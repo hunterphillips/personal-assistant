@@ -430,9 +430,13 @@ test('with nothing listening on the Focus origin, shell and brief routes answer 
       DASHBOARD_BRIEFS_DIR: path.join(await tempDir(t), 'missing'),
     },
   });
-  for (const route of ['/', '/focus', '/brief', '/healthz', '/api/brief/latest']) {
+  for (const route of ['/', '/focus', '/brief', '/healthz']) {
     assert.equal((await request(app, 'GET', route)).status, 200, route);
   }
+  const latest = await request(app, 'GET', '/api/brief/latest');
+  assert.equal(latest.status, 503);
+  assert.match(latest.headers['content-type'], /^application\/json/);
+  assert.deepEqual(latest.json, { error: 'brief_directory_unavailable' });
   const status = await request(app, 'GET', '/api/dashboard/status');
   assert.equal(status.status, 200);
   assert.deepEqual(status.json.focus, { available: false });

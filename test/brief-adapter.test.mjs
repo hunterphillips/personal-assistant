@@ -84,10 +84,11 @@ test('latest metadata reports empty, incomplete, and oversized exactly', async (
   });
 });
 
-test('directory read errors reject rather than masquerading as empty', async (t) => {
+test('directory read errors report unavailable rather than masquerading as empty', async (t) => {
   const parent = await tempDir(t);
   const routes = createBriefRoutes({ briefsDir: path.join(parent, 'missing') });
-  await assert.rejects(routes.latestMetadata({}), { code: 'ENOENT' });
+  assert.deepEqual(await routes.latestMetadata({}), { state: 'unavailable' });
+  await assert.rejects(routes.handleLatest({}, {}), { name: 'HttpError', status: 503, code: 'brief_directory_unavailable' });
 });
 
 test('embedded route injects config and classic bridge after the original script with child CSP', async (t) => {

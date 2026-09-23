@@ -223,21 +223,33 @@ test('missing briefs and unavailable Focus do not affect health or shell', async
   }
   const status = await request(app, 'GET', '/api/dashboard/status');
   assert.equal(status.status, 200);
-  assert.deepEqual(status.json, { focus: { available: false }, brief: { state: 'empty' } });
+  assert.deepEqual(status.json, { focus: { available: false }, brief: { state: 'unavailable' } });
   assertJsonError(await request(app, 'GET', '/embedded/focus'), 502);
   assertJsonError(await request(app, 'GET', '/api/focus'), 502);
   assertJsonError(await request(app, 'PUT', '/api/focus', {
     headers: { origin: app.origin, 'content-type': 'application/json' },
     body: '{"invented":true}',
   }), 502);
-  assertJsonError(await request(app, 'POST', '/api/brief/feedback', {
+  const feedback = await request(app, 'POST', '/api/brief/feedback', {
     headers: { origin: app.origin, 'content-type': 'application/json' },
     body: '{}',
-  }), 503);
+  });
+  assertJsonError(feedback, 400);
+  assert.deepEqual(feedback.json, { error: 'invalid_feedback' });
+  const latest = await request(app, 'GET', '/api/brief/latest');
+  assertJsonError(latest, 503);
+  assert.deepEqual(latest.json, { error: 'brief_directory_unavailable' });
+  assertJsonError(await request(app, 'GET', `/embedded/brief/2026-01-02?revision=${REVISION}`), 404);
+});
+
+test('a readable briefs directory with no candidates reports empty', async (t) => {
+  const app = await startApp(t, { env: { DASHBOARD_BRIEFS_DIR: await tempDir(t) } });
+  const status = await request(app, 'GET', '/api/dashboard/status');
+  assert.equal(status.status, 200);
+  assert.deepEqual(status.json.brief, { state: 'empty' });
   const latest = await request(app, 'GET', '/api/brief/latest');
   assert.equal(latest.status, 200);
   assert.deepEqual(latest.json, { state: 'empty' });
-  assertJsonError(await request(app, 'GET', `/embedded/brief/2026-01-02?revision=${REVISION}`), 404);
 });
 
 test('status copies only non-content brief fields', async (t) => {
@@ -285,7 +297,7 @@ test('status aborts the signal given to a hanging dependency', async (t) => {
 test('unknown routes and assets return 404 JSON', async (t) => {
   const app = await startApp(t);
   for (const path of ['/nope', '/save', '/index.html', '/assets/', '/assets/server.mjs', '/assets/index.html',
-    '/assets/brief-bridge.js', '/embedded/brief/2026-02-30', '/embedded/brief/latest', '/api', '/public/index.html']) {
+    '/assets/nope.js', '/embedded/brief/2026-02-30', '/embedded/brief/latest', '/api', '/public/index.html']) {
     assertJsonError(await request(app, 'GET', path), 404);
   }
 });
