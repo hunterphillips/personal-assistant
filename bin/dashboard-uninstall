@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const LABEL = 'com.personal-assistant.dashboard';
+
+async function main() {
+  const homeDir = process.env.HOME || os.homedir();
+  if (!path.isAbsolute(homeDir)) throw new Error('HOME must be an absolute path');
+
+  const launchAgentsDir = path.join(homeDir, 'Library', 'LaunchAgents');
+  const expectedPlistPath = path.join(launchAgentsDir, `${LABEL}.plist`);
+  const options = parseArgs(process.argv.slice(2), expectedPlistPath);
+
+  if (options.label !== LABEL) {
+    throw new Error(`refusing to operate on label ${options.label}; only ${LABEL} is allowed`);
+  }
+  if (path.resolve(options.plistPath) !== expectedPlistPath) {
+    throw new Error(`refusing to remove plist outside the expected path: ${expectedPlistPath}`);
+  }
+
+  bootoutIfLoaded(`gui/${process.getuid()}/${LABEL}`);
+  await fsp.rm(expectedPlistPath, { force: true });
+  console.log(`Uninstalled ${LABEL}`);
+  console.log('Source files, var/, logs, and brief data were preserved.');
+}
+
+function parseArgs(args, defaultPlistPath) {
+  const options = { label: LABEL, plistPath: defaultPlistPath };
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--label') {
+      options.label = requiredValue(args, ++index, argument);
+      continue;
+    }
+    if (argument === '--plist') {
+      options.plistPath = requiredValue(args, ++index, argument);
+      continue;
+    }
+    throw new Error(`unknown argument: ${argument}`);
+  }
+  return options;
+}
+
+function requiredValue(args, index, flag) {
+  const value = args[index];
+  if (value === undefined || value.startsWith('--')) throw new Error(`${flag} requires a value`);
+  return value;
+}
+
+function bootoutIfLoaded(serviceTarget) {
+  const result = spawnSync('launchctl', ['bootout', serviceTarget], { encoding: 'utf8' });
+  if (result.error) throw new Error(`could not run launchctl: ${result.error.message}`);
+  if (result.status === 0) return;
+  const detail = `${result.stderr}\n${result.stdout}`;
+  if (/no such process|could not find service|service not found/i.test(detail)) return;
+  throw new Error(`launchctl bootout failed: ${detail.trim() || `exit status ${result.status}`}`);
+}
+
+main().catch((error) => {
+  console.error(`dashboard-uninstall: ${error.message}`);
+  process.exitCode = 1;
+});

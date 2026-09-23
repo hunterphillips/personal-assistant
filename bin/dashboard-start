@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+  echo "dashboard-start: expected the absolute Node executable path" >&2
+  exit 64
+fi
+
+# Not NODE_PATH: that name is Node's module search path.
+NODE_BIN=$1
+case "$NODE_BIN" in
+  /*) ;;
+  *)
+    echo "dashboard-start: Node executable path must be absolute" >&2
+    exit 64
+    ;;
+esac
+
+APP_DIR=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+cd "$APP_DIR"
+LOG_DIR="$APP_DIR/var/log"
+LOG_PATH="$LOG_DIR/dashboard.log"
+MAX_LOG_BYTES=5242880
+
+(umask 077 && mkdir -p "$LOG_DIR")
+
+# Rotation happens once per start: a log that grows past the bound while the
+# server runs is rotated at the next restart, keeping one previous file.
+if [ -f "$LOG_PATH" ]; then
+  LOG_BYTES=$(wc -c < "$LOG_PATH" | tr -d ' ')
+  if [ "$LOG_BYTES" -gt "$MAX_LOG_BYTES" ]; then
+    mv -f "$LOG_PATH" "$LOG_PATH.1"
+  fi
+fi
+
+exec "$NODE_BIN" "$APP_DIR/server.mjs" >> "$LOG_PATH" 2>&1

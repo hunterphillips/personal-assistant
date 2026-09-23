@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{{LABEL}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{START_PATH}}</string>
+    <string>{{NODE_PATH}}</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{{APP_DIR}}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>{{PATH}}</string>
+    <key>DASHBOARD_PORT</key>
+    <string>{{PORT}}</string>
+{{PUBLIC_ORIGIN_ENTRY}}{{BRIEFS_DIR_ENTRY}}{{FOCUS_ORIGIN_ENTRY}}  </dict>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>
