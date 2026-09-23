@@ -214,9 +214,9 @@ test('healthz reports process health only', async (t) => {
 });
 
 test('missing briefs and unavailable Focus do not affect health or shell', async (t) => {
-  const upstream = await startSyntheticFocus(t);
+  // Nothing listens on the default Focus origin that startApp picks.
   const app = await startApp(t, {
-    env: { DASHBOARD_FOCUS_ORIGIN: upstream.origin, DASHBOARD_BRIEFS_DIR: path.join(await tempDir(t), 'missing') },
+    env: { DASHBOARD_BRIEFS_DIR: path.join(await tempDir(t), 'missing') },
   });
   for (const path of ['/', '/focus', '/brief', '/healthz']) {
     assert.equal((await request(app, 'GET', path)).status, 200, path);
@@ -224,12 +224,12 @@ test('missing briefs and unavailable Focus do not affect health or shell', async
   const status = await request(app, 'GET', '/api/status');
   assert.equal(status.status, 200);
   assert.deepEqual(status.json, { focus: { available: false }, brief: { state: 'empty' } });
-  assertJsonError(await request(app, 'GET', '/embedded/focus'), 503);
-  assertJsonError(await request(app, 'GET', '/api/focus'), 503);
+  assertJsonError(await request(app, 'GET', '/embedded/focus'), 502);
+  assertJsonError(await request(app, 'GET', '/api/focus'), 502);
   assertJsonError(await request(app, 'PUT', '/api/focus', {
     headers: { origin: app.origin, 'content-type': 'application/json' },
     body: '{"invented":true}',
-  }), 503);
+  }), 502);
   assertJsonError(await request(app, 'POST', '/api/brief/feedback', {
     headers: { origin: app.origin, 'content-type': 'application/json' },
     body: '{}',
@@ -238,8 +238,6 @@ test('missing briefs and unavailable Focus do not affect health or shell', async
   assert.equal(latest.status, 200);
   assert.deepEqual(latest.json, { state: 'empty' });
   assertJsonError(await request(app, 'GET', `/embedded/brief/2026-01-02?revision=${REVISION}`), 404);
-  // The phase 1 stub never contacts the upstream.
-  assert.deepEqual(upstream.requests, []);
 });
 
 test('status copies only non-content brief fields', async (t) => {
@@ -419,11 +417,12 @@ test('feedback bodies are capped at 128 KiB', async (t) => {
   assert.equal(brief.calls.length, 1);
 });
 
-test('the real Focus stub answers over-limit and aborted PUT bodies and keeps serving', async (t) => {
-  const app = await startApp(t);
+test('the real Focus proxy answers over-limit and aborted PUT bodies and keeps serving', async (t) => {
+  const upstream = await startSyntheticFocus(t);
+  const app = await startApp(t, { env: { DASHBOARD_FOCUS_ORIGIN: upstream.origin } });
   const headers = { origin: app.origin, 'content-type': 'application/json' };
 
-  assertJsonError(await request(app, 'PUT', '/api/focus', { headers, body: chunks(FOCUS_LIMIT) }), 503);
+  assert.equal((await request(app, 'PUT', '/api/focus', { headers, body: chunks(FOCUS_LIMIT) })).status, 200);
 
   const streamed = await request(app, 'PUT', '/api/focus', { headers, body: chunks(FOCUS_LIMIT + 200_000) });
   assertJsonError(streamed, 413);
@@ -443,12 +442,13 @@ test('the real Focus stub answers over-limit and aborted PUT bodies and keeps se
 
   assert.equal((await request(app, 'GET', '/healthz')).status, 200);
   const focusLogs = app.logs.filter((entry) => entry.route === '/api/focus');
-  assert.deepEqual(focusLogs.map((entry) => entry.status), [503, 413, 413, 0]);
+  assert.deepEqual(focusLogs.map((entry) => entry.status), [200, 413, 413, 0]);
   assert.equal(focusLogs[3].event, 'response_incomplete');
 });
 
 test('early 413 replies reach clients that are still uploading', async (t) => {
-  const app = await startApp(t);
+  const upstream = await startSyntheticFocus(t);
+  const app = await startApp(t, { env: { DASHBOARD_FOCUS_ORIGIN: upstream.origin } });
   const headers = { origin: app.origin, 'content-type': 'application/json' };
   for (let i = 0; i < 10; i += 1) {
     assertJsonError(await request(app, 'PUT', '/api/focus', { headers, body: chunks(1_200_000) }), 413);
@@ -479,7 +479,8 @@ test('a client that keeps uploading past the drain allowance is disconnected', a
 });
 
 test('a client that stops sending after crossing the limit is disconnected after the linger window', async (t) => {
-  const app = await startApp(t);
+  const upstream = await startSyntheticFocus(t);
+  const app = await startApp(t, { env: { DASHBOARD_FOCUS_ORIGIN: upstream.origin } });
   const upload = await openChunkedUpload(app, 'PUT', '/api/focus');
   upload.writeChunk(FOCUS_LIMIT + 100);
   const started = Date.now();

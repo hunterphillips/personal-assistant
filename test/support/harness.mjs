@@ -37,13 +37,17 @@ export async function tempDir(t) {
   return dir;
 }
 
-// A synthetic Focus upstream that records every request it receives.
+// A synthetic Focus upstream that records every request it receives and
+// answers once the request body has been read.
 export async function startSyntheticFocus(t) {
   const requests = [];
   const server = http.createServer((req, res) => {
     requests.push({ method: req.method, url: req.url });
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end('{"synthetic":true}');
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"synthetic":true}');
+    });
   });
   const port = await listen(server);
   t.after(() => closeServer(server));

@@ -14,10 +14,32 @@ in the umbrella directory.
 
 Phase 1 is done: configuration, the route table, Host and Origin checks,
 response headers, body limits, `/healthz`, `/api/status`, and a placeholder
-shell. `lib/focus-proxy.mjs` and `lib/brief-adapter.mjs` are stubs: Focus
-routes return 503, and the brief routes report an empty state. Phases 2 and 3
-replace them. The comment at the top of each file describes what `lib/app.mjs`
-expects from it.
+shell. Phase 2 replaced the Focus stub with a proxy (below).
+`lib/brief-adapter.mjs` is still a stub that reports an empty state; phase 3
+replaces it. The comment at the top of each route module describes what
+`lib/app.mjs` expects from it.
+
+### Focus proxy (phase 2)
+
+`lib/focus-proxy.mjs` forwards two fixed routes to `DASHBOARD_FOCUS_ORIGIN`:
+`/embedded/focus` to Focus's `GET /`, and `GET`/`PUT /api/focus` to
+`/api/focus`. Focus's page fetches the absolute path `/api/focus`, so it works
+unchanged inside the frame. The page is served with its own CSP that allows its
+inline code and Google Fonts.
+
+Upstream requests carry Host set to the Focus authority and only the JSON
+content headers; cookies, credentials, hop-by-hop headers, Origin, and Referer
+stay behind. Focus's own responses, including validation errors, pass through
+with their status, content type, and body. Failures are JSON errors: refusal,
+redirects, and responses over 2 MiB (HTML) or 4 MiB (JSON) are 502; no response
+within 10 seconds is 504. A PUT is never retried. A PUT that times out after its
+body was sent returns `upstream_timeout_uncertain`, because Focus may have
+committed it.
+
+The shell shows the Focus frame on every view until phase 4 adds view
+switching. The write tests run the real Focus server from a temporary copy with
+an invented board in a throwaway Git repository (`test/support/isolated-focus.mjs`);
+they skip when the Focus checkout is missing.
 
 ## Commands
 
@@ -27,7 +49,8 @@ Requires Node 24 (`.nvmrc`).
 - `npm run dev` runs it with `node --watch`.
 - `npm test` runs the server tests with Node's test runner. The tests use
   ephemeral ports and temporary directories. They never contact ports 4242 or
-  4243, and they never read the real brief directory.
+  4243, never write to the real Focus board, and never read the real brief
+  directory.
 - `npm run check` syntax-checks every `.mjs` and `.js` file. It also confirms
   that each `/assets/<name>` in `public/index.html` is listed in
   `lib/assets.mjs` and exists in `public/`.
