@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import net from 'node:net';
+import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 
-import { HttpError, buildChildCsp, sendError } from '../lib/http.mjs';
-import { chunks, request, startApp, startSyntheticFocus } from './support/harness.mjs';
+import { HttpError, LINGER_LIMITS, buildChildCsp, limitRequestBody, sendError, sendJson } from '../lib/http.mjs';
+import { chunks, closeServer, listen, request, startApp, startSyntheticFocus, tempDir } from './support/harness.mjs';
 
 const REVISION = 'a'.repeat(64);
 
@@ -73,6 +76,98 @@ function consumingFocus() {
   };
 }
 
+const FOCUS_LIMIT = 1_000_000;
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Opens a raw connection and sends a chunked request head. Returns the socket
+// plus helpers to send body chunks and to collect everything the server sends.
+async function openChunkedUpload(app, method, path) {
+  const socket = net.connect(app.port, '127.0.0.1');
+  await new Promise((resolve) => socket.once('connect', resolve));
+  socket.on('error', () => {});
+  let received = '';
+  socket.on('data', (data) => { received += data; });
+  const closed = new Promise((resolve) => socket.once('close', resolve));
+  socket.write([
+    `${method} ${path} HTTP/1.1`,
+    `Host: ${app.authority}`,
+    `Origin: ${app.origin}`,
+    'Content-Type: application/json',
+    'Transfer-Encoding: chunked',
+    '',
+    '',
+  ].join('\r\n'));
+  const writeChunk = (size) => {
+    const ok = socket.write(`${size.toString(16)}\r\n`);
+    socket.write(Buffer.alloc(size, 0x61));
+    return socket.write('\r\n') && ok;
+  };
+  return { socket, closed, writeChunk, received: () => received };
+}
+
+// A synthetic Focus upstream that records how much of each PUT body arrived
+// and whether it arrived whole or was cut off.
+async function startRecordingUpstream(t) {
+  const records = [];
+  const server = http.createServer((req, res) => {
+    const record = { bytes: 0, complete: false };
+    record.closed = new Promise((resolve) => req.once('close', () => resolve(record)));
+    records.push(record);
+    req.on('data', (chunk) => { record.bytes += chunk.length; });
+    req.on('end', () => {
+      record.complete = true;
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ received: record.bytes }));
+    });
+  });
+  const port = await listen(server);
+  t.after(() => closeServer(server));
+  return { port, records };
+}
+
+// Test-only reference for the phase 2 body contract: pipe the limited body into
+// an upstream request, abort the upstream on a body error, and reply once.
+function pipingFocus(upstreamPort) {
+  return {
+    async handlePage(_req, res) {
+      sendError(res, 503, 'focus_unavailable');
+    },
+    async checkHealth() {
+      return { available: true };
+    },
+    handleApi(_req, res, { body }) {
+      return new Promise((resolve) => {
+        let failed = false;
+        const upstream = http.request({
+          host: '127.0.0.1',
+          port: upstreamPort,
+          method: 'PUT',
+          path: '/api/focus',
+          headers: { 'content-type': 'application/json' },
+          agent: false,
+        });
+        const fail = (status, code) => {
+          if (failed) return;
+          failed = true;
+          upstream.destroy();
+          sendError(res, status, code);
+          resolve();
+        };
+        body.on('error', (error) => fail(error.status ?? 400, error.code ?? 'request_aborted'));
+        upstream.on('error', () => fail(502, 'focus_unavailable'));
+        upstream.on('response', (upstreamRes) => {
+          const parts = [];
+          upstreamRes.on('data', (chunk) => parts.push(chunk));
+          upstreamRes.on('end', () => {
+            if (!failed) sendJson(res, upstreamRes.statusCode, JSON.parse(Buffer.concat(parts)));
+            resolve();
+          });
+        });
+        body.pipe(upstream);
+      });
+    },
+  };
+}
+
 test('shell routes serve the same HTML with the shell CSP', async (t) => {
   const app = await startApp(t);
   const bodies = [];
@@ -121,7 +216,7 @@ test('healthz reports process health only', async (t) => {
 test('missing briefs and unavailable Focus do not affect health or shell', async (t) => {
   const upstream = await startSyntheticFocus(t);
   const app = await startApp(t, {
-    env: { DASHBOARD_FOCUS_ORIGIN: upstream.origin, DASHBOARD_BRIEFS_DIR: '/nonexistent/dashboard-test/briefs' },
+    env: { DASHBOARD_FOCUS_ORIGIN: upstream.origin, DASHBOARD_BRIEFS_DIR: path.join(await tempDir(t), 'missing') },
   });
   for (const path of ['/', '/focus', '/brief', '/healthz']) {
     assert.equal((await request(app, 'GET', path)).status, 200, path);
@@ -324,21 +419,143 @@ test('feedback bodies are capped at 128 KiB', async (t) => {
   assert.equal(brief.calls.length, 1);
 });
 
-test('Focus PUT bodies stream to the proxy and are capped at 1,000,000 bytes', async (t) => {
-  const focus = consumingFocus();
-  const app = await startApp(t, { focus });
+test('the real Focus stub answers over-limit and aborted PUT bodies and keeps serving', async (t) => {
+  const app = await startApp(t);
   const headers = { origin: app.origin, 'content-type': 'application/json' };
 
-  const ok = await request(app, 'PUT', '/api/focus', { headers, body: chunks(1_000_000) });
-  assert.equal(ok.status, 200);
-  assert.deepEqual(focus.received, [1_000_000]);
+  assertJsonError(await request(app, 'PUT', '/api/focus', { headers, body: chunks(FOCUS_LIMIT) }), 503);
 
-  const declared = await request(app, 'PUT', '/api/focus', { headers, body: Buffer.alloc(1_000_001) });
-  assertJsonError(declared, 413);
-
-  const streamed = await request(app, 'PUT', '/api/focus', { headers, body: chunks(3_000_000) });
+  const streamed = await request(app, 'PUT', '/api/focus', { headers, body: chunks(FOCUS_LIMIT + 200_000) });
   assertJsonError(streamed, 413);
-  assert.deepEqual(focus.received, [1_000_000]);
+  assert.equal(streamed.headers.connection, 'close');
+
+  const declared = await request(app, 'PUT', '/api/focus', { headers, body: Buffer.alloc(FOCUS_LIMIT + 1) });
+  assertJsonError(declared, 413);
+  assert.equal(declared.headers.connection, 'close');
+
+  // Client disconnects partway through the body.
+  const upload = await openChunkedUpload(app, 'PUT', '/api/focus');
+  upload.writeChunk(300_000);
+  await delay(20);
+  upload.socket.destroy();
+  await upload.closed;
+  await delay(20);
+
+  assert.equal((await request(app, 'GET', '/healthz')).status, 200);
+  const focusLogs = app.logs.filter((entry) => entry.route === '/api/focus');
+  assert.deepEqual(focusLogs.map((entry) => entry.status), [503, 413, 413, 0]);
+  assert.equal(focusLogs[3].event, 'response_incomplete');
+});
+
+test('early 413 replies reach clients that are still uploading', async (t) => {
+  const app = await startApp(t);
+  const headers = { origin: app.origin, 'content-type': 'application/json' };
+  for (let i = 0; i < 10; i += 1) {
+    assertJsonError(await request(app, 'PUT', '/api/focus', { headers, body: chunks(1_200_000) }), 413);
+    assertJsonError(await request(app, 'PUT', '/api/focus', { headers, body: Buffer.alloc(1_200_000) }), 413);
+    assertJsonError(await request(app, 'POST', '/api/brief/feedback', { headers, body: chunks(200 * 1024, 16 * 1024) }), 413);
+    assertJsonError(await request(app, 'POST', '/api/brief/feedback', { headers, body: Buffer.alloc(200 * 1024) }), 413);
+  }
+  assert.equal((await request(app, 'GET', '/healthz')).status, 200);
+});
+
+test('a client that keeps uploading past the drain allowance is disconnected', async (t) => {
+  const app = await startApp(t);
+  for (const route of ['/api/focus', '/api/brief/feedback']) {
+    const upload = await openChunkedUpload(app, route === '/api/focus' ? 'PUT' : 'POST', route);
+    let sent = 0;
+    let open = true;
+    upload.closed.then(() => { open = false; });
+    const started = Date.now();
+    while (open && Date.now() - started < 10_000) {
+      sent += 64 * 1024;
+      if (!upload.writeChunk(64 * 1024)) await Promise.race([delay(5), upload.closed]);
+    }
+    assert.equal(open, false, `${route} connection was not closed`);
+    assert.ok(Date.now() - started < LINGER_LIMITS.ms + 1_000, `${route} took ${Date.now() - started} ms`);
+    assert.ok(sent < FOCUS_LIMIT + LINGER_LIMITS.bytes + 16 * 1024 * 1024);
+  }
+  assert.equal((await request(app, 'GET', '/healthz')).status, 200);
+});
+
+test('a client that stops sending after crossing the limit is disconnected after the linger window', async (t) => {
+  const app = await startApp(t);
+  const upload = await openChunkedUpload(app, 'PUT', '/api/focus');
+  upload.writeChunk(FOCUS_LIMIT + 100);
+  const started = Date.now();
+  await Promise.race([upload.closed, delay(LINGER_LIMITS.ms + 2_000)]);
+  assert.equal(upload.socket.destroyed, true, 'connection left open');
+  assert.match(upload.received(), /^HTTP\/1\.1 413 /);
+  assert.ok(Date.now() - started < LINGER_LIMITS.ms + 1_000);
+});
+
+test('the limited body errors as soon as the limit is crossed, before the upload ends', async () => {
+  const source = new PassThrough();
+  const limited = limitRequestBody(source, 10);
+  const failed = new Promise((resolve) => limited.once('error', resolve));
+  const passed = [];
+  limited.on('data', (chunk) => passed.push(chunk));
+  source.write(Buffer.alloc(10));
+  source.write(Buffer.alloc(1));
+  // The source never ends; the error must not wait for the rest of the body.
+  const error = await Promise.race([failed, delay(500).then(() => null)]);
+  assert.ok(error, 'no error while the upload was still open');
+  assert.equal(error.status, 413);
+  assert.equal(Buffer.concat(passed).length, 10);
+});
+
+test('piping contract: a body exactly at the limit reaches the upstream whole', async (t) => {
+  const upstream = await startRecordingUpstream(t);
+  const app = await startApp(t, { focus: pipingFocus(upstream.port) });
+  const headers = { origin: app.origin, 'content-type': 'application/json' };
+  const response = await request(app, 'PUT', '/api/focus', { headers, body: chunks(FOCUS_LIMIT, 50_000) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.json, { received: FOCUS_LIMIT });
+  assert.equal(upstream.records.length, 1);
+  assert.equal(upstream.records[0].complete, true);
+  assert.equal(upstream.records[0].bytes, FOCUS_LIMIT);
+});
+
+test('piping contract: crossing the limit aborts the upstream and the client gets 413', async (t) => {
+  const upstream = await startRecordingUpstream(t);
+  const app = await startApp(t, { focus: pipingFocus(upstream.port) });
+  const headers = { origin: app.origin, 'content-type': 'application/json' };
+  // The client would send 20 MB but stops once it sees the reply.
+  const response = await request(app, 'PUT', '/api/focus', { headers, body: chunks(20_000_000) });
+  assertJsonError(response, 413);
+  assert.equal(upstream.records.length, 1);
+  const record = await Promise.race([upstream.records[0].closed, delay(1_000).then(() => null)]);
+  assert.ok(record, 'upstream request was not closed promptly');
+  assert.equal(record.complete, false);
+  assert.ok(record.bytes <= FOCUS_LIMIT, `upstream saw ${record.bytes} bytes`);
+});
+
+test('piping contract: a client abort mid-body destroys the upstream request', async (t) => {
+  const upstream = await startRecordingUpstream(t);
+  const app = await startApp(t, { focus: pipingFocus(upstream.port) });
+  const upload = await openChunkedUpload(app, 'PUT', '/api/focus');
+  upload.writeChunk(300_000);
+  const started = Date.now();
+  while ((upstream.records[0]?.bytes ?? 0) === 0 && Date.now() - started < 2_000) await delay(5);
+  assert.ok(upstream.records[0]?.bytes > 0, 'upstream never received the body');
+  upload.socket.destroy();
+  const record = await Promise.race([upstream.records[0].closed, delay(1_000).then(() => null)]);
+  assert.ok(record, 'upstream request was not closed after the client left');
+  assert.equal(record.complete, false);
+  assert.equal((await request(app, 'GET', '/healthz')).status, 200);
+});
+
+test('early refusals of a body-bearing request close the connection cleanly', async (t) => {
+  const app = await startApp(t);
+  const response = await request(app, 'PUT', '/api/focus', {
+    headers: { origin: 'http://evil.example', 'content-type': 'application/json' },
+    body: chunks(600_000),
+  });
+  assertJsonError(response, 403);
+  assert.equal(response.headers.connection, 'close');
+  const log = app.logs.find((entry) => entry.route === '/api/focus');
+  assert.deepEqual(Object.keys(log).sort(), ['method', 'ms', 'route', 'status']);
+  assert.equal(log.status, 403);
 });
 
 test('a client that disconnects mid-body does not reach the handler or break the server', async (t) => {

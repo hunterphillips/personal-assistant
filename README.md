@@ -42,12 +42,16 @@ Its browsers are not installed yet.
 | `DASHBOARD_PORT` | `4243` | Startup fails if the port is taken. |
 | `DASHBOARD_PUBLIC_ORIGIN` | unset | The tailnet `https://` origin. When set, its host is accepted as a Host header and it is accepted as an Origin. When unset, only `127.0.0.1:<port>` and `localhost:<port>` are accepted. |
 | `DASHBOARD_BRIEFS_DIR` | `../../daily-brief/briefs` | Resolved from this directory, not the working directory. |
-| `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin. |
+| `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
 
 The server always binds `127.0.0.1`. PUT and POST requests must send JSON and
 an `Origin` that matches the request's Host. Focus request bodies are capped at
-1,000,000 bytes and feedback at 128 KiB. Logs record method, route, status, and
-duration. They never contain request bodies or brief text.
+1,000,000 bytes and feedback at 128 KiB. An oversized body gets a 413 as soon
+as the limit is crossed, with `Connection: close`; the server then discards at
+most 2 MiB more of the upload, for at most 2 seconds, before cutting the
+connection. Logs record method, route, status, and duration; a response that
+never completed is logged with status 0. They never contain request bodies or
+brief text.
 
 Real briefs, contributions, and feedback contain personal data. They stay in
 `daily-brief/` and never enter this repository.

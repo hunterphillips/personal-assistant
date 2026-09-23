@@ -36,6 +36,15 @@ test('public origin joins the Host and Origin allowlists', () => {
   assert.ok(config.allowedHosts.includes('127.0.0.1:5000'));
 });
 
+test('focus origin is refused only at the dashboard bound authority', () => {
+  const env = { DASHBOARD_PORT: '4243' };
+  assert.throws(() => loadConfig({ ...env, DASHBOARD_FOCUS_ORIGIN: 'http://127.0.0.1:4243' }), ConfigError);
+  assert.equal(loadConfig({ ...env, DASHBOARD_FOCUS_ORIGIN: 'http://[::1]:4243' }).focusOrigin, 'http://[::1]:4243');
+  assert.equal(loadConfig({ ...env, DASHBOARD_FOCUS_ORIGIN: 'http://localhost:4243' }).focusOrigin, 'http://localhost:4243');
+  assert.equal(loadConfig({ DASHBOARD_PORT: '80', DASHBOARD_FOCUS_ORIGIN: 'http://localhost' }).focusOrigin, 'http://localhost');
+  assert.throws(() => loadConfig({ DASHBOARD_PORT: '80', DASHBOARD_FOCUS_ORIGIN: 'http://127.0.0.1' }), ConfigError);
+});
+
 test('focus origin accepts loopback overrides', () => {
   assert.equal(loadConfig({ DASHBOARD_FOCUS_ORIGIN: 'http://localhost:39999' }).focusOrigin, 'http://localhost:39999');
   assert.equal(loadConfig({ DASHBOARD_FOCUS_ORIGIN: 'http://127.0.0.1:40000/' }).focusOrigin, 'http://127.0.0.1:40000');
