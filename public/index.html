@@ -2,19 +2,62 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Dashboard</title>
+  <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
-  <nav>
-    <a href="/">Home</a>
-    <a href="/focus">Focus</a>
-    <a href="/brief">Daily Brief</a>
-  </nav>
-  <main>
-    <!-- Provisional until phase 4: the shell has no script yet, so the Focus
-         frame shows on every view rather than only on /focus. -->
-    <iframe src="/embedded/focus" title="Focus" width="100%" height="800"></iframe>
-  </main>
+  <a class="skip" href="#content">Skip to content</a>
+  <div class="shell">
+    <nav class="nav" aria-label="Dashboard">
+      <a href="/" data-view="home">Home</a>
+      <a href="/focus" data-view="focus">Focus</a>
+      <a href="/brief" data-view="brief">Daily Brief</a>
+    </nav>
+    <main id="content" class="content" tabindex="-1">
+      <div class="notice" id="shell-notice" role="status" hidden>
+        <span>The dashboard is not responding.</span>
+        <button type="button" data-action="retry">Retry</button>
+      </div>
+
+      <section class="view home" id="view-home" data-view="home" aria-label="Home">
+        <ul class="destinations">
+          <li>
+            <a class="destination" href="/focus">
+              <span class="destination-name">Focus</span>
+              <span class="destination-meta" id="home-focus"></span>
+            </a>
+          </li>
+          <li>
+            <a class="destination" href="/brief">
+              <span class="destination-name">Daily Brief</span>
+              <span class="destination-meta" id="home-brief"></span>
+            </a>
+          </li>
+        </ul>
+      </section>
+
+      <section class="view" id="view-focus" data-view="focus" aria-label="Focus" hidden>
+        <div class="notice" id="focus-notice" role="status" hidden>
+          <span>Focus is not responding.</span>
+          <button type="button" data-action="retry">Retry</button>
+        </div>
+        <div class="frame-slot" id="focus-slot"></div>
+      </section>
+
+      <section class="view" id="view-brief" data-view="brief" aria-label="Daily Brief" hidden>
+        <div class="notice" id="brief-newer" role="status" hidden>
+          <span>A newer brief is available.</span>
+          <button type="button" data-action="load-newer">Load newer brief</button>
+        </div>
+        <div class="notice" id="brief-notice" role="status" hidden>
+          <span id="brief-notice-text"></span>
+          <button type="button" data-action="retry">Retry</button>
+        </div>
+        <div class="frame-slot" id="brief-slot"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/assets/shell.js"></script>
 </body>
 </html>

@@ -11,7 +11,8 @@
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
     "test": "node --test --test-timeout=30000 \"test/**/*.test.mjs\"",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "test:browser": "playwright test"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"
