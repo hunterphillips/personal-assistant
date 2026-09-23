@@ -122,7 +122,7 @@
         throw new Error('failed');
       }).catch(function (error) {
         var reason = error && error.message;
-        if (reason === 'changed') setStatus('Save failed: brief changed, reload to continue');
+        if (reason === 'changed') setStatus('Save failed: a newer brief is available. Load it from the dashboard, then save again.');
         else if (reason === 'large') setStatus('Save failed: feedback is too long. Draft kept.');
         else setStatus('Save failed, draft kept. Use Copy instead.');
       }).then(settle, settle);

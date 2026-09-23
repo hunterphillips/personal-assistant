@@ -298,7 +298,7 @@ test('a same-date replacement refuses the stale save and keeps the draft', async
   const response = page.waitForResponse((r) => r.url().endsWith('/api/brief/feedback'));
   await viewer.getByRole('button', { name: 'Save feedback' }).click();
   expect((await response).status()).toBe(409);
-  await expect(viewer.locator('#status')).toHaveText('Save failed: brief changed, reload to continue');
+  await expect(viewer.locator('#status')).toHaveText('Save failed: a newer brief is available. Load it from the dashboard, then save again.');
   await expect(markButton(page, 'invented-one', 'Approve')).toHaveAttribute('aria-pressed', 'true');
   await expect(hub.readFeedback(DATE)).rejects.toThrow();
 
@@ -307,6 +307,95 @@ test('a same-date replacement refuses the stale save and keeps the draft', async
   await page.locator('#brief-newer').getByRole('button', { name: 'Load newer brief' }).click();
   await briefReady(page, revised);
   await expect(markButton(page, 'invented-one', 'Approve')).toHaveAttribute('aria-pressed', 'true');
+});
+
+// Records any embedded brief page that was not served as HTML.
+function watchBriefPages(page) {
+  const refused = [];
+  page.on('response', (response) => {
+    if (response.url().includes('/embedded/brief/') && response.status() !== 200) refused.push(response.status());
+  });
+  return refused;
+}
+
+test('a brief replaced before its view opens is mounted from fresh status', async ({ page, hub }) => {
+  await hub.writeBrief(DATE);
+  await page.goto(`${hub.origin}/`);
+  await expect(page.locator('#home-brief')).toHaveText(DATE);
+  const refused = watchBriefPages(page);
+
+  const revised = `Daily Brief — ${DATE} (revised)`;
+  await hub.writeBrief(DATE, { heading: revised });
+  await nav(page, 'Daily Brief').click();
+  await briefReady(page, revised);
+  await expect(page.locator('#brief-frame')).toBeVisible();
+  expect(refused).toEqual([]);
+});
+
+test('a same-date replacement of a mounted brief is offered and never shown as an error', async ({ page, hub }) => {
+  await hub.writeBrief(DATE);
+  await page.goto(`${hub.origin}/brief`);
+  await briefReady(page);
+  const refused = watchBriefPages(page);
+
+  await hub.writeBrief(DATE, { heading: `Daily Brief — ${DATE} (revised)` });
+  await nav(page, 'Home').click();
+  await nav(page, 'Daily Brief').click();
+  const newer = page.locator('#brief-newer');
+  await expect(newer).toContainText('A newer brief is available.');
+  await briefReady(page);
+
+  // Replaced again after the offer appeared: the button reads the status
+  // afresh and loads the file as it is now.
+  const again = `Daily Brief — ${DATE} (revised again)`;
+  await hub.writeBrief(DATE, { heading: again });
+  await newer.getByRole('button', { name: 'Load newer brief' }).click();
+  await briefReady(page, again);
+  await expect(page.locator('#brief-frame')).toBeVisible();
+  await expect(newer).toBeHidden();
+  await expect(page.locator('#brief-notice')).toBeHidden();
+  expect(refused).toEqual([]);
+});
+
+test('a brief page that fails to load is hidden, and Retry loads it', async ({ page, hub }) => {
+  await hub.writeBrief(DATE);
+  let refuse = true;
+  await page.route('**/embedded/brief/**', (route) => {
+    if (!refuse) return route.continue();
+    refuse = false;
+    return route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"revision_conflict"}' });
+  });
+  await page.goto(`${hub.origin}/brief`);
+  const notice = page.locator('#brief-notice');
+  await expect(notice).toContainText(`The brief for ${DATE} could not be opened.`);
+  await expect(page.locator('#brief-frame')).toHaveAttribute('data-failed', '');
+  await expect(page.locator('#brief-frame')).toBeHidden();
+
+  await notice.getByRole('button', { name: 'Retry' }).click();
+  await briefReady(page);
+  await expect(page.locator('#brief-frame')).toBeVisible();
+  await expect(notice).toBeHidden();
+});
+
+test('a Focus page that fails at mount is hidden, and Retry loads it once Focus answers', async ({ page, hub }) => {
+  needsFocus();
+  let refuse = true;
+  await page.route('**/embedded/focus', (route) => {
+    if (!refuse) return route.continue();
+    refuse = false;
+    return route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"upstream_unavailable"}' });
+  });
+  await page.goto(`${hub.origin}/focus`);
+  const notice = page.locator('#focus-notice');
+  await expect(notice).toContainText('Focus is not responding.');
+  await expect(page.locator('#focus-frame')).toHaveAttribute('data-failed', '');
+  await expect(page.locator('#focus-frame')).toBeHidden();
+
+  await notice.getByRole('button', { name: 'Retry' }).click();
+  await focusBoardReady(page);
+  await expect(page.locator('#focus-frame')).toBeVisible();
+  await expect(notice).toBeHidden();
+  await expect(page.locator('iframe#focus-frame')).toHaveCount(1);
 });
 
 test('brief states other than ready read plainly and leave Focus usable', async ({ page, hub }) => {
@@ -323,7 +412,7 @@ test('brief states other than ready read plainly and leave Focus usable', async 
 
   await hub.writeRawBrief(DATE, '<!doctype html><html><body>Invented, unsupported.</body></html>\n');
   await nav(page, 'Daily Brief').click();
-  await expect(notice).toContainText('The latest brief file could not be read.');
+  await expect(notice).toContainText(`The brief for ${DATE} could not be opened.`);
 });
 
 test('navigation and the brief Save control stay reachable, with one scroll owner', async ({ page, hub }, testInfo) => {

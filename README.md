@@ -12,17 +12,79 @@ in the umbrella directory.
 
 ## Status
 
-Phase 1 is done: configuration, the route table, Host and Origin checks,
-response headers, body limits, `/healthz`, `/api/dashboard/status`, and a placeholder
-shell. Phase 2 replaced the Focus stub with a proxy (below). Phase 3 serves the
-latest Daily Brief and saves its feedback. Phase 4 adds the shell (below). The
-comment at the top of each route module describes what `lib/app.mjs` expects
-from it.
+The server, the Focus proxy, the Daily Brief routes, and the shell are built
+and tested locally. The LaunchAgent is not installed and the Tailscale cutover
+has not been done: the tailnet still reaches Focus directly, and the old brief
+server still runs. Both steps are in [docs/operations.md](docs/operations.md).
 
-Installing the LaunchAgent and the Tailscale cutover are in
-[docs/operations.md](docs/operations.md).
+## Routes
 
-### Focus proxy (phase 2)
+| Route | Purpose |
+| --- | --- |
+| `GET /`, `/focus`, `/brief` | The shell. |
+| `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
+| `GET /api/dashboard/status` | What the shell polls (below). |
+| `GET /assets/<name>` | Shell script, styles, and the brief bridge. |
+| `GET /embedded/focus`, `/api/focus`, `/api/status`; `PUT /api/focus`; `POST /api/pause`, `/api/resume`, `/api/refresh` | Forwarded to Focus (below). |
+| `GET /api/brief/latest` | Latest brief metadata. |
+| `GET /embedded/brief/<date>?revision=<revision>` | One brief viewer. |
+| `POST /api/brief/feedback` | Saves feedback for one brief. |
+
+`/focus/` and `/brief/` redirect to the paths without the slash. A known path
+with the wrong method is 405, and anything else is 404. Errors are JSON bodies of the form
+`{"error": "<code>"}`. The comment at the top of each route module describes
+what `lib/app.mjs` expects from it.
+
+### Dashboard status
+
+`GET /api/dashboard/status` always answers 200 with
+
+```json
+{ "focus": { "available": true }, "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>" } }
+```
+
+`focus.available` is false when Focus does not answer its health check in
+time. `brief.state` is `ready`, `empty` (the briefs directory holds no brief),
+`unavailable` (the directory cannot be read, or the check timed out), or a
+state naming why the latest file cannot be served, such as `unreadable`,
+`unsupported`, `incomplete`, or `oversized`. `date` is present when a latest
+file was found, and `revision` when it could be hashed. The two checks run in
+parallel under a time limit, so a slow Focus cannot hold the answer back for
+long. The body never contains brief text.
+
+### Daily Brief
+
+The latest brief is the `viewer-<YYYY-MM-DD>.html` file with the newest date in
+the briefs directory. Its revision is the SHA-256 of the file.
+
+`GET /api/brief/latest` returns the same `state`, `date`, and `revision` as the
+status route, plus `url` (`/embedded/brief/<date>?revision=<revision>`) when the
+state is `ready`. A briefs directory that cannot be read is a 503
+`brief_directory_unavailable`.
+
+`GET /embedded/brief/<date>?revision=<revision>` serves that viewer, adapted to
+save through the dashboard, with its own CSP. A date that is not a real
+calendar date is 404, and a revision that is not 64 lowercase hex characters
+is 400. If the file
+on disk no longer has that revision, the answer is 409 `revision_conflict`
+rather than a different brief; the shell then reads the status again and
+offers the newer one.
+
+`POST /api/brief/feedback` takes JSON with exactly these keys:
+
+```json
+{ "date": "2026-09-21", "revision": "<64 hex>", "overall": "text",
+  "items": [{ "id": "item-id", "mark": "approved", "note": "text" }] }
+```
+
+`mark` is `approved`, `dismissed`, or `null`. `items` must name each item in
+that brief once. `overall` is capped at 8,000 characters, each note at 4,000,
+and the list at 200 items; beyond those it is 413. A revision that no longer
+matches the file is 409. On success the server writes
+`feedback-<date>.md` beside the viewer, replacing any earlier one for that
+date, with one write per date at a time.
+
+### Focus proxy
 
 `lib/focus-proxy.mjs` forwards a fixed set of routes to
 `DASHBOARD_FOCUS_ORIGIN`, each to one upstream path. Nothing else is forwarded.
@@ -59,7 +121,7 @@ The write tests run the real Focus server from a temporary copy with
 an invented board in a throwaway Git repository (`test/support/isolated-focus.mjs`);
 they skip when the Focus checkout is missing.
 
-### Shell (phase 4)
+### Shell
 
 `public/index.html`, `public/shell.js`, and `public/styles.css` make up the
 page served at `/`, `/focus`, and `/brief`. The navigation links are ordinary
@@ -71,19 +133,26 @@ unsaved marks. The page has no inline script or style, as the shell CSP
 requires.
 
 The script reads `/api/dashboard/status` on every view change and every 30
-seconds while the tab is visible, with a 5-second timeout. What it does with
-the result:
+seconds while the tab is visible, with a 5-second timeout. A frame is created
+only from an answer that has just arrived, never from the one kept since the
+previous check. What it does with the result:
 
 - Focus not answering: the Focus view says "Focus is not responding." with
   Retry. A frame already open stays; otherwise none is created until Focus
   answers.
 - A different brief date or revision than the open frame: "A newer brief is
-  available." with "Load newer brief". The open frame stays until that is
-  chosen.
+  available." with "Load newer brief", which reads the status again and loads
+  what it names. The open frame stays until that is chosen.
 - A brief state other than `ready`: "No brief has been generated yet." for
-  `empty`, and "The latest brief file could not be read." for every other
-  state. Focus is unaffected.
+  `empty`, "The brief for <date> could not be opened." when the status names a
+  date, and "The latest brief file could not be read." otherwise. Focus is
+  unaffected.
 - The status request failing: "The dashboard is not responding." with Retry.
+
+A frame stays hidden until its page loads. If the page comes back as a JSON
+error, such as a 409 for a brief replaced under the same date or a 502 from
+Focus, the frame stays hidden, the view shows its notice, and the status is
+read again at once. Retry reloads that frame.
 
 Wide screens get a navigation column; below 720px it becomes a row across the
 top. The page is exactly one screen tall and each frame fills the rest, so the

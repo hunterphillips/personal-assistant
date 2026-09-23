@@ -1,8 +1,12 @@
 // Dashboard shell: switches between Home, Focus, and Daily Brief with the
 // History API, creates each child frame the first time its view is shown and
 // keeps it afterwards, and reads /api/dashboard/status on navigation and every
-// 30 seconds while the page is visible. A mounted frame is never replaced by a
-// status change; a newer brief waits until "Load newer brief" is chosen.
+// 30 seconds while the page is visible. A frame is created only from a status
+// answer that has just arrived, never from the one kept since the last check.
+// A mounted frame is never replaced by a status change; a newer brief waits
+// until "Load newer brief" is chosen. A frame whose page comes back as a JSON
+// error is hidden and marked failed; the status is read again at once, and
+// Retry reloads it.
 (function () {
   'use strict';
 
@@ -12,6 +16,7 @@
   var STATUS_TIMEOUT_MS = 5000;
   var BRIEF_EMPTY = 'No brief has been generated yet.';
   var BRIEF_UNREADABLE = 'The latest brief file could not be read.';
+  var FAILED = 'data-failed';
 
   var current = null;
   var status = null; // last /api/dashboard/status body, or null when unreachable
@@ -20,6 +25,10 @@
   var pollTimer = null;
   var frames = { focus: null, brief: null };
   var mountedBrief = null; // { date, revision } of the brief frame
+  // Requests waiting for the next status answer: reload failed frames, load
+  // the newer brief.
+  var wantReload = false;
+  var wantNewer = false;
 
   function $(id) { return document.getElementById(id); }
 
@@ -31,8 +40,17 @@
     return '/embedded/brief/' + brief.date + '?revision=' + brief.revision;
   }
 
+  function openFailed(date) {
+    return 'The brief for ' + date + ' could not be opened.';
+  }
+
   function briefSentence(brief) {
-    return brief && brief.state === 'empty' ? BRIEF_EMPTY : BRIEF_UNREADABLE;
+    if (brief && brief.state === 'empty') return BRIEF_EMPTY;
+    return brief && typeof brief.date === 'string' ? openFailed(brief.date) : BRIEF_UNREADABLE;
+  }
+
+  function failed(frame) {
+    return !!frame && frame.hasAttribute(FAILED);
   }
 
   function isReady(brief) {
@@ -45,8 +63,29 @@
     frame.className = 'frame';
     frame.title = title;
     frame.src = src;
+    // Hidden until its page arrives, so an error body is never shown.
+    frame.hidden = true;
+    frame.addEventListener('load', function () {
+      var error = false;
+      try {
+        var doc = frame.contentDocument;
+        error = !!doc && doc.contentType === 'application/json';
+      } catch (_error) {
+        error = false;
+      }
+      if (error) frame.setAttribute(FAILED, '');
+      else frame.removeAttribute(FAILED);
+      frame.hidden = error;
+      if (error) checkStatus();
+      else render(false);
+    });
     slot.appendChild(frame);
     return frame;
+  }
+
+  function mountFocus() {
+    if (frames.focus) frames.focus.remove();
+    frames.focus = createFrame($('focus-slot'), 'focus-frame', 'Focus', '/embedded/focus');
   }
 
   function mountBrief(brief) {
@@ -55,7 +94,9 @@
     mountedBrief = { date: brief.date, revision: brief.revision };
   }
 
-  function render() {
+  // `fresh` is true only right after a status answer arrives; frames are
+  // created only then.
+  function render(fresh) {
     var focusAvailable = !!(status && status.focus && status.focus.available === true);
     var brief = status ? status.brief : null;
     var unreachable = checked && status === null;
@@ -67,19 +108,33 @@
     $('home-brief').textContent = !status ? '' : isReady(brief) ? brief.date : briefSentence(brief);
 
     // Focus: mount once it answers; afterwards keep the frame and only report.
-    if (current === 'focus' && !frames.focus && focusAvailable) {
-      frames.focus = createFrame($('focus-slot'), 'focus-frame', 'Focus', '/embedded/focus');
-    }
-    $('focus-notice').hidden = !(status && !focusAvailable);
+    if (fresh && current === 'focus' && !frames.focus && focusAvailable) mountFocus();
+    $('focus-notice').hidden = !((status && !focusAvailable) || failed(frames.focus));
 
     // Daily Brief
-    if (current === 'brief' && !frames.brief && isReady(brief)) mountBrief(brief);
+    if (fresh && current === 'brief' && !frames.brief && isReady(brief)) mountBrief(brief);
     var newer = !!frames.brief && isReady(brief) &&
       (brief.date !== mountedBrief.date || brief.revision !== mountedBrief.revision);
     $('brief-newer').hidden = !newer;
-    var showState = !!status && !isReady(brief);
-    $('brief-notice-text').textContent = showState ? briefSentence(brief) : '';
+    var notReady = !!status && !isReady(brief);
+    var showState = notReady || (failed(frames.brief) && !newer);
+    $('brief-notice-text').textContent = !showState ? '' : notReady ? briefSentence(brief) : openFailed(mountedBrief.date);
     $('brief-notice').hidden = !showState;
+  }
+
+  // Acts on Retry and "Load newer brief" with the status that just arrived.
+  function applyRequests() {
+    var reload = wantReload;
+    var newer = wantNewer;
+    wantReload = false;
+    wantNewer = false;
+    if (!status) return;
+    var focusAvailable = !!(status.focus && status.focus.available === true);
+    var brief = status.brief;
+    if (reload && failed(frames.focus) && focusAvailable) mountFocus();
+    if (!isReady(brief) || !frames.brief) return;
+    var differs = brief.date !== mountedBrief.date || brief.revision !== mountedBrief.revision;
+    if ((reload && failed(frames.brief)) || (newer && differs)) mountBrief(brief);
   }
 
   function checkStatus() {
@@ -102,7 +157,8 @@
       if (id !== sequence) return;
       status = body;
       checked = true;
-      render();
+      applyRequests();
+      render(true);
     });
   }
 
@@ -116,7 +172,7 @@
       else links[j].removeAttribute('aria-current');
     }
     document.title = TITLES[view] + ' · Dashboard';
-    render();
+    render(false);
     checkStatus();
   }
 
@@ -129,10 +185,8 @@
   document.addEventListener('click', function (event) {
     var action = event.target.closest && event.target.closest('button[data-action]');
     if (action) {
-      if (action.getAttribute('data-action') === 'load-newer') {
-        if (status && isReady(status.brief)) mountBrief(status.brief);
-        render();
-      }
+      if (action.getAttribute('data-action') === 'load-newer') wantNewer = true;
+      else wantReload = true;
       checkStatus();
       return;
     }

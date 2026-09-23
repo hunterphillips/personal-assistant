@@ -77,7 +77,15 @@ These are steps Hunter runs manually. They change Tailscale Serve and eventually
 1. Finish phases 1–4 locally. Re-check listeners, `tailscale serve status --json`, `tailscale funnel status --json`, and the existing Focus LaunchAgent. Record the exact pre-cutover mapping in a private local operations record. If it differs from the expected single root mapping to 4242, reconcile the runbook before changing it; do not reset all Serve settings.
 2. Install the dashboard LaunchAgent with the actual HTTPS public origin. Verify it serves 4243 after a `launchctl kickstart`, stays loopback-only, and reports its own health independently of child availability.
 3. Preserve unsaved brief drafts from the old browser origin (http://localhost:8765) using its existing Save/Copy controls. Moving to the tailnet origin cannot carry localStorage automatically. Existing feedback files remain in place. Keep the old server available while this is checked; do not delete browser storage.
-4. Replace the HTTPS root mapping with the dashboard:
+4. Check that the dashboard accepts the tailnet host name before Tailscale sends it traffic. Use the host from the public origin the LaunchAgent was installed with:
+
+   ```sh
+   curl -sS -o /dev/null -w '%{http_code}\n' -H 'Host: your-machine.your-tailnet.ts.net' http://127.0.0.1:4243/healthz
+   curl -sS -o /dev/null -w '%{http_code}\n' -H 'Host: some-other-host.example' http://127.0.0.1:4243/healthz
+   ```
+
+   The first should print 200. The second uses a host that is not configured and should print 421, which shows the Host check is in force. If the first prints 421, the tailnet host does not match the public origin the job was installed with; reinstall with the right origin before going on.
+5. Replace the HTTPS root mapping with the dashboard:
 
    ```sh
    tailscale serve --bg --https=443 http://127.0.0.1:4243
@@ -85,9 +93,10 @@ These are steps Hunter runs manually. They change Tailscale Serve and eventually
    tailscale funnel status --json
    ```
 
-5. From another tailnet device, load the existing HTTPS hostname and both direct routes (/focus, /brief). Verify the shell, touch layout, same-origin API requests, and real feedback saving. Hunter performs one intended Focus action and one intended feedback save; inspect their normal local outputs without inventing tasks on the live board. Confirm there is one exposed HTTPS service and no Funnel entry.
-6. Only after those checks, identify the current 8765 listener by PID, command, and working directory (`lsof -nP -iTCP:8765 -sTCP:LISTEN`). Stop that exact `serve.py` process gracefully; confirm 8765 is closed while 4242/4243 and the dashboard URL remain healthy. Keep `serve.py`, viewers, builders, briefs, and feedback for rollback.
-7. Check service recovery after login/restart when a suitable opportunity occurs. The app is available while the Mac is awake and the user LaunchAgent is loaded; this does not add an always-on host or machine-sleep policy.
+   If the tailnet URL then answers 421 or 403, Tailscale is presenting a different Host or Origin than the one configured. Roll back as described under Rollback, then correct the origin and reinstall.
+6. From another tailnet device, load the existing HTTPS hostname and both direct routes (/focus, /brief). Verify the shell, touch layout, same-origin API requests, and real feedback saving. Hunter performs one intended Focus action and one intended feedback save; inspect their normal local outputs without inventing tasks on the live board. Confirm there is one exposed HTTPS service and no Funnel entry.
+7. Only after those checks, identify the current 8765 listener by PID, command, and working directory (`lsof -nP -iTCP:8765 -sTCP:LISTEN`). Stop that exact `serve.py` process gracefully; confirm 8765 is closed while 4242/4243 and the dashboard URL remain healthy. Keep `serve.py`, viewers, builders, briefs, and feedback for rollback.
+8. Check service recovery after login/restart when a suitable opportunity occurs. The app is available while the Mac is awake and the user LaunchAgent is loaded; this does not add an always-on host or machine-sleep policy.
 
 ## Rollback
 

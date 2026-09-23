@@ -135,7 +135,7 @@ test('a second Save while pending sends nothing', async () => {
 });
 
 for (const [label, fetchImpl, message] of [
-  ['409', async () => ({ ok: false, status: 409 }), 'Save failed: brief changed, reload to continue'],
+  ['409', async () => ({ ok: false, status: 409 }), 'Save failed: a newer brief is available. Load it from the dashboard, then save again.'],
   ['413', async () => ({ ok: false, status: 413 }), 'Save failed: feedback is too long. Draft kept.'],
   ['500', async () => ({ ok: false, status: 500 }), 'Save failed, draft kept. Use Copy instead.'],
   ['network error', async () => { throw new TypeError('invented network failure'); }, 'Save failed, draft kept. Use Copy instead.'],

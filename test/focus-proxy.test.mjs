@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { PassThrough } from 'node:stream';
@@ -637,10 +638,43 @@ test('isolated Focus: status and scan controls work through the proxy', isolated
   const refresh = await request(app, 'POST', '/api/refresh', { headers: { origin: app.origin } });
   assert.ok([202, 409].includes(refresh.status), `refresh answered ${refresh.status}`);
   assert.ok(Array.isArray(refresh.json.running));
-  // The fixture has no bin/, so pause fails inside Focus and never reaches launchd.
+  // The fixture's bin/focus-pause is a stub that exits 1, so Focus reports
+  // its 500 and launchd is never touched.
   const pause = await request(app, 'POST', '/api/pause', { headers: { origin: app.origin } });
   assert.equal(pause.status, 500);
   assert.match(pause.headers['content-type'], /^text\/plain/);
+  assert.match(pause.text, /fixture stub: focus-pause/);
+});
+
+test('isolated Focus: the launchd scripts are the fixture\'s own stubs', isolated, async (t) => {
+  const focus = await startIsolatedFocus(t);
+  for (const name of ['focus-pause', 'focus-resume']) {
+    const stub = await readFile(path.join(focus.dir, 'bin', name), 'utf8');
+    assert.match(stub, new RegExp(`fixture stub: ${name}`));
+    assert.equal((await stat(path.join(focus.dir, 'bin', name))).mode & 0o777, 0o700);
+  }
+  assert.deepEqual((await readdir(path.join(focus.dir, 'bin'))).sort(), ['focus-pause', 'focus-resume']);
+});
+
+// Every absolute API path the Focus page calls must be one the dashboard
+// forwards, or it would 404 inside the frame.
+const FORWARDED_FOCUS_PATHS = new Set(['/api/focus', '/api/status', '/api/pause', '/api/resume', '/api/refresh']);
+
+test('isolated Focus: every API path the page calls is forwarded', isolated, async (t) => {
+  const focus = await startIsolatedFocus(t);
+  const html = await readFile(path.join(focus.dir, 'ui', 'index.html'), 'utf8');
+  const called = new Set();
+  // fetch('/…') with a literal path, and any '/api/…' literal, which covers
+  // paths kept in a variable and passed to fetch later.
+  for (const match of html.matchAll(/\bfetch\(\s*(['"`])(\/[^'"`]*)\1/g)) called.add(match[2]);
+  for (const match of html.matchAll(/(['"`])(\/api\/[^'"`]*)\1/g)) called.add(match[2]);
+  const paths = [...called].map((value) => value.split(/[?#]/)[0]);
+  assert.ok(paths.length > 0, 'found no API paths in the Focus page');
+  const missing = paths.filter((value) => !FORWARDED_FOCUS_PATHS.has(value));
+  assert.deepEqual(missing, [], `Focus calls paths the dashboard does not forward: ${missing.join(', ')}`);
+  for (const expected of ['/api/focus', '/api/status', '/api/pause', '/api/resume', '/api/refresh']) {
+    assert.ok(paths.includes(expected), `Focus page no longer calls ${expected}`);
+  }
 });
 
 test('isolated Focus: a valid PUT writes focus.json and commits with a manual: subject', isolated, async (t) => {

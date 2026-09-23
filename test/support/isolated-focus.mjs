@@ -16,7 +16,11 @@
 //   3. `git init` with no template, set a local user.name/user.email and
 //      core.hooksPath to an empty directory, commit focus.json, and confirm
 //      the repository's top level is the temporary directory.
-//   4. Spawn `node ui/server.mjs` with FOCUS_PORT on an ephemeral port,
+//   4. Write bin/focus-pause and bin/focus-resume as stubs that exit 1.
+//      Focus runs these from its root, and the real ones call launchctl on
+//      Hunter's scan jobs; the fixture refuses to start if any file under
+//      bin/ came from the checkout, and creates the stubs exclusively.
+//   5. Spawn `node ui/server.mjs` with FOCUS_PORT on an ephemeral port,
 //      FOCUS_ROOT pinned to the temporary directory, and FOCUS_RUN_SCAN
 //      pointed at a stub that exits 0, then wait until GET / answers.
 // Every git invocation and the server run with an environment scrubbed of
@@ -77,7 +81,10 @@ export async function startIsolatedFocus(t) {
   t.after(stop);
 
   const root = await realpath(dir);
-  await copyFocusSource(root);
+  const copied = await copyFocusSource(root);
+  const fromBin = copied.filter((relative) => relative.split('/')[0] === 'bin');
+  if (fromBin.length > 0) throw new Error(`fixture copied Focus bin/ files: ${fromBin.join(', ')}`);
+  await writeLaunchdStubs(root);
   await writeSyntheticDoc(root);
   const env = isolatedEnv(root);
   const git = (...args) => execFileSync('git', args, { cwd: root, env, encoding: 'utf8' });
@@ -170,6 +177,19 @@ async function copyFocusSource(root) {
       const specifier = match[1] ?? match[2];
       pending.push(path.posix.normalize(path.posix.join(path.posix.dirname(relative), specifier)));
     }
+  }
+  return [...copied];
+}
+
+// Stand-ins for Focus's launchd scripts. mkdir without `recursive` fails if
+// bin/ already exists, and `wx` fails if a stub's path does.
+async function writeLaunchdStubs(root) {
+  const bin = path.join(root, 'bin');
+  await mkdir(bin, { mode: 0o700 });
+  for (const name of ['focus-pause', 'focus-resume']) {
+    const stub = path.join(bin, name);
+    await writeFile(stub, `#!/bin/sh\necho 'fixture stub: ${name} does nothing' >&2\nexit 1\n`, { flag: 'wx', mode: 0o700 });
+    await chmod(stub, 0o700);
   }
 }
 
