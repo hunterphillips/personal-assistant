@@ -221,7 +221,7 @@ test('missing briefs and unavailable Focus do not affect health or shell', async
   for (const path of ['/', '/focus', '/brief', '/healthz']) {
     assert.equal((await request(app, 'GET', path)).status, 200, path);
   }
-  const status = await request(app, 'GET', '/api/status');
+  const status = await request(app, 'GET', '/api/dashboard/status');
   assert.equal(status.status, 200);
   assert.deepEqual(status.json, { focus: { available: false }, brief: { state: 'empty' } });
   assertJsonError(await request(app, 'GET', '/embedded/focus'), 502);
@@ -242,7 +242,7 @@ test('missing briefs and unavailable Focus do not affect health or shell', async
 
 test('status copies only non-content brief fields', async (t) => {
   const app = await startApp(t, { focus: consumingFocus(), brief: recordingBrief() });
-  const response = await request(app, 'GET', '/api/status');
+  const response = await request(app, 'GET', '/api/dashboard/status');
   assert.deepEqual(response.json, {
     focus: { available: true },
     brief: { state: 'ready', date: '2026-01-02', revision: REVISION },
@@ -262,7 +262,7 @@ test('status survives dependencies that throw or hang', async (t) => {
       configure: (config) => ({ ...config, timeouts: { ...config.timeouts, statusMs: 50 } }),
     });
     const started = Date.now();
-    const response = await request(app, 'GET', '/api/status');
+    const response = await request(app, 'GET', '/api/dashboard/status');
     assert.equal(response.status, 200);
     assert.deepEqual(response.json, { focus: { available: false }, brief: { state: 'unavailable' } });
     assert.ok(Date.now() - started < 1_000);
@@ -278,7 +278,7 @@ test('status aborts the signal given to a hanging dependency', async (t) => {
     brief: recordingBrief(),
     configure: (config) => ({ ...config, timeouts: { ...config.timeouts, statusMs: 30 } }),
   });
-  await request(app, 'GET', '/api/status');
+  await request(app, 'GET', '/api/dashboard/status');
   assert.equal(aborted, true);
 });
 
@@ -331,7 +331,9 @@ test('configured public host is accepted', async (t) => {
 test('unsupported methods return 405 with Allow', async (t) => {
   const app = await startApp(t);
   const cases = [
-    ['POST', '/'], ['DELETE', '/healthz'], ['OPTIONS', '/focus'], ['PUT', '/api/status'], ['HEAD', '/api/status'],
+    ['POST', '/'], ['DELETE', '/healthz'], ['OPTIONS', '/focus'],
+    ['PUT', '/api/dashboard/status'], ['HEAD', '/api/dashboard/status'], ['PUT', '/api/status'], ['HEAD', '/api/status'],
+    ['GET', '/api/pause'], ['PUT', '/api/resume'], ['DELETE', '/api/refresh'],
     ['POST', '/api/focus'], ['DELETE', '/api/focus'], ['GET', '/api/brief/feedback'], ['PUT', '/api/brief/feedback'],
     ['POST', '/embedded/focus'], ['POST', '/api/brief/latest'], ['PATCH', '/assets/brief-bridge.js'],
   ];
@@ -460,7 +462,10 @@ test('early 413 replies reach clients that are still uploading', async (t) => {
 });
 
 test('a client that keeps uploading past the drain allowance is disconnected', async (t) => {
-  const app = await startApp(t);
+  // A live synthetic upstream, so the Focus reply is the proxy's own 413 and
+  // not a 502 from a refused connection.
+  const upstream = await startSyntheticFocus(t);
+  const app = await startApp(t, { env: { DASHBOARD_FOCUS_ORIGIN: upstream.origin } });
   for (const route of ['/api/focus', '/api/brief/feedback']) {
     const upload = await openChunkedUpload(app, route === '/api/focus' ? 'PUT' : 'POST', route);
     let sent = 0;
@@ -472,6 +477,7 @@ test('a client that keeps uploading past the drain allowance is disconnected', a
       if (!upload.writeChunk(64 * 1024)) await Promise.race([delay(5), upload.closed]);
     }
     assert.equal(open, false, `${route} connection was not closed`);
+    assert.match(upload.received(), /^HTTP\/1\.1 413 /, route);
     assert.ok(Date.now() - started < LINGER_LIMITS.ms + 1_000, `${route} took ${Date.now() - started} ms`);
     assert.ok(sent < FOCUS_LIMIT + LINGER_LIMITS.bytes + 16 * 1024 * 1024);
   }

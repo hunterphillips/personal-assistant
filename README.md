@@ -13,7 +13,7 @@ in the umbrella directory.
 ## Status
 
 Phase 1 is done: configuration, the route table, Host and Origin checks,
-response headers, body limits, `/healthz`, `/api/status`, and a placeholder
+response headers, body limits, `/healthz`, `/api/dashboard/status`, and a placeholder
 shell. Phase 2 replaced the Focus stub with a proxy (below).
 `lib/brief-adapter.mjs` is still a stub that reports an empty state; phase 3
 replaces it. The comment at the top of each route module describes what
@@ -21,20 +21,36 @@ replaces it. The comment at the top of each route module describes what
 
 ### Focus proxy (phase 2)
 
-`lib/focus-proxy.mjs` forwards two fixed routes to `DASHBOARD_FOCUS_ORIGIN`:
-`/embedded/focus` to Focus's `GET /`, and `GET`/`PUT /api/focus` to
-`/api/focus`. Focus's page fetches the absolute path `/api/focus`, so it works
-unchanged inside the frame. The page is served with its own CSP that allows its
-inline code and Google Fonts.
+`lib/focus-proxy.mjs` forwards a fixed set of routes to
+`DASHBOARD_FOCUS_ORIGIN`, each to one upstream path. Nothing else is forwarded.
+
+| Dashboard route | Focus route |
+| --- | --- |
+| `GET /embedded/focus` | `GET /` |
+| `GET`, `PUT /api/focus` | same |
+| `GET /api/status` | same |
+| `POST /api/pause`, `/api/resume`, `/api/refresh` | same |
+
+Focus's page calls these API paths as absolute paths, so inside the frame they
+arrive at the dashboard, which forwards them. Its pause, resume, and refresh
+buttons reach Focus this way. The dashboard's own status is at
+`/api/dashboard/status`, which leaves `/api/status` to Focus. The page is
+served with its own CSP that allows its inline code and Google Fonts.
+
+The three control POSTs need the same exact `Origin` as other mutations but no
+content type, and must have no body: a declared body gets 413 and a chunked one
+gets 400.
 
 Upstream requests carry Host set to the Focus authority and only the JSON
 content headers; cookies, credentials, hop-by-hop headers, Origin, and Referer
 stay behind. Focus's own responses, including validation errors, pass through
 with their status, content type, and body. Failures are JSON errors: refusal,
-redirects, and responses over 2 MiB (HTML) or 4 MiB (JSON) are 502; no response
-within 10 seconds is 504. A PUT is never retried. A PUT that times out after its
-body was sent returns `upstream_timeout_uncertain`, because Focus may have
-committed it.
+a truncated response, redirects, and responses over 2 MiB (HTML) or 4 MiB
+(JSON) are 502; no response within 10 seconds is 504. A PUT or POST is never
+retried. One that times out after it was sent whole returns
+`upstream_timeout_uncertain`, because Focus may have acted on it. A PUT
+succeeds only when its body reached Focus whole; if Focus answers first, the
+dashboard does not pass that answer on.
 
 The shell shows the Focus frame on every view until phase 4 adds view
 switching. The write tests run the real Focus server from a temporary copy with
@@ -67,8 +83,9 @@ Its browsers are not installed yet.
 | `DASHBOARD_BRIEFS_DIR` | `../../daily-brief/briefs` | Resolved from this directory, not the working directory. |
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
 
-The server always binds `127.0.0.1`. PUT and POST requests must send JSON and
-an `Origin` that matches the request's Host. Focus request bodies are capped at
+The server always binds `127.0.0.1`. PUT and POST requests must send an
+`Origin` that matches the request's Host, and JSON unless they are one of the
+bodyless Focus controls. Focus request bodies are capped at
 1,000,000 bytes and feedback at 128 KiB. An oversized body gets a 413 as soon
 as the limit is crossed, with `Connection: close`; the server then discards at
 most 2 MiB more of the upload, for at most 2 seconds, before cutting the

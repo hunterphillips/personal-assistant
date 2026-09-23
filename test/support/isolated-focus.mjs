@@ -7,13 +7,22 @@
 //      lib/store.mjs, lib/validate.mjs, lib/status.mjs, and anything added
 //      later) from the Focus checkout into a new temporary directory, keeping
 //      the relative layout. store.mjs derives its root from its own location,
-//      so the copy reads and commits in the temporary directory.
+//      so the copy reads and commits in the temporary directory. Paths are
+//      checked against the real (symlink-resolved) roots: an import that
+//      normalizes outside the Focus checkout, or any symlink on the way, is
+//      refused, and nothing is copied over an existing destination.
 //   2. Write SYNTHETIC_DOC as focus.json. It is invented, not copied from the
 //      real board, and is checked with the copied validator before use.
-//   3. `git init`, set a local user.name/user.email, commit focus.json.
-//   4. Spawn `node ui/server.mjs` with FOCUS_PORT on an ephemeral port and
-//      FOCUS_ROOT pinned to the temporary directory, then wait until GET /
-//      answers.
+//   3. `git init` with no template, set a local user.name/user.email and
+//      core.hooksPath to an empty directory, commit focus.json, and confirm
+//      the repository's top level is the temporary directory.
+//   4. Spawn `node ui/server.mjs` with FOCUS_PORT on an ephemeral port,
+//      FOCUS_ROOT pinned to the temporary directory, and FOCUS_RUN_SCAN
+//      pointed at a stub that exits 0, then wait until GET / answers.
+// Every git invocation and the server run with an environment scrubbed of
+// inherited GIT_* and FOCUS_* variables, with system and global git config
+// ignored and discovery stopped at the temporary directory's parent, so no
+// inherited setting can redirect git to another repository or run hooks.
 // stop() kills the process and removes the temporary directory, and only a
 // directory this module created. startIsolatedFocus registers stop() with
 // t.after, so cleanup runs even when a test fails.
@@ -23,8 +32,8 @@
 // skip.
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { constants, existsSync } from 'node:fs';
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,20 +76,31 @@ export async function startIsolatedFocus(t) {
   };
   t.after(stop);
 
-  await copyFocusSource(dir);
-  await writeSyntheticDoc(dir);
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
-  git('init', '-q');
+  const root = await realpath(dir);
+  await copyFocusSource(root);
+  await writeSyntheticDoc(root);
+  const env = isolatedEnv(root);
+  const git = (...args) => execFileSync('git', args, { cwd: root, env, encoding: 'utf8' });
+  git('init', '-q', '--template=');
+  const hooks = path.join(root, '.git', 'no-hooks');
+  await mkdir(hooks);
+  git('config', 'core.hooksPath', hooks);
   git('config', 'user.name', 'Dashboard Fixture');
   git('config', 'user.email', 'dashboard-fixture@example.invalid');
   git('config', 'commit.gpgsign', 'false');
   git('add', 'focus.json');
   git('commit', '-q', '-m', 'fixture: synthetic board');
+  const toplevel = git('rev-parse', '--show-toplevel').trim();
+  if (toplevel !== root) throw new Error(`fixture git top level is ${toplevel}, expected ${root}`);
+
+  const scanStub = path.join(root, '.git', 'scan-stub.sh');
+  await writeFile(scanStub, '#!/bin/sh\nexit 0\n', { flag: 'wx' });
+  await chmod(scanStub, 0o700);
 
   const port = await freePort();
   child = spawn(process.execPath, ['ui/server.mjs'], {
-    cwd: dir,
-    env: { ...process.env, FOCUS_PORT: String(port), FOCUS_ROOT: dir },
+    cwd: root,
+    env: { ...env, FOCUS_PORT: String(port), FOCUS_ROOT: root, FOCUS_RUN_SCAN: scanStub },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   let stderr = '';
@@ -88,26 +108,62 @@ export async function startIsolatedFocus(t) {
   await waitUntilServing(port, child, () => stderr);
 
   return {
-    dir,
+    dir: root,
+    git,
     origin: `http://127.0.0.1:${port}`,
     stop,
-    readDoc: async () => JSON.parse(await readFile(path.join(dir, 'focus.json'), 'utf8')),
-    readRaw: () => readFile(path.join(dir, 'focus.json'), 'utf8'),
+    readDoc: async () => JSON.parse(await readFile(path.join(root, 'focus.json'), 'utf8')),
+    readRaw: () => readFile(path.join(root, 'focus.json'), 'utf8'),
     commitSubjects: () => git('log', '--format=%s').trim().split('\n'),
   };
 }
 
-async function copyFocusSource(dir) {
+// The parent environment minus anything that steers git or Focus.
+function isolatedEnv(root) {
+  const env = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!name.startsWith('GIT_') && !name.startsWith('FOCUS_')) env[name] = value;
+  }
+  return {
+    ...env,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: os.devNull,
+    GIT_CEILING_DIRECTORIES: path.dirname(root),
+    GIT_TERMINAL_PROMPT: '0',
+  };
+}
+
+function inside(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+// Copies the entry files and their relative imports from the Focus checkout
+// into `root` (already a real path).
+async function copyFocusSource(root) {
+  const sourceRoot = await realpath(FOCUS_SOURCE_DIR);
   const pending = [...ENTRY_FILES];
   const copied = new Set();
   while (pending.length > 0) {
     const relative = pending.pop();
     if (copied.has(relative)) continue;
     copied.add(relative);
-    const source = path.join(FOCUS_SOURCE_DIR, relative);
-    const destination = path.join(dir, relative);
+    if (path.posix.isAbsolute(relative) || relative.split('/').includes('..')) {
+      throw new Error(`Focus import escapes the checkout: ${relative}`);
+    }
+    const source = path.join(sourceRoot, relative);
+    const destination = path.join(root, relative);
+    if (!inside(sourceRoot, source) || !inside(root, destination)) {
+      throw new Error(`Focus import escapes the checkout: ${relative}`);
+    }
+    const stats = await lstat(source);
+    if (stats.isSymbolicLink() || !stats.isFile()) throw new Error(`Focus source is not a regular file: ${relative}`);
+    if ((await realpath(source)) !== source) throw new Error(`Focus source path goes through a symlink: ${relative}`);
     await mkdir(path.dirname(destination), { recursive: true });
-    await copyFile(source, destination);
+    if ((await realpath(path.dirname(destination))) !== path.dirname(destination)) {
+      throw new Error(`fixture path goes through a symlink: ${relative}`);
+    }
+    await copyFile(source, destination, constants.COPYFILE_EXCL);
     if (!relative.endsWith('.mjs')) continue;
     const code = await readFile(source, 'utf8');
     for (const match of code.matchAll(RELATIVE_IMPORT)) {

@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
+import { PassThrough } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { createFocusProxy } from '../lib/focus-proxy.mjs';
+import { HttpError } from '../lib/http.mjs';
 import { focusSourceAvailable, startIsolatedFocus } from './support/isolated-focus.mjs';
-import { freePort, request, startApp, tempDir } from './support/harness.mjs';
-import { startScriptedFocus } from './support/synthetic-focus.mjs';
+import { closeServer, freePort, listen, request, startApp, tempDir } from './support/harness.mjs';
+import { startEarlyReplyFocus, startScriptedFocus } from './support/synthetic-focus.mjs';
 
 const MiB = 1024 * 1024;
 
@@ -34,6 +37,9 @@ async function openChunkedPut(app) {
   const socket = net.connect(app.port, '127.0.0.1');
   await new Promise((resolve) => socket.once('connect', resolve));
   socket.on('error', () => {});
+  let received = '';
+  socket.on('data', (data) => { received += data; });
+  const closed = new Promise((resolve) => socket.once('close', resolve));
   socket.write([
     'PUT /api/focus HTTP/1.1',
     `Host: ${app.authority}`,
@@ -45,6 +51,8 @@ async function openChunkedPut(app) {
   ].join('\r\n'));
   return {
     socket,
+    closed,
+    received: () => received,
     writeChunk(size) {
       socket.write(`${size.toString(16)}\r\n`);
       socket.write(Buffer.alloc(size, 0x61));
@@ -248,6 +256,101 @@ test('a PUT body over the limit aborts the upstream and answers 413', async (t) 
   assert.ok(record.bytes <= 1_000_000);
 });
 
+// Serves one route that hands `body` (a stream the test controls) to the
+// real proxy's handleApi as if it were a PUT body, and records the reply.
+async function startProxyWithBody(t, upstream, body) {
+  const app = await appFor(t, upstream);
+  const proxy = createFocusProxy(app.config);
+  const server = http.createServer((req, res) => {
+    req.resume();
+    proxy.handleApi({ method: 'PUT', headers: { 'content-type': 'application/json' } }, res, { body });
+  });
+  const port = await listen(server);
+  t.after(() => closeServer(server));
+  return { port };
+}
+
+const QUEUED = 32 * MiB;
+
+// A destroyed upstream request drops what was still queued; one that was left
+// to finish would deliver all of it before closing.
+async function assertUpstreamDestroyed(connection) {
+  connection.resume();
+  const closed = await Promise.race([connection.closed, delay(2_000).then(() => null)]);
+  assert.ok(closed, 'upstream connection stayed open');
+  assert.ok(connection.bytes < QUEUED, `upstream received ${connection.bytes} bytes; the request was not destroyed`);
+}
+
+test('a body error after Focus has already answered still wins and aborts the upstream', async (t) => {
+  const upstream = await startEarlyReplyFocus(t, { stopReading: true });
+  const body = new PassThrough();
+  const { port } = await startProxyWithBody(t, upstream, body);
+  const pending = new Promise((resolve, reject) => {
+    http.get({ host: '127.0.0.1', port, agent: false }, (res) => {
+      const parts = [];
+      res.on('data', (chunk) => parts.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(parts).toString() }));
+    }).on('error', reject);
+  });
+  // One write larger than the socket buffers hold, so most of it is still
+  // queued in the proxy when Focus answers.
+  body.write(Buffer.alloc(QUEUED, 0x61));
+  assert.ok(await waitFor(() => upstream.connections[0]?.replied), 'upstream never answered');
+  await delay(100);
+  body.destroy(new HttpError(413, 'payload_too_large'));
+  const reply = await pending;
+  assert.equal(reply.status, 413);
+  assert.deepEqual(JSON.parse(reply.text), { error: 'payload_too_large' });
+  await assertUpstreamDestroyed(upstream.connections[0]);
+});
+
+test('a client that leaves after Focus has already answered aborts the upstream', async (t) => {
+  const upstream = await startEarlyReplyFocus(t, { stopReading: true });
+  const body = new PassThrough();
+  const { port } = await startProxyWithBody(t, upstream, body);
+  let answered = false;
+  const client = http.get({ host: '127.0.0.1', port, agent: false }, () => { answered = true; });
+  client.on('error', () => {});
+  body.write(Buffer.alloc(QUEUED, 0x61));
+  assert.ok(await waitFor(() => upstream.connections[0]?.replied), 'upstream never answered');
+  await delay(100);
+  assert.equal(answered, false, 'the client was answered before the body was sent whole');
+  client.destroy();
+  await delay(50);
+  await assertUpstreamDestroyed(upstream.connections[0]);
+});
+
+test('Focus answering and closing before the PUT body is sent is a prompt 502, never its early answer', async (t) => {
+  const upstream = await startEarlyReplyFocus(t);
+  const app = await appFor(t, upstream);
+  const upload = await openChunkedPut(app);
+  const started = Date.now();
+  upload.writeChunk(100_000);
+  await Promise.race([upload.closed, waitFor(() => upload.received().includes('\r\n\r\n'), 3_000)]);
+  assert.match(upload.received(), /^HTTP\/1\.1 502 /);
+  assert.match(upload.received(), /"upstream_early_response"/);
+  assert.doesNotMatch(upload.received(), /early":1/);
+  assert.ok(Date.now() - started < 2_000);
+  const connection = await Promise.race([upstream.connections[0].closed, delay(1_000).then(() => null)]);
+  assert.ok(connection, 'upstream connection stayed open');
+  upload.socket.destroy();
+});
+
+test('an upstream that closes after part of its response is a 502 on every Focus route', async (t) => {
+  const upstream = await startScriptedFocus(t, (req, res) => {
+    const type = req.url === '/' ? 'text/html' : 'application/json';
+    res.writeHead(200, { 'Content-Type': type, 'Content-Length': 1000 });
+    res.write('{"partial":', () => setTimeout(() => res.socket.destroy(), 10));
+  });
+  const app = await appFor(t, upstream);
+  assertJsonError(await request(app, 'GET', '/embedded/focus'), 502);
+  assertJsonError(await request(app, 'GET', '/api/focus'), 502);
+  assertJsonError(await request(app, 'GET', '/api/status'), 502);
+  assertJsonError(await request(app, 'PUT', '/api/focus', { headers: putHeaders(app), body: '{}' }), 502);
+  assertJsonError(await request(app, 'POST', '/api/refresh', { headers: { origin: app.origin } }), 502);
+  assert.equal((await request(app, 'GET', '/healthz')).status, 200);
+});
+
 test('responses over the HTML and JSON size limits become 502', async (t) => {
   const sizes = { '/': 2 * MiB + 1, '/api/focus': 4 * MiB + 1 };
   let chunked = false;
@@ -330,7 +433,7 @@ test('with nothing listening on the Focus origin, shell and brief routes answer 
   for (const route of ['/', '/focus', '/brief', '/healthz', '/api/brief/latest']) {
     assert.equal((await request(app, 'GET', route)).status, 200, route);
   }
-  const status = await request(app, 'GET', '/api/status');
+  const status = await request(app, 'GET', '/api/dashboard/status');
   assert.equal(status.status, 200);
   assert.deepEqual(status.json.focus, { available: false });
 });
@@ -338,7 +441,7 @@ test('with nothing listening on the Focus origin, shell and brief routes answer 
 test('status reports Focus available when upstream answers JSON', async (t) => {
   const upstream = await startScriptedFocus(t);
   const app = await appFor(t, upstream);
-  const status = await request(app, 'GET', '/api/status');
+  const status = await request(app, 'GET', '/api/dashboard/status');
   assert.deepEqual(status.json.focus, { available: true });
   assert.deepEqual(upstream.records.map((r) => [r.method, r.url]), [['GET', '/api/focus']]);
 });
@@ -363,12 +466,137 @@ test('checkHealth stops when its signal aborts', async (t) => {
   assert.equal(upstream.records.length, 1);
 });
 
+test('checkHealth reports a truncated response as unavailable', async (t) => {
+  let chunked = false;
+  const upstream = await startScriptedFocus(t, (_req, res) => {
+    res.writeHead(200, chunked ? { 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json', 'Content-Length': 1000 });
+    res.write('{"items":[', () => setTimeout(() => res.socket.destroy(), 10));
+  });
+  const app = await appFor(t, upstream);
+  const proxy = createFocusProxy(app.config);
+  assert.deepEqual(await proxy.checkHealth({}), { available: false });
+  chunked = true;
+  assert.deepEqual(await proxy.checkHealth({}), { available: false });
+  assert.deepEqual((await request(app, 'GET', '/api/dashboard/status')).json.focus, { available: false });
+});
+
+test('checkHealth reads the whole response and Focus sees a clean close', async (t) => {
+  const body = JSON.stringify({ items: Array.from({ length: 5_000 }, (_, i) => ({ id: `item-${i}`, title: 'x'.repeat(80) })) });
+  const upstream = await startScriptedFocus(t, (_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' }).end(body);
+  });
+  const app = await appFor(t, upstream);
+  const proxy = createFocusProxy(app.config);
+  for (let i = 0; i < 3; i += 1) assert.deepEqual(await proxy.checkHealth({}), { available: true });
+  for (const record of upstream.records) {
+    const closed = await Promise.race([record.socketClosed, delay(1_000).then(() => null)]);
+    assert.ok(closed, 'health check connection stayed open');
+    assert.deepEqual(closed, { hadError: false, errorCode: undefined });
+  }
+});
+
 test('checkHealth is bounded by the upstream timeout without a signal', async (t) => {
   const upstream = await startScriptedFocus(t, () => {});
   const app = await appFor(t, upstream, { configure: withUpstreamTimeout(100) });
   const started = Date.now();
   assert.deepEqual(await createFocusProxy(app.config).checkHealth({}), { available: false });
   assert.ok(Date.now() - started < 1_000);
+});
+
+// Focus's own status and scan controls, called by its page at absolute paths.
+const CONTROLS = [
+  ['GET', '/api/status', 200, 'application/json; charset=utf-8', '{"paused":false,"running":[]}'],
+  ['POST', '/api/pause', 200, 'application/json; charset=utf-8', '{"paused":true,"running":[]}'],
+  ['POST', '/api/resume', 500, 'text/plain; charset=utf-8', 'launchctl refused'],
+  ['POST', '/api/refresh', 202, 'application/json; charset=utf-8', '{"paused":false,"running":["gmail"]}'],
+];
+
+test('Focus status and control routes reach the same upstream path and pass the reply through', async (t) => {
+  const replies = new Map(CONTROLS.map(([method, url, status, type, text]) => [`${method} ${url}`, { status, type, text }]));
+  const upstream = await startScriptedFocus(t, (req, res) => {
+    const reply = replies.get(`${req.method} ${req.url}`);
+    res.writeHead(reply.status, { 'Content-Type': reply.type }).end(reply.text);
+  });
+  const app = await appFor(t, upstream);
+  for (const [method, url, status, type, text] of CONTROLS) {
+    // As Focus's page sends them: no body and no content type.
+    const headers = method === 'POST' ? { origin: app.origin, 'content-length': '0' } : {};
+    const response = await request(app, method, url, { headers });
+    assert.equal(response.status, status, url);
+    assert.equal(response.headers['content-type'], type, url);
+    assert.equal(response.text, text, url);
+    assert.equal(response.headers['cache-control'], 'no-store');
+  }
+  assert.deepEqual(upstream.records.map((r) => [r.method, r.url]), CONTROLS.map(([method, url]) => [method, url]));
+  for (const record of upstream.records) {
+    assert.equal(record.headers.host, upstream.authority);
+    assert.equal(record.headers.origin, undefined);
+    assert.equal(record.headers['content-type'], undefined);
+    assert.equal(record.body, '');
+    if (record.method === 'POST') assert.equal(record.headers['content-length'], '0');
+  }
+});
+
+test('a refresh already running passes through as 409', async (t) => {
+  const upstream = await startScriptedFocus(t, (_req, res) => {
+    res.writeHead(409, { 'Content-Type': 'application/json' }).end('{"running":["gmail"]}');
+  });
+  const app = await appFor(t, upstream);
+  const response = await request(app, 'POST', '/api/refresh', { headers: { origin: app.origin } });
+  assert.equal(response.status, 409);
+  assert.deepEqual(response.json, { running: ['gmail'] });
+});
+
+test('control POSTs need an exact Origin and no body, and never reach Focus otherwise', async (t) => {
+  const upstream = await startScriptedFocus(t);
+  const app = await appFor(t, upstream);
+  for (const url of ['/api/pause', '/api/resume', '/api/refresh']) {
+    assertJsonError(await request(app, 'POST', url), 403);
+    assertJsonError(await request(app, 'POST', url, { headers: { origin: 'http://evil.example' } }), 403);
+    assertJsonError(await request(app, 'POST', url, { headers: { origin: app.origin, 'content-type': 'application/json' }, body: '{}' }), 413);
+    async function* chunked() { yield 'x'; }
+    assertJsonError(await request(app, 'POST', url, { headers: { origin: app.origin }, body: chunked() }), 400);
+  }
+  assert.equal(upstream.records.length, 0);
+  // A JSON content type is not required, but is not refused either.
+  const typed = await request(app, 'POST', '/api/pause', { headers: { origin: app.origin, 'content-type': 'application/json' } });
+  assert.equal(typed.status, 200);
+  assert.equal(upstream.records.length, 1);
+});
+
+test('only the listed Focus paths and methods are forwarded', async (t) => {
+  const upstream = await startScriptedFocus(t);
+  const app = await appFor(t, upstream);
+  for (const url of ['/api/whatever', '/api/focus/extra', '/api/pause/now', '/api/statuses', '/api/dashboard']) {
+    assertJsonError(await request(app, 'GET', url), 404);
+    assertJsonError(await request(app, 'POST', url, { headers: { origin: app.origin } }), 404);
+  }
+  for (const [method, url] of [['POST', '/api/status'], ['PUT', '/api/status'], ['HEAD', '/api/status'], ['GET', '/api/pause'], ['PUT', '/api/refresh'], ['DELETE', '/api/resume']]) {
+    const response = await request(app, method, url, { headers: { origin: app.origin } });
+    assert.equal(response.status, 405, `${method} ${url}`);
+  }
+  assert.equal(upstream.records.length, 0);
+
+  // The proxy itself refuses anything outside its list without contacting Focus.
+  const proxy = createFocusProxy(app.config);
+  const refusal = await new Promise((resolve) => {
+    const res = { headersSent: false, req: null, setHeader() {}, writeHead(status) { this.statusCode = status; }, end() { resolve(this.statusCode); } };
+    proxy.handleControl({ method: 'GET', headers: {} }, res, { path: '/api/focus' });
+  });
+  assert.equal(refusal, 404);
+  assert.equal(upstream.records.length, 0);
+});
+
+test('the dashboard status moved to /api/dashboard/status; /api/status is Focus\'s', async (t) => {
+  const upstream = await startScriptedFocus(t, (req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ from: req.url }));
+  });
+  const app = await appFor(t, upstream);
+  const dashboard = await request(app, 'GET', '/api/dashboard/status');
+  assert.deepEqual(dashboard.json.focus, { available: true });
+  assert.deepEqual(upstream.records.map((r) => r.url), ['/api/focus']);
+  const focus = await request(app, 'GET', '/api/status');
+  assert.deepEqual(focus.json, { from: '/api/status' });
 });
 
 // The real Focus server, copied into a temporary Git repository.
@@ -384,7 +612,31 @@ test('isolated Focus: page and API load through the proxy', isolated, async (t) 
   const api = await request(app, 'GET', '/api/focus');
   assert.equal(api.status, 200);
   assert.deepEqual(api.json.items.map((item) => item.id), ['fixture-a', 'fixture-b']);
-  assert.deepEqual((await request(app, 'GET', '/api/status')).json.focus, { available: true });
+  assert.deepEqual((await request(app, 'GET', '/api/dashboard/status')).json.focus, { available: true });
+});
+
+test('isolated Focus: the fixture is its own Git repository', isolated, async (t) => {
+  const focus = await startIsolatedFocus(t);
+  assert.equal(focus.git('rev-parse', '--show-toplevel').trim(), focus.dir);
+  assert.equal(focus.git('config', '--get', 'core.hooksPath').trim(), path.join(focus.dir, '.git', 'no-hooks'));
+});
+
+test('isolated Focus: status and scan controls work through the proxy', isolated, async (t) => {
+  const focus = await startIsolatedFocus(t);
+  const app = await startApp(t, { env: { DASHBOARD_FOCUS_ORIGIN: focus.origin } });
+  const page = await request(app, 'GET', '/embedded/focus');
+  assert.ok(page.text.includes("fetch('/api/status'"), 'Focus page no longer calls /api/status');
+  const status = await request(app, 'GET', '/api/status');
+  assert.equal(status.status, 200);
+  assert.ok(Array.isArray(status.json.running));
+  // The scan runner is a stub that exits at once.
+  const refresh = await request(app, 'POST', '/api/refresh', { headers: { origin: app.origin } });
+  assert.ok([202, 409].includes(refresh.status), `refresh answered ${refresh.status}`);
+  assert.ok(Array.isArray(refresh.json.running));
+  // The fixture has no bin/, so pause fails inside Focus and never reaches launchd.
+  const pause = await request(app, 'POST', '/api/pause', { headers: { origin: app.origin } });
+  assert.equal(pause.status, 500);
+  assert.match(pause.headers['content-type'], /^text\/plain/);
 });
 
 test('isolated Focus: a valid PUT writes focus.json and commits with a manual: subject', isolated, async (t) => {
