@@ -374,6 +374,17 @@ test('defaultLaunchctlList parses PID and LastExitStatus, and a missing service 
   assert.equal(errors.length, 1);
 });
 
+test('an aborted launchctl call is null and not logged', async () => {
+  const errors = [];
+  const aborted = scriptedRun(() => ({ error: Object.assign(new Error('The operation was aborted'), { name: 'AbortError', code: 'ABORT_ERR' }) }));
+  const controller = new AbortController();
+  controller.abort();
+  assert.equal(await defaultLaunchctlList('com.x', {
+    timeoutMs: 100, run: aborted.run, signal: controller.signal, onError: (...args) => errors.push(args),
+  }), null);
+  assert.deepEqual(errors, []);
+});
+
 const hasPlutil = !spawnSync('plutil', ['-help']).error;
 
 test('defaultReadPlist converts a real plist with plutil (opt-in: needs plutil)', async (t) => {

@@ -20,16 +20,20 @@ Operations are in [docs/operations.md](docs/operations.md).
 
 | Route | Purpose |
 | --- | --- |
-| `GET /`, `/focus`, `/brief` | The shell. |
+| `GET /`, `/focus`, `/brief`, `/routines`, `/agents`, `/goals` | The shell. |
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
-| `GET /api/dashboard/status` | What the shell polls (below). |
+| `GET /api/state` | The state hub's snapshot (below). |
+| `GET /api/events` | Server-Sent Events: the snapshot, then each change (below). |
+| `POST /api/routines/refresh` | Re-reads the routines and answers `{"ok": true, "revision": N}`. |
+| `GET /api/dashboard/status` | What the shell polls (below). Kept for one release while the shell moves to `/api/events`. |
 | `GET /assets/<name>` | Shell script, styles, and the brief bridge. |
 | `GET /embedded/focus`, `/api/focus`, `/api/status`; `PUT /api/focus`; `POST /api/pause`, `/api/resume`, `/api/refresh` | Forwarded to Focus (below). |
 | `GET /api/brief/latest` | Latest brief metadata. |
 | `GET /embedded/brief/<date>?revision=<revision>` | One brief viewer. |
 | `POST /api/brief/feedback` | Saves feedback for one brief. |
 
-`/focus/` and `/brief/` redirect to the paths without the slash. A known path
+`/focus/`, `/brief/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
+paths without the slash. A known path
 with the wrong method is 405, and anything else is 404. Errors are JSON bodies of the form
 `{"error": "<code>"}`. The comment at the top of each route module describes
 what `lib/app.mjs` expects from it.
@@ -50,6 +54,51 @@ state naming why the latest file cannot be served, such as `unreadable`,
 file was found, and `revision` when it could be hashed. The two checks run in
 parallel under a time limit, so a slow Focus cannot hold the answer back for
 long. The body never contains brief text.
+
+The status route now asks the state hub for a refresh and answers from its
+snapshot; concurrent requests share one check. It stays for one release.
+
+### State and events
+
+`lib/hub.mjs` keeps one snapshot in memory:
+
+```json
+{ "revision": 7, "updatedAt": "<ISO>",
+  "focus": { "available": true },
+  "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>" },
+  "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
+  "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona", "provider": "claude" }],
+  "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] } }
+```
+
+`revision` goes up by one on every change. `focus` and `brief` hold what the
+status route reports (`available` is null and `state` is `unknown` before the
+first check). Agents leave out `cwd` and `routines`. `routines.items` is empty
+until the first refresh; a failed refresh keeps the previous items and sets
+`error` to `refresh_failed`. `GET /api/state` returns the snapshot.
+
+`GET /api/events` is a Server-Sent Events stream:
+
+- `event: snapshot` first, with the whole snapshot and `id:` set to its
+  revision. The server checks Focus and the brief before sending it, for at
+  most `statusMs`.
+- `event: delta` for each change, with `id:` set to the new revision and data
+  `{ "revision": N, "patch": { ... } }`. `patch` holds only the top-level keys
+  that changed. The server keeps no history and ignores `Last-Event-ID`: a
+  client that sees a revision gap fetches `/api/state` again.
+- `event: reload` (data `{}`) when the client read too slowly and deltas were
+  dropped; the client fetches `/api/state` again.
+- `event: bye` (data `{}`) when the server shuts down.
+- `: ping` every 25 seconds.
+
+At most 8 streams are open at once; the ninth gets 503 `too_many_streams` with
+`Retry-After: 5`. While any stream is open, the server checks Focus and the
+brief every 30 seconds and sends a delta only when the answer changed.
+A stream is logged once, as `stream_closed`, when it ends.
+
+`POST /api/routines/refresh` follows the rules for the Focus controls: exact
+`Origin`, no body. A successful `POST /api/pause` or `/api/resume` also starts
+a routines refresh.
 
 ### Daily Brief
 
@@ -211,7 +260,9 @@ bodyless Focus controls. Focus request bodies are capped at
 1,000,000 bytes and feedback at 128 KiB. An oversized body gets a 413 as soon
 as the limit is crossed, with `Connection: close`; the server then discards at
 most 2 MiB more of the upload, for at most 2 seconds, before cutting the
-connection. Logs record method, route, status, and duration; a response that
+connection. The event stream limits (`LIMITS.eventStreams`, 8;
+`TIMEOUTS.heartbeatMs`, 25 seconds; `TIMEOUTS.statusPollMs`, 30 seconds) are
+constants in `lib/config.mjs`, not environment variables. Logs record method, route, status, and duration; a response that
 never completed is logged with status 0. They never contain request bodies or
 brief text.
 
