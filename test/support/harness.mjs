@@ -74,16 +74,23 @@ export function fakeRoutines(routines = []) {
 }
 
 // Builds a hub over the given focus and brief, with fake registry and
-// routines unless real ones are passed.
-export function createTestHub({ config, focus, brief, registry = fakeRegistry(), routines = fakeRoutines(), log = () => {} }) {
-  return createHub({ registry, routines, focus, brief, timeouts: config.timeouts, log });
+// routines unless real ones are passed, and no persona adapters unless given.
+export function createTestHub({
+  config, focus, brief, registry = fakeRegistry(), routines = fakeRoutines(), adapters = {}, store = null, log = () => {},
+}) {
+  return createHub({
+    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, log,
+  });
 }
 
 // Starts the app on an ephemeral port. `focus` and `brief` default to the
 // real phase 1 modules; tests may pass fakes. `registry` and `routines`
-// default to the fakes above, and `hub` to a hub over all four.
-// `configure` may adjust config.
-export async function startApp(t, { env = {}, focus, brief, registry, routines, hub, configure = (c) => c } = {}) {
+// default to the fakes above, and `hub` to a hub over all four plus any
+// `adapters` and `store` fakes (default none), started before the app
+// listens. `configure` may adjust config.
+export async function startApp(t, {
+  env = {}, focus, brief, registry, routines, hub, adapters, store, configure = (c) => c,
+} = {}) {
   const server = http.createServer();
   const port = await listen(server);
   const briefsDir = env.DASHBOARD_BRIEFS_DIR ?? path.join(await tempDir(t), 'briefs-missing');
@@ -99,8 +106,11 @@ export async function startApp(t, { env = {}, focus, brief, registry, routines, 
   const focusRoutes = focus ?? createFocusProxy(config);
   const briefRoutes = brief ?? createBriefRoutes(config);
   const routinesModule = routines ?? fakeRoutines();
-  const stateHub = hub ?? createTestHub({ config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, log });
-  const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, log });
+  const stateHub = hub ?? createTestHub({
+    config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, adapters, store, log,
+  });
+  if (!hub) await stateHub.start();
+  const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, log });
   server.on('request', handler);
   t.after(() => {
     handler.closeStreams();

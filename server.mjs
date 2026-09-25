@@ -1,8 +1,19 @@
 // Entry point: load configuration, load the agent registry, compose the
-// routines view, state hub, and app, listen on 127.0.0.1, and shut down
-// within a bounded window on SIGTERM/SIGINT. Importing this module does
-// nothing; `node server.mjs` runs main(). A missing or invalid registry does
-// not stop startup; the hub reports it.
+// routines view, thread store, persona adapters, state hub, and app, start
+// the personas, listen on 127.0.0.1, and shut down within a bounded window
+// on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
+// runs main(). A missing or invalid registry does not stop startup; the hub
+// reports it.
+//
+// Cost guard: when ANTHROPIC_API_KEY or OPENAI_API_KEY is set in the
+// environment, no adapters are created (logged as adapters_disabled), so
+// every persona is unavailable with lastError 'api_key_in_env'. Persona
+// turns must bill the subscription, never an API key.
+//
+// Shutdown order: end event streams and refuse new sends (closeStreams),
+// close each adapter (which drains running turns for up to drainMs), close
+// the hub, stop the registry, then close the server (shutdownMs grace).
+// main() forces exit drainMs + shutdownMs after the signal.
 
 import http from 'node:http';
 
@@ -13,10 +24,20 @@ import { createFocusProxy } from './lib/focus-proxy.mjs';
 import { createHub } from './lib/hub.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { createRoutines } from './lib/routines.mjs';
+import { createClaudeAdapter } from './lib/runtime/claude.mjs';
+import { createThreadStore } from './lib/threads.mjs';
+
+const API_KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
+
+function defaultAdapters({ config, store, log }) {
+  return { claude: createClaudeAdapter({ store, config, log }) };
+}
 
 // Starts the dashboard and resolves once it is listening. Rejects on invalid
 // configuration or a port already in use; it never picks another port.
-export async function startDashboard({ env = process.env, log } = {}) {
+// `createAdapters({ config, store, log })` returns the adapters by provider;
+// tests pass fakes. It is not called when an API key is in `env`.
+export async function startDashboard({ env = process.env, log, createAdapters = defaultAdapters } = {}) {
   const config = loadConfig(env);
   const focus = createFocusProxy(config);
   const brief = createBriefRoutes(config);
@@ -29,20 +50,41 @@ export async function startDashboard({ env = process.env, log } = {}) {
     timeouts: config.timeouts,
     log: logEntry,
   });
-  const hub = createHub({ registry, routines, focus, brief, timeouts: config.timeouts, log: logEntry });
-  const app = createApp({ config, focus, brief, hub, log: logEntry });
+  const store = createThreadStore({ dir: config.threadsDir, limits: config.limits, log: logEntry });
+  const apiKeyInEnv = API_KEY_VARS.some((name) => typeof env[name] === 'string' && env[name] !== '');
+  let adapters = {};
+  if (apiKeyInEnv) {
+    logEntry({ event: 'adapters_disabled', reason: 'api_key_in_env' });
+  } else {
+    adapters = createAdapters({ config, store, log: logEntry });
+  }
+  const hub = createHub({
+    registry,
+    routines,
+    focus,
+    brief,
+    timeouts: config.timeouts,
+    limits: config.limits,
+    adapters,
+    store,
+    adaptersDisabled: apiKeyInEnv ? 'api_key_in_env' : null,
+    log: logEntry,
+  });
+  const app = createApp({ config, focus, brief, hub, store, log: logEntry });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;
   server.requestTimeout = config.timeouts.requestMs;
   server.keepAliveTimeout = config.timeouts.keepAliveMs;
 
-  const shutdownState = () => {
+  const shutdownState = async () => {
     app.closeStreams();
+    await Promise.all(Object.values(adapters).map((adapter) => adapter.close()));
     hub.close();
     registry.stop();
   };
 
   await registry.start();
+  await hub.start();
   try {
     await new Promise((resolve, reject) => {
       server.once('error', reject);
@@ -52,12 +94,12 @@ export async function startDashboard({ env = process.env, log } = {}) {
       });
     });
   } catch (error) {
-    shutdownState();
+    await shutdownState();
     throw error;
   }
 
   let closing;
-  const close = () => (closing ??= (shutdownState(), closeServer(server, config.timeouts.shutdownMs)));
+  const close = () => (closing ??= shutdownState().then(() => closeServer(server, config.timeouts.shutdownMs)));
   return { server, config, close };
 }
 
@@ -96,7 +138,7 @@ async function main() {
 
   const stop = (signal) => {
     console.log(`dashboard: ${signal} received, shutting down`);
-    setTimeout(() => process.exit(1), config.timeouts.shutdownMs + 1_000).unref();
+    setTimeout(() => process.exit(1), config.timeouts.drainMs + config.timeouts.shutdownMs).unref();
     close().then(() => process.exit(0));
   };
   process.once('SIGTERM', stop);

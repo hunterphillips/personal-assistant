@@ -5,6 +5,7 @@ import net from 'node:net';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { startDashboard } from '../server.mjs';
@@ -28,6 +29,33 @@ async function testEnv(t) {
     DASHBOARD_BRIEFS_DIR: await tempDir(t),
     DASHBOARD_REGISTRY_PATH: path.join(await tempDir(t), 'agents.json'),
     DASHBOARD_LAUNCH_AGENTS_DIR: await tempDir(t),
+    DASHBOARD_THREADS_DIR: path.join(await tempDir(t), 'threads'),
+  };
+}
+
+async function writeRegistry(env, agents) {
+  await writeFile(env.DASHBOARD_REGISTRY_PATH, JSON.stringify({ version: 1, agents }));
+}
+
+async function personaEntry(t, id = 'cfo') {
+  return {
+    id, name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona',
+    cwd: await tempDir(t), provider: 'claude',
+  };
+}
+
+// An adapter stand-in that records close, and the hub's unsubscribe from it,
+// into `order`.
+function recordingAdapter(order) {
+  return {
+    start: async () => ({}),
+    state: () => ({ state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null }),
+    subscribe: () => () => order.push('hub.close'),
+    close: async () => {
+      order.push('adapter.close');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      order.push('adapter.drained');
+    },
   };
 }
 
@@ -132,4 +160,60 @@ test('the executable exits non-zero when its port is taken', async (t) => {
   });
   assert.equal(result.code, 1);
   assert.match(result.stderr, /port already in use/);
+});
+
+test('shutdown ends streams, drains the adapters, then closes the hub and the server', async (t) => {
+  const env = await testEnv(t);
+  await writeRegistry(env, [await personaEntry(t)]);
+  const order = [];
+  let dashboard;
+  const adapter = recordingAdapter(order);
+  const drain = adapter.close;
+  adapter.close = async () => {
+    const response = await fetch(`http://127.0.0.1:${dashboard.config.port}/api/agents/cfo/send`, {
+      method: 'POST',
+      headers: { origin: `http://127.0.0.1:${dashboard.config.port}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Late' }),
+    });
+    order.push(`send ${response.status}`);
+    order.push(`listening ${dashboard.server.listening}`);
+    await drain();
+  };
+  dashboard = await startDashboard({ env, log: () => {}, createAdapters: () => ({ claude: adapter }) });
+  const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
+  assert.equal(state.agents[0].state, 'idle');
+  await dashboard.close();
+  assert.deepEqual(order, ['send 503', 'listening true', 'adapter.close', 'adapter.drained', 'hub.close']);
+  assert.equal(dashboard.server.listening, false);
+});
+
+test('an API key in the environment disables the adapters and marks personas unavailable', async (t) => {
+  for (const name of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY']) {
+    const env = { ...await testEnv(t), [name]: 'invented-key' };
+    await writeRegistry(env, [await personaEntry(t)]);
+    const logs = [];
+    const dashboard = await startDashboard({
+      env,
+      log: (entry) => logs.push(entry),
+      createAdapters: () => { throw new Error('adapters must not be created'); },
+    });
+    t.after(() => dashboard.close());
+    const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
+    assert.deepEqual([state.agents[0].state, state.agents[0].lastError], ['unavailable', 'api_key_in_env'], name);
+    assert.ok(logs.some((entry) => entry.event === 'adapters_disabled' && entry.reason === 'api_key_in_env'));
+    await dashboard.close();
+  }
+});
+
+test('a port collision still closes the adapters it created', async (t) => {
+  const env = await testEnv(t);
+  const blocker = http.createServer();
+  await new Promise((resolve) => blocker.listen(Number(env.DASHBOARD_PORT), '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => blocker.close(resolve)));
+  const order = [];
+  await assert.rejects(
+    startDashboard({ env, log: () => {}, createAdapters: () => ({ claude: recordingAdapter(order) }) }),
+    { code: 'EADDRINUSE' },
+  );
+  assert.deepEqual(order, ['adapter.close', 'adapter.drained', 'hub.close']);
 });
