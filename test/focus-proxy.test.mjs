@@ -508,6 +508,83 @@ test('checkHealth is bounded by the upstream timeout without a signal', async (t
   assert.ok(Date.now() - started < 1_000);
 });
 
+const FOCUS_STATUS = {
+  paused: false,
+  running: ['gmail'],
+  sources: { gmail: { lastRun: '2026-09-25T13:35:04Z', lastOutcome: 'no change', failures24h: 3 } },
+};
+
+test('fetchStatus returns the parsed Focus status from upstream /api/status', async (t) => {
+  const upstream = await startScriptedFocus(t, (_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify(FOCUS_STATUS));
+  });
+  const app = await appFor(t, upstream);
+  assert.deepEqual(await createFocusProxy(app.config).fetchStatus(), FOCUS_STATUS);
+  assert.deepEqual(upstream.records.map((r) => [r.method, r.url]), [['GET', '/api/status']]);
+  assert.equal(upstream.records[0].headers.host, upstream.authority);
+});
+
+test('fetchStatus returns null for a non-JSON reply, a non-object body, or unparseable JSON', async (t) => {
+  const replies = [
+    ['text/html', '<p>status</p>'],
+    ['application/json', '[1,2,3]'],
+    ['application/json', 'null'],
+    ['application/json', '{"paused":'],
+  ];
+  let index = 0;
+  const upstream = await startScriptedFocus(t, (_req, res) => {
+    const [type, text] = replies[index];
+    res.writeHead(200, { 'Content-Type': type }).end(text);
+  });
+  const app = await appFor(t, upstream);
+  const proxy = createFocusProxy(app.config);
+  for (index = 0; index < replies.length; index += 1) {
+    assert.equal(await proxy.fetchStatus(), null, replies[index].join(' '));
+  }
+});
+
+test('fetchStatus returns null for a non-200 reply', async (t) => {
+  const upstream = await startScriptedFocus(t, (_req, res) => {
+    res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify(FOCUS_STATUS));
+  });
+  const app = await appFor(t, upstream);
+  assert.equal(await createFocusProxy(app.config).fetchStatus(), null);
+});
+
+test('fetchStatus returns null when Focus does not answer in time or the signal aborts', async (t) => {
+  const upstream = await startScriptedFocus(t, () => {});
+  const app = await appFor(t, upstream, { configure: withUpstreamTimeout(100) });
+  const proxy = createFocusProxy(app.config);
+  const started = Date.now();
+  assert.equal(await proxy.fetchStatus(), null);
+  assert.ok(Date.now() - started < 1_000);
+
+  const controller = new AbortController();
+  const pending = proxy.fetchStatus({ signal: controller.signal });
+  controller.abort();
+  assert.equal(await pending, null);
+  assert.equal(await proxy.fetchStatus({ signal: AbortSignal.abort() }), null);
+});
+
+test('fetchStatus returns null for a reply over the JSON size limit', async (t) => {
+  let chunked = false;
+  const size = 4 * MiB + 1;
+  const upstream = await startScriptedFocus(t, (_req, res) => {
+    if (chunked) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      for (let sent = 0; sent < size; sent += 256 * 1024) res.write(Buffer.alloc(Math.min(256 * 1024, size - sent), 0x20));
+      res.end();
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': size }).end(Buffer.alloc(size, 0x20));
+    }
+  });
+  const app = await appFor(t, upstream);
+  const proxy = createFocusProxy(app.config);
+  assert.equal(await proxy.fetchStatus(), null);
+  chunked = true;
+  assert.equal(await proxy.fetchStatus(), null);
+});
+
 // Focus's own status and scan controls, called by its page at absolute paths.
 const CONTROLS = [
   ['GET', '/api/status', 200, 'application/json; charset=utf-8', '{"paused":false,"running":[]}'],
