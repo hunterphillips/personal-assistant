@@ -16,7 +16,9 @@
 // card is rebuilt only when the request changes, so choices survive other
 // state changes. Send, Answer, Allow, Deny, Interrupt, and New thread post
 // to the persona routes; a refusal is reported under the composer until the
-// next attempt.
+// next attempt. The composer's draft and the refusal belong to the agent
+// they were typed for: a draft is kept while another thread is open and put
+// back when its agent is chosen again.
 (function () {
   'use strict';
 
@@ -26,6 +28,7 @@
   var AGENT_ID = /^[a-z][a-z0-9-]{1,31}$/;
   var TICK_MS = 60000;
   var THREAD_TIMEOUT_MS = 8000;
+  var SCROLL_END_PX = 80; // this close to the end counts as reading the newest message
   var NO_ANSWER = 'The dashboard did not respond.';
 
   function element(tag, className, text) {
@@ -213,6 +216,7 @@
     var cost = document.getElementById('agent-cost');
     var newThread = document.getElementById('agent-new-thread');
     var confirmNode = document.getElementById('agent-confirm');
+    var confirmText = document.getElementById('agent-confirm-text');
     var description = document.getElementById('agent-description');
     var notice = document.getElementById('agent-notice');
     var messagesNode = document.getElementById('agent-messages');
@@ -229,13 +233,14 @@
     var state = null;
     var visible = false;
     var selectedId = null;
-    var thread = { id: null, messages: null, loading: false, error: false, version: 0 };
+    var thread = { id: null, messages: null, loading: false, error: false, fresh: true, version: 0 };
     var renderedVersion = -1;
     var threadKey = null; // what the thread was last fetched against
     var threadSeq = 0;
     var busy = false; // one of our POSTs is out
-    var actionError = ''; // why the last POST failed, or ''
+    var actionError = ''; // why the selected agent's last POST failed, or ''
     var confirming = false; // New thread awaits confirmation
+    var drafts = {}; // unsent composer text by agent id, for agents not selected
     var tick = null;
 
     function selectedAgent() {
@@ -272,6 +277,9 @@
 
     function renderList() {
       if (!state) return;
+      // Keep keyboard focus on the same row across the rebuild.
+      var active = document.activeElement;
+      var focusedId = active && groupsNode.contains(active) && active.hasAttribute('data-agent') ? active.getAttribute('data-agent') : null;
       groupsNode.textContent = '';
       var registry = state.registry;
       if (registry && registry.ok === false) message.textContent = 'The registry could not be read.';
@@ -290,6 +298,10 @@
         for (var j = 0; j < list[i].agents.length; j += 1) section.appendChild(row(list[i].agents[j]));
         groupsNode.appendChild(section);
       }
+      if (focusedId) {
+        var again = groupsNode.querySelector('[data-agent="' + focusedId + '"]');
+        if (again) again.focus();
+      }
     }
 
     function messageNode(entry) {
@@ -303,8 +315,13 @@
       return node;
     }
 
+    // The pane scrolls to the newest message when a thread first shows and
+    // when the reader is already at the end; a reader who scrolled up stays
+    // where they were.
     function renderMessages() {
       var agent = selectedAgent();
+      var atEnd = messagesNode.scrollHeight - messagesNode.scrollTop - messagesNode.clientHeight <= SCROLL_END_PX;
+      var follow = thread.fresh || atEnd;
       messagesNode.textContent = '';
       renderedVersion = thread.version;
       if (!isPersona(agent) || agent.state === 'unavailable') return;
@@ -313,18 +330,18 @@
         line.appendChild(document.createTextNode('The thread could not be loaded. '));
         line.appendChild(button('link-button', 'Retry', 'retry-thread'));
         messagesNode.appendChild(line);
-        return;
-      }
-      if (thread.messages === null) {
+        if (thread.messages === null) return;
+      } else if (thread.messages === null) {
         if (thread.loading) messagesNode.appendChild(element('p', 'thread-line', 'Opening thread.'));
         return;
       }
+      thread.fresh = false;
       if (thread.messages.length === 0) {
         messagesNode.appendChild(element('p', 'thread-line', 'No messages yet.'));
         return;
       }
       for (var i = 0; i < thread.messages.length; i += 1) messagesNode.appendChild(messageNode(thread.messages[i]));
-      messagesNode.scrollTop = messagesNode.scrollHeight;
+      if (follow) messagesNode.scrollTop = messagesNode.scrollHeight;
     }
 
     function optionButton(option) {
@@ -346,7 +363,9 @@
       card.appendChild(head);
       var options = element('div', 'request-options');
       var list = Array.isArray(question.options) ? question.options : [];
-      for (var i = 0; i < list.length; i += 1) options.appendChild(optionButton(list[i]));
+      for (var i = 0; i < list.length; i += 1) {
+        if (list[i] && typeof list[i].label === 'string') options.appendChild(optionButton(list[i]));
+      }
       card.appendChild(options);
       var other = element('label', 'request-other');
       var otherId = 'agent-other-' + index;
@@ -364,7 +383,7 @@
 
     function renderRequest(agent) {
       var pending = isPersona(agent) && agent.state === 'waiting' ? agent.pending : null;
-      var key = pending ? pending.requestId : '';
+      var key = pending ? agent.id + '|' + pending.requestId : '';
       if (request.getAttribute('data-request') === key) {
         setRequestBusy();
         return;
@@ -386,7 +405,9 @@
         request.appendChild(card);
       } else {
         var questions = questionsOf(pending);
-        for (var i = 0; i < questions.length; i += 1) request.appendChild(questionCard(questions[i], i));
+        for (var i = 0; i < questions.length; i += 1) {
+          if (questions[i] && typeof questions[i].question === 'string') request.appendChild(questionCard(questions[i], i));
+        }
         var answerRow = element('div', 'request-actions');
         answerRow.appendChild(button('button button-primary', 'Answer', 'answer'));
         var missing = element('span', 'request-missing');
@@ -402,8 +423,10 @@
       for (var i = 0; i < buttons.length; i += 1) buttons[i].disabled = busy;
     }
 
-    // One answer per question: the pressed labels, plus the Other text when
-    // given. Returns null and marks the first unanswered question otherwise.
+    // One answer per question. A multi-select question sends its pressed
+    // labels plus the Other text when given; a single-select question sends
+    // the Other text when typed, else the pressed label. Returns null and
+    // marks the first unanswered question otherwise.
     function collectAnswers() {
       var cards = request.querySelectorAll('.request-card[data-question]');
       var answers = {};
@@ -414,13 +437,14 @@
         var pressed = card.querySelectorAll('.option[aria-pressed="true"]');
         for (var j = 0; j < pressed.length; j += 1) labels.push(pressed[j].getAttribute('data-label'));
         var other = card.querySelector('.request-other-field').value.trim();
-        if (other) labels.push(other);
+        var multi = card.hasAttribute('data-multi');
+        if (other && (multi || labels.length === 0)) labels.push(other);
         if (labels.length === 0) {
           if (missingNode) missingNode.textContent = 'Every question needs an answer.';
           card.querySelector('.option, .request-other-field').focus();
           return null;
         }
-        answers[card.getAttribute('data-question')] = card.hasAttribute('data-multi') ? labels : labels[0];
+        answers[card.getAttribute('data-question')] = multi ? labels : other || labels[0];
       }
       if (missingNode) missingNode.textContent = '';
       return answers;
@@ -456,13 +480,17 @@
       newThread.hidden = !persona;
       newThread.disabled = busy || !persona || agent.state === 'unavailable' || turnOpen(agent);
       confirmNode.hidden = !confirming;
+      confirmText.textContent = 'Start a new thread? ' + agent.name + ' will not remember this one.';
 
-      var failed = persona && agent.state === 'error';
+      // A failed turn, or a turn the clock stopped: the persona is idle
+      // again with the reason kept until its next turn.
+      var failed = persona && (agent.state === 'error' || (agent.state === 'idle' && !!agent.lastError));
       notice.textContent = failed ? errorSentence(agent) : '';
       notice.hidden = !failed;
 
-      status.hidden = !(persona && agent.state === 'busy');
-      statusText.textContent = persona && agent.state === 'busy' ? agent.name + ' is working.' : '';
+      var open = persona && turnOpen(agent);
+      status.hidden = !open;
+      statusText.textContent = !open ? '' : agent.state === 'busy' ? agent.name + ' is working.' : agent.name + ' is waiting for you.';
       var interrupt = status.querySelector('button');
       interrupt.disabled = busy;
 
@@ -490,11 +518,12 @@
 
     // Fetches the thread when the selected persona's thread may have
     // changed: a new selection, a new last message, or a turn that ended.
-    function syncThread() {
+    // `force` fetches it again regardless, for Retry.
+    function syncThread(force) {
       var agent = selectedAgent();
       if (!isPersona(agent) || agent.state === 'unavailable') return;
       var key = agent.id + '|' + JSON.stringify(agent.lastMessage) + '|' + (turnOpen(agent) ? 'open' : 'closed');
-      if (key === threadKey) return;
+      if (key === threadKey && !force) return;
       threadKey = key;
       fetchThread(agent.id);
     }
@@ -515,7 +544,9 @@
             thread.messages = body.messages;
             thread.error = false;
           } else {
+            // The last good messages stay; the next state change fetches again.
             thread.error = true;
+            threadKey = null;
           }
           bumpThread();
         });
@@ -528,17 +559,25 @@
 
     function resetThread(id) {
       threadSeq += 1;
-      thread = { id: id, messages: null, loading: false, error: false, version: thread.version + 1 };
+      thread = { id: id, messages: null, loading: false, error: false, fresh: true, version: thread.version + 1 };
       threadKey = null;
     }
 
-    function select(id, push) {
-      if (push) history.pushState(null, '', id ? '/agents?agent=' + id : '/agents');
-      if (id === selectedId) return;
+    // Puts the current draft away and brings out the chosen agent's.
+    function setSelected(id) {
+      if (selectedId) drafts[selectedId] = input.value;
       selectedId = id;
+      input.value = (id && drafts[id]) || '';
       actionError = '';
       confirming = false;
       resetThread(id);
+    }
+
+    function select(id, push) {
+      var url = id ? '/agents?agent=' + id : '/agents';
+      if (push && location.pathname + location.search !== url) history.pushState(null, '', url);
+      if (id === selectedId) return;
+      setSelected(id);
       render();
       syncThread();
       if (isPersona(selectedAgent()) && window.matchMedia('(min-width: 720px)').matches) input.focus();
@@ -566,22 +605,32 @@
 
     // Runs one persona action; the outcome lands in the state, so a success
     // only clears the failure line and asks for the state when not streaming.
-    function act(agent, action, body, onSuccess) {
+    // The failure line and onDone(ok) belong to the agent acted on: when
+    // another thread has been opened meanwhile, neither touches it.
+    function act(agent, action, body, onDone) {
       if (busy) return;
       busy = true;
       actionError = '';
       renderThread();
       post('/api/agents/' + agent.id + '/' + action, body).then(function (result) {
         busy = false;
-        if (result && result.ok) {
-          if (onSuccess) onSuccess();
+        var ok = !!(result && result.ok);
+        var current = agent.id === selectedId;
+        if (ok) {
           if (!shell.isStreaming()) shell.requestState();
-        } else {
-          actionError = refusalSentence(result, agent);
-          if (result && result.code === 'no_such_request') shell.requestState();
+        } else if (result && result.code === 'no_such_request') {
+          shell.requestState();
         }
+        if (current && !ok) actionError = refusalSentence(result, agent);
         renderThread();
+        if (current && onDone) onDone(ok);
       });
+    }
+
+    // Where the keyboard lands once a request or approval is settled.
+    function focusComposer() {
+      if (!composer.hidden && !input.disabled) input.focus();
+      else if (!status.hidden) status.focus();
     }
 
     function sendMessage() {
@@ -592,15 +641,16 @@
         input.focus();
         return;
       }
-      act(agent, 'send', { text: text }, function () {
-        input.value = '';
+      act(agent, 'send', { text: text }, function (ok) {
+        if (ok) input.value = '';
+        input.focus();
       });
     }
 
     function answerQuestion(agent) {
       var answers = collectAnswers();
       if (!answers) return;
-      act(agent, 'answer', { requestId: agent.pending.requestId, answers: answers });
+      act(agent, 'answer', { requestId: agent.pending.requestId, answers: answers }, focusComposer);
     }
 
     function toggleOption(node) {
@@ -641,7 +691,7 @@
         case 'allow':
         case 'deny':
           if (agent && agent.pending) {
-            act(agent, 'answer', { requestId: agent.pending.requestId, decision: node.getAttribute('data-agent-action') });
+            act(agent, 'answer', { requestId: agent.pending.requestId, decision: node.getAttribute('data-agent-action') }, focusComposer);
           }
           break;
         case 'interrupt':
@@ -654,7 +704,7 @@
           break;
         case 'confirm-new-thread':
           confirming = false;
-          if (agent) act(agent, 'new-thread');
+          if (agent) act(agent, 'new-thread', undefined, function () { newThread.focus(); });
           break;
         case 'cancel-new-thread':
           confirming = false;
@@ -662,7 +712,7 @@
           newThread.focus();
           break;
         case 'retry-thread':
-          if (agent) fetchThread(agent.id);
+          syncThread(true);
           break;
         default:
           break;
@@ -693,12 +743,7 @@
       show: function () {
         visible = true;
         var id = agentFromUrl();
-        if (id !== selectedId) {
-          selectedId = id;
-          actionError = '';
-          confirming = false;
-          resetThread(id);
-        }
+        if (id !== selectedId) setSelected(id);
         if (tick === null) tick = setInterval(function () { refreshTimes(view); }, TICK_MS);
         render();
         syncThread();

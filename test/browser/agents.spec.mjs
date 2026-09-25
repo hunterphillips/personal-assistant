@@ -177,6 +177,8 @@ test.describe('with seeded agents', () => {
     await expect(request.locator('.request-other-field')).toBeVisible();
     await expect(page.locator('#agent-send')).toBeDisabled();
     await expect(page.locator('#agent-composer-reason')).toHaveText('Answer the question first.');
+    await expect(page.locator('#agent-status-text')).toHaveText('Second brain is waiting for you.');
+    await expect(page.locator('#agent-status').getByRole('button', { name: 'Interrupt' })).toBeEnabled();
     await expect(row(page, 'Second brain').locator('.agent-row-state')).toHaveText('Waiting for you');
     for (const button of await request.getByRole('button').all()) {
       expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);
@@ -195,19 +197,56 @@ test.describe('with seeded agents', () => {
     await request.getByRole('button', { name: 'Answer' }).click();
 
     await expect(request).toBeHidden();
+    await expect(page.locator('#agent-input')).toBeFocused();
     await expect(row(page, 'Second brain').locator('.agent-row-state')).toHaveCount(0, { timeout: 10_000 });
     await expect(messages(page)).toHaveText([/^Reply: answered/]);
     await expect(page.locator('#agent-send')).toBeEnabled();
     expect(hub.personas.calls).toEqual([['answer', 'brain', expect.stringMatching(/^req-/), { answers: { [QUESTION]: 'Amber' } }]]);
   });
 
-  test('a typed Other answer is sent as the label', async ({ page, hub }) => {
+  test('a typed Other answer is sent as the label, and wins over a pressed option', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/agents?agent=brain`);
     const request = page.locator('#agent-request');
+    await request.locator('.option').nth(0).click();
     await request.locator('.request-other-field').fill('Teal');
     await request.getByRole('button', { name: 'Answer' }).click();
     await expect(request).toBeHidden();
     expect(hub.personas.calls[0][3]).toEqual({ answers: { [QUESTION]: 'Teal' } });
+  });
+
+  test('a multi-select question posts every pressed label as a list', async ({ page, hub }) => {
+    hub.personas.hold('cfo');
+    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.locator('#agent-input').fill('Pick colors.');
+    await page.locator('#agent-send').click();
+    await expect(page.locator('#agent-status')).toBeVisible();
+    hub.personas.raise('cfo', {
+      ...QUESTION_REQUEST,
+      input: { questions: [{ ...QUESTION_REQUEST.input.questions[0], multiSelect: true }] },
+    });
+    const request = page.locator('#agent-request');
+    const options = request.locator('.option');
+    await options.nth(0).click();
+    await options.nth(1).click();
+    await expect(options.nth(0)).toHaveAttribute('aria-pressed', 'true');
+    await expect(options.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    await request.locator('.request-other-field').fill('Teal');
+    await request.getByRole('button', { name: 'Answer' }).click();
+    await expect(request).toBeHidden();
+    expect(hub.personas.calls.at(-1)).toEqual(['answer', 'cfo', expect.stringMatching(/^req-/), { answers: { [QUESTION]: ['Blue', 'Amber', 'Teal'] } }]);
+  });
+
+  test('a question whose request has expired says so under the composer', async ({ page, hub }) => {
+    await page.route('**/api/agents/brain/answer', (route) => route.fulfill({
+      status: 409, contentType: 'application/json', body: '{"error":"no_such_request"}',
+    }));
+    await page.goto(`${hub.origin}/agents?agent=brain`);
+    const request = page.locator('#agent-request');
+    await request.locator('.option').nth(0).click();
+    await request.getByRole('button', { name: 'Answer' }).click();
+    await expect(page.locator('#agent-failure')).toHaveText('That request was already answered or has expired.');
+    await expect(request).toBeVisible();
+    expect(hub.personas.calls).toEqual([]);
   });
 
   test('a pending approval shows the tool and its input, and Deny resolves it', async ({ page, hub }) => {
@@ -249,9 +288,11 @@ test.describe('with seeded agents', () => {
     await page.locator('#agent-new-thread').click();
     const confirm = page.locator('#agent-confirm');
     await expect(confirm).toBeVisible();
-    await expect(confirm).toContainText('Start a new thread?');
+    await expect(confirm).toContainText('Start a new thread? CFO will not remember this one.');
+    await expect(confirm.getByRole('button', { name: 'Start new thread' })).toBeFocused();
     await confirm.getByRole('button', { name: 'Cancel' }).click();
     await expect(confirm).toBeHidden();
+    await expect(page.locator('#agent-new-thread')).toBeFocused();
     expect(hub.personas.calls).toEqual([]);
 
     await page.locator('#agent-new-thread').click();
@@ -260,7 +301,69 @@ test.describe('with seeded agents', () => {
     await expect(messages(page)).toHaveText([/^New thread/]);
     await expect(messages(page).first()).toHaveClass(/thread-message-system/);
     await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('New thread');
+    await expect(page.locator('#agent-new-thread')).toBeFocused();
     expect(hub.personas.calls).toEqual([['newThread', 'cfo']]);
+  });
+
+  test('a thread that cannot be read again keeps its messages, and Retry or the next change recovers', async ({ page, hub }) => {
+    hub.personas.hold('cfo');
+    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await expect(messages(page)).toHaveCount(2);
+
+    let failing = true;
+    await page.route('**/api/agents/cfo/thread', (route) => (failing ? route.fulfill({ status: 500, body: '' }) : route.continue()));
+    await page.locator('#agent-input').fill('Still there?');
+    await page.locator('#agent-send').click();
+    const line = page.locator('#agent-messages .thread-line');
+    await expect(line).toHaveText('The thread could not be loaded. Retry');
+    await expect(messages(page)).toHaveCount(2);
+    expect(await page.locator('#agent-messages > *').first().getAttribute('class')).toBe('thread-line');
+
+    await line.getByRole('button', { name: 'Retry' }).click();
+    await expect(line).toHaveText('The thread could not be loaded. Retry');
+    failing = false;
+    await line.getByRole('button', { name: 'Retry' }).click();
+    await expect(line).toHaveCount(0);
+    await expect(messages(page)).toHaveCount(3);
+
+    failing = true;
+    await hub.personas.reply('cfo', 'Yes.');
+    await expect(line).toHaveText('The thread could not be loaded. Retry');
+    await expect(messages(page)).toHaveCount(3);
+    failing = false;
+    await page.locator('#agent-input').fill('Good.');
+    await page.locator('#agent-send').click();
+    await expect(line).toHaveCount(0);
+    await expect(messages(page)).toHaveCount(5);
+  });
+
+  test('a draft typed for one persona is kept while another thread is open', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.locator('#agent-input').fill('For CFO');
+    await row(page, 'Second brain').click();
+    await expect(pane(page).locator('#agent-name')).toHaveText('Second brain');
+    await expect(page.locator('#agent-input')).toHaveValue('');
+    await page.locator('#agent-input').fill('For Second brain');
+    await row(page, 'CFO').click();
+    await expect(page.locator('#agent-input')).toHaveValue('For CFO');
+    await page.goBack();
+    await expect(pane(page).locator('#agent-name')).toHaveText('Second brain');
+    await expect(page.locator('#agent-input')).toHaveValue('For Second brain');
+  });
+
+  test('Back from a thread returns to the list, and choosing the open row adds no history', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(`${hub.origin}/agents`);
+    await expect(page.locator('#agent-empty')).toHaveText('Choose an agent.');
+    await row(page, 'CFO').click();
+    await expect(page).toHaveURL(`${hub.origin}/agents?agent=cfo`);
+    await expect(pane(page)).toBeVisible();
+    await row(page, 'CFO').click();
+    await page.goBack();
+    await expect(page).toHaveURL(`${hub.origin}/agents`);
+    await expect(pane(page)).toBeHidden();
+    await expect(page.locator('#agent-empty')).toHaveText('Choose an agent.');
   });
 
   test('an unavailable persona shows why and a disabled composer', async ({ page, hub }) => {
@@ -299,6 +402,14 @@ test.describe('with seeded agents', () => {
     await expect(page.locator('#agent-send')).toBeEnabled();
   });
 
+  test('a sent message clears the composer and leaves the keyboard in it', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.locator('#agent-input').fill('Hello');
+    await page.locator('#agent-send').click();
+    await expect(page.locator('#agent-input')).toHaveValue('');
+    await expect(page.locator('#agent-input')).toBeFocused();
+  });
+
   test('at phone width the list comes first and a row opens the thread full width with a way back', async ({ page, hub }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${hub.origin}/agents`);
@@ -325,6 +436,17 @@ test.describe('with seeded agents', () => {
     await page.goBack();
     await expect(page).toHaveURL(`${hub.origin}/agents?agent=cfo`);
     await expect(page.locator('#agent-thread')).toBeVisible();
+  });
+});
+
+test.describe('with a persona whose last turn the clock stopped', () => {
+  test.use({ hubOptions: seeded({ cfo: { lastError: 'turn_timeout' } }) });
+
+  test('the idle persona says why above the messages and takes a message', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await expect(page.locator('#agent-notice')).toHaveText('The last turn ran too long and was stopped.');
+    await expect(page.locator('#agent-send')).toBeEnabled();
+    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveCount(0);
   });
 });
 
