@@ -300,7 +300,7 @@ markers in the middle. While the persona works, the pane says so and offers
 Interrupt. A question becomes one card per question with its options
 (label and description), an Other field, and Answer, which posts one answer
 per question; an approval is a card with the tool name, its input as
-monospaced JSON (marked "Input cut at 16 KB." when the snapshot cut it),
+monospaced JSON (marked "Input cut short." when the snapshot cut it),
 and Allow and Deny. The composer is labelled "Message <name>"; Send is off,
 with the reason under it, while the persona is working, waiting on an
 answer, or unavailable. A failed turn shows the adapter's sentence above

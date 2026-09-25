@@ -90,7 +90,7 @@
     var waiting = agents.filter(function (agent) { return agent.state === 'waiting'; }).map(function (agent) { return agent.name; });
     if (waiting.length === 1) return waiting[0] + ' is waiting for you';
     if (waiting.length === 2) return waiting[0] + ' and ' + waiting[1] + ' are waiting for you';
-    if (waiting.length > 2) return waiting.length + ' are waiting for you';
+    if (waiting.length > 2) return waiting.length + ' agents are waiting for you';
     if (agents.length === 0) return '';
     return agents.length === 1 ? '1 agent' : agents.length + ' agents';
   }
@@ -103,11 +103,11 @@
       case 'api_key_in_env':
         return 'The dashboard started with an API key in its environment, so personas are off. Unset it and restart the dashboard.';
       case 'start_failed':
-        return 'The session file for ' + agent.name + ' could not be read. Check var/threads, then restart the dashboard.';
+        return 'The session file for ' + agent.name + ' could not be read. Check the threads directory, then restart the dashboard.';
       case 'provider_unavailable':
         return providerName(agent) ? 'There is no runtime for ' + providerName(agent) + ' yet.' : 'There is no runtime for this provider yet.';
       case 'turn_timeout':
-        return 'The last turn ran for 30 minutes and was stopped.';
+        return 'The last turn ran too long and was stopped.';
       case 'error':
       case null:
       case undefined:
@@ -140,9 +140,11 @@
       case 'persona_unavailable': return agent.name + ' is unavailable.';
       case 'thread_reset_failed': return 'The thread could not be reset. Check the dashboard log.';
       case 'invalid_text': return 'Type a message first.';
-      case 'payload_too_large': return 'The message is over 16 KB. Shorten it.';
+      case 'payload_too_large': return 'The message is too long. Shorten it.';
       case 'invalid_answer': return 'That answer could not be sent.';
-      default: return 'The dashboard reported an error' + (result.code ? ' (' + result.code + ').' : '.');
+      case 'not_a_persona': return agent.name + ' has no thread.';
+      case 'invalid_agent': return 'That agent is not in the registry.';
+      default: return 'Something went wrong on the dashboard. Try again.';
     }
   }
 
@@ -314,7 +316,7 @@
         return;
       }
       if (thread.messages === null) {
-        if (thread.loading) messagesNode.appendChild(element('p', 'thread-line', 'Opening thread'));
+        if (thread.loading) messagesNode.appendChild(element('p', 'thread-line', 'Opening thread.'));
         return;
       }
       if (thread.messages.length === 0) {
@@ -376,7 +378,7 @@
         card.appendChild(element('h3', 'request-title', agent.name + ' wants to run ' + (pending.toolName || 'a tool')));
         var pre = element('pre', 'request-input', formatInput(pending));
         card.appendChild(pre);
-        if (pending.truncated) card.appendChild(element('p', 'request-note', 'Input cut at 16 KB.'));
+        if (pending.truncated) card.appendChild(element('p', 'request-note', 'Input cut short.'));
         var actions = element('div', 'request-actions');
         actions.appendChild(button('button button-primary', 'Allow', 'allow'));
         actions.appendChild(button('button', 'Deny', 'deny'));
@@ -428,7 +430,7 @@
       var agent = selectedAgent();
       view.classList.toggle('agents-open', !!selectedId);
       if (!selectedId) {
-        empty.textContent = 'No thread open.';
+        empty.textContent = 'Choose an agent.';
         empty.hidden = false;
         panel.hidden = true;
         return;

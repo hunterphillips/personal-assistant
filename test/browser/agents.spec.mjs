@@ -236,7 +236,7 @@ test.describe('with seeded agents', () => {
     // A second approval whose input is over the snapshot cap arrives cut.
     hub.personas.raise('cfo', { kind: 'approval', toolName: 'Write', input: { content: 'x'.repeat(20_000) } });
     await expect(request.locator('.request-title')).toHaveText('CFO wants to run Write');
-    await expect(request.locator('.request-note')).toHaveText('Input cut at 16 KB.');
+    await expect(request.locator('.request-note')).toHaveText('Input cut short.');
     expect((await request.locator('.request-input').textContent()).length).toBeLessThan(17_000);
     await request.getByRole('button', { name: 'Allow' }).click();
     await expect(request).toBeHidden();

@@ -31,16 +31,16 @@ test('summary names who is waiting, or counts the agents', () => {
   assert.equal(view.summary({ agents: [persona(), { id: 'x', kind: 'system', state: null }] }), '2 agents');
   assert.equal(view.summary({ agents: [persona({ state: 'waiting' })] }), 'CFO is waiting for you');
   assert.equal(view.summary({ agents: [persona({ state: 'waiting' }), persona({ name: 'Brain', state: 'waiting' })] }), 'CFO and Brain are waiting for you');
-  assert.equal(view.summary({ agents: [1, 2, 3].map((n) => persona({ name: `P${n}`, state: 'waiting' })) }), '3 are waiting for you');
+  assert.equal(view.summary({ agents: [1, 2, 3].map((n) => persona({ name: `P${n}`, state: 'waiting' })) }), '3 agents are waiting for you');
 });
 
 test('errorSentence turns each code into a sentence and passes adapter sentences through', () => {
   assert.equal(view.errorSentence(persona({ lastError: 'api_key_in_env' })),
     'The dashboard started with an API key in its environment, so personas are off. Unset it and restart the dashboard.');
   assert.equal(view.errorSentence(persona({ lastError: 'start_failed' })),
-    'The session file for CFO could not be read. Check var/threads, then restart the dashboard.');
+    'The session file for CFO could not be read. Check the threads directory, then restart the dashboard.');
   assert.equal(view.errorSentence(persona({ lastError: 'provider_unavailable', provider: 'codex' })), 'There is no runtime for Codex yet.');
-  assert.equal(view.errorSentence(persona({ lastError: 'turn_timeout' })), 'The last turn ran for 30 minutes and was stopped.');
+  assert.equal(view.errorSentence(persona({ lastError: 'turn_timeout' })), 'The last turn ran too long and was stopped.');
   assert.equal(view.errorSentence(persona({ lastError: 'error' })), 'The last turn failed.');
   assert.equal(view.errorSentence(persona({ lastError: null })), 'The last turn failed.');
   const resume = 'The stored session could not be resumed. Start a new thread.';
@@ -66,9 +66,13 @@ test('refusalSentence covers each route refusal and a missing answer', () => {
   assert.equal(view.refusalSentence({ code: 'shutting_down' }, agent), 'The dashboard is shutting down. Try again in a moment.');
   assert.equal(view.refusalSentence({ code: 'persona_unavailable' }, agent), 'CFO is unavailable.');
   assert.equal(view.refusalSentence({ code: 'thread_reset_failed' }, agent), 'The thread could not be reset. Check the dashboard log.');
-  assert.equal(view.refusalSentence({ code: 'payload_too_large' }, agent), 'The message is over 16 KB. Shorten it.');
-  assert.equal(view.refusalSentence({ code: 'internal_error' }, agent), 'The dashboard reported an error (internal_error).');
-  assert.equal(view.refusalSentence({ code: null }, agent), 'The dashboard reported an error.');
+  assert.equal(view.refusalSentence({ code: 'payload_too_large' }, agent), 'The message is too long. Shorten it.');
+  assert.equal(view.refusalSentence({ code: 'not_a_persona' }, agent), 'CFO has no thread.');
+  assert.equal(view.refusalSentence({ code: 'invalid_agent' }, agent), 'That agent is not in the registry.');
+  const generic = 'Something went wrong on the dashboard. Try again.';
+  assert.equal(view.refusalSentence({ code: 'internal_error' }, agent), generic);
+  assert.equal(view.refusalSentence({ code: 'never_seen_before' }, agent), generic);
+  assert.equal(view.refusalSentence({ code: null }, agent), generic);
 });
 
 test('previewText collapses whitespace and marks your own messages', () => {
