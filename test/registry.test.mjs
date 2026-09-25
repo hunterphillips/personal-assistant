@@ -172,6 +172,19 @@ test('an unknown key on an agent is rejected', async (t) => {
   assert.match(state.error, /unknown key "extra"/);
 });
 
+test('a file over the 256 KiB cap is rejected as oversized', async (t) => {
+  const dir = await tempDir(t);
+  const file = path.join(dir, 'agents.json');
+  await writeFile(file, JSON.stringify({ version: 1, agents: [baseAgent(dir)] }) + ' '.repeat(256 * 1024));
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  const state = registry.current();
+  assert.equal(state.ok, false);
+  assert.equal(state.error, 'registry_oversized');
+});
+
 test('invalid JSON keeps the last good agents and sets error', async (t) => {
   const dir = await tempDir(t);
   const file = await write(dir, { version: 1, agents: [baseAgent(dir)] });
