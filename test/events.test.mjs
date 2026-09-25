@@ -174,9 +174,11 @@ test('the shared status poll runs only while a stream is open', async (t) => {
   assert.ok(app.counts.health <= closed + 1, 'polling stopped with the last stream');
 });
 
-test('GET /api/state returns the hub snapshot', async (t) => {
+test('GET /api/state checks Focus and the brief, then returns the hub snapshot', async (t) => {
   const app = await startStreamingApp(t);
   const response = await request(app, 'GET', '/api/state');
+  assert.equal(app.counts.health, 1);
+  assert.deepEqual(response.json.focus, { available: true });
   assert.equal(response.status, 200);
   assert.equal(response.headers['cache-control'], 'no-store');
   assert.match(response.headers['content-type'], /^application\/json/);
