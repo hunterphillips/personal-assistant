@@ -95,3 +95,20 @@ for (const [name, env] of Object.entries(invalid)) {
     assert.throws(() => loadConfig(env), ConfigError);
   });
 }
+
+test('threads dir defaults under APP_ROOT and honors absolute and relative overrides', () => {
+  assert.equal(loadConfig({}).threadsDir, path.resolve(APP_ROOT, 'var/threads'));
+  assert.ok(path.isAbsolute(loadConfig({}).threadsDir));
+  assert.equal(loadConfig({ DASHBOARD_THREADS_DIR: '/etc/threads' }).threadsDir, '/etc/threads');
+  assert.equal(loadConfig({ DASHBOARD_THREADS_DIR: 'var/other' }).threadsDir, path.resolve(APP_ROOT, 'var/other'));
+});
+
+test('persona limits and timeouts are exposed', () => {
+  const config = loadConfig({});
+  assert.equal(config.timeouts.drainMs, 30_000);
+  assert.equal(config.timeouts.requestMaxAgeMs, 1_800_000);
+  assert.equal(config.limits.turnMaxTurns, 25);
+  assert.equal(config.limits.messageTextBytes, 8192);
+  assert.equal(config.limits.threadCacheMessages, 200);
+  assert.equal(config.limits.threadCacheBytes, 1_048_576);
+});
