@@ -9,7 +9,10 @@
 // Briefs live in a new temporary directory and are invented by
 // writeBrief(). The registry and routines are in-memory fakes seeded from
 // the options (see controlledRegistry and controlledRoutines); `state` is the
-// state hub itself. stopStreams() ends every event stream with `bye` and
+// state hub itself. Personas run on a fake Claude adapter over a real thread
+// store in the temporary directory (see fakePersonas): a send is answered by
+// an invented reply unless the persona is held, and `personas` lets a test
+// raise a question or approval, reply, or hold a turn open. stopStreams() ends every event stream with `bye` and
 // leaves the app refusing new ones (503 shutting_down), as during shutdown;
 // restartApp() then puts a new app handler over the same hub, as after a
 // restart. emitDelta(revision, patch) sends one delta with any revision to
@@ -29,6 +32,8 @@ import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
+import { RuntimeError } from '../../lib/runtime/adapter.mjs';
+import { createThreadStore } from '../../lib/threads.mjs';
 import { closeServer, createTestHub, freePort, listen } from './harness.mjs';
 import { focusSourceAvailable, startIsolatedFocus } from './isolated-focus.mjs';
 
@@ -42,7 +47,12 @@ export { focusSourceAvailable };
 //   registry   { ok, error } to seed a registry that could not be read
 //   routines   { items, focusAvailable, refreshedAt }: when given, the hub is
 //              refreshed once at startup so the snapshot holds them
-export async function startHub({ withFocus = true, agents = [], registry: registryState, routines: routinesSeed } = {}) {
+//   personas   { <agentId>: { state, pending, lastError, costUsd, messages,
+//              startFails } } seeds each persona's runtime state and cached
+//              messages before the hub starts (see fakePersonas)
+export async function startHub({
+  withFocus = true, agents = [], registry: registryState, routines: routinesSeed, personas: personaSeed = {},
+} = {}) {
   const cleanups = [];
   const context = { after: (fn) => cleanups.push(fn) };
   const stop = async () => {
@@ -79,7 +89,15 @@ export async function startHub({ withFocus = true, agents = [], registry: regist
     const briefRoutes = createBriefRoutes(config);
     const registry = controlledRegistry({ agents, ...registryState });
     const routines = controlledRoutines(routinesSeed);
-    const hub = createTestHub({ config, focus: focusRoutes, brief: briefRoutes, registry, routines });
+    const store = createThreadStore({ dir: path.join(root, 'threads'), limits: config.limits });
+    const personas = fakePersonas(personaSeed, store);
+    for (const [id, seed] of Object.entries(personaSeed)) {
+      for (const message of seed.messages ?? []) await store.append(id, message);
+    }
+    const hub = createTestHub({
+      config, focus: focusRoutes, brief: briefRoutes, registry, routines, adapters: { claude: personas.adapter }, store,
+    });
+    await hub.start();
     if (routinesSeed) {
       await hub.refreshRoutines();
       routines.calls = 0;
@@ -98,7 +116,7 @@ export async function startHub({ withFocus = true, agents = [], registry: regist
         };
       },
     };
-    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: appHub, log: () => {} });
+    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, log: () => {} });
     let handler = newHandler();
     cleanups.push(async () => {
       handler.closeStreams();
@@ -128,6 +146,7 @@ export async function startHub({ withFocus = true, agents = [], registry: regist
         .map((entry) => ({ method: entry.method, status: entry.res.headersSent ? entry.res.statusCode : null })),
       registry,
       routines,
+      personas,
       emitDelta: (revision, patch) => {
         for (const fn of [...streamListeners]) fn({ revision, patch });
       },
@@ -203,6 +222,164 @@ function controlledRoutines({ items = [], focusAvailable = null, refreshedAt = n
     },
   };
   return fake;
+}
+
+// A Claude adapter stand-in that keeps each persona's state in memory and
+// writes messages to the real thread store, emitting the events the hub
+// expects. send() refuses 'busy' while a turn is open; otherwise it goes
+// busy, records the user message, and after a short delay replies
+// "Reply: <text>" and goes idle, unless the persona is held. answer()
+// resolves the pending request and continues the turn the same way.
+// Controls on the returned object:
+//   hold(id)                       later turns stay busy until reply()
+//   reply(id, text)                ends the open turn with that reply
+//   raise(id, { kind, toolName, input })  puts the busy persona on a request
+//   fail(id, message)              ends the open turn with an error
+//   calls                          [['send', id, text], ['answer', id, requestId, answer], ...]
+function fakePersonas(seed, store) {
+  const listeners = new Set();
+  const entries = new Map();
+  const held = new Set();
+  const calls = [];
+  const timers = new Set();
+  let nextRequest = 1;
+  const at = () => new Date().toISOString();
+
+  function entry(id) {
+    if (!entries.has(id)) {
+      const initial = seed[id] ?? {};
+      entries.set(id, {
+        state: initial.state ?? 'idle',
+        pending: initial.pending ? { requestId: `req-${nextRequest++}`, at: at(), ...initial.pending } : null,
+        lastError: initial.lastError ?? null,
+        costUsd: initial.costUsd ?? null,
+        turn: null,
+      });
+    }
+    return entries.get(id);
+  }
+
+  function emit(type, agentId, fields = {}) {
+    for (const fn of [...listeners]) fn({ type, agentId, at: at(), ...fields });
+  }
+
+  function setState(id, state) {
+    const current = entry(id);
+    current.state = state;
+    emit('thread.state', id, { state });
+  }
+
+  async function say(id, role, text) {
+    const message = { role, text, at: at() };
+    await store.append(id, message);
+    emit('message', id, message);
+  }
+
+  function endTurn(id) {
+    const current = entry(id);
+    const done = current.turn;
+    current.turn = null;
+    done?.();
+  }
+
+  async function finish(id, text) {
+    const current = entry(id);
+    await say(id, 'assistant', text);
+    current.costUsd = (current.costUsd ?? 0) + 0.01;
+    emit('usage', id, { usage: {}, costUsd: current.costUsd, denials: [] });
+    setState(id, 'idle');
+    endTurn(id);
+  }
+
+  // The invented reply, unless the persona is held.
+  function continueTurn(id, text) {
+    if (held.has(id)) return;
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      if (entry(id).state === 'busy') finish(id, `Reply: ${text}`);
+    }, 60);
+    timers.add(timer);
+  }
+
+  const adapter = {
+    kind: 'claude',
+    async start(agent) {
+      if (seed[agent.id]?.startFails) throw new Error('invented start failure');
+      entry(agent.id);
+      return { threadId: agent.id };
+    },
+    state(id) {
+      const current = entry(id);
+      return { state: current.state, pending: current.pending, lastError: current.lastError, sessionId: null, costUsd: current.costUsd };
+    },
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    send(agent, text) {
+      calls.push(['send', agent.id, text]);
+      const current = entry(agent.id);
+      if (current.state === 'busy' || current.state === 'waiting') return Promise.reject(new RuntimeError('busy'));
+      const ended = new Promise((resolve) => { current.turn = resolve; });
+      current.lastError = null;
+      setState(agent.id, 'busy');
+      say(agent.id, 'user', text).then(() => continueTurn(agent.id, text));
+      return ended;
+    },
+    async answer(agent, requestId, answer) {
+      calls.push(['answer', agent.id, requestId, answer]);
+      const current = entry(agent.id);
+      if (!current.pending || current.pending.requestId !== requestId) throw new RuntimeError('no_such_request');
+      current.pending = null;
+      emit('resolved', agent.id, { requestId, outcome: 'answered' });
+      setState(agent.id, 'busy');
+      continueTurn(agent.id, 'answered');
+    },
+    async interrupt(agent) {
+      const current = entry(agent.id);
+      if (current.state !== 'busy' && current.state !== 'waiting') return;
+      if (current.pending) {
+        const { requestId } = current.pending;
+        current.pending = null;
+        emit('resolved', agent.id, { requestId, outcome: 'interrupted' });
+      }
+      setState(agent.id, 'idle');
+      endTurn(agent.id);
+    },
+    async newThread(agent) {
+      calls.push(['newThread', agent.id]);
+      const current = entry(agent.id);
+      if (current.state === 'busy' || current.state === 'waiting') throw new RuntimeError('busy');
+      await store.clear(agent.id);
+      current.lastError = null;
+      setState(agent.id, 'idle');
+      await say(agent.id, 'system', 'New thread');
+    },
+    async close() {
+      for (const timer of timers) clearTimeout(timer);
+    },
+  };
+
+  return {
+    adapter,
+    calls,
+    hold: (id) => held.add(id),
+    reply: (id, text) => finish(id, text),
+    raise(id, request) {
+      const current = entry(id);
+      current.pending = { requestId: `req-${nextRequest++}`, at: at(), ...request };
+      setState(id, 'waiting');
+      emit('request', id, current.pending);
+      return current.pending.requestId;
+    },
+    fail(id, message) {
+      const current = entry(id);
+      current.lastError = message;
+      emit('error', id, { message });
+      setState(id, 'error');
+      endTurn(id);
+    },
+  };
 }
 
 async function selfSignedCertificate(root) {
