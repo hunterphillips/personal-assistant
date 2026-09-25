@@ -5,8 +5,11 @@ import net from 'node:net';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import path from 'node:path';
+
 import { startDashboard } from '../server.mjs';
 import { freePort, tempDir } from './support/harness.mjs';
+import { openEvents } from './support/sse.mjs';
 
 const APP_DIR = fileURLToPath(new URL('..', import.meta.url));
 
@@ -23,6 +26,8 @@ async function testEnv(t) {
     DASHBOARD_PORT: String(await freePort()),
     DASHBOARD_FOCUS_ORIGIN: `http://127.0.0.1:${await freePort()}`,
     DASHBOARD_BRIEFS_DIR: await tempDir(t),
+    DASHBOARD_REGISTRY_PATH: path.join(await tempDir(t), 'agents.json'),
+    DASHBOARD_LAUNCH_AGENTS_DIR: await tempDir(t),
   };
 }
 
@@ -50,6 +55,24 @@ test('startDashboard binds loopback and close releases the port', async (t) => {
   await dashboard.close();
   assert.equal(dashboard.server.listening, false);
   assert.equal(await canConnect(address.port), false);
+});
+
+test('startDashboard reports a missing registry and ends event streams on close', async (t) => {
+  const env = await testEnv(t);
+  const dashboard = await startDashboard({ env, log: () => {} });
+  t.after(() => dashboard.close());
+  const app = { port: dashboard.config.port, authority: `127.0.0.1:${dashboard.config.port}` };
+  const state = await (await fetch(`http://${app.authority}/api/state`)).json();
+  assert.deepEqual(state.registry, { ok: false, error: 'registry_missing', loadedAt: null });
+  assert.deepEqual(state.agents, []);
+
+  const stream = await openEvents(app);
+  assert.equal((await stream.next()).event, 'snapshot');
+  const started = Date.now();
+  await dashboard.close();
+  assert.deepEqual(await stream.next(), { event: 'bye', data: {} });
+  await stream.closed;
+  assert.ok(Date.now() - started < dashboard.config.timeouts.shutdownMs);
 });
 
 test('a port collision fails startup instead of choosing another port', async (t) => {

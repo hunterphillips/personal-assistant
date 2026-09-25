@@ -22,7 +22,7 @@ import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
-import { closeServer, freePort, listen } from './harness.mjs';
+import { closeServer, createTestHub, freePort, listen } from './harness.mjs';
 import { focusSourceAvailable, startIsolatedFocus } from './isolated-focus.mjs';
 
 const FORBIDDEN_PORTS = new Set([4242, 4243]);
@@ -62,11 +62,13 @@ export async function startHub({ withFocus = true } = {}) {
       DASHBOARD_BRIEFS_DIR: briefsDir,
       DASHBOARD_FOCUS_ORIGIN: focusOrigin,
     });
-    const handler = createApp({
-      config,
-      focus: createFocusProxy(config),
-      brief: createBriefRoutes(config),
-      log: () => {},
+    const focusRoutes = createFocusProxy(config);
+    const briefRoutes = createBriefRoutes(config);
+    const hub = createTestHub({ config, focus: focusRoutes, brief: briefRoutes });
+    const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub, log: () => {} });
+    cleanups.push(async () => {
+      handler.closeStreams();
+      hub.close();
     });
     plain.on('request', handler);
     secure.on('request', handler);

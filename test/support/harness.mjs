@@ -10,6 +10,7 @@ import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
+import { createHub } from '../../lib/hub.mjs';
 
 export async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -54,9 +55,35 @@ export async function startSyntheticFocus(t) {
   return { origin: `http://127.0.0.1:${port}`, requests };
 }
 
+// A registry that never reads a file: current() returns `agents` as loaded.
+export function fakeRegistry(agents = []) {
+  const current = Object.freeze({ ok: true, agents, error: null, loadedAt: '2026-01-01T00:00:00.000Z', path: '/invented/agents.json' });
+  return { current: () => current, onChange: () => () => {}, start: async () => current, stop() {} };
+}
+
+// Routines that run no subprocess; `calls` counts refreshes.
+export function fakeRoutines(routines = []) {
+  const fake = {
+    calls: 0,
+    async refresh() {
+      fake.calls += 1;
+      return { refreshedAt: new Date().toISOString(), focusAvailable: null, routines };
+    },
+  };
+  return fake;
+}
+
+// Builds a hub over the given focus and brief, with fake registry and
+// routines unless real ones are passed.
+export function createTestHub({ config, focus, brief, registry = fakeRegistry(), routines = fakeRoutines(), log = () => {} }) {
+  return createHub({ registry, routines, focus, brief, timeouts: config.timeouts, log });
+}
+
 // Starts the app on an ephemeral port. `focus` and `brief` default to the
-// real phase 1 modules; tests may pass fakes. `configure` may adjust config.
-export async function startApp(t, { env = {}, focus, brief, configure = (c) => c } = {}) {
+// real phase 1 modules; tests may pass fakes. `registry` and `routines`
+// default to the fakes above, and `hub` to a hub over all four.
+// `configure` may adjust config.
+export async function startApp(t, { env = {}, focus, brief, registry, routines, hub, configure = (c) => c } = {}) {
   const server = http.createServer();
   const port = await listen(server);
   const briefsDir = env.DASHBOARD_BRIEFS_DIR ?? path.join(await tempDir(t), 'briefs-missing');
@@ -68,15 +95,20 @@ export async function startApp(t, { env = {}, focus, brief, configure = (c) => c
     DASHBOARD_FOCUS_ORIGIN: focusOrigin,
   }));
   const logs = [];
-  server.on('request', createApp({
-    config,
-    focus: focus ?? createFocusProxy(config),
-    brief: brief ?? createBriefRoutes(config),
-    log: (entry) => logs.push(entry),
-  }));
-  t.after(() => closeServer(server));
+  const log = (entry) => logs.push(entry);
+  const focusRoutes = focus ?? createFocusProxy(config);
+  const briefRoutes = brief ?? createBriefRoutes(config);
+  const routinesModule = routines ?? fakeRoutines();
+  const stateHub = hub ?? createTestHub({ config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, log });
+  const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, log });
+  server.on('request', handler);
+  t.after(() => {
+    handler.closeStreams();
+    stateHub.close();
+    return closeServer(server);
+  });
   const authority = `127.0.0.1:${port}`;
-  return { port, config, logs, authority, origin: `http://${authority}` };
+  return { port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, routines: routinesModule, handler };
 }
 
 // Sends one request. `headers.host` defaults to the app authority; pass

@@ -1,39 +1,63 @@
-// Entry point: load configuration, compose the app, listen on 127.0.0.1, and
-// shut down within a bounded window on SIGTERM/SIGINT. Importing this module
-// does nothing; `node server.mjs` runs main().
+// Entry point: load configuration, load the agent registry, compose the
+// routines view, state hub, and app, listen on 127.0.0.1, and shut down
+// within a bounded window on SIGTERM/SIGINT. Importing this module does
+// nothing; `node server.mjs` runs main(). A missing or invalid registry does
+// not stop startup; the hub reports it.
 
 import http from 'node:http';
 
-import { createApp } from './lib/app.mjs';
+import { createApp, defaultLog } from './lib/app.mjs';
 import { createBriefRoutes } from './lib/brief-adapter.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
+import { createHub } from './lib/hub.mjs';
+import { createRegistry } from './lib/registry.mjs';
+import { createRoutines } from './lib/routines.mjs';
 
 // Starts the dashboard and resolves once it is listening. Rejects on invalid
 // configuration or a port already in use; it never picks another port.
 export async function startDashboard({ env = process.env, log } = {}) {
   const config = loadConfig(env);
-  const app = createApp({
-    config,
-    focus: createFocusProxy(config),
-    brief: createBriefRoutes(config),
-    log,
+  const focus = createFocusProxy(config);
+  const brief = createBriefRoutes(config);
+  const logEntry = log ?? defaultLog;
+  const registry = createRegistry({ path: config.registryPath, log: logEntry });
+  const routines = createRoutines({
+    registry,
+    launchAgentsDir: config.launchAgentsDir,
+    focus,
+    timeouts: config.timeouts,
+    log: logEntry,
   });
+  const hub = createHub({ registry, routines, focus, brief, timeouts: config.timeouts, log: logEntry });
+  const app = createApp({ config, focus, brief, hub, log: logEntry });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;
   server.requestTimeout = config.timeouts.requestMs;
   server.keepAliveTimeout = config.timeouts.keepAliveMs;
 
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen({ host: config.bindHost, port: config.port, exclusive: true }, () => {
-      server.off('error', reject);
-      resolve();
+  const shutdownState = () => {
+    app.closeStreams();
+    hub.close();
+    registry.stop();
+  };
+
+  await registry.start();
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen({ host: config.bindHost, port: config.port, exclusive: true }, () => {
+        server.off('error', reject);
+        resolve();
+      });
     });
-  });
+  } catch (error) {
+    shutdownState();
+    throw error;
+  }
 
   let closing;
-  const close = () => (closing ??= closeServer(server, config.timeouts.shutdownMs));
+  const close = () => (closing ??= (shutdownState(), closeServer(server, config.timeouts.shutdownMs)));
   return { server, config, close };
 }
 
