@@ -31,6 +31,11 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/brief/latest` | Latest brief metadata. |
 | `GET /embedded/brief/<date>?revision=<revision>` | One brief viewer. |
 | `POST /api/brief/feedback` | Saves feedback for one brief. |
+| `POST /api/agents/<id>/send` | Sends `{"text": "..."}` to a persona; 202 once the turn has started (below). |
+| `POST /api/agents/<id>/answer` | Answers the persona's open question or approval. |
+| `POST /api/agents/<id>/interrupt` | Stops the persona's turn. |
+| `POST /api/agents/<id>/new-thread` | Starts the persona on a new session. |
+| `GET /api/agents/<id>/thread` | The persona's cached messages. |
 
 `/focus/`, `/brief/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
 paths without the slash. A known path
@@ -67,13 +72,17 @@ snapshot; concurrent requests share one check. It stays for one release.
   "focus": { "available": true },
   "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>" },
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
-  "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona", "provider": "claude" }],
+  "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona", "provider": "claude",
+               "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
+               "lastError": null, "costUsd": 0.42 }],
   "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] } }
 ```
 
 `revision` goes up by one on every change. `focus` and `brief` hold what the
 status route reports (`available` is null and `state` is `unknown` before the
-first check). Agents leave out `cwd` and `routines`. `routines.items` is empty
+first check). Agents leave out `cwd` and `routines`. A persona also carries
+its runtime state (see Personas below); any other kind has `state: null`.
+`routines.items` is empty
 until the first refresh; a failed refresh keeps the previous items and sets
 `error` to `refresh_failed`. `GET /api/state` refreshes Focus and the brief
 the same way the status route does (one shared check, bounded by
@@ -272,9 +281,77 @@ renders the latest state.
 A persona is a long-lived Claude session whose working directory is the
 agent's repo. `lib/runtime/claude.mjs` runs persona turns through
 `@anthropic-ai/claude-agent-sdk`, the app's one runtime dependency, pinned to
-an exact version and loaded on the first turn. Routes and the Agents view
-are not wired to it yet. The comment at the top of the module lists its
-methods and events.
+an exact version and loaded on the first turn. The comment at the top of the
+module lists its methods and events. The routes below are wired to it; the
+Agents view is not yet.
+
+### State in the snapshot
+
+At startup the hub starts each persona in the registry and follows its
+events. Each persona in `agents` carries:
+
+- `state`: `idle`, `busy`, `waiting` (on a question or approval), `error`
+  (the last turn failed), or `unavailable`.
+- `pending`: null, or the open request as `{ requestId, kind, toolName,
+  input, truncated }`. `kind` is `question` or `approval`. An approval's
+  `input` is the tool input as JSON text; a question's is the object, so its
+  `questions` can be shown whole. Input whose JSON is over 16 KiB becomes
+  the first 16 KiB of that text, with `truncated: true`.
+- `lastMessage`: null, or `{ role, text, at }` with the first 200
+  characters. At startup it comes from the thread cache.
+- `lastError`: null, or why the last turn failed or why the persona is
+  unavailable: `provider_unavailable` (no runtime for its provider, such as
+  `codex` today), `api_key_in_env`, or `start_failed` (its session pointer
+  could not be read).
+- `costUsd`: null, or the session's running total.
+
+A persona whose turn runs longer than 30 minutes (`TIMEOUTS.turnMaxMs`) is
+interrupted and the timeout is logged as `persona_turn_timeout`. Personas
+added to the registry are started; removed ones are dropped.
+
+### Persona routes
+
+Each route names the agent by its registry id. An id not in the registry is
+404 `no_such_agent`; an agent that is not a persona, or is unavailable, is
+409 `not_a_persona`. POSTs follow the usual rules: exact `Origin`, JSON for
+`send` and `answer`, no body for `interrupt` and `new-thread`.
+
+| Route | Success | Refusals |
+| --- | --- | --- |
+| `POST send` `{"text": "..."}` | 202 `{"ok": true}` | 400 `invalid_text` (missing or blank), 413 over 16 KiB, 409 `busy`, 503 `shutting_down` |
+| `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 409 `no_such_request` |
+| `POST interrupt` | 200 `{"ok": true}` | |
+| `POST new-thread` | 200 `{"ok": true}` | 409 `busy`, 500 `thread_reset_failed` |
+| `GET thread` | 200 `{"messages": [...]}` | |
+
+`send` answers as soon as the turn has started and never waits for it; the
+reply and any questions arrive in the state. `answers` maps question text to
+a label or a list of labels; `decision` is `allow` or `deny`. `interrupt`
+answers before the turn has wound down. `thread` returns the cached messages,
+oldest first.
+
+### Cost guards
+
+Persona turns must bill the Claude subscription. Two guards stand in front
+of the adapter's own refusal of an API-key turn:
+
+- If `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` is set when the server starts,
+  it creates no persona runtime and logs `adapters_disabled`; every persona
+  is unavailable with `api_key_in_env`.
+- `bin/dashboard-install` refuses to render or install while either is set
+  in its environment.
+
+### Shutdown
+
+On SIGTERM the server ends the event streams and refuses new sends with 503
+`shutting_down`, then drains the personas: turns waiting on an answer are
+aborted at once, running turns get up to 30 seconds (`TIMEOUTS.drainMs`), and
+the rest are aborted. Then it closes the hub and the registry poll, and
+finally the server, which cuts requests still open after 5 seconds
+(`TIMEOUTS.shutdownMs`). The process exits with status 1 if all of this has
+not finished 35 seconds after the signal. The installer refuses to unload a
+dashboard with busy or waiting personas unless given `--force`, and waits up
+to 40 seconds for it to exit; see [docs/operations.md](docs/operations.md).
 
 ### Thread files
 
@@ -321,6 +398,8 @@ The agent id must match the registry's id pattern before any path is built.
 - A turn that would bill an API key (the SDK reports an `apiKeySource` other
   than `none`) is aborted at once and fails with "Refused: this turn would
   bill an API key", naming the source.
+- A result that arrives before the session's init message (a startup
+  failure) never replaces the stored pointer.
 - At shutdown, new messages are refused as `shutting_down`. Turns waiting on
   an answer are aborted at once, running turns get up to 30 seconds to
   finish, and any still running are aborted.
@@ -354,7 +433,11 @@ directory.
 | `LIMITS.threadCacheMessages` | 200 | Messages kept per cache file |
 | `LIMITS.threadCacheBytes` | 1 MiB | Bytes kept per cache file |
 | `TIMEOUTS.requestMaxAgeMs` | 30 minutes | An unanswered question or approval is denied |
+| `LIMITS.sendTextBytes` | 16 KiB | Text of one message sent to a persona |
+| `LIMITS.requestInputBytes` | 16 KiB | A pending request's input, as JSON, in the snapshot |
+| `LIMITS.previewChars` | 200 | Characters of a persona's last message in the snapshot |
 | `TIMEOUTS.drainMs` | 30 seconds | Wait for running turns at shutdown |
+| `TIMEOUTS.turnMaxMs` | 30 minutes | A persona turn is interrupted after this |
 
 ## Commands
 

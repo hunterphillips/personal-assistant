@@ -18,6 +18,8 @@ The rendered plist is `var/launchd/com.personal-assistant.dashboard.plist`. Insp
 
 The installer creates only the `com.personal-assistant.dashboard` user LaunchAgent. It does not install or change Focus, the old brief server, or Tailscale Serve.
 
+The installer refuses to render or install when `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` is set in its environment. Persona turns must bill the Claude subscription, never an API key. Unset the variable and run it again. The server has the same guard: if it starts with either variable set, it creates no persona runtime, logs `adapters_disabled`, and every persona shows as unavailable with `api_key_in_env`.
+
 ## Verify
 
 Check the dashboard's own health endpoint:
@@ -52,7 +54,22 @@ tail -f var/log/dashboard.log
 
 ## Reinstall and job rollback
 
-Run the install command again to reinstall. Before replacing an existing plist, the installer saves it as `var/launchd/backup-<timestamp>.plist`, notes whether the job is loaded, and unloads only `com.personal-assistant.dashboard`, waiting up to 10 seconds for the old process to exit.
+Run the install command again to reinstall. Before replacing an existing plist, the installer saves it as `var/launchd/backup-<timestamp>.plist` and notes whether the job is loaded.
+
+If the job is loaded, the installer first asks the running dashboard for `GET /api/state` on 127.0.0.1. If any persona is busy or waiting on an answer, it stops without unloading anything and names those personas. Wait for them to finish, or pass `--force` to unload anyway. If the dashboard does not answer, the installer goes on.
+
+It then unloads only `com.personal-assistant.dashboard` and waits up to 40 seconds for the old process to exit, which covers the shutdown below.
+
+## Shutdown
+
+On SIGTERM or SIGINT, as when launchd unloads the job, the dashboard:
+
+1. Ends every event stream and refuses new persona messages with 503 `shutting_down`.
+2. Drains persona turns. A turn waiting on a question or approval is aborted at once. Running turns get up to 30 seconds (`TIMEOUTS.drainMs`) to finish, and any still running are then aborted.
+3. Stops the state hub and the registry poll.
+4. Closes the server, giving open requests up to 5 seconds (`TIMEOUTS.shutdownMs`) before cutting them.
+
+If all of that has not finished 35 seconds after the signal, the process exits with status 1.
 
 The installer then checks that nothing else answers on 127.0.0.1:4243. If something does, such as a manual `npm start`, it stops without writing the new plist and names the port. Stop that process and run the installer again.
 
@@ -65,6 +82,15 @@ If the new job cannot be bootstrapped, kicked off, or made healthy within about 
 ```
 
 Uninstall unloads only `com.personal-assistant.dashboard` and removes only `~/Library/LaunchAgents/com.personal-assistant.dashboard.plist`. It preserves the source tree, `var/`, logs, briefs, feedback, Focus jobs, and all Tailscale settings.
+
+## Persona threads
+
+Each persona keeps two files in `var/threads/` (`DASHBOARD_THREADS_DIR`), readable only by this account:
+
+- `<agent-id>.json` points at the persona's Claude session. It is the one durable file: without it, the next message starts a new session, and the old conversation is left behind in Claude Code's own transcripts under `~/.claude/projects/`.
+- `<agent-id>.jsonl` is a display cache of the thread. It can be deleted; the thread view is then empty until new messages arrive.
+
+Back up `var/` to keep the session pointers. `POST /api/agents/<id>/new-thread` deletes both files for that persona.
 
 ## Agent registry
 

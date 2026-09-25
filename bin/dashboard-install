@@ -9,6 +9,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { TIMEOUTS } from '../lib/config.mjs';
 import { renderPlist, validatePlistInputs } from '../lib/launchd.mjs';
 
 const LABEL = 'com.personal-assistant.dashboard';
@@ -16,7 +17,12 @@ const APP_DIR = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const START_PATH = path.join(APP_DIR, 'bin', 'dashboard-start');
 const DEFAULT_PORT = 4243;
 const HEALTH_TIMEOUT_MS = 10_000;
-const UNLOAD_TIMEOUT_MS = 10_000;
+// A stopping dashboard drains persona turns (drainMs), then closes its
+// server (shutdownMs); the extra 5 seconds covers process exit.
+const UNLOAD_TIMEOUT_MS = TIMEOUTS.drainMs + TIMEOUTS.shutdownMs + 5_000;
+const STATE_TIMEOUT_MS = 5_000;
+const API_KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
+const ACTIVE_STATES = new Set(['busy', 'waiting']);
 const BOOTSTRAP_RETRIES = 3;
 const BOOTSTRAP_RETRY_DELAY_MS = 1_000;
 // launchctl bootstrap returns 5 (Input/output error) or 37 (Operation already
@@ -28,6 +34,7 @@ const ALLOW_HOME_OVERRIDE = process.env.DASHBOARD_INSTALL_ALLOW_HOME_OVERRIDE ==
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  refuseApiKeys();
   const nodePath = options.nodePath ?? process.execPath;
 
   if (!options.dryRun && !options.publicOrigin) {
@@ -87,6 +94,8 @@ async function main() {
     );
   }
 
+  if (wasLoaded && !options.force) await refuseActivePersonas(inputs.port);
+
   // A failed bootout leaves the existing job and plist untouched, so there is
   // nothing to roll back until this succeeds (or confirms no job is loaded).
   if (wasLoaded) await bootoutAndWait(serviceTarget);
@@ -121,11 +130,15 @@ async function main() {
 }
 
 function parseArgs(args) {
-  const options = { dryRun: false, port: DEFAULT_PORT };
+  const options = { dryRun: false, force: false, port: DEFAULT_PORT };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--dry-run') {
       options.dryRun = true;
+      continue;
+    }
+    if (argument === '--force') {
+      options.force = true;
       continue;
     }
     if (argument === '--public-origin') {
@@ -150,6 +163,60 @@ function requiredValue(args, index, flag) {
   const value = args[index];
   if (value === undefined || value.startsWith('--')) throw new Error(`${flag} requires a value`);
   return value;
+}
+
+// Persona turns must bill the Claude subscription. The job does not inherit
+// this shell's environment, but a key here is the sign of a setup that would
+// hand one to it, so the installer stops before rendering anything.
+function refuseApiKeys() {
+  const present = API_KEY_VARS.filter((name) => process.env[name]);
+  if (present.length > 0) {
+    throw new Error(
+      `${present.join(' and ')} ${present.length === 1 ? 'is' : 'are'} set in this environment. ` +
+      'Persona turns must bill the Claude subscription, not an API key. Unset it and run the installer again.',
+    );
+  }
+}
+
+// Asks the running dashboard for its state and refuses when any persona is
+// busy or waiting on an answer, since unloading would cut those turns short
+// after the drain. No answer means there is nothing to ask; the install goes on.
+async function refuseActivePersonas(port) {
+  const state = await fetchState(port);
+  const active = (Array.isArray(state?.agents) ? state.agents : [])
+    .filter((agent) => ACTIVE_STATES.has(agent?.state))
+    .map((agent) => (typeof agent.name === 'string' ? agent.name : String(agent.id)));
+  if (active.length > 0) {
+    throw new Error(
+      `persona turns are still running (${active.join(', ')}). ` +
+      'Wait for them to finish, or run the installer again with --force to unload anyway.',
+    );
+  }
+}
+
+function fetchState(port) {
+  return new Promise((resolve) => {
+    const request = http.get({
+      host: '127.0.0.1',
+      port,
+      path: '/api/state',
+      timeout: STATE_TIMEOUT_MS,
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        if (response.statusCode !== 200) return resolve(null);
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } catch {
+          resolve(null);
+        }
+      });
+      response.on('error', () => resolve(null));
+    });
+    request.on('timeout', () => request.destroy());
+    request.on('error', () => resolve(null));
+  });
 }
 
 function resolveHome() {

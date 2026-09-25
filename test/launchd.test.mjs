@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -314,6 +315,81 @@ test('dashboard-install aborts before writing the plist when the port already an
   }
 });
 
+test('dashboard-install refuses to render when an API key is in its environment', async () => {
+  for (const name of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY']) {
+    const fixture = await makeInstallerFixture();
+    try {
+      const result = spawnSync(process.execPath, [fixture.installerPath, '--dry-run', '--node', process.execPath], {
+        env: { ...fakeLaunchctlEnv(fixture), [name]: 'invented-key' },
+        encoding: 'utf8',
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, new RegExp(`${name} is set in this environment`));
+      assert.match(result.stderr, /must bill the Claude subscription/);
+      assert.equal(fs.existsSync(path.join(fixture.appDir, 'var')), false);
+      assert.deepEqual(readFakeState(fixture).calls, []);
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  }
+});
+
+test('dashboard-install refuses to unload a dashboard with busy personas unless forced', async () => {
+  const fixture = await makeInstallerFixture({ loaded: true });
+  await writePreviousPlist(fixture);
+  const agents = [
+    { id: 'cfo', name: 'CFO', state: 'busy' },
+    { id: 'coach', name: 'Coach', state: 'waiting' },
+    { id: 'ops', name: 'Ops', state: null },
+    { id: 'dev', name: 'Dev', state: 'idle' },
+  ];
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    requests.push(req.url);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ revision: 1, agents }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  assert.equal(RESERVED_PORTS.has(port), false);
+  try {
+    let result = await runInstallAsync(fixture, port);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /persona turns are still running \(CFO, Coach\)/);
+    assert.match(result.stderr, /--force/);
+    assert.deepEqual(requests, ['/api/state']);
+    assert.equal(countCalls(readFakeState(fixture), 'bootout'), 0);
+    assert.equal(readFakeState(fixture).loaded, true);
+
+    result = await runInstallAsync(fixture, port, ['--force']);
+    assert.doesNotMatch(result.stderr, /persona turns are still running/);
+    assert.equal(requests.length, 1);
+    assert.equal(countCalls(readFakeState(fixture), 'bootout'), 1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await cleanupFixture(fixture);
+  }
+});
+
+test('dashboard-install goes on when the running dashboard has no busy personas', async () => {
+  const fixture = await makeInstallerFixture({ loaded: true });
+  await writePreviousPlist(fixture);
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ agents: [{ id: 'cfo', name: 'CFO', state: 'idle' }] }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const result = await runInstallAsync(fixture, port);
+    assert.doesNotMatch(result.stderr, /persona turns are still running/);
+    assert.equal(countCalls(readFakeState(fixture), 'bootout'), 1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await cleanupFixture(fixture);
+  }
+});
+
 test('dashboard-uninstall rejects another label without side effects', async () => {
   const fixture = await makeInstallerFixture({ loaded: true });
   try {
@@ -424,6 +500,7 @@ async function makeInstallerFixture(fakeState = {}) {
     fsp.copyFile(path.join(APP_DIR, 'bin', 'dashboard-install'), installerPath),
     fsp.copyFile(path.join(APP_DIR, 'bin', 'dashboard-start'), path.join(appDir, 'bin', 'dashboard-start')),
     fsp.copyFile(path.join(APP_DIR, 'lib', 'launchd.mjs'), path.join(appDir, 'lib', 'launchd.mjs')),
+    fsp.copyFile(path.join(APP_DIR, 'lib', 'config.mjs'), path.join(appDir, 'lib', 'config.mjs')),
     fsp.copyFile(path.join(APP_DIR, 'package.json'), path.join(appDir, 'package.json')),
     fsp.copyFile(
       path.join(APP_DIR, 'launchd', `${LABEL}.plist.template`),
@@ -516,8 +593,11 @@ process.exit(code);
 const RESERVED_PORTS = new Set([4242, 4243, 8765]);
 
 function fakeLaunchctlEnv(fixture) {
+  const inherited = { ...process.env };
+  delete inherited.ANTHROPIC_API_KEY;
+  delete inherited.OPENAI_API_KEY;
   return {
-    ...process.env,
+    ...inherited,
     HOME: fixture.homeDir,
     PATH: `${fixture.fakeBinDir}:${process.env.PATH}`,
     ...fixture.fakeEnv,
@@ -537,6 +617,28 @@ function runInstall(fixture, port) {
   ], {
     env: { ...fakeLaunchctlEnv(fixture), DASHBOARD_INSTALL_ALLOW_HOME_OVERRIDE: '1' },
     encoding: 'utf8',
+  });
+}
+
+// runInstall without blocking this process, so a server in the test can answer.
+function runInstallAsync(fixture, port, extra = []) {
+  assert.equal(RESERVED_PORTS.has(port), false);
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [
+      fixture.installerPath,
+      '--public-origin',
+      'https://example.tailnet.ts.net',
+      '--node',
+      process.execPath,
+      '--port',
+      String(port),
+      ...extra,
+    ], { env: { ...fakeLaunchctlEnv(fixture), DASHBOARD_INSTALL_ALLOW_HOME_OVERRIDE: '1' } });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (data) => { stdout += data; });
+    child.stderr.on('data', (data) => { stderr += data; });
+    child.once('exit', (status) => resolve({ status, stdout, stderr }));
   });
 }
 
