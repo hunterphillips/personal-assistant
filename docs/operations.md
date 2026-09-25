@@ -56,6 +56,10 @@ tail -f var/log/dashboard.log
 
 Run the install command again to reinstall. Before replacing an existing plist, the installer saves it as `var/launchd/backup-<timestamp>.plist` and notes whether the job is loaded.
 
+### Update
+
+After pulling a new revision, run `npm ci` in `dashboard/app` before the installer. The app has a runtime dependency (`@anthropic-ai/claude-agent-sdk`), and the LaunchAgent does not install packages; a dashboard started without it shows every persona as unavailable with `sdk_unavailable`.
+
 If the job is loaded, the installer first asks the running dashboard for `GET /api/state` on 127.0.0.1, at the port recorded in the installed plist (the new `--port` only when no previous plist can be read). If any persona is busy or waiting on an answer, it stops without unloading anything and names those personas. Wait for them to finish, or pass `--force` to unload anyway. If the dashboard does not answer, the installer goes on.
 
 It then unloads only `com.personal-assistant.dashboard` and waits up to 40 seconds for the old process to exit, which covers the shutdown below.
@@ -96,7 +100,7 @@ A persona turn is interrupted 30 minutes after it starts (`TIMEOUTS.turnMaxMs`),
 
 ## Agent registry
 
-The Routines view reads the agent registry from `personal-assistant/registry/agents.json`, outside this repository. It is unversioned local configuration and holds absolute paths, so it is not committed anywhere. Set `DASHBOARD_REGISTRY_PATH` to use another file (default `../../registry/agents.json`, resolved from the app directory) and `DASHBOARD_LAUNCH_AGENTS_DIR` to read plists from another directory (default `~/Library/LaunchAgents`). The daemon checks the file every few seconds; if an edit leaves it unreadable or invalid, the daemon keeps the last good registry and reports the error in the state, and the Routines view shows it. Back up `registry/` with the rest of `personal-assistant/`.
+The Routines and Agents views and the persona runtime read the agent registry from `personal-assistant/registry/agents.json`, outside this repository. It is unversioned local configuration and holds absolute paths, so it is not committed anywhere. Set `DASHBOARD_REGISTRY_PATH` to use another file (default `../../registry/agents.json`, resolved from the app directory) and `DASHBOARD_LAUNCH_AGENTS_DIR` to read plists from another directory (default `~/Library/LaunchAgents`). The daemon checks the file every few seconds; if an edit leaves it unreadable or invalid, the daemon keeps the last good registry and reports the error in the state, and the Routines view shows it. Back up `registry/` with the rest of `personal-assistant/`.
 
 ## Node path after upgrades
 

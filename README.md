@@ -321,9 +321,11 @@ thread is open.
 A persona is a long-lived Claude session whose working directory is the
 agent's repo. `lib/runtime/claude.mjs` runs persona turns through
 `@anthropic-ai/claude-agent-sdk`, the app's one runtime dependency, pinned to
-an exact version and loaded on the first turn. The comment at the top of the
-module lists its methods and events. The routes below are wired to it and
-the Agents view (above) drives them.
+an exact version and loaded once when the personas start. Bumping the pin
+means re-running `scripts/spike-claude-sdk.mjs` and confirming the
+`apiKeySource` it reports is still `none`. The adapter contract, its methods
+and events, is in `lib/runtime/adapter.mjs`. The routes below are wired to
+it and the Agents view (above) drives them.
 
 ### State in the snapshot
 
@@ -341,8 +343,9 @@ events. Each persona in `agents` carries:
   characters. At startup it comes from the thread cache.
 - `lastError`: null, or why the last turn failed or why the persona is
   unavailable: `provider_unavailable` (no runtime for its provider, such as
-  `codex` today), `api_key_in_env`, or `start_failed` (its session pointer
-  could not be read).
+  `codex` today), `api_key_in_env`, `sdk_unavailable` (the SDK package could
+  not be loaded; run `npm ci`), or `start_failed` (its session pointer could
+  not be read).
 - `costUsd`: null, or the session's running total.
 
 A persona whose turn runs longer than 30 minutes (`TIMEOUTS.turnMaxMs`) is
@@ -358,15 +361,15 @@ next turn may fail to resume; New thread is the fix.
 
 Each route names the agent by its registry id. An id not in the registry is
 404 `no_such_agent`; an agent of another kind is 409 `not_a_persona`; a
-persona that is unavailable (`provider_unavailable`, `api_key_in_env`, or
-`start_failed`) is 409 `persona_unavailable`. POSTs follow the usual rules:
+persona that is unavailable (`provider_unavailable`, `api_key_in_env`,
+`sdk_unavailable`, or `start_failed`) is 409 `persona_unavailable`. POSTs follow the usual rules:
 exact `Origin`, JSON for `send` and `answer`, no body for `interrupt` and
 `new-thread`.
 
 | Route | Success | Refusals |
 | --- | --- | --- |
-| `POST send` `{"text": "..."}` | 202 `{"ok": true}` | 400 `invalid_text` (missing or blank), 413 over 16 KiB, 409 `busy`, 503 `shutting_down` |
-| `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 409 `no_such_request` |
+| `POST send` `{"text": "..."}` | 202 `{"ok": true}` | 400 `invalid_body` (JSON that is not an object), 400 `invalid_text` (missing or blank), 413 `payload_too_large` over 16 KiB of text or 32 KiB of body, 409 `busy`, 503 `shutting_down` |
+| `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 413 `payload_too_large` over 32 KiB, 409 `no_such_request` |
 | `POST interrupt` | 200 `{"ok": true}` | |
 | `POST new-thread` | 200 `{"ok": true}` | 409 `busy`, 503 `shutting_down`, 500 `thread_reset_failed` |
 | `GET thread` | 200 `{"messages": [...]}` | |
@@ -390,7 +393,7 @@ of the adapter's own refusal of an API-key turn:
 
 ### Shutdown
 
-On SIGTERM the server ends the event streams and refuses new sends and new
+On SIGTERM or SIGINT the server ends the event streams and refuses new sends and new
 threads with 503 `shutting_down`, then drains the personas: turns waiting on
 an answer are aborted at once, running turns get up to 30 seconds
 (`TIMEOUTS.drainMs`), and the rest are aborted and given 2 seconds
@@ -516,6 +519,8 @@ Requires Node 24 (`.nvmrc`).
 - `npm run check` syntax-checks every `.mjs` and `.js` file. It also confirms
   that each `/assets/<name>` in `public/index.html` is listed in
   `lib/assets.mjs` and exists in `public/`.
+- `node scripts/spike-claude-sdk.mjs` re-runs the Phase 2 SDK spike under
+  `SPIKE_ROOT`; it spends subscription usage. See the research note.
 
 Still checked by hand: dragging to reorder in Focus, keyboard focus
 visibility, scrolling inside the frames, and a real phone after cutover.
@@ -541,8 +546,13 @@ most 2 MiB more of the upload, for at most 2 seconds, before cutting the
 connection. The event stream limits (`LIMITS.eventStreams`, 8;
 `TIMEOUTS.heartbeatMs`, 25 seconds; `TIMEOUTS.statusPollMs`, 30 seconds) are
 constants in `lib/config.mjs`, not environment variables. Logs record method, route, status, and duration; a response that
-never completed is logged with status 0. They never contain request bodies or
-brief text.
+never completed is logged with status 0. They also carry the persona events:
+`persona_init`, `persona_usage`, `persona_turn_error` (with bounded error
+text and, for a failure before init, the CLI's last 2 KiB of stderr),
+`persona_api_key_refused`, `persona_start_error`, `persona_interrupt`,
+`persona_turn_aborted`, `persona_turn_timeout`, and `thread_resume_failed`.
+They never contain request bodies, brief text, persona messages, or tool
+inputs.
 
 Real briefs, contributions, and feedback contain personal data. They stay in
 `daily-brief/` and never enter this repository.
