@@ -123,6 +123,19 @@ test('a turn emits state, messages, and usage, writes the pointer, and caches th
   assert.equal('resume' in options, false);
 });
 
+test('the cache already holds a message when its event fires', async (t) => {
+  const { adapter, store } = await setup(t);
+  const reads = [];
+  adapter.subscribe((event) => {
+    if (event.type === 'message') reads.push(store.read('cfo').then((messages) => ({ event, messages })));
+  });
+  await adapter.send(AGENT, 'How is cash?');
+  assert.equal(reads.length, 2);
+  for (const { event, messages } of await Promise.all(reads)) {
+    assert.deepEqual(messages.at(-1), { role: event.role, text: event.text, at: event.at });
+  }
+});
+
 test('subagent messages are skipped and long assistant text is bounded and flagged', async (t) => {
   const query = fakeQuery(async function* () {
     yield init();
