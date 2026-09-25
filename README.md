@@ -120,6 +120,16 @@ The write tests run the real Focus server from a temporary copy with
 an invented board in a throwaway Git repository (`test/support/isolated-focus.mjs`);
 they skip when the Focus checkout is missing.
 
+### Routines
+
+`lib/routines.mjs` lists every job named in the agent registry's `routines`.
+For each label it reads the plist from `DASHBOARD_LAUNCH_AGENTS_DIR` with
+`plutil`, asks `launchctl list` for the last exit status and PID, and takes
+the log file's modification time as the last run. Focus scans
+(`com.focus.scan-*`) use Focus's `/api/status` instead when Focus answers. The
+module only reads: it never loads, starts, or stops a job, and it runs only
+when asked.
+
 ### Shell
 
 `public/index.html`, `public/shell.js`, and `public/styles.css` make up the
