@@ -253,12 +253,3 @@ test('the new shell paths serve the shell and their slash forms redirect', async
     assert.equal(slash.headers.location, `${view}?a=1`);
   }
 });
-
-test('the browser test server starts with a hub and serves state', async (t) => {
-  const { startHub } = await import('./support/browser-server.mjs');
-  const server = await startHub({ withFocus: false });
-  t.after(() => server.stop());
-  const response = await fetch(`${server.origin}/api/state`);
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).revision >= 1, true);
-});

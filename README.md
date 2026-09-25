@@ -257,10 +257,14 @@ refresh is missing or more than 60 seconds old, and when Refresh is chosen.
 The Focus card shows "Paused" when any scan is paused, and a Pause or
 Resume button that posts to the forwarded `/api/pause` or `/api/resume`;
 the server then refreshes the routines, and the card follows the state. If
-Focus refuses or does not answer, the card says "Focus did not respond." A
-registry that cannot be read, a failed refresh, and an empty list each get
-one plain sentence, and when Focus did not answer during the refresh the
-Focus card says its rows come from launchd.
+the request gets no answer, the card says "Focus did not respond."; if it
+gets an error status, "Focus reported an error." The message clears on the
+next attempt or when the state shows the scans paused or resumed. A
+registry that cannot be read (followed by the registry's error), a failed
+refresh, and an empty list each get one plain sentence, and when Focus did
+not answer during the refresh the Focus card says its rows come from
+launchd. While the view is hidden its cards are not rebuilt; opening it
+renders the latest state.
 
 ## Commands
 

@@ -2,12 +2,15 @@
 // rendered from the shell's state. The shell calls create({ requestState,
 // isStreaming }) once and then update(state, keys) on every change (keys is
 // null for a whole snapshot), show() when the view opens, and hide() when it
-// closes or the tab is hidden.
+// closes or the tab is hidden. Cards are rebuilt only while the view is
+// shown; show() renders the latest state.
 //
 // Routines are refreshed only on demand: when the view opens and the last
 // refresh is missing or older than 60 seconds, and when Refresh is chosen.
 // The Focus card carries Pause or Resume, forwarded to Focus; the server
 // refreshes routines after either succeeds, and the card follows the state.
+// A failed Pause or Resume is reported in the card until the next attempt or
+// until the state shows Focus paused or resumed.
 (function () {
   'use strict';
 
@@ -20,6 +23,7 @@
     wrote: { text: 'Wrote', tone: 'good' },
     'no change': { text: 'No change', tone: 'good' },
     skipped: { text: 'Skipped', tone: 'wait' },
+    'never ran': { text: 'Never ran', tone: 'wait' },
     running: { text: 'Running', tone: 'wait' },
     failed: { text: 'Failed', tone: 'bad' },
     'not loaded': { text: 'Not loaded', tone: 'wait' },
@@ -106,6 +110,12 @@
     return result;
   }
 
+  // Whether the state shows any Focus scan paused.
+  function focusPaused(state) {
+    var items = state && state.routines && state.routines.items ? state.routines.items : [];
+    return items.some(function (item) { return isFocusScan(item) && item.paused === true; });
+  }
+
   function create(shell) {
     var updated = document.getElementById('routines-updated');
     var refreshButton = document.getElementById('routines-refresh');
@@ -117,7 +127,7 @@
     var checkOnOpen = false;
     var refreshing = false; // our refresh request is out
     var pauseBusy = false;
-    var pauseFailed = false;
+    var pauseError = ''; // why the last Pause or Resume failed, or ''
     var tick = null;
 
     function row(item) {
@@ -163,8 +173,8 @@
       if (scans.length > 0 && state.routines.focusAvailable === false) {
         section.appendChild(element('p', 'card-note', 'Focus is not responding; showing launchd status.'));
       }
-      if (scans.length > 0 && pauseFailed) {
-        var failure = element('p', 'card-error', 'Focus did not respond.');
+      if (scans.length > 0 && pauseError) {
+        var failure = element('p', 'card-error', pauseError);
         failure.setAttribute('role', 'status');
         section.appendChild(failure);
       }
@@ -175,10 +185,13 @@
       return section;
     }
 
-    function setMessage(text, title) {
+    // `code`, when given, follows the text in a muted span.
+    function setMessage(text, code) {
       message.textContent = text || '';
-      if (title) message.title = title;
-      else message.removeAttribute('title');
+      if (text && code) {
+        message.appendChild(document.createTextNode(' '));
+        message.appendChild(element('span', 'routines-code', code));
+      }
       message.hidden = !text;
     }
 
@@ -196,7 +209,7 @@
 
       cards.textContent = '';
       if (state.registry && state.registry.ok === false) {
-        setMessage('The registry could not be read.', state.registry.error || undefined);
+        setMessage('The registry could not be read.', state.registry.error || null);
         return;
       }
       if (routines.error) setMessage('Routines could not be refreshed.');
@@ -223,9 +236,10 @@
       if (!refreshing && state.routines.refreshing !== true && stale()) refresh();
     }
 
+    // Resolves to the response, or null when the request itself failed.
     function post(path) {
       return fetch(path, { method: 'POST', cache: 'no-store', credentials: 'same-origin' })
-        .then(function (response) { return response.ok; }, function () { return false; });
+        .then(function (response) { return response; }, function () { return null; });
     }
 
     function refresh() {
@@ -243,11 +257,12 @@
     function togglePause(action) {
       if (pauseBusy) return;
       pauseBusy = true;
-      pauseFailed = false;
+      pauseError = '';
       render();
-      post(action === 'resume' ? '/api/resume' : '/api/pause').then(function (ok) {
+      post(action === 'resume' ? '/api/resume' : '/api/pause').then(function (response) {
+        var ok = !!response && response.ok;
         pauseBusy = false;
-        pauseFailed = !ok;
+        pauseError = ok ? '' : response ? 'Focus reported an error.' : 'Focus did not respond.';
         if (ok && !shell.isStreaming()) shell.requestState();
         render();
       });
@@ -261,9 +276,10 @@
 
     return {
       update: function (next, keys) {
+        if (pauseError && state && focusPaused(state) !== focusPaused(next)) pauseError = '';
         state = next;
         var touched = !keys || keys.some(function (key) { return WATCHED.indexOf(key) !== -1; });
-        if (touched) render();
+        if (touched && visible) render();
         maybeRefreshOnOpen();
       },
       show: function () {

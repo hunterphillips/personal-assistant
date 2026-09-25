@@ -4,7 +4,8 @@
 //
 // State comes from the event stream (/api/events) while the tab is visible:
 // `snapshot` replaces it, `delta` applies a patch when its revision is the
-// next one and otherwise refetches /api/state, `reload` refetches, and `bye`
+// next one, is dropped when it is not newer, and otherwise refetches
+// /api/state, `reload` refetches, and `bye`
 // closes and reconnects shortly after. Reconnecting is done here, not by
 // EventSource: on any error the source is closed and reopened after 1, 2, 4,
 // 8, then 15 seconds, reset by a snapshot. While the stream is down,
@@ -237,7 +238,11 @@
     });
   }
 
+  // A delta at or below the current revision is already reflected and is
+  // dropped; one past the next revision means a missed delta, so the state is
+  // fetched again.
   function onDelta(body) {
+    if (state && body && typeof body.revision === 'number' && body.revision <= state.revision) return;
     if (!state || !body || typeof body.revision !== 'number' || !body.patch ||
         typeof body.patch !== 'object' || body.revision !== state.revision + 1) {
       fetchState();

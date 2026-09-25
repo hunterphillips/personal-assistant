@@ -171,6 +171,23 @@ test('Focus scans take lastRun, outcome, failures, and paused from the Focus sta
   assert.equal(byLabel['com.focus.server'].paused, null);
 });
 
+test('a scan Focus reports as never ran keeps that outcome', async () => {
+  const focus = {
+    fetchStatus: async () => ({
+      paused: false,
+      sources: {
+        gmail: { lastRun: null, lastOutcome: 'never ran', failures24h: 0 },
+        git: { lastRun: null, lastOutcome: 'invented outcome', failures24h: 0 },
+      },
+    }),
+  };
+  const result = await routinesFor({ agents: [FOCUS_AGENT], plists: FOCUS_PLISTS, launchctl: FOCUS_LAUNCHCTL, focus }).refresh();
+  const byLabel = Object.fromEntries(result.routines.map((r) => [r.label, r]));
+  assert.equal(byLabel['com.focus.scan-gmail'].outcome, 'never ran');
+  assert.equal(byLabel['com.focus.scan-gmail'].lastRun, null);
+  assert.equal(byLabel['com.focus.scan-git'].outcome, 'unknown');
+});
+
 test('without a Focus status every scan falls back to launchctl and focusAvailable is false', async () => {
   const result = await routinesFor({
     agents: [FOCUS_AGENT],

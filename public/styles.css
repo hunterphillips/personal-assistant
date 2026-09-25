@@ -233,6 +233,11 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   margin: 0 0 16px;
 }
 
+.routines-code {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .routines-cards {
   display: grid;
   gap: 12px;
@@ -360,7 +365,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 719.98px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);

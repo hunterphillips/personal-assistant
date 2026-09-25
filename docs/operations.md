@@ -66,6 +66,10 @@ If the new job cannot be bootstrapped, kicked off, or made healthy within about 
 
 Uninstall unloads only `com.personal-assistant.dashboard` and removes only `~/Library/LaunchAgents/com.personal-assistant.dashboard.plist`. It preserves the source tree, `var/`, logs, briefs, feedback, Focus jobs, and all Tailscale settings.
 
+## Agent registry
+
+The Routines view reads the agent registry from `personal-assistant/registry/agents.json`, outside this repository. It is unversioned local configuration and holds absolute paths, so it is not committed anywhere. Set `DASHBOARD_REGISTRY_PATH` to use another file (default `../../registry/agents.json`, resolved from the app directory) and `DASHBOARD_LAUNCH_AGENTS_DIR` to read plists from another directory (default `~/Library/LaunchAgents`). The daemon checks the file every few seconds; if an edit leaves it unreadable or invalid, the daemon keeps the last good registry and reports the error in the state, and the Routines view shows it. Back up `registry/` with the rest of `personal-assistant/`.
+
 ## Node path after upgrades
 
 The plist records the absolute Node executable selected during installation. After upgrading or removing that Node installation, reinstall with Node 24 or newer so the plist points at the current executable. Normally the installer uses the Node process running it; an explicit executable can be selected with `--node /absolute/path/to/node`.

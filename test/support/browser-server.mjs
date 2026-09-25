@@ -12,8 +12,9 @@
 // state hub itself. stopStreams() ends every event stream with `bye` and
 // leaves the app refusing new ones (503 shutting_down), as during shutdown;
 // restartApp() then puts a new app handler over the same hub, as after a
-// restart. requests(path) lists what the app received on a path, with the
-// status it sent. Nothing here reads the real briefs directory or connects to
+// restart. emitDelta(revision, patch) sends one delta with any revision to
+// every open event stream without changing the hub. requests(path) lists
+// what the app received on a path, with the status it sent. Nothing here reads the real briefs directory or connects to
 // ports 4242 or 4243. stop() closes everything and removes the temporary
 // directories.
 
@@ -83,7 +84,21 @@ export async function startHub({ withFocus = true, agents = [], registry: regist
       await hub.refreshRoutines();
       routines.calls = 0;
     }
-    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub, log: () => {} });
+    // The app subscribes through this wrapper so a test can send a delta the
+    // hub never made.
+    const streamListeners = new Set();
+    const appHub = {
+      ...hub,
+      subscribe(fn) {
+        streamListeners.add(fn);
+        const off = hub.subscribe(fn);
+        return () => {
+          streamListeners.delete(fn);
+          off();
+        };
+      },
+    };
+    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: appHub, log: () => {} });
     let handler = newHandler();
     cleanups.push(async () => {
       handler.closeStreams();
@@ -113,6 +128,9 @@ export async function startHub({ withFocus = true, agents = [], registry: regist
         .map((entry) => ({ method: entry.method, status: entry.res.headersSent ? entry.res.statusCode : null })),
       registry,
       routines,
+      emitDelta: (revision, patch) => {
+        for (const fn of [...streamListeners]) fn({ revision, patch });
+      },
       stopStreams: () => handler.closeStreams(),
       restartApp: () => {
         handler.closeStreams();
