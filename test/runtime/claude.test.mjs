@@ -319,9 +319,10 @@ test('a stream error ends the turn in error, and the next send recovers', async 
   assert.equal(adapter.state('cfo').lastError, null);
 });
 
-test('a stream that fails before init while resuming says the stored session could not be resumed', async (t) => {
-  const query = fakeQuery(async function* () {
-    throw new Error('No conversation found with session ID: session-0');
+test('a stream that fails before init while resuming, with stderr naming a missing session, says so', async (t) => {
+  const query = fakeQuery(async function* ({ options }) {
+    options.stderr('No conversation found with session ID: session-0\n');
+    throw new Error('Claude Code process exited with code 1');
   });
   const { adapter, store, events, logs } = await setup(t, { query });
   await store.writePointer('cfo', { sessionId: 'session-0', createdAt: AT });
@@ -331,7 +332,59 @@ test('a stream that fails before init while resuming says the stored session cou
   assert.equal(adapter.state('cfo').state, 'error');
   assert.equal(adapter.state('cfo').lastError, message);
   assert.ok(logs.some((entry) => entry.event === 'thread_resume_failed' && entry.agentId === 'cfo'));
+  const logged = logs.find((entry) => entry.event === 'persona_turn_error');
+  assert.equal(logged.cause, 'Claude Code process exited with code 1');
+  assert.equal(logged.stderr, 'No conversation found with session ID: session-0\n');
   assert.equal((await store.readPointer('cfo')).sessionId, 'session-0');
+});
+
+test('a stream that fails before init for another reason keeps the pointer and asks for a retry', async (t) => {
+  const query = fakeQuery(async function* ({ options }) {
+    options.stderr('x'.repeat(2_100));
+    options.stderr('env: node: No such file or directory\n');
+    throw new Error('Claude Code process exited with code 127');
+  });
+  const { adapter, store, events, logs } = await setup(t, { query });
+  await store.writePointer('cfo', { sessionId: 'session-0', createdAt: AT });
+  await adapter.send(AGENT, 'Continue');
+  const message = 'The turn could not start. Retry; if it keeps failing, start a new thread.';
+  assert.equal(events.find((event) => event.type === 'error').message, message);
+  assert.equal(adapter.state('cfo').lastError, message);
+  assert.equal(logs.some((entry) => entry.event === 'thread_resume_failed'), false);
+  const logged = logs.find((entry) => entry.event === 'persona_turn_error');
+  assert.equal(logged.cause, 'Claude Code process exited with code 127');
+  assert.equal(logged.stderr.length, 2_048);
+  assert.ok(logged.stderr.endsWith('env: node: No such file or directory\n'));
+  assert.equal((await store.readPointer('cfo')).sessionId, 'session-0');
+});
+
+test('start imports the SDK once and rejects sdk_unavailable when it cannot', async (t) => {
+  const dir = path.join(await tempDir(t), 'threads');
+  const store = createThreadStore({ dir, limits: LIMITS });
+  const config = { limits: LIMITS, timeouts: { drainMs: 2_000, requestMaxAgeMs: 60_000 } };
+  let imports = 0;
+  const broken = createClaudeAdapter({
+    importSdk: async () => { imports += 1; throw new Error("Cannot find package '@anthropic-ai/claude-agent-sdk'"); },
+    store, config,
+  });
+  await assert.rejects(broken.start(AGENT), (error) => {
+    assert.equal(error.name, 'RuntimeError');
+    assert.equal(error.code, 'sdk_unavailable');
+    assert.equal(error.cause.message, "Cannot find package '@anthropic-ai/claude-agent-sdk'");
+    return true;
+  });
+  await assert.rejects(broken.start(AGENT), { code: 'sdk_unavailable' });
+  assert.equal(imports, 2);
+
+  const query = simple();
+  const loaded = createClaudeAdapter({ importSdk: async () => { imports += 1; return { query }; }, store, config });
+  t.after(() => loaded.close());
+  await loaded.start(AGENT);
+  await loaded.start({ ...AGENT, id: 'brain' });
+  await loaded.send(AGENT, 'Hi');
+  assert.equal(imports, 3);
+  assert.equal(query.calls.length, 1);
+  assert.equal(typeof query.calls[0].options.stderr, 'function');
 });
 
 test('a turn whose init reports an API key source is refused and aborted', async (t) => {
@@ -353,6 +406,19 @@ test('a turn whose init reports an API key source is refused and aborted', async
   assert.equal(adapter.state('cfo').lastError, message);
   assert.ok(logs.some((entry) => entry.event === 'persona_api_key_refused' && entry.agentId === 'cfo' &&
     entry.source === 'ANTHROPIC_API_KEY'));
+});
+
+test('an init whose apiKeySource is oauth is accepted', async (t) => {
+  const query = fakeQuery(async function* () {
+    yield init('session-1', { apiKeySource: 'oauth' });
+    yield assistant('Still on the subscription.');
+    yield result();
+  });
+  const { adapter, events, logs } = await setup(t, { query });
+  await adapter.send(AGENT, 'Hi');
+  assert.equal(events.some((event) => event.type === 'error'), false);
+  assert.equal(logs.some((entry) => entry.event === 'persona_api_key_refused'), false);
+  assert.deepEqual(states(events), ['busy', 'idle']);
 });
 
 test('an interrupted turn that reports an error result while winding down still ends idle', async (t) => {

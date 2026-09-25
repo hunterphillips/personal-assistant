@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { createHub } from '../lib/hub.mjs';
+import { RuntimeError } from '../lib/runtime/adapter.mjs';
 
 const REVISION = 'c'.repeat(64);
 
@@ -332,7 +333,23 @@ test('a persona whose adapter fails to start is unavailable and logged', async (
   const { hub, logs } = makeHub({ adapters: { claude: adapter } });
   await hub.start();
   assert.deepEqual([persona(hub).state, persona(hub).lastError], ['unavailable', 'start_failed']);
-  assert.ok(logs.some((entry) => entry.event === 'persona_start_error' && entry.agentId === 'cfo'));
+  const logged = logs.find((entry) => entry.event === 'persona_start_error' && entry.agentId === 'cfo');
+  assert.deepEqual([logged.reason, logged.error], ['start_failed', 'invented unreadable pointer']);
+  assert.equal(hub.persona('cfo'), null);
+});
+
+test('a persona whose SDK cannot be loaded is unavailable as sdk_unavailable with the cause logged', async () => {
+  const adapter = fakeAdapter();
+  adapter.start = async () => {
+    throw new RuntimeError('sdk_unavailable', { cause: new Error(`Cannot find package ${'x'.repeat(600)}`) });
+  };
+  const { hub, logs } = makeHub({ adapters: { claude: adapter } });
+  await hub.start();
+  assert.deepEqual([persona(hub).state, persona(hub).lastError], ['unavailable', 'sdk_unavailable']);
+  const logged = logs.find((entry) => entry.event === 'persona_start_error' && entry.agentId === 'cfo');
+  assert.equal(logged.reason, 'sdk_unavailable');
+  assert.ok(logged.error.startsWith('Cannot find package'));
+  assert.equal(logged.error.length, 500);
   assert.equal(hub.persona('cfo'), null);
 });
 

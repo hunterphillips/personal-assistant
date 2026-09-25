@@ -39,6 +39,8 @@ test('errorSentence turns each code into a sentence and passes adapter sentences
     'The dashboard started with an API key in its environment, so personas are off. Unset it and restart the dashboard.');
   assert.equal(view.errorSentence(persona({ lastError: 'start_failed' })),
     'The session file for CFO could not be read. Check the threads directory, then restart the dashboard.');
+  assert.equal(view.errorSentence(persona({ lastError: 'sdk_unavailable' })),
+    'The Claude Agent SDK could not be loaded. Run npm ci in dashboard/app, then restart the dashboard.');
   assert.equal(view.errorSentence(persona({ lastError: 'provider_unavailable', provider: 'codex' })), 'There is no runtime for Codex yet.');
   assert.equal(view.errorSentence(persona({ lastError: 'turn_timeout' })), 'The last turn ran too long and was stopped.');
   assert.equal(view.errorSentence(persona({ lastError: 'error' })), 'The last turn failed.');

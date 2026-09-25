@@ -107,6 +107,8 @@
         return 'The dashboard started with an API key in its environment, so personas are off. Unset it and restart the dashboard.';
       case 'start_failed':
         return 'The session file for ' + agent.name + ' could not be read. Check the threads directory, then restart the dashboard.';
+      case 'sdk_unavailable':
+        return 'The Claude Agent SDK could not be loaded. Run npm ci in dashboard/app, then restart the dashboard.';
       case 'provider_unavailable':
         return providerName(agent) ? 'There is no runtime for ' + providerName(agent) + ' yet.' : 'There is no runtime for this provider yet.';
       case 'turn_timeout':
