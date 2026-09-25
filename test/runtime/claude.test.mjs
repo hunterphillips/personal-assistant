@@ -20,7 +20,9 @@ const QUESTION_INPUT = Object.freeze({
 });
 const BASH_INPUT = Object.freeze({ command: 'printf probe > marker.txt', description: 'Write probe text' });
 
-const init = (sessionId = 'session-1') => ({ type: 'system', subtype: 'init', session_id: sessionId, apiKeySource: 'none' });
+const init = (sessionId = 'session-1', extra = {}) => ({
+  type: 'system', subtype: 'init', session_id: sessionId, apiKeySource: 'none', ...extra,
+});
 const assistant = (text, parent = null) => ({
   type: 'assistant', parent_tool_use_id: parent, session_id: 'session-1', message: { content: [{ type: 'text', text }] },
 });
@@ -304,6 +306,77 @@ test('a stream error ends the turn in error, and the next send recovers', async 
   assert.equal(adapter.state('cfo').lastError, null);
 });
 
+test('a stream that fails before init while resuming says the stored session could not be resumed', async (t) => {
+  const query = fakeQuery(async function* () {
+    throw new Error('No conversation found with session ID: session-0');
+  });
+  const { adapter, store, events, logs } = await setup(t, { query });
+  await store.writePointer('cfo', { sessionId: 'session-0', createdAt: AT });
+  await adapter.send(AGENT, 'Continue');
+  const message = 'The stored session could not be resumed. Start a new thread.';
+  assert.equal(events.find((event) => event.type === 'error').message, message);
+  assert.equal(adapter.state('cfo').state, 'error');
+  assert.equal(adapter.state('cfo').lastError, message);
+  assert.ok(logs.some((entry) => entry.event === 'thread_resume_failed' && entry.agentId === 'cfo'));
+  assert.equal((await store.readPointer('cfo')).sessionId, 'session-0');
+});
+
+test('a turn whose init reports an API key source is refused and aborted', async (t) => {
+  let signal;
+  const query = fakeQuery(async function* ({ options }) {
+    signal = options.abortController.signal;
+    yield init('session-1', { apiKeySource: 'ANTHROPIC_API_KEY' });
+    yield assistant('This should never be shown.');
+    yield result();
+  });
+  const { adapter, store, events, logs } = await setup(t, { query });
+  await adapter.send(AGENT, 'Hi');
+  const message = 'Refused: this turn would bill an API key (ANTHROPIC_API_KEY).';
+  assert.equal(signal.aborted, true);
+  assert.equal(events.some((event) => event.type === 'message' && event.role === 'assistant'), false);
+  assert.deepEqual((await store.read('cfo')).map(({ role }) => role), ['user']);
+  assert.equal(events.find((event) => event.type === 'error').message, message);
+  assert.deepEqual(states(events), ['busy', 'error']);
+  assert.equal(adapter.state('cfo').lastError, message);
+  assert.ok(logs.some((entry) => entry.event === 'persona_api_key_refused' && entry.agentId === 'cfo' &&
+    entry.source === 'ANTHROPIC_API_KEY'));
+});
+
+test('an interrupted turn that reports an error result while winding down still ends idle', async (t) => {
+  const running = gate();
+  const query = fakeQuery(async function* ({ options }) {
+    yield init();
+    const aborted = new Promise((resolve) => {
+      options.abortController.signal.addEventListener('abort', resolve, { once: true });
+    });
+    running.open();
+    await aborted;
+    yield result({ subtype: 'error_during_execution', is_error: true, errors: ['Request was aborted.'] });
+  });
+  const { adapter, events } = await setup(t, { query });
+  const turn = adapter.send(AGENT, 'Hi');
+  await running.promise;
+  await adapter.interrupt(AGENT);
+  await turn;
+  assert.equal(adapter.state('cfo').state, 'idle');
+  assert.equal(adapter.state('cfo').lastError, null);
+  assert.equal(events.some((event) => event.type === 'error'), false);
+  assert.ok(events.some((event) => event.type === 'usage'));
+});
+
+test('a stream error with a pending request resolves it and goes to error without passing through busy', async (t) => {
+  const query = fakeQuery(async function* ({ options }) {
+    yield init();
+    options.canUseTool('Bash', BASH_INPUT, {});
+    throw new Error('stream broke');
+  });
+  const { adapter, events } = await setup(t, { query });
+  await adapter.send(AGENT, 'Run it');
+  assert.deepEqual(states(events), ['busy', 'waiting', 'error']);
+  const tail = events.filter((event) => event.type === 'resolved' || event.type === 'error' || event.type === 'thread.state').slice(-3);
+  assert.deepEqual(tail.map(({ type, outcome, state }) => outcome ?? state ?? type), ['interrupted', 'error', 'error']);
+});
+
 test('an error result still reports usage and ends in error', async (t) => {
   const query = fakeQuery(async function* () {
     yield init();
@@ -376,6 +449,37 @@ test('close aborts a turn still running when the drain time runs out', async (t)
   assert.equal(adapter.state('cfo').state, 'idle');
   assert.equal(events.some((event) => event.type === 'error'), false);
   assert.ok(logs.some((entry) => entry.event === 'persona_turn_aborted' && entry.agentId === 'cfo'));
+});
+
+test('close aborts a thread waiting on an answer at once instead of draining it', async (t) => {
+  const query = fakeQuery(async function* ({ options }) {
+    yield init();
+    await options.canUseTool('Bash', BASH_INPUT, { signal: options.abortController.signal });
+    await untilAborted(options);
+  });
+  const { adapter, events, logs } = await setup(t, { query, timeouts: { drainMs: 5_000 } });
+  const turn = adapter.send(AGENT, 'Run it');
+  await waitFor(events, (event) => event.type === 'request');
+  const started = Date.now();
+  await adapter.close();
+  assert.ok(Date.now() - started < 1_000);
+  await turn;
+  assert.equal(events.find((event) => event.type === 'resolved').outcome, 'interrupted');
+  assert.equal(adapter.state('cfo').state, 'idle');
+  assert.equal(events.some((event) => event.type === 'error'), false);
+  assert.ok(logs.some((entry) => entry.event === 'persona_turn_aborted' && entry.agentId === 'cfo'));
+});
+
+test('New thread reports a failed clear as thread_reset_failed', async (t) => {
+  const { adapter, store } = await setup(t);
+  store.clearPointer = async () => { throw new Error('EACCES: permission denied'); };
+  await assert.rejects(adapter.newThread(AGENT), (error) => {
+    assert.equal(error.name, 'RuntimeError');
+    assert.equal(error.code, 'thread_reset_failed');
+    assert.equal(error.cause.message, 'EACCES: permission denied');
+    return true;
+  });
+  await adapter.send(AGENT, 'Still works');
 });
 
 test('a throwing listener is logged and the other listeners still run', async (t) => {

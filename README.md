@@ -315,8 +315,15 @@ The agent id must match the registry's id pattern before any path is built.
 - The result message's `total_cost_usd` is a running total for the
   session, not the cost of one turn. It is reported with the token usage
   and the list of denied tool calls.
-- At shutdown, new messages are refused as `shutting_down`, running turns
-  get up to 30 seconds to finish, and any still running are aborted.
+- If a stored session cannot be resumed, the turn fails with "The stored
+  session could not be resumed. Start a new thread." The pointer is kept
+  until New thread clears it.
+- A turn that would bill an API key (the SDK reports an `apiKeySource` other
+  than `none`) is aborted at once and fails with "Refused: this turn would
+  bill an API key", naming the source.
+- At shutdown, new messages are refused as `shutting_down`. Turns waiting on
+  an answer are aborted at once, running turns get up to 30 seconds to
+  finish, and any still running are aborted.
 
 ### What runs without a card
 
@@ -329,7 +336,10 @@ Only tool calls that reach `canUseTool` produce a card. These do not:
 - File reads inside the working directory and read-only shell commands.
 - Skills. The Skill tool never asks, though tools a skill then calls go
   through the usual checks.
-- Subagents, which inherit the parent's permission mode.
+
+Subagents are not on this list. Their tool prompts reach the same callback
+(the SDK passes the subagent's `agentID` in the callback options), so they
+raise cards like the parent's.
 
 The audit behind this list is
 `thoughts/shared/research/2026-09-25-claude-sdk-spike.md` in the umbrella
