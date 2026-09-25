@@ -281,3 +281,105 @@ test('onChange fires after every load attempt and can be unsubscribed', async (t
   await waitUntil(() => registry.current().ok === false);
   assert.deepEqual(seen, [true]);
 });
+
+test('an unchanged file does not re-read or notify on later polls', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir)] });
+  const events = [];
+  const calls = [];
+  const registry = createRegistry({ path: file, pollMs: 20, log: (entry) => events.push(entry) });
+  registry.onChange((state) => calls.push(state.ok));
+  await registry.start();
+  t.after(() => registry.stop());
+
+  // Give a few poll cycles a chance to fire against the unchanged file.
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  assert.equal(calls.length, 1);
+  assert.equal(events.length, 0);
+});
+
+test('a missing file notifies once, then again only when the file appears', async (t) => {
+  const dir = await tempDir(t);
+  const file = path.join(dir, 'nope.json');
+  const calls = [];
+  const registry = createRegistry({ path: file, pollMs: 20 });
+  registry.onChange((state) => calls.push(state.ok));
+  await registry.start();
+  t.after(() => registry.stop());
+  assert.equal(registry.current().error, 'registry_missing');
+  assert.equal(calls.length, 1);
+
+  // Several more poll cycles against the still-missing file must not notify again.
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(calls.length, 1);
+
+  await writeFile(file, JSON.stringify({ version: 1, agents: [baseAgent(dir)] }));
+  await waitUntil(() => registry.current().ok === true);
+  assert.equal(calls.length, 2);
+});
+
+test('model is accepted on a persona and rejected on a system agent', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, {
+    version: 1,
+    agents: [baseAgent(dir, { model: 'claude-sonnet-5' })],
+  });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  const state = registry.current();
+  assert.equal(state.ok, true);
+  assert.equal(state.agents[0].model, 'claude-sonnet-5');
+
+  const systemFile = path.join(dir, 'system.json');
+  await writeFile(systemFile, JSON.stringify({
+    version: 1,
+    agents: [
+      {
+        id: 'assistant',
+        name: 'Assistant',
+        role: 'System',
+        description: 'The dashboard itself.',
+        group: 'personal',
+        kind: 'system',
+        cwd: dir,
+        model: 'claude-sonnet-5',
+      },
+    ],
+  }));
+  const systemRegistry = createRegistry({ path: systemFile, pollMs: 10_000 });
+  await systemRegistry.start();
+  t.after(() => systemRegistry.stop());
+
+  const systemState = systemRegistry.current();
+  assert.equal(systemState.ok, false);
+  assert.match(systemState.error, /model/);
+});
+
+test('model is absent from the frozen agent when not given', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir)] });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  const state = registry.current();
+  assert.equal(state.ok, true);
+  assert.equal('model' in state.agents[0], false);
+});
+
+test('start() called twice does not arm a second poll', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir)] });
+  const calls = [];
+  const registry = createRegistry({ path: file, pollMs: 20 });
+  registry.onChange((state) => calls.push(state.ok));
+  await registry.start();
+  await registry.start();
+  t.after(() => registry.stop());
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(calls.length, 1);
+});
