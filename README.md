@@ -267,6 +267,85 @@ not answer during the refresh the Focus card says its rows come from
 launchd. While the view is hidden its cards are not rebuilt; opening it
 renders the latest state.
 
+## Personas
+
+A persona is a long-lived Claude session whose working directory is the
+agent's repo. `lib/runtime/claude.mjs` runs persona turns through
+`@anthropic-ai/claude-agent-sdk`, the app's one runtime dependency, pinned to
+an exact version and loaded on the first turn. Routes and the Agents view
+are not wired to it yet. The comment at the top of the module lists its
+methods and events.
+
+### Thread files
+
+`lib/threads.mjs` keeps two files per agent in `DASHBOARD_THREADS_DIR`
+(created with mode 0700; the files are 0600):
+
+- `<agent-id>.json` holds the session id and when it was first seen. It is
+  the only durable file a persona has here, and it is replaced atomically
+  (temporary file, fsync, rename). If it is lost, the next message starts a
+  new session. The transcript itself stays with Claude Code under
+  `~/.claude/projects/`.
+- `<agent-id>.jsonl` is a display cache of the thread, one message per line.
+  It is capped at 200 messages and 1 MiB; past either cap it is rewritten
+  with the newest messages that fit under both. Message text is cut at
+  8 KiB and marked `truncated`. A partial last line left by a crash is
+  skipped on read. Losing this file only empties the thread view.
+
+The agent id must match the registry's id pattern before any path is built.
+
+### Turns
+
+- One turn per persona at a time. A second message while a turn is running
+  is refused as `busy` before the SDK is called, because two resumes of one
+  session both succeed and split its history.
+- Each turn resumes the stored session and passes `permissionMode:
+  'default'`, so the global `auto` mode never applies, and `maxTurns` 25.
+  It also passes a `canUseTool` callback on every turn; without one the SDK
+  removes `AskUserQuestion`.
+- `AskUserQuestion` becomes a question. Any other tool that needs
+  permission becomes an approval that carries the tool name and its full
+  input. The turn waits for an answer. After 30 minutes without one, the
+  request is denied with "No answer within 30 minutes". The persona stays
+  busy after a denial until the SDK reports the turn's result, since the
+  model keeps working.
+- Interrupt aborts the turn and denies any open request. New thread is
+  refused while a turn runs; otherwise it deletes both files, and the cache
+  starts again with a "New thread" line.
+- The result message's `total_cost_usd` is a running total for the
+  session, not the cost of one turn. It is reported with the token usage
+  and the list of denied tool calls.
+- At shutdown, new messages are refused as `shutting_down`, running turns
+  get up to 30 seconds to finish, and any still running are aborted.
+
+### What runs without a card
+
+Only tool calls that reach `canUseTool` produce a card. These do not:
+
+- Tools covered by allow rules in `~/.claude/settings.json` or the repo's
+  `.claude/settings*.json`. Today that is the global test, build, lint, and
+  typecheck commands in every repo, plus `git worktree`, `git branch`, and
+  `git push` in nowgentic.
+- File reads inside the working directory and read-only shell commands.
+- Skills. The Skill tool never asks, though tools a skill then calls go
+  through the usual checks.
+- Subagents, which inherit the parent's permission mode.
+
+The audit behind this list is
+`thoughts/shared/research/2026-09-25-claude-sdk-spike.md` in the umbrella
+directory.
+
+### Limits
+
+| Constant | Value | Meaning |
+| --- | --- | --- |
+| `LIMITS.turnMaxTurns` | 25 | SDK `maxTurns` for one persona turn |
+| `LIMITS.messageTextBytes` | 8 KiB | Text kept per message, in events and the cache |
+| `LIMITS.threadCacheMessages` | 200 | Messages kept per cache file |
+| `LIMITS.threadCacheBytes` | 1 MiB | Bytes kept per cache file |
+| `TIMEOUTS.requestMaxAgeMs` | 30 minutes | An unanswered question or approval is denied |
+| `TIMEOUTS.drainMs` | 30 seconds | Wait for running turns at shutdown |
+
 ## Commands
 
 Requires Node 24 (`.nvmrc`).
@@ -305,6 +384,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
 | `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
+| `DASHBOARD_THREADS_DIR` | `var/threads` | Persona session pointers and message caches. Resolved from this directory; created on the first write. |
 
 The server always binds `127.0.0.1`. PUT and POST requests must send an
 `Origin` that matches the request's Host, and JSON unless they are one of the
