@@ -2,9 +2,9 @@
 
 A local Node server that will become the single private entry point for Focus
 and the Daily Brief. It listens on `127.0.0.1:4243`; Tailscale serves it to the
-tailnet over HTTPS. The page is a shell with Home, Routines, Focus, and Daily
-Brief views. Focus runs in an iframe through a proxy to its own server. Briefs are
-read from `daily-brief/briefs/`, and feedback is saved beside them.
+tailnet over HTTPS. The page is a shell with Home, Agents, Routines, Focus, and
+Daily Brief views. Focus runs in an iframe through a proxy to its own server.
+Briefs are read from `daily-brief/briefs/`, and feedback is saved beside them.
 
 The plan is
 `thoughts/shared/plans/2026-09-22-dashboard-integrated-hub-implementation.md`
@@ -196,10 +196,11 @@ when asked.
 
 ### Shell
 
-`public/index.html`, `public/shell.js`, `public/routines.js`, and
-`public/styles.css` make up the page served at `/`, `/routines`, `/focus`,
-and `/brief`. `/agents` and `/goals` serve the same page, which shows Home
-there, as it does for any path it does not know. The navigation links are
+`public/index.html`, `public/shell.js`, `public/agents.js`,
+`public/routines.js`, and `public/styles.css` make up the page served at
+`/`, `/agents`, `/routines`, `/focus`, and `/brief`. `/goals` serves the
+same page, which shows Home there, as it does for any path it does not
+know. The navigation links are
 ordinary links; the script switches views with the History API and handles
 Back and Forward, and a reload or bookmark opens the same view. Each frame
 is created the first time its view opens and stays in the page afterwards,
@@ -244,8 +245,10 @@ error, such as a 409 for a brief replaced under the same date or a 502 from
 Focus, the frame stays hidden, the view shows its notice, and the state is
 fetched again at once. Retry reloads that frame.
 
-Home links to Routines, Focus, and the Daily Brief. Under Routines it shows
-the number of routines, or "Not refreshed yet" before the first refresh.
+Home links to Agents, Routines, Focus, and the Daily Brief. Under Agents it
+names who is waiting for an answer ("CFO is waiting for you"), or counts the
+agents; under Routines it shows the number of routines, or "Not refreshed
+yet" before the first refresh.
 
 Wide screens get a navigation column; below 720px it becomes a row across the
 top. The page is exactly one screen tall and each frame fills the rest, so the
@@ -276,14 +279,46 @@ not answer during the refresh the Focus card says its rows come from
 launchd. While the view is hidden its cards are not rebuilt; opening it
 renders the latest state.
 
+### Agents view
+
+The Agents view lists every registry agent under Work and Personal, in
+registry order: name, role, provider (Claude or Codex), and for a persona
+its last message with a relative time, plus a line for its state: "Waiting
+for you" on a question or approval, "Working" during a turn, "The last turn
+failed", or "Unavailable". A project folder or system agent shows its
+description instead and opens nothing. Choosing a persona opens its thread
+and puts `?agent=<id>` in the URL, so a reload or a shared link lands on the
+same thread; Back and Forward move between threads. From 720px the list and
+the thread sit side by side; on a phone the list comes first and the thread
+takes the whole width with an "All agents" link back.
+
+The thread is read from `GET /api/agents/<id>/thread` when it opens and
+again whenever the state shows a new last message or a turn that started or
+ended, so it follows the turn without reconstructing it from deltas. Your
+messages sit on the right, the persona's on the left, and "New thread"
+markers in the middle. While the persona works, the pane says so and offers
+Interrupt. A question becomes one card per question with its options
+(label and description), an Other field, and Answer, which posts one answer
+per question; an approval is a card with the tool name, its input as
+monospaced JSON (marked "Input cut at 16 KB." when the snapshot cut it),
+and Allow and Deny. The composer is labelled "Message <name>"; Send is off,
+with the reason under it, while the persona is working, waiting on an
+answer, or unavailable. A failed turn shows the adapter's sentence above
+the messages ("The stored session could not be resumed. Start a new
+thread."), and an unavailable persona shows why under the composer, as a
+sentence rather than a code. New thread asks for confirmation inline before
+posting. A refused Send, Answer, Interrupt, or New thread is reported under
+the composer until the next attempt; a `no_such_request` refusal also
+fetches the state again.
+
 ## Personas
 
 A persona is a long-lived Claude session whose working directory is the
 agent's repo. `lib/runtime/claude.mjs` runs persona turns through
 `@anthropic-ai/claude-agent-sdk`, the app's one runtime dependency, pinned to
 an exact version and loaded on the first turn. The comment at the top of the
-module lists its methods and events. The routes below are wired to it; the
-Agents view is not yet.
+module lists its methods and events. The routes below are wired to it and
+the Agents view (above) drives them.
 
 ### State in the snapshot
 
@@ -466,8 +501,9 @@ Requires Node 24 (`.nvmrc`).
   events on). Emulation does not test real touch hardware. Each test starts
   its own isolated Focus copy, the app over HTTP, and the same app over HTTPS
   with a throwaway self-signed certificate, all on ephemeral ports, with
-  invented brief viewers in a temporary directory and an in-memory registry
-  and routines (`test/support/browser-server.mjs`). Shared fixtures are in
+  invented brief viewers in a temporary directory, an in-memory registry
+  and routines, and personas on a fake Claude adapter over a thread store
+  in that directory (`test/support/browser-server.mjs`). Shared fixtures are in
   `test/support/browser-test.mjs`. Only the HTTPS test's browser context
   accepts that certificate. Requests to any other host are blocked, and a CSP
   violation fails the test. Output goes to the ignored `test-results/`.
