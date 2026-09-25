@@ -296,8 +296,9 @@ The thread is read from `GET /api/agents/<id>/thread` when it opens and
 again whenever the state shows a new last message or a turn that started or
 ended, so it follows the turn without reconstructing it from deltas. Your
 messages sit on the right, the persona's on the left, and "New thread"
-markers in the middle. While the persona works, the pane says so and offers
-Interrupt. A question becomes one card per question with its options
+markers in the middle. While the persona works or waits on an answer, the
+pane says so and offers Interrupt, which ends the turn and denies any open
+request. A question becomes one card per question with its options
 (label and description), an Other field, and Answer, which posts one answer
 per question; an approval is a card with the tool name, its input as
 monospaced JSON (marked "Input cut short." when the snapshot cut it),
@@ -305,11 +306,15 @@ and Allow and Deny. The composer is labelled "Message <name>"; Send is off,
 with the reason under it, while the persona is working, waiting on an
 answer, or unavailable. A failed turn shows the adapter's sentence above
 the messages ("The stored session could not be resumed. Start a new
-thread."), and an unavailable persona shows why under the composer, as a
-sentence rather than a code. New thread asks for confirmation inline before
-posting. A refused Send, Answer, Interrupt, or New thread is reported under
-the composer until the next attempt; a `no_such_request` refusal also
-fetches the state again.
+thread."), a turn the clock stopped shows "The last turn ran too long and
+was stopped." there until the next turn, and an unavailable persona shows
+why under the composer, as a sentence rather than a code. New thread asks
+for confirmation inline before posting. A refused Send, Answer, Interrupt,
+or New thread is reported under the composer until the next attempt; a
+`no_such_request` refusal also fetches the state again. If the thread
+cannot be read again after a change, the messages already shown stay, with
+a Retry line above them. A draft typed for one persona is kept while another
+thread is open.
 
 ## Personas
 
