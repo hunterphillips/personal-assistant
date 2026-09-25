@@ -94,7 +94,8 @@ until the first refresh; a failed refresh keeps the previous items and sets
 At most 8 streams are open at once; the ninth gets 503 `too_many_streams` with
 `Retry-After: 5`. While any stream is open, the server checks Focus and the
 brief every 30 seconds and sends a delta only when the answer changed.
-A stream is logged once, as `stream_closed`, when it ends.
+A stream is logged once, as `stream_closed`, when it ends. Once the server
+has begun shutting down, a new stream request gets 503 `shutting_down`.
 
 `POST /api/routines/refresh` follows the rules for the Focus controls: exact
 `Origin`, no body. A successful `POST /api/pause` or `/api/resume` also starts
