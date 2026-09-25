@@ -389,6 +389,19 @@ test('an error result still reports usage and ends in error', async (t) => {
   assert.equal(adapter.state('cfo').state, 'error');
 });
 
+test('an error result before init keeps the stored pointer', async (t) => {
+  const query = fakeQuery(async function* () {
+    yield result({ subtype: 'error_during_execution', is_error: true, session_id: 'session-startup', errors: ['startup failed'] });
+  });
+  const { adapter, store } = await setup(t, { query });
+  await store.writePointer('cfo', { sessionId: 'session-good', createdAt: '2026-09-01T00:00:00.000Z' });
+  await adapter.start(AGENT);
+  await adapter.send(AGENT, 'Hi');
+  assert.equal(adapter.state('cfo').state, 'error');
+  assert.equal(adapter.state('cfo').sessionId, 'session-good');
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-good', createdAt: '2026-09-01T00:00:00.000Z' });
+});
+
 test('New thread is refused while busy, otherwise clears the pointer and cache and marks the boundary', async (t) => {
   const release = gate();
   let calls = 0;

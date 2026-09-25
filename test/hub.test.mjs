@@ -69,7 +69,11 @@ function makeHub(overrides = {}) {
     routines: overrides.routines ?? fakeRoutines(),
     focus: status.focus,
     brief: status.brief,
-    timeouts: { statusMs: 200 },
+    timeouts: { statusMs: 200, turnMaxMs: overrides.turnMaxMs ?? 60_000 },
+    limits: { requestInputBytes: 64, previewChars: 10 },
+    adapters: overrides.adapters ?? {},
+    store: overrides.store ?? null,
+    adaptersDisabled: overrides.adaptersDisabled ?? null,
     log: (entry) => logs.push(entry),
     now: () => new Date('2026-09-25T12:00:00.000Z'),
   });
@@ -93,7 +97,10 @@ test('the initial snapshot is frozen and omits agent cwd and routines', () => {
   assert.deepEqual(snapshot.brief, { state: 'unknown' });
   assert.deepEqual(snapshot.registry, { ok: true, error: null, loadedAt: '2026-09-25T12:00:00.000Z' });
   assert.deepEqual(snapshot.agents, [
-    { id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude' },
+    {
+      id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude',
+      state: 'unavailable', pending: null, lastMessage: null, lastError: null, costUsd: null,
+    },
   ]);
   assert.deepEqual(snapshot.routines, { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] });
   assert.ok(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.agents[0]) && Object.isFrozen(snapshot.routines));
@@ -259,4 +266,183 @@ test('close drops subscribers and stops following the registry', () => {
   registry.emit(registryState([]));
   assert.equal(hub.snapshot().revision, 1);
   assert.equal(deltas.length, 0);
+});
+
+// An adapter stand-in: state() answers from `states`, emit() plays an event,
+// and every start, interrupt, and unsubscribe is recorded.
+function fakeAdapter(states = {}) {
+  const listeners = new Set();
+  const adapter = {
+    calls: [],
+    states,
+    start: async (agent) => { adapter.calls.push(['start', agent.id]); return { threadId: agent.id }; },
+    interrupt: async (agent) => { adapter.calls.push(['interrupt', agent.id]); },
+    state: (id) => ({ state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null, ...adapter.states[id] }),
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => { adapter.calls.push(['unsubscribe']); listeners.delete(fn); };
+    },
+    emit(type, agentId, fields = {}) {
+      for (const fn of [...listeners]) fn({ type, agentId, at: '2026-09-25T12:01:00.000Z', ...fields });
+    },
+    listenerCount: () => listeners.size,
+  };
+  return adapter;
+}
+
+const persona = (hub, id = 'cfo') => hub.snapshot().agents.find((entry) => entry.id === id);
+
+test('start seeds a persona from its adapter and the last cached message', async () => {
+  const adapter = fakeAdapter({ cfo: { state: 'error', lastError: 'Invented failure', costUsd: 0.5 } });
+  const store = { read: async () => [{ role: 'user', text: 'first', at: 'a' }, { role: 'assistant', text: 'Invented reply text', at: 'b' }] };
+  const registry = fakeRegistry(registryState([agent('cfo'), agent('ops', { kind: 'system', provider: undefined })]));
+  const { hub, deltas } = makeHub({ adapters: { claude: adapter }, store, registry });
+  assert.equal(persona(hub).state, 'unavailable');
+  await hub.start();
+  assert.deepEqual(adapter.calls, [['start', 'cfo']]);
+  assert.deepEqual(persona(hub), {
+    id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude',
+    state: 'error', pending: null, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
+    lastError: 'Invented failure', costUsd: 0.5,
+  });
+  assert.equal(persona(hub, 'ops').state, null);
+  assert.equal('pending' in persona(hub, 'ops'), false);
+  assert.deepEqual(deltas.map((d) => Object.keys(d.patch)), [['agents']]);
+  assert.equal(hub.persona('cfo').agent.cwd, '/invented');
+  assert.equal(hub.persona('cfo').adapter, adapter);
+  assert.equal(hub.persona('ops'), null);
+  assert.equal(hub.persona('nobody'), null);
+});
+
+test('a persona whose provider has no adapter is unavailable with the reason', async () => {
+  const { hub } = makeHub();
+  await hub.start();
+  assert.equal(persona(hub).state, 'unavailable');
+  assert.equal(persona(hub).lastError, 'provider_unavailable');
+  assert.equal(hub.persona('cfo'), null);
+
+  const disabled = makeHub({ adaptersDisabled: 'api_key_in_env' });
+  await disabled.hub.start();
+  assert.equal(persona(disabled.hub).lastError, 'api_key_in_env');
+});
+
+test('a persona whose adapter fails to start is unavailable and logged', async () => {
+  const adapter = fakeAdapter();
+  adapter.start = async () => { throw new Error('invented unreadable pointer'); };
+  const { hub, logs } = makeHub({ adapters: { claude: adapter } });
+  await hub.start();
+  assert.deepEqual([persona(hub).state, persona(hub).lastError], ['unavailable', 'start_failed']);
+  assert.ok(logs.some((entry) => entry.event === 'persona_start_error' && entry.agentId === 'cfo'));
+  assert.equal(hub.persona('cfo'), null);
+});
+
+test('adapter events map onto the persona and each bumps the revision with an agents patch', async () => {
+  const adapter = fakeAdapter();
+  const { hub, deltas } = makeHub({ adapters: { claude: adapter } });
+  await hub.start();
+  deltas.length = 0;
+
+  adapter.states.cfo = { state: 'busy' };
+  adapter.emit('thread.state', 'cfo', { state: 'busy' });
+  assert.equal(persona(hub).state, 'busy');
+
+  adapter.emit('message', 'cfo', { role: 'assistant', text: 'A long invented answer' });
+  assert.deepEqual(persona(hub).lastMessage, { role: 'assistant', text: 'A long inv', at: '2026-09-25T12:01:00.000Z' });
+
+  const input = { questions: [{ question: 'Pick?', options: [] }] };
+  adapter.states.cfo = { state: 'waiting', pending: { requestId: 'r1', kind: 'question', toolName: 'AskUserQuestion', input } };
+  adapter.emit('request', 'cfo', { requestId: 'r1', kind: 'question', toolName: 'AskUserQuestion', input });
+  assert.deepEqual(persona(hub).pending, { requestId: 'r1', kind: 'question', toolName: 'AskUserQuestion', input, truncated: false });
+
+  adapter.states.cfo = { state: 'waiting', pending: null };
+  adapter.emit('resolved', 'cfo', { requestId: 'r1', outcome: 'answered' });
+  assert.equal(persona(hub).pending, null);
+
+  adapter.emit('usage', 'cfo', { usage: {}, costUsd: 1.25, denials: [] });
+  assert.equal(persona(hub).costUsd, 1.25);
+
+  adapter.emit('error', 'cfo', { message: 'Invented error' });
+  assert.equal(persona(hub).lastError, 'Invented error');
+
+  adapter.emit('message', 'someone-else', { role: 'user', text: 'ignored' });
+  assert.equal(deltas.length, 6);
+  assert.ok(deltas.every((d) => Object.keys(d.patch).join() === 'agents'));
+  assert.deepEqual(deltas.map((d) => d.revision), [3, 4, 5, 6, 7, 8]);
+});
+
+test('a new turn clears a stale error through the adapter state', async () => {
+  const adapter = fakeAdapter({ cfo: { state: 'error', lastError: 'Old failure', costUsd: 2 } });
+  const { hub } = makeHub({ adapters: { claude: adapter } });
+  await hub.start();
+  adapter.states.cfo = { state: 'busy', lastError: null, costUsd: 2 };
+  adapter.emit('thread.state', 'cfo', { state: 'busy' });
+  assert.deepEqual([persona(hub).state, persona(hub).lastError, persona(hub).costUsd], ['busy', null, 2]);
+});
+
+test('request input is shown as JSON text, cut to the limit and flagged when too long', async () => {
+  const adapter = fakeAdapter();
+  const { hub } = makeHub({ adapters: { claude: adapter } });
+  await hub.start();
+  adapter.emit('request', 'cfo', { requestId: 'r1', kind: 'approval', toolName: 'Bash', input: { command: 'ls' } });
+  assert.deepEqual(persona(hub).pending, {
+    requestId: 'r1', kind: 'approval', toolName: 'Bash', input: '{"command":"ls"}', truncated: false,
+  });
+  const long = { command: 'é'.repeat(100) };
+  adapter.emit('request', 'cfo', { requestId: 'r2', kind: 'approval', toolName: 'Bash', input: long });
+  const pending = persona(hub).pending;
+  assert.equal(pending.truncated, true);
+  assert.ok(Buffer.byteLength(pending.input) <= 64);
+  assert.ok(JSON.stringify(long).startsWith(pending.input));
+  const question = { questions: [{ question: 'x'.repeat(100) }] };
+  adapter.emit('request', 'cfo', { requestId: 'r3', kind: 'question', toolName: 'AskUserQuestion', input: question });
+  assert.equal(typeof persona(hub).pending.input, 'string');
+  assert.equal(persona(hub).pending.truncated, true);
+});
+
+test('a registry change starts a new persona, drops a removed one, and keeps existing state', async () => {
+  const adapter = fakeAdapter({ cfo: { state: 'error', lastError: 'Kept' } });
+  const registry = fakeRegistry();
+  const { hub } = makeHub({ adapters: { claude: adapter }, registry });
+  await hub.start();
+  registry.emit(registryState([agent('cfo', { name: 'Renamed' }), agent('coach')]));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(adapter.calls, [['start', 'cfo'], ['start', 'coach']]);
+  assert.deepEqual([persona(hub).name, persona(hub).lastError], ['Renamed', 'Kept']);
+  assert.equal(persona(hub, 'coach').state, 'idle');
+  assert.ok(hub.persona('coach'));
+
+  registry.emit(registryState([agent('coach')]));
+  assert.equal(hub.persona('cfo'), null);
+  assert.deepEqual(hub.snapshot().agents.map((entry) => entry.id), ['coach']);
+});
+
+test('a turn over the wall clock is interrupted and logged; idle clears the clock', async () => {
+  const adapter = fakeAdapter();
+  const { hub, logs } = makeHub({ adapters: { claude: adapter }, turnMaxMs: 20 });
+  await hub.start();
+  adapter.emit('thread.state', 'cfo', { state: 'busy' });
+  adapter.emit('thread.state', 'cfo', { state: 'waiting' });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(adapter.calls.filter((call) => call[0] === 'interrupt'), [['interrupt', 'cfo']]);
+  assert.ok(logs.some((entry) => entry.event === 'persona_turn_timeout' && entry.agentId === 'cfo'));
+
+  adapter.emit('thread.state', 'cfo', { state: 'idle' });
+  adapter.emit('thread.state', 'cfo', { state: 'busy' });
+  adapter.emit('thread.state', 'cfo', { state: 'idle' });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(adapter.calls.filter((call) => call[0] === 'interrupt').length, 1);
+  hub.close();
+});
+
+test('close clears turn clocks and unsubscribes from the adapters without closing them', async () => {
+  const adapter = fakeAdapter();
+  adapter.close = async () => { adapter.calls.push(['close']); };
+  const { hub } = makeHub({ adapters: { claude: adapter }, turnMaxMs: 20 });
+  await hub.start();
+  assert.equal(adapter.listenerCount(), 1);
+  adapter.emit('thread.state', 'cfo', { state: 'busy' });
+  hub.close();
+  assert.equal(adapter.listenerCount(), 0);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(adapter.calls, [['start', 'cfo'], ['unsubscribe']]);
 });
