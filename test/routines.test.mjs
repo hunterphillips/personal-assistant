@@ -45,7 +45,8 @@ async function one(plist, launchctl = { pid: null, lastExitStatus: 0 }) {
 const SCHEDULES = [
   ['KeepAlive true', { KeepAlive: true, RunAtLoad: true }, 'always', 'Always on'],
   ['KeepAlive object', { KeepAlive: { SuccessfulExit: false } }, 'always', 'Always on'],
-  ['RunAtLoad with no interval', { RunAtLoad: true }, 'always', 'Always on'],
+  ['RunAtLoad with no interval and no KeepAlive', { RunAtLoad: true }, 'once', 'Runs at login'],
+  ['RunAtLoad with KeepAlive explicitly false', { RunAtLoad: true, KeepAlive: false }, 'once', 'Runs at login'],
   ['StartInterval in seconds', { StartInterval: 45 }, 'interval', 'Every 45 seconds'],
   ['StartInterval in minutes', { StartInterval: 900 }, 'interval', 'Every 15 minutes'],
   ['StartInterval in whole hours', { StartInterval: 7200 }, 'interval', 'Every 2 hours'],

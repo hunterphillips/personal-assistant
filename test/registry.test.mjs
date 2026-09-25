@@ -116,6 +116,21 @@ test('a duplicate routine label across agents is rejected', async (t) => {
   assert.match(state.error, /agent 1 \(focus\)/);
 });
 
+test('a routine label starting with a hyphen is rejected', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, {
+    version: 1,
+    agents: [baseAgent(dir, { routines: ['-x'] })],
+  });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  const state = registry.current();
+  assert.equal(state.ok, false);
+  assert.match(state.error, /routines must be an array of strings matching/);
+});
+
 test('a missing cwd directory is rejected', async (t) => {
   const dir = await tempDir(t);
   const file = await write(dir, {
