@@ -11,6 +11,7 @@
   <div class="shell">
     <nav class="nav" aria-label="Dashboard">
       <a href="/" data-view="home">Home</a>
+      <a href="/agents" data-view="agents">Agents</a>
       <a href="/routines" data-view="routines">Routines</a>
       <a href="/focus" data-view="focus">Focus</a>
       <a href="/brief" data-view="brief">Daily Brief</a>
@@ -23,6 +24,12 @@
 
       <section class="view home" id="view-home" data-view="home" aria-label="Home">
         <ul class="destinations">
+          <li>
+            <a class="destination" href="/agents">
+              <span class="destination-name">Agents</span>
+              <span class="destination-meta" id="home-agents"></span>
+            </a>
+          </li>
           <li>
             <a class="destination" href="/routines">
               <span class="destination-name">Routines</span>
@@ -56,6 +63,50 @@
         <div class="routines-cards" id="routines-cards"></div>
       </section>
 
+      <section class="view agents" id="view-agents" data-view="agents" aria-label="Agents" hidden>
+        <div class="agents-list" id="agents-list">
+          <h1 class="agents-heading">Agents</h1>
+          <p class="agents-message" id="agents-message" hidden></p>
+          <div id="agents-groups"></div>
+        </div>
+        <div class="agent-thread" id="agent-thread">
+          <p class="thread-empty" id="agent-empty"></p>
+          <div class="thread-panel" id="agent-panel" hidden>
+            <div class="thread-header">
+              <a class="thread-back" id="agent-back" href="/agents">All agents</a>
+              <div class="thread-title">
+                <h2 class="thread-name" id="agent-name"></h2>
+                <span class="thread-chips" id="agent-chips"></span>
+                <span class="thread-cost" id="agent-cost"></span>
+              </div>
+              <button type="button" class="button thread-new" id="agent-new-thread" data-agent-action="new-thread">New thread</button>
+            </div>
+            <div class="thread-confirm" id="agent-confirm" role="group" aria-label="New thread" hidden>
+              <span>Start a new thread? This one stays in Claude Code's transcripts but leaves this view.</span>
+              <button type="button" class="button button-primary" data-agent-action="confirm-new-thread">Start new thread</button>
+              <button type="button" class="button" data-agent-action="cancel-new-thread">Cancel</button>
+            </div>
+            <p class="thread-description" id="agent-description" hidden></p>
+            <p class="thread-notice" id="agent-notice" role="status" hidden></p>
+            <div class="thread-messages" id="agent-messages" aria-live="polite"></div>
+            <div class="thread-status" id="agent-status" role="status" hidden>
+              <span id="agent-status-text"></span>
+              <button type="button" class="button" data-agent-action="interrupt">Interrupt</button>
+            </div>
+            <div class="thread-request" id="agent-request" hidden></div>
+            <form class="composer" id="agent-composer" hidden>
+              <label class="composer-label" id="agent-input-label" for="agent-input"></label>
+              <div class="composer-row">
+                <textarea class="composer-input" id="agent-input" rows="2"></textarea>
+                <button type="submit" class="button button-primary" id="agent-send">Send</button>
+              </div>
+              <p class="composer-reason" id="agent-composer-reason" hidden></p>
+              <p class="composer-failure" id="agent-failure" role="status" hidden></p>
+            </form>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-focus" data-view="focus" aria-label="Focus" hidden>
         <div class="notice" id="focus-notice" role="status" hidden>
           <span>Focus is not responding.</span>
@@ -78,6 +129,7 @@
     </main>
   </div>
   <script src="/assets/routines.js"></script>
+  <script src="/assets/agents.js"></script>
   <script src="/assets/shell.js"></script>
 </body>
 </html>

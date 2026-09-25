@@ -1,5 +1,5 @@
-// Dashboard shell: switches between Home, Routines, Focus, and Daily Brief
-// with the History API, creates each child frame the first time its view is
+// Dashboard shell: switches between Home, Agents, Routines, Focus, and Daily
+// Brief with the History API, creates each child frame the first time its view is
 // shown and keeps it afterwards, and keeps one copy of the server's state.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
@@ -21,8 +21,8 @@
 (function () {
   'use strict';
 
-  var ROUTES = { '/': 'home', '/routines': 'routines', '/focus': 'focus', '/brief': 'brief' };
-  var TITLES = { home: 'Home', routines: 'Routines', focus: 'Focus', brief: 'Daily Brief' };
+  var ROUTES = { '/': 'home', '/agents': 'agents', '/routines': 'routines', '/focus': 'focus', '/brief': 'brief' };
+  var TITLES = { home: 'Home', agents: 'Agents', routines: 'Routines', focus: 'Focus', brief: 'Daily Brief' };
   var FALLBACK_POLL_MS = 30000;
   var STATE_TIMEOUT_MS = 5000;
   var BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
@@ -49,10 +49,12 @@
   var reconnectTimer = null;
   var fallbackTimer = null;
 
-  var routines = window.DashboardRoutines ? window.DashboardRoutines.create({
+  var shellApi = {
     requestState: function () { fetchState(); },
     isStreaming: function () { return streaming; },
-  }) : null;
+  };
+  var routines = window.DashboardRoutines ? window.DashboardRoutines.create(shellApi) : null;
+  var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -149,6 +151,7 @@
     $('home-routines').textContent = !list ? '' : list.refreshedAt
       ? countLabel(list.items.length, 'routine', 'routines')
       : 'Not refreshed yet';
+    $('home-agents').textContent = agents && state ? window.DashboardAgents.summary(state) : '';
 
     // Focus: mount once it answers; afterwards keep the frame and only report.
     if (fresh && current === 'focus' && !frames.focus && focusAvailable()) mountFocus();
@@ -188,6 +191,7 @@
     if (fresh) applyRequests();
     render(fresh);
     if (routines) routines.update(state, keys);
+    if (agents) agents.update(state, keys);
   }
 
   function isSnapshot(body) {
@@ -341,6 +345,10 @@
       if (view === 'routines') routines.show();
       else routines.hide();
     }
+    if (agents) {
+      if (view === 'agents') agents.show();
+      else agents.hide();
+    }
     render(false);
     fetchState();
   }
@@ -363,7 +371,9 @@
     if (url.origin !== location.origin || url.hash || url.search) return;
     if (!Object.prototype.hasOwnProperty.call(ROUTES, url.pathname)) return;
     event.preventDefault();
-    if (url.pathname !== location.pathname) history.pushState(null, '', url.pathname);
+    // A view link drops any query, so Agents from an open thread returns
+    // to the list.
+    if (url.pathname !== location.pathname || location.search) history.pushState(null, '', url.pathname);
     show(viewFor(url.pathname));
   });
 
@@ -375,9 +385,11 @@
     if (document.hidden) {
       disconnect();
       if (routines) routines.hide();
+      if (agents) agents.hide();
     } else {
       connect();
       if (routines && current === 'routines') routines.show();
+      if (agents && current === 'agents') agents.show();
     }
   });
 

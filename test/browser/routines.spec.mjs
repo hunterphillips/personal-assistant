@@ -279,21 +279,19 @@ test.describe('with no routines registered', () => {
   });
 });
 
-test('the nav lists Home, Routines, Focus, and Daily Brief, and unknown paths show Home', async ({ page, hub }) => {
+test('the nav lists Home, Agents, Routines, Focus, and Daily Brief, and unknown paths show Home', async ({ page, hub }) => {
   await page.goto(`${hub.origin}/`);
   await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link'))
-    .toHaveText(['Home', 'Routines', 'Focus', 'Daily Brief']);
-  await expect(page.locator('#view-home .destination-name')).toHaveText(['Routines', 'Focus', 'Daily Brief']);
+    .toHaveText(['Home', 'Agents', 'Routines', 'Focus', 'Daily Brief']);
+  await expect(page.locator('#view-home .destination-name')).toHaveText(['Agents', 'Routines', 'Focus', 'Daily Brief']);
   await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
   await page.locator('#view-home').getByRole('link', { name: /Routines/ }).click();
   await expect(page).toHaveURL(`${hub.origin}/routines`);
   await expectView(page, 'routines', 'Routines');
   // The view opened with nothing refreshed, so it refreshed once.
   await expect.poll(() => hub.routines.calls).toBe(1);
-  for (const path of ['/agents', '/goals']) {
-    await page.goto(`${hub.origin}${path}`);
-    await expectView(page, 'home', 'Home');
-  }
+  await page.goto(`${hub.origin}/goals`);
+  await expectView(page, 'home', 'Home');
 });
 
 test.describe('stream client', () => {
