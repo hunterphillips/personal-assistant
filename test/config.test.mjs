@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -12,10 +13,34 @@ test('defaults resolve from the source location', () => {
   assert.equal(config.publicOrigin, null);
   assert.equal(config.briefsDir, path.resolve(APP_ROOT, '../../daily-brief/briefs'));
   assert.ok(path.isAbsolute(config.briefsDir));
+  assert.equal(config.registryPath, path.resolve(APP_ROOT, '../../registry/agents.json'));
+  assert.ok(path.isAbsolute(config.registryPath));
+  assert.equal(config.launchAgentsDir, path.join(os.homedir(), 'Library', 'LaunchAgents'));
+  assert.ok(path.isAbsolute(config.launchAgentsDir));
   assert.deepEqual([...config.allowedHosts], ['127.0.0.1:4243', 'localhost:4243']);
   assert.deepEqual([...config.allowedOrigins], ['http://127.0.0.1:4243', 'http://localhost:4243']);
   assert.equal(config.limits.focusBodyBytes, 1_000_000);
   assert.equal(config.limits.feedbackBodyBytes, 131_072);
+  assert.equal(config.timeouts.launchctlMs, 3_000);
+});
+
+test('registry path and launch agents dir overrides are honored', () => {
+  const config = loadConfig({
+    DASHBOARD_REGISTRY_PATH: '/etc/personal-assistant/agents.json',
+    DASHBOARD_LAUNCH_AGENTS_DIR: '/etc/launchd-agents',
+  });
+  assert.equal(config.registryPath, '/etc/personal-assistant/agents.json');
+  assert.equal(config.launchAgentsDir, '/etc/launchd-agents');
+});
+
+test('a relative registry path override resolves from APP_ROOT', () => {
+  const config = loadConfig({ DASHBOARD_REGISTRY_PATH: '../registry/other.json' });
+  assert.equal(config.registryPath, path.resolve(APP_ROOT, '../registry/other.json'));
+});
+
+test('a relative launch agents dir override resolves from APP_ROOT', () => {
+  const config = loadConfig({ DASHBOARD_LAUNCH_AGENTS_DIR: 'var/launchd' });
+  assert.equal(config.launchAgentsDir, path.resolve(APP_ROOT, 'var/launchd'));
 });
 
 test('defaults do not depend on the working directory', () => {

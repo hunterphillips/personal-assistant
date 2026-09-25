@@ -12,10 +12,9 @@ in the umbrella directory.
 
 ## Status
 
-The server, the Focus proxy, the Daily Brief routes, and the shell are built
-and tested locally. The LaunchAgent is not installed and the Tailscale cutover
-has not been done: the tailnet still reaches Focus directly, and the old brief
-server still runs. Both steps are in [docs/operations.md](docs/operations.md).
+The LaunchAgent has been installed and Tailscale Serve has pointed at the
+dashboard since 2026-09-23. The old brief server on 8765 is retired.
+Operations are in [docs/operations.md](docs/operations.md).
 
 ## Routes
 
@@ -193,6 +192,8 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_PUBLIC_ORIGIN` | unset | The tailnet `https://` origin. When set, its host is accepted as a Host header and it is accepted as an Origin. When unset, only `127.0.0.1:<port>` and `localhost:<port>` are accepted. |
 | `DASHBOARD_BRIEFS_DIR` | `../../daily-brief/briefs` | Resolved from this directory, not the working directory. |
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
+| `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
+| `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
 
 The server always binds `127.0.0.1`. PUT and POST requests must send an
 `Origin` that matches the request's Host, and JSON unless they are one of the
