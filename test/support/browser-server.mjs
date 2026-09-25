@@ -7,7 +7,13 @@
 //     certificate, with DASHBOARD_PUBLIC_ORIGIN set to that https origin so
 //     its Host and Origin pass the app's checks.
 // Briefs live in a new temporary directory and are invented by
-// writeBrief(). Nothing here reads the real briefs directory or connects to
+// writeBrief(). The registry and routines are in-memory fakes seeded from
+// the options (see controlledRegistry and controlledRoutines); `state` is the
+// state hub itself. stopStreams() ends every event stream with `bye` and
+// leaves the app refusing new ones (503 shutting_down), as during shutdown;
+// restartApp() then puts a new app handler over the same hub, as after a
+// restart. requests(path) lists what the app received on a path, with the
+// status it sent. Nothing here reads the real briefs directory or connects to
 // ports 4242 or 4243. stop() closes everything and removes the temporary
 // directories.
 
@@ -29,7 +35,13 @@ const FORBIDDEN_PORTS = new Set([4242, 4243]);
 
 export { focusSourceAvailable };
 
-export async function startHub({ withFocus = true } = {}) {
+// Options:
+//   withFocus  start the isolated Focus copy (default true)
+//   agents     registry agents (default none)
+//   registry   { ok, error } to seed a registry that could not be read
+//   routines   { items, focusAvailable, refreshedAt }: when given, the hub is
+//              refreshed once at startup so the snapshot holds them
+export async function startHub({ withFocus = true, agents = [], registry: registryState, routines: routinesSeed } = {}) {
   const cleanups = [];
   const context = { after: (fn) => cleanups.push(fn) };
   const stop = async () => {
@@ -64,14 +76,26 @@ export async function startHub({ withFocus = true } = {}) {
     });
     const focusRoutes = createFocusProxy(config);
     const briefRoutes = createBriefRoutes(config);
-    const hub = createTestHub({ config, focus: focusRoutes, brief: briefRoutes });
-    const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub, log: () => {} });
+    const registry = controlledRegistry({ agents, ...registryState });
+    const routines = controlledRoutines(routinesSeed);
+    const hub = createTestHub({ config, focus: focusRoutes, brief: briefRoutes, registry, routines });
+    if (routinesSeed) {
+      await hub.refreshRoutines();
+      routines.calls = 0;
+    }
+    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub, log: () => {} });
+    let handler = newHandler();
     cleanups.push(async () => {
       handler.closeStreams();
       hub.close();
     });
-    plain.on('request', handler);
-    secure.on('request', handler);
+    const seen = [];
+    const dispatch = (req, res) => {
+      seen.push({ method: req.method, path: (req.url ?? '').split('?')[0], res });
+      handler(req, res);
+    };
+    plain.on('request', dispatch);
+    secure.on('request', dispatch);
 
     return {
       origin: `http://127.0.0.1:${plainPort}`,
@@ -81,12 +105,86 @@ export async function startHub({ withFocus = true } = {}) {
       writeBrief: (date, options) => writeFile(path.join(briefsDir, `viewer-${date}.html`), inventedViewer({ date, ...options })),
       writeRawBrief: (date, html) => writeFile(path.join(briefsDir, `viewer-${date}.html`), html),
       readFeedback: (date) => readFile(path.join(briefsDir, `feedback-${date}.md`), 'utf8'),
+      state: hub,
+      // Requests the app received, with the status sent so far (null before
+      // headers go out). An open event stream shows 200.
+      requests: (pathname) => seen
+        .filter((entry) => entry.path === pathname)
+        .map((entry) => ({ method: entry.method, status: entry.res.headersSent ? entry.res.statusCode : null })),
+      registry,
+      routines,
+      stopStreams: () => handler.closeStreams(),
+      restartApp: () => {
+        handler.closeStreams();
+        handler = newHandler();
+      },
       stop,
     };
   } catch (error) {
     await stop();
     throw error;
   }
+}
+
+// A registry held in memory. set(fields) replaces what current() returns and
+// notifies the hub, as a changed registry file would.
+function controlledRegistry({ ok = true, error = null, agents = [] }) {
+  const listeners = new Set();
+  const build = (fields) => Object.freeze({
+    ok: fields.ok,
+    error: fields.error,
+    agents: fields.ok ? fields.agents : [],
+    loadedAt: fields.ok ? '2026-01-01T00:00:00.000Z' : null,
+    path: '/invented/agents.json',
+  });
+  let fields = { ok, error, agents };
+  let current = build(fields);
+  return {
+    current: () => current,
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    set(next) {
+      fields = { ...fields, ...next };
+      current = build(fields);
+      for (const fn of listeners) fn(current);
+    },
+    start: async () => current,
+    stop() {},
+  };
+}
+
+// Routines that run no subprocess. `calls` counts refreshes; the fields may
+// be changed between refreshes. hold() makes refreshes wait until the
+// returned release() is called; `fail` makes them throw. `refreshedAt`, when
+// set, is used once and then cleared, so later refreshes report now.
+function controlledRoutines({ items = [], focusAvailable = null, refreshedAt = null } = {}) {
+  const fake = {
+    calls: 0,
+    items,
+    focusAvailable,
+    refreshedAt,
+    fail: false,
+    gate: null,
+    hold() {
+      let release;
+      fake.gate = new Promise((resolve) => { release = resolve; });
+      return () => {
+        fake.gate = null;
+        release();
+      };
+    },
+    async refresh() {
+      fake.calls += 1;
+      if (fake.gate) await fake.gate;
+      if (fake.fail) throw new Error('invented refresh failure');
+      const at = fake.refreshedAt ?? new Date().toISOString();
+      fake.refreshedAt = null;
+      return { refreshedAt: at, focusAvailable: fake.focusAvailable, routines: fake.items };
+    },
+  };
+  return fake;
 }
 
 async function selfSignedCertificate(root) {

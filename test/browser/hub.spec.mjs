@@ -2,60 +2,14 @@
 // copy with a synthetic board and invented brief viewers in a temporary
 // directory. See test/support/browser-server.mjs.
 
-import { expect, test as base } from '@playwright/test';
-
-import { focusSourceAvailable, startHub } from '../support/browser-server.mjs';
+import { expect, expectView, nav, needsFocus, test } from '../support/browser-test.mjs';
 
 const DATE = '2026-09-15';
 const NEXT_DATE = '2026-09-16';
-const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
-
-const test = base.extend({
-  withFocus: [true, { option: true }],
-  hub: async ({ withFocus }, use) => {
-    const hub = await startHub({ withFocus });
-    try {
-      await use(hub);
-    } finally {
-      await hub.stop();
-    }
-  },
-  // Nothing leaves the machine: requests to any other host are aborted.
-  context: async ({ context }, use) => {
-    await context.route((url) => !LOCAL_HOSTS.has(url.hostname), (route) => route.abort());
-    await use(context);
-  },
-  // Fails the test on any CSP report in the shell or its frames, and on
-  // uncaught shell errors.
-  policyViolations: [async ({ page }, use) => {
-    const violations = [];
-    page.on('console', (message) => {
-      if (/Content Security Policy|Refused to (load|execute|apply|connect|frame)/i.test(message.text())) {
-        violations.push(message.text());
-      }
-    });
-    page.on('pageerror', (error) => violations.push(`pageerror: ${error.message}`));
-    await use(violations);
-    expect(violations).toEqual([]);
-  }, { auto: true }],
-});
-
-const needsFocus = () => test.skip(!focusSourceAvailable(), 'Focus checkout not found');
 
 async function frameOf(page, selector) {
   const handle = await page.locator(selector).elementHandle();
   return handle.contentFrame();
-}
-
-function nav(page, name) {
-  return page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link', { name, exact: true });
-}
-
-async function expectView(page, view, title) {
-  await expect(page.locator(`#view-${view}`)).toBeVisible();
-  await expect(page.locator('section.view:visible')).toHaveCount(1);
-  await expect(nav(page, title)).toHaveAttribute('aria-current', 'page');
-  await expect(page).toHaveTitle(`${title} · Dashboard`);
 }
 
 async function focusBoardReady(page) {
@@ -236,7 +190,7 @@ test('when Focus stops, the shell reports it and keeps the mounted frame', async
   await nav(page, 'Focus').click();
   const notice = page.locator('#focus-notice');
   await expect(notice).toContainText('Focus is not responding.');
-  const retried = page.waitForRequest((r) => r.url().endsWith('/api/dashboard/status'));
+  const retried = page.waitForRequest((r) => r.url().endsWith('/api/state'));
   await notice.getByRole('button', { name: 'Retry' }).click();
   await retried;
   await expect(notice).toBeVisible();
@@ -255,7 +209,7 @@ test.describe('with Focus not running', () => {
     const notice = page.locator('#focus-notice');
     await expect(notice).toContainText('Focus is not responding.');
     await expect(page.locator('#focus-frame')).toHaveCount(0);
-    const retried = page.waitForRequest((r) => r.url().endsWith('/api/dashboard/status'));
+    const retried = page.waitForRequest((r) => r.url().endsWith('/api/state'));
     await notice.getByRole('button', { name: 'Retry' }).click();
     await retried;
     await expect(notice).toBeVisible();
@@ -421,12 +375,14 @@ test('navigation and the brief Save control stay reachable, with one scroll owne
   await briefReady(page);
   const viewport = page.viewportSize();
 
-  for (const name of ['Home', 'Focus', 'Daily Brief']) {
+  const names = ['Home', 'Routines', 'Focus', 'Daily Brief'];
+  await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(names);
+  for (const name of names) {
     const link = nav(page, name);
     await expect(link).toBeInViewport();
     await link.click({ trial: true });
   }
-  const tops = await Promise.all(['Home', 'Focus', 'Daily Brief'].map(async (name) => (await nav(page, name).boundingBox()).y));
+  const tops = await Promise.all(names.map(async (name) => (await nav(page, name).boundingBox()).y));
   if (testInfo.project.name === 'mobile-webkit') expect(new Set(tops).size).toBe(1);
   else expect(tops[1]).toBeGreaterThan(tops[0]);
 

@@ -1,0 +1,374 @@
+// The Routines view and the shell's event stream client, in real browsers
+// against the in-memory registry and routines of test/support/browser-server.mjs.
+// Pause and Resume reach the isolated Focus copy, whose launchd stubs refuse.
+
+import { expect, expectView, nav, needsFocus, test } from '../support/browser-test.mjs';
+
+const DATE = '2026-09-15';
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const ago = (ms) => new Date(Date.now() - ms).toISOString();
+
+const AGENTS = [
+  { id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented.', group: 'personal', kind: 'system' },
+  { id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented.', group: 'personal', kind: 'persona' },
+  { id: 'scribe', name: 'Scribe', role: 'Drafts', description: 'Invented, with no routines.', group: 'work', kind: 'persona' },
+  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona' },
+];
+
+function routine(agent, label, fields) {
+  const name = label.replace(/^com\.(focus|hunter)\./, '');
+  return {
+    label,
+    agentId: agent.id,
+    agentName: agent.name,
+    name,
+    schedule: { kind: 'calendar', text: 'Hourly at :35' },
+    logPath: `/invented/logs/${name}.log`,
+    lastRun: ago(12.5 * MINUTE),
+    outcome: 'ok',
+    exitStatus: 0,
+    failures24h: null,
+    paused: null,
+    source: 'launchctl',
+    available: true,
+    ...fields,
+  };
+}
+
+function focusScan(name, fields) {
+  return routine(AGENTS[0], `com.focus.scan-${name}`, { source: 'focus', exitStatus: null, paused: false, failures24h: 0, ...fields });
+}
+
+function items({ paused = true } = {}) {
+  return [
+    focusScan('gmail', { outcome: 'wrote', paused, failures24h: 2 }),
+    focusScan('git', { outcome: 'running', paused }),
+    focusScan('notes', { outcome: 'skipped', lastRun: ago(3.5 * HOUR) }),
+    focusScan('work', { outcome: 'failed', failures24h: 1 }),
+    focusScan('calendar', { outcome: 'no change' }),
+    routine(AGENTS[1], 'com.hunter.brain-drain', { schedule: { kind: 'calendar', text: 'Daily at 02:30' }, lastRun: ago(30 * HOUR) }),
+    routine(AGENTS[1], 'com.hunter.brain-audit', { outcome: 'failed', exitStatus: 78, lastRun: ago(5 * 24 * HOUR) }),
+    routine(AGENTS[1], 'com.hunter.brain-refresh', { outcome: 'not loaded', exitStatus: null, lastRun: null }),
+    routine(AGENTS[3], 'com.hunter.cfo.daily', {
+      schedule: { kind: 'unavailable', text: 'Schedule unavailable' },
+      outcome: 'unknown', exitStatus: null, lastRun: null, available: false,
+    }),
+  ];
+}
+
+function seeded(routines = {}) {
+  return { build: () => ({ agents: AGENTS, routines: { items: items(), focusAvailable: true, refreshedAt: ago(5_000), ...routines } }) };
+}
+
+function card(page, name) {
+  return page.locator('.routine-card').filter({ has: page.getByRole('heading', { name, exact: true }) });
+}
+
+function row(page, name) {
+  return page.locator('.routine-row').filter({ has: page.locator('.routine-name', { hasText: new RegExp(`^${name}$`) }) });
+}
+
+function pad(n) {
+  return String(n).padStart(2, '0');
+}
+
+test.describe('with seeded routines', () => {
+  test.use({ hubOptions: seeded() });
+
+  test('each agent with routines gets a card with its rows and outcome badges', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/routines`);
+    await expectView(page, 'routines', 'Routines');
+    await expect(page.getByRole('heading', { name: 'Routines', level: 1 })).toBeVisible();
+    await expect(page.locator('#routines-updated')).toHaveText('Updated just now');
+    await expect(page.locator('#routines-refresh')).toHaveText('Refresh');
+
+    await expect(page.locator('.routine-card .card-name')).toHaveText(['Focus', 'Second brain', 'CFO']);
+    await expect(card(page, 'Focus').locator('.role-chip')).toHaveText('Tasks');
+    await expect(card(page, 'CFO').locator('.role-chip')).toHaveText('Money');
+
+    const expected = [
+      ['scan-gmail', 'Wrote'],
+      ['scan-git', 'Running'],
+      ['scan-notes', 'Skipped'],
+      ['scan-work', 'Failed'],
+      ['scan-calendar', 'No change'],
+      ['brain-drain', 'OK'],
+      ['brain-audit', 'Failed (exit 78)'],
+      ['brain-refresh', 'Not loaded'],
+      ['cfo.daily', 'Unknown'],
+    ];
+    for (const [name, badge] of expected) await expect(row(page, name).locator('.badge')).toHaveText(badge);
+
+    await expect(row(page, 'scan-gmail').locator('.routine-schedule')).toHaveText('Hourly at :35');
+    await expect(row(page, 'scan-gmail').locator('.routine-run')).toHaveText(/^12 minutes ago\s*2 failures today$/);
+    await expect(row(page, 'scan-work').locator('.routine-failures')).toHaveText('1 failure today');
+    await expect(row(page, 'scan-git').locator('.routine-failures')).toHaveCount(0);
+    await expect(row(page, 'scan-notes').locator('.routine-run')).toHaveText('3 hours ago');
+    const yesterday = new Date(Date.parse(items()[5].lastRun));
+    await expect(row(page, 'brain-drain').locator('.routine-run')).toHaveText(
+      `Yesterday ${pad(yesterday.getHours())}:${pad(yesterday.getMinutes())}`);
+    await expect(row(page, 'brain-audit').locator('.routine-run')).toHaveText(/^[A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}$/);
+    await expect(row(page, 'brain-refresh').locator('.routine-run')).toHaveText('Never run');
+    await expect(row(page, 'cfo.daily').locator('.routine-schedule')).toHaveText('Schedule unavailable');
+
+    const focus = card(page, 'Focus');
+    await expect(focus.locator('.card-header .badge')).toHaveText('Paused');
+    await expect(focus.getByRole('button')).toHaveText(['Resume']);
+    await expect(card(page, 'Second brain').getByRole('button')).toHaveCount(0);
+    await expect(focus.locator('.card-note')).toHaveCount(0);
+
+    // A fresh refreshedAt means opening the view did not refresh.
+    expect(hub.routines.calls).toBe(0);
+
+    for (const button of await page.locator('#view-routines button').all()) {
+      expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test('Refresh posts the control and reads Refreshing… until the refresh finishes', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/routines`);
+    const refresh = page.locator('#routines-refresh');
+    await expect(refresh).toHaveText('Refresh');
+    const release = hub.routines.hold();
+    const posted = page.waitForRequest((r) => r.url().endsWith('/api/routines/refresh') && r.method() === 'POST');
+    await refresh.click();
+    await posted;
+    await expect(refresh).toHaveText('Refreshing…');
+    await expect(refresh).toBeDisabled();
+    hub.routines.items = items().slice(0, 5);
+    release();
+    await expect(refresh).toHaveText('Refresh');
+    await expect(refresh).toBeEnabled();
+    await expect(page.locator('.routine-card .card-name')).toHaveText(['Focus']);
+    expect(hub.routines.calls).toBe(1);
+  });
+
+  test('Resume follows the state once the control succeeds', async ({ page, hub }) => {
+    let answer;
+    const answered = new Promise((resolve) => { answer = resolve; });
+    await page.route('**/api/resume', async (route) => {
+      await answered;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+    await page.goto(`${hub.origin}/routines`);
+    const focus = card(page, 'Focus');
+    const button = focus.getByRole('button', { name: 'Resume' });
+    await button.click();
+    await expect(button).toBeDisabled();
+    answer();
+    await expect(button).toBeEnabled();
+
+    // What the server does after a real resume: refresh routines.
+    hub.routines.items = items({ paused: false });
+    await hub.state.refreshRoutines();
+    await expect(focus.getByRole('button')).toHaveText(['Pause']);
+    await expect(focus.locator('.card-header .badge')).toHaveCount(0);
+    await expect(focus.locator('.card-error')).toHaveCount(0);
+  });
+
+  test('Resume reaches the isolated Focus, whose refusal is reported in the card', async ({ page, hub }) => {
+    needsFocus();
+    await page.goto(`${hub.origin}/routines`);
+    const focus = card(page, 'Focus');
+    const response = page.waitForResponse((r) => r.url().endsWith('/api/resume'));
+    await focus.getByRole('button', { name: 'Resume' }).click();
+    // The fixture's launchd stubs exit 1, so Focus answers 500.
+    expect((await response).status()).toBe(500);
+    await expect(focus.locator('.card-error')).toHaveText('Focus did not respond.');
+    await expect(focus.getByRole('button', { name: 'Resume' })).toBeEnabled();
+    expect(hub.routines.calls).toBe(0);
+  });
+
+  test('a failed refresh says so and leaves Refresh available', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/routines`);
+    await expect(page.locator('.routine-card')).toHaveCount(3);
+    hub.routines.fail = true;
+    await page.locator('#routines-refresh').click();
+    await expect(page.locator('#routines-message')).toHaveText('Routines could not be refreshed.');
+    await expect(page.locator('#routines-refresh')).toBeEnabled();
+    await expect(page.locator('.routine-card')).toHaveCount(3);
+  });
+
+  test('rows stack at 390px and line up in columns on a wide screen, without horizontal scroll', async ({ page, hub }) => {
+    const wide = page.viewportSize().width >= 720;
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${hub.origin}/routines`);
+    await expect(page.locator('.routine-card')).toHaveCount(3);
+    const stacked = row(page, 'scan-gmail');
+    const name = await stacked.locator('.routine-name').boundingBox();
+    const schedule = await stacked.locator('.routine-schedule').boundingBox();
+    expect(schedule.y).toBeGreaterThanOrEqual(name.y + name.height - 1);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    for (const box of await page.locator('.routine-card').evaluateAll((cards) => cards.map((c) => c.getBoundingClientRect().right))) {
+      expect(box).toBeLessThanOrEqual(390);
+    }
+
+    if (!wide) return;
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const lefts = await page.locator('.routine-schedule').evaluateAll((cells) => cells.map((c) => Math.round(c.getBoundingClientRect().left)));
+    expect(new Set(lefts).size).toBe(1);
+    const inline = await stacked.locator('.routine-schedule').boundingBox();
+    const inlineName = await stacked.locator('.routine-name').boundingBox();
+    expect(Math.abs(inline.y - inlineName.y)).toBeLessThan(inlineName.height);
+    expect((await page.locator('.routine-card').first().boundingBox()).width).toBeLessThanOrEqual(720);
+  });
+});
+
+test.describe('with stale routines', () => {
+  test.use({ hubOptions: seeded({ refreshedAt: ago(5 * MINUTE) }) });
+
+  test('opening the view refreshes once', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await expect(page.locator('#home-routines')).toHaveText('9 routines');
+    expect(hub.routines.calls).toBe(0);
+    await nav(page, 'Routines').click();
+    await expect(page.locator('#routines-updated')).toHaveText('Updated just now');
+    await page.waitForTimeout(300);
+    expect(hub.routines.calls).toBe(1);
+  });
+});
+
+test.describe('with Focus unreachable during the refresh', () => {
+  test.use({ hubOptions: seeded({ focusAvailable: false }) });
+
+  test('the Focus card says it is showing launchd status', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/routines`);
+    await expect(card(page, 'Focus').locator('.card-note')).toHaveText('Focus is not responding; showing launchd status.');
+    await expect(card(page, 'Second brain').locator('.card-note')).toHaveCount(0);
+  });
+});
+
+test.describe('with an unreadable registry', () => {
+  test.use({ hubOptions: { registry: { ok: false, error: 'registry_invalid' }, routines: {} } });
+
+  test('the view says the registry could not be read', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/routines`);
+    const message = page.locator('#routines-message');
+    await expect(message).toHaveText('The registry could not be read.');
+    await expect(message).toHaveAttribute('title', 'registry_invalid');
+    await expect(page.locator('.routine-card')).toHaveCount(0);
+  });
+});
+
+test.describe('with no routines registered', () => {
+  test.use({ hubOptions: seeded({ items: [] }) });
+
+  test('the view says none are registered', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/routines`);
+    await expect(page.locator('#routines-message')).toHaveText('No routines are registered.');
+    await expect(page.locator('.routine-card')).toHaveCount(0);
+    await expect(page.locator('#routines-refresh')).toBeEnabled();
+  });
+});
+
+test('the nav lists Home, Routines, Focus, and Daily Brief, and unknown paths show Home', async ({ page, hub }) => {
+  await page.goto(`${hub.origin}/`);
+  await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link'))
+    .toHaveText(['Home', 'Routines', 'Focus', 'Daily Brief']);
+  await expect(page.locator('#view-home .destination-name')).toHaveText(['Routines', 'Focus', 'Daily Brief']);
+  await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+  await page.locator('#view-home').getByRole('link', { name: /Routines/ }).click();
+  await expect(page).toHaveURL(`${hub.origin}/routines`);
+  await expectView(page, 'routines', 'Routines');
+  // The view opened with nothing refreshed, so it refreshed once.
+  await expect.poll(() => hub.routines.calls).toBe(1);
+  for (const path of ['/agents', '/goals']) {
+    await page.goto(`${hub.origin}${path}`);
+    await expectView(page, 'home', 'Home');
+  }
+});
+
+test.describe('stream client', () => {
+  function countRequests(page, suffix) {
+    const seen = [];
+    page.on('request', (r) => {
+      if (new URL(r.url()).pathname === suffix) seen.push(r);
+    });
+    return seen;
+  }
+
+  test('Home follows deltas without refetching the state', async ({ page, hub }) => {
+    await hub.writeBrief(DATE);
+    const states = countRequests(page, '/api/state');
+    await page.goto(`${hub.origin}/`);
+    await expect(page.locator('#home-brief')).toHaveText(DATE);
+    await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+    const before = states.length;
+
+    hub.routines.items = items().slice(0, 1);
+    await hub.state.refreshRoutines();
+    await expect(page.locator('#home-routines')).toHaveText('1 routine');
+    await hub.writeBrief('2026-09-16');
+    await hub.state.refreshStatus();
+    await expect(page.locator('#home-brief')).toHaveText('2026-09-16');
+    expect(states.length).toBe(before);
+  });
+
+  test('a reload event fetches the state again', async ({ page, hub }) => {
+    const states = countRequests(page, '/api/state');
+    let firstState;
+    const stateDone = new Promise((resolve) => { firstState = resolve; });
+    page.on('requestfinished', (r) => {
+      if (new URL(r.url()).pathname === '/api/state') firstState();
+    });
+    let first = true;
+    await page.route('**/api/events', async (route) => {
+      if (!first) return route.continue();
+      first = false;
+      await stateDone;
+      const snapshot = hub.state.snapshot();
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: `event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\nevent: reload\ndata: {}\n\n`,
+      });
+    });
+    await page.goto(`${hub.origin}/`);
+    await expect.poll(() => states.length).toBe(2);
+  });
+
+  const streamStatuses = (hub) => hub.requests('/api/events').map((entry) => entry.status);
+
+  test('after the server ends the stream, the client reconnects and keeps following', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+    await expect.poll(() => streamStatuses(hub)).toEqual([200]);
+
+    hub.restartApp();
+    await expect.poll(() => streamStatuses(hub)).toEqual([200, 200]);
+    await expect(page.locator('#shell-notice')).toBeHidden();
+    hub.routines.items = items().slice(0, 2);
+    await hub.state.refreshRoutines();
+    await expect(page.locator('#home-routines')).toHaveText('2 routines');
+  });
+
+  test('while new streams are refused the notice shows, and the next snapshot clears it', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await expect.poll(() => streamStatuses(hub)).toEqual([200]);
+
+    hub.stopStreams();
+    const notice = page.locator('#shell-notice');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('The dashboard is not responding.');
+    expect(streamStatuses(hub).filter((status) => status === 503).length).toBeGreaterThanOrEqual(2);
+
+    hub.restartApp();
+    await expect(notice).toBeHidden({ timeout: 10_000 });
+    expect(streamStatuses(hub).at(-1)).toBe(200);
+  });
+
+  test('Retry on the notice reconnects at once', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+    hub.stopStreams();
+    const notice = page.locator('#shell-notice');
+    await expect(notice).toBeVisible();
+    hub.restartApp();
+    const reopened = page.waitForResponse((r) => r.url().endsWith('/api/events') && r.status() === 200);
+    await notice.getByRole('button', { name: 'Retry' }).click();
+    await reopened;
+    await expect(notice).toBeHidden({ timeout: 1_000 });
+  });
+});

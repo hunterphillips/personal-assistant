@@ -2,8 +2,8 @@
 
 A local Node server that will become the single private entry point for Focus
 and the Daily Brief. It listens on `127.0.0.1:4243`; Tailscale serves it to the
-tailnet over HTTPS. The page is a shell with Home, Focus, and Daily Brief
-views. Focus runs in an iframe through a proxy to its own server. Briefs are
+tailnet over HTTPS. The page is a shell with Home, Routines, Focus, and Daily
+Brief views. Focus runs in an iframe through a proxy to its own server. Briefs are
 read from `daily-brief/briefs/`, and feedback is saved beside them.
 
 The plan is
@@ -22,11 +22,11 @@ Operations are in [docs/operations.md](docs/operations.md).
 | --- | --- |
 | `GET /`, `/focus`, `/brief`, `/routines`, `/agents`, `/goals` | The shell. |
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
-| `GET /api/state` | The state hub's snapshot (below). |
+| `GET /api/state` | Checks Focus and the brief, then returns the state hub's snapshot (below). |
 | `GET /api/events` | Server-Sent Events: the snapshot, then each change (below). |
 | `POST /api/routines/refresh` | Re-reads the routines and answers `{"ok": true, "revision": N}`. |
-| `GET /api/dashboard/status` | What the shell polls (below). Kept for one release while the shell moves to `/api/events`. |
-| `GET /assets/<name>` | Shell script, styles, and the brief bridge. |
+| `GET /api/dashboard/status` | Focus and brief status (below). The shell no longer reads it; kept for one release. |
+| `GET /assets/<name>` | Shell scripts, styles, and the brief bridge. |
 | `GET /embedded/focus`, `/api/focus`, `/api/status`; `PUT /api/focus`; `POST /api/pause`, `/api/resume`, `/api/refresh` | Forwarded to Focus (below). |
 | `GET /api/brief/latest` | Latest brief metadata. |
 | `GET /embedded/brief/<date>?revision=<revision>` | One brief viewer. |
@@ -75,7 +75,10 @@ snapshot; concurrent requests share one check. It stays for one release.
 status route reports (`available` is null and `state` is `unknown` before the
 first check). Agents leave out `cwd` and `routines`. `routines.items` is empty
 until the first refresh; a failed refresh keeps the previous items and sets
-`error` to `refresh_failed`. `GET /api/state` returns the snapshot.
+`error` to `refresh_failed`. `GET /api/state` refreshes Focus and the brief
+the same way the status route does (one shared check, bounded by
+`statusMs`) and returns the snapshot, so the shell can mount a frame from
+what it fetched.
 
 `GET /api/events` is a Server-Sent Events stream:
 
@@ -98,7 +101,9 @@ A stream is logged once, as `stream_closed`, when it ends. Once the server
 has begun shutting down, a new stream request gets 503 `shutting_down`.
 
 `POST /api/routines/refresh` follows the rules for the Focus controls: exact
-`Origin`, no body. A successful `POST /api/pause` or `/api/resume` also starts
+`Origin`, no body. It answers once the refresh has finished. `ok` means the
+control ran, not that the refresh worked; a failed refresh shows up in the
+state as `routines.error`. A successful `POST /api/pause` or `/api/resume` also starts
 a routines refresh.
 
 ### Daily Brief
@@ -116,7 +121,7 @@ save through the dashboard, with its own CSP. A date that is not a real
 calendar date is 404, and a revision that is not 64 lowercase hex characters
 is 400. If the file
 on disk no longer has that revision, the answer is 409 `revision_conflict`
-rather than a different brief; the shell then reads the status again and
+rather than a different brief; the shell then fetches the state again and
 offers the newer one.
 
 `POST /api/brief/feedback` takes JSON with exactly these keys:
@@ -182,40 +187,80 @@ when asked.
 
 ### Shell
 
-`public/index.html`, `public/shell.js`, and `public/styles.css` make up the
-page served at `/`, `/focus`, and `/brief`. The navigation links are ordinary
-links; the script switches views with the History API and handles Back and
-Forward, and a reload or bookmark opens the same view. Each frame is created
-the first time its view opens and stays in the page afterwards, hidden while
-another view is shown, so Focus keeps its state and the brief keeps its
-unsaved marks. The page has no inline script or style, as the shell CSP
-requires.
+`public/index.html`, `public/shell.js`, `public/routines.js`, and
+`public/styles.css` make up the page served at `/`, `/routines`, `/focus`,
+and `/brief`. `/agents` and `/goals` serve the same page, which shows Home
+there, as it does for any path it does not know. The navigation links are
+ordinary links; the script switches views with the History API and handles
+Back and Forward, and a reload or bookmark opens the same view. Each frame
+is created the first time its view opens and stays in the page afterwards,
+hidden while another view is shown, so Focus keeps its state and the brief
+keeps its unsaved marks. The page has no inline script or style, as the
+shell CSP requires.
 
-The script reads `/api/dashboard/status` on every view change and every 30
-seconds while the tab is visible, with a 5-second timeout. A frame is created
-only from an answer that has just arrived, never from the one kept since the
-previous check. What it does with the result:
+The shell keeps one copy of the state and gets it from the event stream.
+While the tab is visible it holds an `EventSource` on `/api/events`, and it
+closes it when the tab is hidden. A `snapshot` replaces the copy. A `delta`
+whose revision is one more than the copy's is merged in, key by key; any
+other revision means deltas were missed, and the shell fetches `/api/state`
+instead. `reload` also fetches `/api/state`. After `bye` the shell closes
+the stream and opens a new one half a second later.
+
+The browser's own `EventSource` stops for good on any answer other than
+200, including the 503 a stopping server sends, so the shell reconnects
+itself. On any stream error it closes the stream and tries again after 1,
+2, 4, 8, and then every 15 seconds; a snapshot resets the delay. Until a
+snapshot arrives it fetches `/api/state` every 30 seconds, so the views keep
+up. When a second attempt in a row has failed, the page shows "The
+dashboard is not responding." with Retry, which reconnects at once. Every
+view change also fetches `/api/state`, with a 5-second timeout.
+
+A frame is created only from state that has just arrived: a snapshot, a
+delta that changes `focus` or `brief`, or a finished `/api/state` fetch,
+never the copy kept since. What the shell does with `focus` and `brief`:
 
 - Focus not answering: the Focus view says "Focus is not responding." with
   Retry. A frame already open stays; otherwise none is created until Focus
   answers.
 - A different brief date or revision than the open frame: "A newer brief is
-  available." with "Load newer brief", which reads the status again and loads
+  available." with "Load newer brief", which fetches `/api/state` and loads
   what it names. The open frame stays until that is chosen.
 - A brief state other than `ready`: "No brief has been generated yet." for
-  `empty`, "The brief for <date> could not be opened." when the status names a
+  `empty`, "The brief for <date> could not be opened." when the state names a
   date, and "The latest brief file could not be read." otherwise. Focus is
   unaffected.
-- The status request failing: "The dashboard is not responding." with Retry.
 
 A frame stays hidden until its page loads. If the page comes back as a JSON
 error, such as a 409 for a brief replaced under the same date or a 502 from
-Focus, the frame stays hidden, the view shows its notice, and the status is
-read again at once. Retry reloads that frame.
+Focus, the frame stays hidden, the view shows its notice, and the state is
+fetched again at once. Retry reloads that frame.
+
+Home links to Routines, Focus, and the Daily Brief. Under Routines it shows
+the number of routines, or "Not refreshed yet" before the first refresh.
 
 Wide screens get a navigation column; below 720px it becomes a row across the
 top. The page is exactly one screen tall and each frame fills the rest, so the
 child page does its own scrolling and keeps its fixed bar in view.
+
+### Routines view
+
+The Routines view has one card for each agent that has routines, in
+registry order, with the agent's name and role. Each routine is a row with
+its name, schedule, last run, and outcome, and Focus scans with failures in
+the last 24 hours also show how many. Times under a day are relative ("12
+minutes ago"); older ones read "Yesterday 21:00" or "Sep 3 21:00". The
+header shows when the routines were last refreshed and has a Refresh button,
+which reads "Refreshing…" while a refresh runs.
+
+Routines are refreshed only on demand: when the view opens and the last
+refresh is missing or more than 60 seconds old, and when Refresh is chosen.
+The Focus card shows "Paused" when any scan is paused, and a Pause or
+Resume button that posts to the forwarded `/api/pause` or `/api/resume`;
+the server then refreshes the routines, and the card follows the state. If
+Focus refuses or does not answer, the card says "Focus did not respond." A
+registry that cannot be read, a failed refresh, and an empty list each get
+one plain sentence, and when Focus did not answer during the refresh the
+Focus card says its rows come from launchd.
 
 ## Commands
 
@@ -232,8 +277,9 @@ Requires Node 24 (`.nvmrc`).
   events on). Emulation does not test real touch hardware. Each test starts
   its own isolated Focus copy, the app over HTTP, and the same app over HTTPS
   with a throwaway self-signed certificate, all on ephemeral ports, with
-  invented brief viewers in a temporary directory
-  (`test/support/browser-server.mjs`). Only the HTTPS test's browser context
+  invented brief viewers in a temporary directory and an in-memory registry
+  and routines (`test/support/browser-server.mjs`). Shared fixtures are in
+  `test/support/browser-test.mjs`. Only the HTTPS test's browser context
   accepts that certificate. Requests to any other host are blocked, and a CSP
   violation fails the test. Output goes to the ignored `test-results/`.
   Install the browsers once with `npx playwright install chromium webkit`.
