@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { startDashboard } from '../server.mjs';
+import { TIMEOUTS } from '../lib/config.mjs';
+import { forcedExitMs, startDashboard } from '../server.mjs';
 import { freePort, tempDir } from './support/harness.mjs';
 import { openEvents } from './support/sse.mjs';
 
@@ -71,6 +72,13 @@ test('importing the handler and entry point opens no listener', () => {
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), []);
+});
+
+test('the forced exit comes after the drain, the abort grace, and the server grace', () => {
+  const orderly = TIMEOUTS.drainMs + TIMEOUTS.abortGraceMs + TIMEOUTS.shutdownMs;
+  assert.equal(forcedExitMs(TIMEOUTS), orderly + 1_000);
+  assert.equal(forcedExitMs(TIMEOUTS), 38_000);
+  assert.equal(forcedExitMs({ drainMs: 10, abortGraceMs: 20, shutdownMs: 30 }), 1_060);
 });
 
 test('startDashboard binds loopback and close releases the port', async (t) => {

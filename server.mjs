@@ -11,9 +11,10 @@
 // turns must bill the subscription, never an API key.
 //
 // Shutdown order: end event streams and refuse new sends (closeStreams),
-// close each adapter (which drains running turns for up to drainMs), close
-// the hub, stop the registry, then close the server (shutdownMs grace).
-// main() forces exit drainMs + shutdownMs after the signal.
+// close each adapter (which drains running turns for up to drainMs, then
+// aborts the rest and waits abortGraceMs for them), close the hub, stop the
+// registry, then close the server (shutdownMs grace). main() forces exit
+// forcedExitMs(timeouts) after the signal: one second past that sum.
 
 import http from 'node:http';
 
@@ -103,6 +104,12 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   return { server, config, close };
 }
 
+// How long main() gives the orderly shutdown before it forces the exit: the
+// drain, the abort grace, and the server's grace, plus one second of slack.
+export function forcedExitMs(timeouts) {
+  return timeouts.drainMs + timeouts.abortGraceMs + timeouts.shutdownMs + 1_000;
+}
+
 // Stops accepting connections, lets in-flight requests finish, and cuts any
 // that remain after `graceMs`.
 function closeServer(server, graceMs) {
@@ -138,8 +145,11 @@ async function main() {
 
   const stop = (signal) => {
     console.log(`dashboard: ${signal} received, shutting down`);
-    setTimeout(() => process.exit(1), config.timeouts.drainMs + config.timeouts.shutdownMs).unref();
-    close().then(() => process.exit(0));
+    setTimeout(() => process.exit(1), forcedExitMs(config.timeouts)).unref();
+    close().then(() => process.exit(0), (error) => {
+      console.error(`dashboard: shutdown failed: ${error?.message ?? error}`);
+      process.exit(1);
+    });
   };
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);

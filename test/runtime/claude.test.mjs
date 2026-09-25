@@ -483,6 +483,38 @@ test('close aborts a thread waiting on an answer at once instead of draining it'
   assert.ok(logs.some((entry) => entry.event === 'persona_turn_aborted' && entry.agentId === 'cfo'));
 });
 
+test('close waits only abortGraceMs from config for an aborted turn that never ends', async (t) => {
+  const query = fakeQuery(async function* () {
+    yield init();
+    await new Promise(() => {}); // ignores the abort
+  });
+  const { adapter } = await setup(t, { query, timeouts: { drainMs: 20, abortGraceMs: 40 } });
+  adapter.send(AGENT, 'Hi');
+  const started = Date.now();
+  await adapter.close();
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed >= 55 && elapsed < 1_000, String(elapsed));
+});
+
+test('New thread is refused once close has begun, so a drain never loses the pointer', async (t) => {
+  const release = gate();
+  const query = fakeQuery(async function* () {
+    yield init();
+    await release.promise;
+    yield result();
+  });
+  const { adapter, store } = await setup(t, { query });
+  const turn = adapter.send(AGENT, 'Hi');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const closing = adapter.close();
+  await assert.rejects(adapter.newThread(AGENT), { code: 'shutting_down' });
+  release.open();
+  await turn;
+  await closing;
+  await assert.rejects(adapter.newThread(AGENT), { code: 'shutting_down' });
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT });
+});
+
 test('New thread reports a failed clear as thread_reset_failed', async (t) => {
   const { adapter, store } = await setup(t);
   store.clearPointer = async () => { throw new Error('EACCES: permission denied'); };
