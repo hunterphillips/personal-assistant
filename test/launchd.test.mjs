@@ -334,9 +334,8 @@ test('dashboard-install refuses to render when an API key is in its environment'
   }
 });
 
-test('dashboard-install refuses to unload a dashboard with busy personas unless forced', async () => {
+test('dashboard-install refuses to unload a dashboard with busy personas unless forced, probing the loaded job\'s port', async () => {
   const fixture = await makeInstallerFixture({ loaded: true });
-  await writePreviousPlist(fixture);
   const agents = [
     { id: 'cfo', name: 'CFO', state: 'busy' },
     { id: 'coach', name: 'Coach', state: 'waiting' },
@@ -350,10 +349,15 @@ test('dashboard-install refuses to unload a dashboard with busy personas unless 
     res.end(JSON.stringify({ revision: 1, agents }));
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address();
-  assert.equal(RESERVED_PORTS.has(port), false);
+  const { port: oldPort } = server.address();
+  assert.equal(RESERVED_PORTS.has(oldPort), false);
+  // The loaded job listens on oldPort (recorded in its plist); the install
+  // moves to newPort, where nothing answers.
+  await writePreviousPlist(fixture, { port: oldPort });
+  const newPort = await freePort();
+  assert.notEqual(newPort, oldPort);
   try {
-    let result = await runInstallAsync(fixture, port);
+    let result = await runInstallAsync(fixture, newPort);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /persona turns are still running \(CFO, Coach\)/);
     assert.match(result.stderr, /--force/);
@@ -361,8 +365,11 @@ test('dashboard-install refuses to unload a dashboard with busy personas unless 
     assert.equal(countCalls(readFakeState(fixture), 'bootout'), 0);
     assert.equal(readFakeState(fixture).loaded, true);
 
-    result = await runInstallAsync(fixture, port, ['--force']);
+    // Forced: no probe, straight to the bootout. Installing onto oldPort,
+    // which the test server still holds, ends the run right after it.
+    result = await runInstallAsync(fixture, oldPort, ['--force']);
     assert.doesNotMatch(result.stderr, /persona turns are still running/);
+    assert.match(result.stderr, /already listening/);
     assert.equal(requests.length, 1);
     assert.equal(countCalls(readFakeState(fixture), 'bootout'), 1);
   } finally {
@@ -371,10 +378,12 @@ test('dashboard-install refuses to unload a dashboard with busy personas unless 
   }
 });
 
-test('dashboard-install goes on when the running dashboard has no busy personas', async () => {
+test('dashboard-install goes on when the running dashboard has no busy personas, probing the new port when the previous plist names none', async () => {
   const fixture = await makeInstallerFixture({ loaded: true });
   await writePreviousPlist(fixture);
+  const requests = [];
   const server = http.createServer((req, res) => {
+    requests.push(req.url);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ agents: [{ id: 'cfo', name: 'CFO', state: 'idle' }] }));
   });
@@ -383,6 +392,7 @@ test('dashboard-install goes on when the running dashboard has no busy personas'
   try {
     const result = await runInstallAsync(fixture, port);
     assert.doesNotMatch(result.stderr, /persona turns are still running/);
+    assert.deepEqual(requests, ['/api/state']);
     assert.equal(countCalls(readFakeState(fixture), 'bootout'), 1);
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -650,8 +660,12 @@ function countCalls(state, command) {
   return state.calls.filter((call) => call.split(' ')[0] === command).length;
 }
 
-async function writePreviousPlist(fixture) {
-  const previousPlist = '<?xml version="1.0"?><plist><dict><key>Label</key><string>previous</string></dict></plist>\n';
+// With `port`, the plist names DASHBOARD_PORT the way the installer's
+// template does, so the installer reads it back as the loaded job's port.
+async function writePreviousPlist(fixture, { port } = {}) {
+  const portEntry = port === undefined ? '' :
+    `<key>EnvironmentVariables</key><dict><key>DASHBOARD_PORT</key><string>${port}</string></dict>`;
+  const previousPlist = `<?xml version="1.0"?><plist><dict><key>Label</key><string>previous</string>${portEntry}</dict></plist>\n`;
   await fsp.mkdir(path.dirname(fixture.installedPath), { recursive: true });
   await fsp.writeFile(fixture.installedPath, previousPlist);
   return previousPlist;

@@ -17,9 +17,10 @@ const APP_DIR = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const START_PATH = path.join(APP_DIR, 'bin', 'dashboard-start');
 const DEFAULT_PORT = 4243;
 const HEALTH_TIMEOUT_MS = 10_000;
-// A stopping dashboard drains persona turns (drainMs), then closes its
-// server (shutdownMs); the extra 5 seconds covers process exit.
-const UNLOAD_TIMEOUT_MS = TIMEOUTS.drainMs + TIMEOUTS.shutdownMs + 5_000;
+// A stopping dashboard drains persona turns (drainMs), aborts the rest
+// (abortGraceMs), closes its server (shutdownMs), and forces its exit one
+// second later; the extra 2 seconds cover the process going away.
+const UNLOAD_TIMEOUT_MS = TIMEOUTS.drainMs + TIMEOUTS.abortGraceMs + TIMEOUTS.shutdownMs + 1_000 + 2_000;
 const STATE_TIMEOUT_MS = 5_000;
 const API_KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 const ACTIVE_STATES = new Set(['busy', 'waiting']);
@@ -94,7 +95,7 @@ async function main() {
     );
   }
 
-  if (wasLoaded && !options.force) await refuseActivePersonas(inputs.port);
+  if (wasLoaded && !options.force) await refuseActivePersonas(previousPort(installedPath, inputs.port));
 
   // A failed bootout leaves the existing job and plist untouched, so there is
   // nothing to roll back until this succeeds (or confirms no job is loaded).
@@ -176,6 +177,21 @@ function refuseApiKeys() {
       'Persona turns must bill the Claude subscription, not an API key. Unset it and run the installer again.',
     );
   }
+}
+
+// The port the loaded job listens on: DASHBOARD_PORT from the installed
+// plist, or `fallback` when there is no readable previous plist. A reinstall
+// that changes the port must still ask the old dashboard, not the new port.
+function previousPort(installedPath, fallback) {
+  let plist;
+  try {
+    plist = fs.readFileSync(installedPath, 'utf8');
+  } catch {
+    return fallback;
+  }
+  const match = /<key>DASHBOARD_PORT<\/key>\s*<string>(\d{1,5})<\/string>/.exec(plist);
+  const port = match ? Number(match[1]) : Number.NaN;
+  return port >= 1 && port <= 65535 ? port : fallback;
 }
 
 // Asks the running dashboard for its state and refuses when any persona is
