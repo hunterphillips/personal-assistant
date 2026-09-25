@@ -208,11 +208,10 @@
       var hadFocus = !!active && cards.contains(active) && active.hasAttribute('data-routines-action');
 
       cards.textContent = '';
-      if (state.registry && state.registry.ok === false) {
-        setMessage('The registry could not be read.', state.registry.error || null);
-        return;
-      }
-      if (routines.error) setMessage('Routines could not be refreshed.');
+      // A bad registry edit keeps the last good agents on the server, so the
+      // cards stay while the sentence says the file could not be read.
+      if (state.registry && state.registry.ok === false) setMessage('The registry could not be read.', state.registry.error || null);
+      else if (routines.error) setMessage('Routines could not be refreshed.');
       else if (routines.refreshedAt && (routines.items || []).length === 0) setMessage('No routines are registered.');
       else setMessage('');
 
@@ -262,7 +261,10 @@
       post(action === 'resume' ? '/api/resume' : '/api/pause').then(function (response) {
         var ok = !!response && response.ok;
         pauseBusy = false;
-        pauseError = ok ? '' : response ? 'Focus reported an error.' : 'Focus did not respond.';
+        // 502 and 504 come from the dashboard's proxy when Focus gave no
+        // usable answer; any other error status is Focus's own.
+        var unreachable = !response || response.status === 502 || response.status === 504;
+        pauseError = ok ? '' : unreachable ? 'Focus did not respond.' : 'Focus reported an error.';
         if (ok && !shell.isStreaming()) shell.requestState();
         render();
       });

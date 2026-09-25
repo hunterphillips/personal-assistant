@@ -257,8 +257,9 @@ refresh is missing or more than 60 seconds old, and when Refresh is chosen.
 The Focus card shows "Paused" when any scan is paused, and a Pause or
 Resume button that posts to the forwarded `/api/pause` or `/api/resume`;
 the server then refreshes the routines, and the card follows the state. If
-the request gets no answer, the card says "Focus did not respond."; if it
-gets an error status, "Focus reported an error." The message clears on the
+the request gets no answer, or the proxy answers 502 or 504 because Focus
+gave none, the card says "Focus did not respond."; any other error status
+is Focus's own and shows "Focus reported an error." The message clears on the
 next attempt or when the state shows the scans paused or resumed. A
 registry that cannot be read (followed by the registry's error), a failed
 refresh, and an empty list each get one plain sentence, and when Focus did

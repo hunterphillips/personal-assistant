@@ -257,14 +257,14 @@ test.describe('with Focus unreachable during the refresh', () => {
 });
 
 test.describe('with an unreadable registry', () => {
-  test.use({ hubOptions: { registry: { ok: false, error: 'registry_invalid_json' }, routines: {} } });
+  test.use({ hubOptions: { build: () => ({ ...seeded().build(), registry: { ok: false, error: 'registry_invalid_json' } }) } });
 
-  test('the view says the registry could not be read', async ({ page, hub }) => {
+  test('the view says the registry could not be read and keeps the last good cards', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/routines`);
     const message = page.locator('#routines-message');
     await expect(message).toHaveText('The registry could not be read. registry_invalid_json');
     await expect(message.locator('.routines-code')).toHaveText('registry_invalid_json');
-    await expect(page.locator('.routine-card')).toHaveCount(0);
+    await expect(page.locator('.routine-card').first()).toBeVisible();
   });
 });
 
