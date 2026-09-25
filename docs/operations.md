@@ -56,7 +56,7 @@ tail -f var/log/dashboard.log
 
 Run the install command again to reinstall. Before replacing an existing plist, the installer saves it as `var/launchd/backup-<timestamp>.plist` and notes whether the job is loaded.
 
-If the job is loaded, the installer first asks the running dashboard for `GET /api/state` on 127.0.0.1. If any persona is busy or waiting on an answer, it stops without unloading anything and names those personas. Wait for them to finish, or pass `--force` to unload anyway. If the dashboard does not answer, the installer goes on.
+If the job is loaded, the installer first asks the running dashboard for `GET /api/state` on 127.0.0.1, at the port recorded in the installed plist (the new `--port` only when no previous plist can be read). If any persona is busy or waiting on an answer, it stops without unloading anything and names those personas. Wait for them to finish, or pass `--force` to unload anyway. If the dashboard does not answer, the installer goes on.
 
 It then unloads only `com.personal-assistant.dashboard` and waits up to 40 seconds for the old process to exit, which covers the shutdown below.
 
@@ -64,12 +64,12 @@ It then unloads only `com.personal-assistant.dashboard` and waits up to 40 secon
 
 On SIGTERM or SIGINT, as when launchd unloads the job, the dashboard:
 
-1. Ends every event stream and refuses new persona messages with 503 `shutting_down`.
-2. Drains persona turns. A turn waiting on a question or approval is aborted at once. Running turns get up to 30 seconds (`TIMEOUTS.drainMs`) to finish, and any still running are then aborted.
+1. Ends every event stream and refuses new persona messages and new threads with 503 `shutting_down`.
+2. Drains persona turns. A turn waiting on a question or approval is aborted at once. Running turns get up to 30 seconds (`TIMEOUTS.drainMs`) to finish; any still running are then aborted and given 2 seconds (`TIMEOUTS.abortGraceMs`) to end.
 3. Stops the state hub and the registry poll.
 4. Closes the server, giving open requests up to 5 seconds (`TIMEOUTS.shutdownMs`) before cutting them.
 
-If all of that has not finished 35 seconds after the signal, the process exits with status 1.
+If all of that has not finished 38 seconds after the signal (the three waits plus one second), or if the shutdown itself fails, the process exits with status 1.
 
 The installer then checks that nothing else answers on 127.0.0.1:4243. If something does, such as a manual `npm start`, it stops without writing the new plist and names the port. Stop that process and run the installer again.
 
@@ -91,6 +91,8 @@ Each persona keeps two files in `var/threads/` (`DASHBOARD_THREADS_DIR`), readab
 - `<agent-id>.jsonl` is a display cache of the thread. It can be deleted; the thread view is then empty until new messages arrive.
 
 Back up `var/` to keep the session pointers. `POST /api/agents/<id>/new-thread` deletes both files for that persona.
+
+A persona turn is interrupted 30 minutes after it starts (`TIMEOUTS.turnMaxMs`), and that clock keeps running while the persona waits on an answer: a question raised 10 minutes in leaves 20 minutes to answer it. The persona then shows `turn_timeout` as its last error until its next turn. Changing a persona's `cwd` in the registry keeps its session pointer; if the next turn cannot resume, start a new thread.
 
 ## Agent registry
 

@@ -294,9 +294,9 @@ events. Each persona in `agents` carries:
   (the last turn failed), or `unavailable`.
 - `pending`: null, or the open request as `{ requestId, kind, toolName,
   input, truncated }`. `kind` is `question` or `approval`. An approval's
-  `input` is the tool input as JSON text; a question's is the object, so its
-  `questions` can be shown whole. Input whose JSON is over 16 KiB becomes
-  the first 16 KiB of that text, with `truncated: true`.
+  `input` is the tool input as JSON text; over 16 KiB it becomes the first
+  16 KiB of that text, with `truncated: true`. A question's `input` is the
+  object, never cut, so every question and option is there to answer.
 - `lastMessage`: null, or `{ role, text, at }` with the first 200
   characters. At startup it comes from the thread cache.
 - `lastError`: null, or why the last turn failed or why the persona is
@@ -306,22 +306,29 @@ events. Each persona in `agents` carries:
 - `costUsd`: null, or the session's running total.
 
 A persona whose turn runs longer than 30 minutes (`TIMEOUTS.turnMaxMs`) is
-interrupted and the timeout is logged as `persona_turn_timeout`. Personas
-added to the registry are started; removed ones are dropped.
+interrupted, the timeout is logged as `persona_turn_timeout`, and its
+`lastError` reads `turn_timeout` until the next turn. The clock covers the
+whole turn, including time spent waiting on an answer, so a question raised
+at minute 10 has 20 minutes left. Personas added to the registry are
+started; removed ones are dropped. A persona whose `cwd` changes in the
+registry keeps its session pointer (logged as `persona_cwd_changed`), so its
+next turn may fail to resume; New thread is the fix.
 
 ### Persona routes
 
 Each route names the agent by its registry id. An id not in the registry is
-404 `no_such_agent`; an agent that is not a persona, or is unavailable, is
-409 `not_a_persona`. POSTs follow the usual rules: exact `Origin`, JSON for
-`send` and `answer`, no body for `interrupt` and `new-thread`.
+404 `no_such_agent`; an agent of another kind is 409 `not_a_persona`; a
+persona that is unavailable (`provider_unavailable`, `api_key_in_env`, or
+`start_failed`) is 409 `persona_unavailable`. POSTs follow the usual rules:
+exact `Origin`, JSON for `send` and `answer`, no body for `interrupt` and
+`new-thread`.
 
 | Route | Success | Refusals |
 | --- | --- | --- |
 | `POST send` `{"text": "..."}` | 202 `{"ok": true}` | 400 `invalid_text` (missing or blank), 413 over 16 KiB, 409 `busy`, 503 `shutting_down` |
 | `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 409 `no_such_request` |
 | `POST interrupt` | 200 `{"ok": true}` | |
-| `POST new-thread` | 200 `{"ok": true}` | 409 `busy`, 500 `thread_reset_failed` |
+| `POST new-thread` | 200 `{"ok": true}` | 409 `busy`, 503 `shutting_down`, 500 `thread_reset_failed` |
 | `GET thread` | 200 `{"messages": [...]}` | |
 
 `send` answers as soon as the turn has started and never waits for it; the
@@ -343,15 +350,17 @@ of the adapter's own refusal of an API-key turn:
 
 ### Shutdown
 
-On SIGTERM the server ends the event streams and refuses new sends with 503
-`shutting_down`, then drains the personas: turns waiting on an answer are
-aborted at once, running turns get up to 30 seconds (`TIMEOUTS.drainMs`), and
-the rest are aborted. Then it closes the hub and the registry poll, and
-finally the server, which cuts requests still open after 5 seconds
+On SIGTERM the server ends the event streams and refuses new sends and new
+threads with 503 `shutting_down`, then drains the personas: turns waiting on
+an answer are aborted at once, running turns get up to 30 seconds
+(`TIMEOUTS.drainMs`), and the rest are aborted and given 2 seconds
+(`TIMEOUTS.abortGraceMs`) to end. Then it closes the hub and the registry
+poll, and finally the server, which cuts requests still open after 5 seconds
 (`TIMEOUTS.shutdownMs`). The process exits with status 1 if all of this has
-not finished 35 seconds after the signal. The installer refuses to unload a
-dashboard with busy or waiting personas unless given `--force`, and waits up
-to 40 seconds for it to exit; see [docs/operations.md](docs/operations.md).
+not finished 38 seconds after the signal (those three, plus one second), or
+if the shutdown itself fails. The installer refuses to unload a dashboard
+with busy or waiting personas unless given `--force`, and waits up to 40
+seconds for it to exit; see [docs/operations.md](docs/operations.md).
 
 ### Thread files
 
@@ -383,12 +392,13 @@ The agent id must match the registry's id pattern before any path is built.
 - `AskUserQuestion` becomes a question. Any other tool that needs
   permission becomes an approval that carries the tool name and its full
   input. The turn waits for an answer. After 30 minutes without one, the
-  request is denied with "No answer within 30 minutes". The persona stays
-  busy after a denial until the SDK reports the turn's result, since the
-  model keeps working.
+  request is denied with "No answer within 30 minutes". The turn clock
+  keeps running while it waits, so the whole turn, waiting included, is
+  bounded by `turnMaxMs`. The persona stays busy after a denial until the
+  SDK reports the turn's result, since the model keeps working.
 - Interrupt aborts the turn and denies any open request. New thread is
-  refused while a turn runs; otherwise it deletes both files, and the cache
-  starts again with a "New thread" line.
+  refused while a turn runs or the server is shutting down; otherwise it
+  deletes both files, and the cache starts again with a "New thread" line.
 - The result message's `total_cost_usd` is a running total for the
   session, not the cost of one turn. It is reported with the token usage
   and the list of denied tool calls.
@@ -400,9 +410,10 @@ The agent id must match the registry's id pattern before any path is built.
   bill an API key", naming the source.
 - A result that arrives before the session's init message (a startup
   failure) never replaces the stored pointer.
-- At shutdown, new messages are refused as `shutting_down`. Turns waiting on
-  an answer are aborted at once, running turns get up to 30 seconds to
-  finish, and any still running are aborted.
+- At shutdown, new messages and new threads are refused as
+  `shutting_down`. Turns waiting on an answer are aborted at once, running
+  turns get up to 30 seconds to finish, and any still running are aborted
+  and given 2 seconds to end.
 
 ### What runs without a card
 
@@ -434,10 +445,11 @@ directory.
 | `LIMITS.threadCacheBytes` | 1 MiB | Bytes kept per cache file |
 | `TIMEOUTS.requestMaxAgeMs` | 30 minutes | An unanswered question or approval is denied |
 | `LIMITS.sendTextBytes` | 16 KiB | Text of one message sent to a persona |
-| `LIMITS.requestInputBytes` | 16 KiB | A pending request's input, as JSON, in the snapshot |
+| `LIMITS.requestInputBytes` | 16 KiB | A pending approval's input, as JSON, in the snapshot; questions are never cut |
 | `LIMITS.previewChars` | 200 | Characters of a persona's last message in the snapshot |
 | `TIMEOUTS.drainMs` | 30 seconds | Wait for running turns at shutdown |
-| `TIMEOUTS.turnMaxMs` | 30 minutes | A persona turn is interrupted after this |
+| `TIMEOUTS.abortGraceMs` | 2 seconds | Wait for aborted turns to end after the drain |
+| `TIMEOUTS.turnMaxMs` | 30 minutes | A persona turn, time waiting on an answer included, is interrupted after this |
 
 ## Commands
 
