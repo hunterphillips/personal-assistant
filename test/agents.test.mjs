@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { RuntimeError } from '../lib/runtime/claude.mjs';
+import { RuntimeError } from '../lib/runtime/adapter.mjs';
 import { fakeRegistry, request, startApp } from './support/harness.mjs';
 
 const status = {
@@ -109,7 +109,25 @@ test('send after closeStreams answers 503 without reaching the adapter', async (
   app.handler.closeStreams();
   const response = await post(app, '/api/agents/cfo/send', { text: 'Late' });
   assert.deepEqual([response.status, response.json], [503, { error: 'shutting_down' }]);
+  const reset = await post(app, '/api/agents/cfo/new-thread');
+  assert.deepEqual([reset.status, reset.json], [503, { error: 'shutting_down' }]);
   assert.deepEqual(app.adapter.calls, []);
+});
+
+test('a turn rejected after it was accepted is logged, since the 202 has gone out', async (t) => {
+  const app = await startAgents(t);
+  app.adapter.send = () => new Promise((_, reject) => setTimeout(() => reject(new RuntimeError('invented_late')), 5));
+  const response = await post(app, '/api/agents/cfo/send', { text: 'Go' });
+  assert.equal(response.status, 202);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const logged = app.logs.filter((entry) => entry.event === 'persona_turn_rejected');
+  assert.deepEqual(logged, [{ event: 'persona_turn_rejected', agentId: 'cfo', error: 'invented_late' }]);
+
+  // A synchronous refusal is the reply itself, not a log line.
+  app.adapter.send = () => Promise.reject(new RuntimeError('busy'));
+  assert.equal((await post(app, '/api/agents/cfo/send', { text: 'Again' })).status, 409);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(app.logs.filter((entry) => entry.event === 'persona_turn_rejected').length, 1);
 });
 
 test('mutations need an exact Origin and the right content type', async (t) => {
@@ -120,19 +138,20 @@ test('mutations need an exact Origin and the right content type', async (t) => {
   assert.deepEqual(app.adapter.calls, []);
 });
 
-test('unknown agents are 404 and non-personas or unavailable personas are 409', async (t) => {
+test('unknown agents are 404, other kinds are not_a_persona, and unavailable personas are persona_unavailable', async (t) => {
   const app = await startAgents(t);
   for (const action of ['send', 'answer', 'interrupt', 'new-thread']) {
     const body = action === 'send' ? { text: 'x' } : action === 'answer' ? { requestId: 'r', decision: 'deny' } : undefined;
     const unknown = await post(app, `/api/agents/nobody/${action}`, body);
     assert.deepEqual([unknown.status, unknown.json], [404, { error: 'no_such_agent' }], action);
-    for (const id of ['ops', 'dev']) {
-      const refused = await post(app, `/api/agents/${id}/${action}`, body);
-      assert.deepEqual([refused.status, refused.json], [409, { error: 'not_a_persona' }], `${id} ${action}`);
-    }
+    const other = await post(app, `/api/agents/ops/${action}`, body);
+    assert.deepEqual([other.status, other.json], [409, { error: 'not_a_persona' }], `ops ${action}`);
+    const unavailable = await post(app, `/api/agents/dev/${action}`, body);
+    assert.deepEqual([unavailable.status, unavailable.json], [409, { error: 'persona_unavailable' }], `dev ${action}`);
   }
   assert.equal((await request(app, 'GET', '/api/agents/nobody/thread')).status, 404);
-  assert.equal((await request(app, 'GET', '/api/agents/ops/thread')).status, 409);
+  assert.deepEqual((await request(app, 'GET', '/api/agents/ops/thread')).json, { error: 'not_a_persona' });
+  assert.deepEqual((await request(app, 'GET', '/api/agents/dev/thread')).json, { error: 'persona_unavailable' });
   assert.equal((await request(app, 'GET', '/api/agents/cfo/unknown')).status, 404);
   assert.equal((await request(app, 'GET', '/api/agents/Bad_Id/thread')).status, 404);
   assert.equal((await request(app, 'GET', '/api/agents/cfo/thread/extra')).status, 404);
@@ -183,7 +202,10 @@ test('new-thread answers 200 and maps busy and a failed reset', async (t) => {
   app.adapter.behavior.newThread = 'thread_reset_failed';
   const failed = await post(app, '/api/agents/cfo/new-thread');
   assert.deepEqual([failed.status, failed.json], [500, { error: 'thread_reset_failed' }]);
-  assert.equal(app.adapter.calls.length, 3);
+  app.adapter.behavior.newThread = 'shutting_down';
+  const closing = await post(app, '/api/agents/cfo/new-thread');
+  assert.deepEqual([closing.status, closing.json], [503, { error: 'shutting_down' }]);
+  assert.equal(app.adapter.calls.length, 4);
 });
 
 test('thread returns the cached messages with no-store', async (t) => {

@@ -379,7 +379,7 @@ test('a new turn clears a stale error through the adapter state', async () => {
   assert.deepEqual([persona(hub).state, persona(hub).lastError, persona(hub).costUsd], ['busy', null, 2]);
 });
 
-test('request input is shown as JSON text, cut to the limit and flagged when too long', async () => {
+test('approval input is shown as JSON text, cut to the limit and flagged when too long; questions stay whole', async () => {
   const adapter = fakeAdapter();
   const { hub } = makeHub({ adapters: { claude: adapter } });
   await hub.start();
@@ -393,16 +393,25 @@ test('request input is shown as JSON text, cut to the limit and flagged when too
   assert.equal(pending.truncated, true);
   assert.ok(Buffer.byteLength(pending.input) <= 64);
   assert.ok(JSON.stringify(long).startsWith(pending.input));
-  const question = { questions: [{ question: 'x'.repeat(100) }] };
+  // A question over the cap is never cut: each question and option must
+  // reach the client for it to be answerable.
+  const question = {
+    questions: [
+      { question: 'x'.repeat(100), header: 'One', options: [{ label: 'A', description: 'y'.repeat(100) }, { label: 'B', description: 'z' }] },
+      { question: 'Second?', header: 'Two', options: [{ label: 'C', description: 'w'.repeat(100) }] },
+    ],
+  };
+  assert.ok(Buffer.byteLength(JSON.stringify(question)) > 64);
   adapter.emit('request', 'cfo', { requestId: 'r3', kind: 'question', toolName: 'AskUserQuestion', input: question });
-  assert.equal(typeof persona(hub).pending.input, 'string');
-  assert.equal(persona(hub).pending.truncated, true);
+  assert.deepEqual(persona(hub).pending, { requestId: 'r3', kind: 'question', toolName: 'AskUserQuestion', input: question, truncated: false });
+  assert.notEqual(persona(hub).pending.input, question);
+  assert.equal(Object.isFrozen(question), false);
 });
 
 test('a registry change starts a new persona, drops a removed one, and keeps existing state', async () => {
   const adapter = fakeAdapter({ cfo: { state: 'error', lastError: 'Kept' } });
   const registry = fakeRegistry();
-  const { hub } = makeHub({ adapters: { claude: adapter }, registry });
+  const { hub, logs } = makeHub({ adapters: { claude: adapter }, registry });
   await hub.start();
   registry.emit(registryState([agent('cfo', { name: 'Renamed' }), agent('coach')]));
   await new Promise((resolve) => setImmediate(resolve));
@@ -410,24 +419,43 @@ test('a registry change starts a new persona, drops a removed one, and keeps exi
   assert.deepEqual([persona(hub).name, persona(hub).lastError], ['Renamed', 'Kept']);
   assert.equal(persona(hub, 'coach').state, 'idle');
   assert.ok(hub.persona('coach'));
+  assert.equal(logs.some((entry) => entry.event === 'persona_cwd_changed'), false);
+
+  // A cwd change is logged and nothing else: the pointer and state are kept.
+  registry.emit(registryState([agent('cfo', { name: 'Renamed', cwd: '/invented/moved' }), agent('coach')]));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(logs.filter((entry) => entry.event === 'persona_cwd_changed'), [{ event: 'persona_cwd_changed', agentId: 'cfo' }]);
+  assert.equal(hub.persona('cfo').agent.cwd, '/invented/moved');
+  assert.equal(persona(hub).lastError, 'Kept');
+  assert.equal(adapter.calls.length, 2);
 
   registry.emit(registryState([agent('coach')]));
   assert.equal(hub.persona('cfo'), null);
   assert.deepEqual(hub.snapshot().agents.map((entry) => entry.id), ['coach']);
 });
 
-test('a turn over the wall clock is interrupted and logged; idle clears the clock', async () => {
+test('a turn over the wall clock is interrupted, logged, and marked turn_timeout; idle clears the clock', async () => {
   const adapter = fakeAdapter();
-  const { hub, logs } = makeHub({ adapters: { claude: adapter }, turnMaxMs: 20 });
+  // The real adapter goes idle (clearing lastError) before interrupt resolves.
+  adapter.interrupt = async (agent) => {
+    adapter.calls.push(['interrupt', agent.id]);
+    adapter.states.cfo = { state: 'idle', lastError: null };
+    adapter.emit('thread.state', 'cfo', { state: 'idle' });
+  };
+  const { hub, logs, deltas } = makeHub({ adapters: { claude: adapter }, turnMaxMs: 20 });
   await hub.start();
   adapter.emit('thread.state', 'cfo', { state: 'busy' });
   adapter.emit('thread.state', 'cfo', { state: 'waiting' });
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.deepEqual(adapter.calls.filter((call) => call[0] === 'interrupt'), [['interrupt', 'cfo']]);
   assert.ok(logs.some((entry) => entry.event === 'persona_turn_timeout' && entry.agentId === 'cfo'));
+  assert.deepEqual([persona(hub).state, persona(hub).lastError], ['idle', 'turn_timeout']);
+  assert.equal(deltas.at(-1).patch.agents[0].lastError, 'turn_timeout');
 
-  adapter.emit('thread.state', 'cfo', { state: 'idle' });
+  // The next turn clears it through the adapter state, as with any error.
+  adapter.states.cfo = { state: 'busy', lastError: null };
   adapter.emit('thread.state', 'cfo', { state: 'busy' });
+  assert.equal(persona(hub).lastError, null);
   adapter.emit('thread.state', 'cfo', { state: 'idle' });
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.equal(adapter.calls.filter((call) => call[0] === 'interrupt').length, 1);
