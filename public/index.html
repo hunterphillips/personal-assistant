@@ -11,6 +11,7 @@
   <div class="shell">
     <nav class="nav" aria-label="Dashboard">
       <a href="/" data-view="home">Home</a>
+      <a href="/routines" data-view="routines">Routines</a>
       <a href="/focus" data-view="focus">Focus</a>
       <a href="/brief" data-view="brief">Daily Brief</a>
     </nav>
@@ -22,6 +23,12 @@
 
       <section class="view home" id="view-home" data-view="home" aria-label="Home">
         <ul class="destinations">
+          <li>
+            <a class="destination" href="/routines">
+              <span class="destination-name">Routines</span>
+              <span class="destination-meta" id="home-routines"></span>
+            </a>
+          </li>
           <li>
             <a class="destination" href="/focus">
               <span class="destination-name">Focus</span>
@@ -35,6 +42,18 @@
             </a>
           </li>
         </ul>
+      </section>
+
+      <section class="view routines" id="view-routines" data-view="routines" aria-label="Routines" hidden>
+        <div class="routines-header">
+          <div class="routines-title">
+            <h1 class="routines-heading">Routines</h1>
+            <p class="routines-updated" id="routines-updated"></p>
+          </div>
+          <button type="button" class="button" id="routines-refresh">Refresh</button>
+        </div>
+        <p class="routines-message" id="routines-message" hidden></p>
+        <div class="routines-cards" id="routines-cards"></div>
       </section>
 
       <section class="view" id="view-focus" data-view="focus" aria-label="Focus" hidden>
@@ -58,6 +77,7 @@
       </section>
     </main>
   </div>
+  <script src="/assets/routines.js"></script>
   <script src="/assets/shell.js"></script>
 </body>
 </html>
