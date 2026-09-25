@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { appendFile, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -31,6 +31,14 @@ test('a pointer round-trips and leaves no temporary file behind', async (t) => {
   assert.deepEqual(await readdir(dir), ['cfo.json']);
   assert.equal((await stat(dir)).mode & 0o777, 0o700);
   assert.equal((await stat(path.join(dir, 'cfo.json'))).mode & 0o777, 0o600);
+});
+
+test('a thread directory created with a looser mode is tightened to 0700', async (t) => {
+  const { dir, store } = await setup(t);
+  await mkdir(dir, { recursive: true, mode: 0o755 });
+  assert.equal((await stat(dir)).mode & 0o777, 0o755);
+  await store.writePointer('cfo', { sessionId: 'session-1', createdAt: AT });
+  assert.equal((await stat(dir)).mode & 0o777, 0o700);
 });
 
 test('clearing a pointer removes it, and clearing a missing one is fine', async (t) => {
