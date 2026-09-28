@@ -549,14 +549,21 @@ are passed per launch by `bin/codex-serve`.
   refuses a socket path over 100 bytes, since macOS allows 104 for a Unix
   socket path; that is why the socket lives under `var/codex/` rather than a
   deeper directory. `--socket PATH` overrides the path.
-- `bin/codex-new [--cwd DIR]` starts one thread on that server with the
-  given working directory (default: the current one), records it in
-  `var/codex/bindings.json` with the cmux workspace and surface ids from
-  `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`, then runs
-  `codex --remote unix://<socket> -C <cwd> resume <threadId>` and exits
-  with its status. Outside cmux the ids are recorded as null and the
-  helper says so; "Open terminal" is then unavailable for that thread.
-  The file keeps the 200 newest records.
+- `bin/codex-new [--cwd DIR]` opens the Codex TUI on that server in the
+  given working directory (default: the current one) and records the
+  thread it starts. It connects to the server, runs
+  `codex --remote unix://<socket> -C <cwd>`, waits for the
+  `thread/started` notification whose cwd is that directory, writes the
+  thread to `var/codex/bindings.json` with the cmux workspace and surface
+  ids from `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`, drops its own
+  connection, and exits with the TUI's status. The TUI must start the
+  thread: one started over the socket has no rollout until its first
+  turn, and `codex … resume <id>` on it fails with "no rollout found".
+  The wait lasts as long as the TUI runs, because the thread is only
+  started once the update nudge and the trust prompt are answered; the
+  outcome is printed after the TUI exits. Outside cmux the ids are
+  recorded as null and the helper says so; "Open terminal" is then
+  unavailable for that thread. The file keeps the 200 newest records.
 
 Both read `DASHBOARD_CODEX_DIR` (default `var/codex`, created with mode
 0700) so they agree with the daemon.
@@ -707,7 +714,7 @@ Requires Node 24 (`.nvmrc`).
   `SPIKE_ROOT`; it spends subscription usage. See the research note.
 - `npm run verify:codex -- --yes` starts a disposable real `codex app-server`
   on a temporary socket, connects an adapter, creates one thread from a
-  second client (as `codex-new` does) and reports how the adapter came to
+  second client (as the TUI does) and reports how the adapter came to
   list it, asks one question through the adapter, answers it, archives the
   thread, stops the server, and prints the Node, `ws`, and Codex versions.
   It runs one short model turn on the Codex subscription and refuses

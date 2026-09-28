@@ -16,7 +16,8 @@ const NEW = path.join(APP_DIR, 'bin', 'codex-new');
 // A stand-in for the Codex CLI: prints a version, records its arguments to
 // FAKE_CODEX_LOG, waits as app-server until told to stop (or, with
 // FAKE_CODEX_SERVER_EXIT, exits with that status on its own after 300ms),
-// and otherwise exits with FAKE_CODEX_EXIT.
+// and otherwise stands in for the TUI: it stays up for
+// FAKE_CODEX_LINGER_MS (default 0) and exits with FAKE_CODEX_EXIT.
 const FAKE_CODEX = `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
@@ -28,7 +29,7 @@ if (args[0] === '--version') {
   process.on('SIGTERM', () => process.exit(0));
   if (process.env.FAKE_CODEX_SERVER_EXIT) setTimeout(() => process.exit(Number(process.env.FAKE_CODEX_SERVER_EXIT)), 300);
 } else {
-  process.exit(Number(process.env.FAKE_CODEX_EXIT ?? 0));
+  setTimeout(() => process.exit(Number(process.env.FAKE_CODEX_EXIT ?? 0)), Number(process.env.FAKE_CODEX_LINGER_MS ?? 0));
 }
 `;
 
@@ -151,7 +152,65 @@ test('codex-new refuses without a running owner', async (t) => {
   assert.equal(fs.existsSync(f.bindingsFile), false);
 });
 
-test('codex-new starts a thread with the cwd, records the binding, and resumes it in the TUI', async (t) => {
+test('codex-new opens the TUI on the server, records the thread it starts for the cwd, and drops its connection', async (t) => {
+  const f = await fixture(t);
+  const server = await startCodexServer(t);
+  await fsp.mkdir(f.codexDir, { recursive: true });
+  await fsp.writeFile(f.ownerFile, JSON.stringify({ socket: server.socket, pid: process.pid, startedAt: 'x', codexVersion: 'y' }));
+  const work = path.join(f.root, 'work');
+  const elsewhere = path.join(f.root, 'elsewhere');
+  await fsp.mkdir(work);
+  await fsp.mkdir(elsewhere);
+
+  // The scripted server lives in this process, so the helper runs
+  // asynchronously; spawnSync would block the server's event loop.
+  const first = runAsync(NEW, ['--cwd', work], { ...f.env, CMUX_WORKSPACE_ID: 'ws-7', CMUX_SURFACE_ID: 'sf-3', FAKE_CODEX_EXIT: '3', FAKE_CODEX_LINGER_MS: '2000' });
+  t.after(() => { if (first.child.exitCode === null) first.child.kill('SIGKILL'); });
+  await until(() => f.calls().length === 1, 5_000, 'TUI launch');
+  assert.deepEqual(f.calls(), [['--remote', `unix://${server.socket}`, '-C', work]]);
+  assert.deepEqual(server.requests.map((r) => r.method), ['initialize']);
+  assert.deepEqual(server.requests[0].params.capabilities, { experimentalApi: true });
+  assert.deepEqual(server.notifications.map((n) => n.method), ['initialized']);
+  assert.equal(server.live().length, 1);
+
+  // Another client's thread, and one with no cwd, are not this terminal's.
+  server.notify('thread/started', { thread: { id: 'other-thread', cwd: elsewhere } });
+  server.notify('thread/started', { thread: { id: 'bare-thread' } });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(fs.existsSync(f.bindingsFile), false);
+  // The TUI's own thread reports the real path of the directory.
+  server.notify('thread/started', { thread: { id: 'tui-thread-1', cwd: await fsp.realpath(work) } });
+  await until(() => fs.existsSync(f.bindingsFile), 5_000, 'binding');
+  let bindings = JSON.parse(await fsp.readFile(f.bindingsFile, 'utf8'));
+  assert.equal(bindings.length, 1);
+  assert.deepEqual({ ...bindings[0], createdAt: null }, { threadId: 'tui-thread-1', cwd: work, workspaceId: 'ws-7', surfaceId: 'sf-3', createdAt: null });
+  assert.match(bindings[0].createdAt, /^\d{4}-/);
+  await until(() => server.live().length === 0, 2_000, 'helper connection closed');
+  assert.equal(first.child.exitCode, null, 'the TUI keeps running after the thread is recorded');
+  assert.equal(server.requests.filter((r) => r.method === 'thread/start').length, 0);
+
+  let result = await first.exit;
+  assert.equal(result.code, 3, result.stderr);
+  assert.match(result.stdout, /connected to unix:/);
+  assert.match(result.stdout, /thread tui-thread-1 bound to this cmux terminal \(workspace ws-7, surface sf-3\)/);
+
+  // Outside cmux the thread is still recorded, with null ids, from the
+  // environment's cwd; the thread's cwd arrives through `environments`.
+  const second = runAsync(NEW, [], { ...f.env, FAKE_CODEX_LINGER_MS: '2000' }, { cwd: work });
+  t.after(() => { if (second.child.exitCode === null) second.child.kill('SIGKILL'); });
+  await until(() => f.calls().length === 2, 5_000, 'second TUI launch');
+  server.notify('thread/started', { thread: { id: 'tui-thread-2', environments: [{ cwd: work }] } });
+  await until(() => fs.existsSync(f.bindingsFile) && fs.readFileSync(f.bindingsFile, 'utf8').includes('tui-thread-2'), 5_000, 'second binding');
+  result = await second.exit;
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /thread tui-thread-2 recorded; this terminal is not a cmux surface, so Open terminal will be unavailable/);
+  bindings = JSON.parse(await fsp.readFile(f.bindingsFile, 'utf8'));
+  assert.deepEqual(bindings.map((b) => [b.threadId, b.workspaceId, b.surfaceId]), [['tui-thread-2', null, null], ['tui-thread-1', 'ws-7', 'sf-3']]);
+  assert.equal(await fsp.realpath(bindings[0].cwd), await fsp.realpath(work));
+  await until(() => server.live().length === 0, 2_000, 'second connection closed');
+});
+
+test('codex-new records nothing when the TUI exits before starting a thread', async (t) => {
   const f = await fixture(t);
   const server = await startCodexServer(t);
   await fsp.mkdir(f.codexDir, { recursive: true });
@@ -159,26 +218,10 @@ test('codex-new starts a thread with the cwd, records the binding, and resumes i
   const work = path.join(f.root, 'work');
   await fsp.mkdir(work);
 
-  // The scripted server lives in this process, so the helper runs
-  // asynchronously; spawnSync would block the server's event loop.
-  let result = await runAsync(NEW, ['--cwd', work], { ...f.env, CMUX_WORKSPACE_ID: 'ws-7', CMUX_SURFACE_ID: 'sf-3', FAKE_CODEX_EXIT: '3' }).exit;
-  assert.equal(result.code, 3, result.stderr);
-  assert.match(result.stdout, /thread fake-thread-1 bound to this cmux terminal \(workspace ws-7, surface sf-3\)/);
-  const starts = server.requests.filter((r) => r.method === 'thread/start');
-  assert.deepEqual(starts.map((r) => r.params), [{ cwd: work }]);
-  assert.deepEqual(server.requests[0].params.capabilities, { experimentalApi: true });
-  assert.deepEqual(server.notifications.map((n) => n.method), ['initialized']);
-  assert.deepEqual(f.calls(), [['--remote', `unix://${server.socket}`, '-C', work, 'resume', 'fake-thread-1']]);
-  let bindings = JSON.parse(await fsp.readFile(f.bindingsFile, 'utf8'));
-  assert.equal(bindings.length, 1);
-  assert.deepEqual({ ...bindings[0], createdAt: null }, { threadId: 'fake-thread-1', cwd: work, workspaceId: 'ws-7', surfaceId: 'sf-3', createdAt: null });
-  assert.match(bindings[0].createdAt, /^\d{4}-/);
-
-  result = await runAsync(NEW, [], f.env, { cwd: work }).exit;
-  assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /thread fake-thread-2 started; this terminal is not a cmux surface, so Open terminal will be unavailable/);
-  bindings = JSON.parse(await fsp.readFile(f.bindingsFile, 'utf8'));
-  assert.deepEqual(bindings.map((b) => [b.threadId, b.workspaceId, b.surfaceId]), [['fake-thread-2', null, null], ['fake-thread-1', 'ws-7', 'sf-3']]);
-  assert.equal(await fsp.realpath(bindings[0].cwd), await fsp.realpath(work));
+  const result = await runAsync(NEW, ['--cwd', work], { ...f.env, FAKE_CODEX_EXIT: '2', FAKE_CODEX_LINGER_MS: '200' }).exit;
+  assert.equal(result.code, 2, result.stderr);
+  assert.match(result.stdout, /the TUI exited before starting a thread; nothing was recorded/);
+  assert.equal(fs.existsSync(f.bindingsFile), false);
+  assert.deepEqual(f.calls(), [['--remote', `unix://${server.socket}`, '-C', work]]);
   await until(() => server.live().length === 0, 2_000, 'helper connection closed');
 });

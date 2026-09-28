@@ -4,7 +4,7 @@
 // disposable `codex app-server` on a socket under a short temporary
 // directory, points a Codex adapter at it through a temporary owner file,
 // creates one thread in an empty temporary directory from a second client
-// (as bin/codex-new does), waits for the adapter to list it, asks the model
+// (as the TUI does), waits for the adapter to list it, asks the model
 // one question through request_user_input, answers it through the adapter,
 // confirms the resolution and the finished turn, archives the thread, stops
 // the server, and prints the versions. It runs one short model turn, which
