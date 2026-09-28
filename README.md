@@ -506,8 +506,9 @@ directory.
 | `TIMEOUTS.drainMs` | 30 seconds | Wait for running turns at shutdown |
 | `TIMEOUTS.abortGraceMs` | 2 seconds | Wait for aborted turns to end after the drain |
 | `TIMEOUTS.turnMaxMs` | 30 minutes | A persona turn, time waiting on an answer included, is interrupted after this |
-| `TIMEOUTS.cmuxRequestMs` | 5 seconds | One cmux socket request, the auth handshake included |
+| `TIMEOUTS.cmuxRequestMs` | 5 seconds | The cmux auth handshake, and separately each socket request |
 | `TIMEOUTS.cmuxSessionsMs` | 5 seconds | One `cmux sessions list --json` |
+| `TIMEOUTS.cmuxStaleMs` | 5 minutes | How long a cached cmux inventory is served stale after a transient failure |
 | `LIMITS.cmuxFrameBytes` | 1 MiB | One line from the cmux socket; a longer one drops the connection |
 
 ## Runtimes
@@ -524,18 +525,22 @@ library with tests; the hub does not call it yet.
 cmux only admits processes it started itself unless its socket mode is
 changed, so the daemon needs one setting made once: in
 `~/.config/cmux/cmux.json`, `automation.socketControlMode` set to
-`password`, with the password set in cmux's Settings. cmux keeps that
-password in `~/Library/Application Support/cmux/socket-control-password`.
-The steps are in [docs/operations.md](docs/operations.md). The 2026-09-28
-spike ran this mode from environment variables only; the first live run
-should confirm the stored file's path.
+`password`, and a password file. Verified on 2026-09-28 with cmux 0.64.25:
+a file written to `~/Library/Application Support/cmux/socket-control-password`
+before launch is adopted and moved by cmux to
+`~/.local/state/cmux/socket-control-password`, where it stays across quits;
+nothing was set in cmux's Settings. From a shell, `cmux ping` then answers
+`PONG` with no password flag or variable. The steps are in
+[docs/operations.md](docs/operations.md).
 
 Every call starts by reading two files. cmux writes its socket path to
 `~/.local/state/cmux/last-socket-path` (`DASHBOARD_CMUX_SOCKET_PATH_FILE`)
 on launch and deletes it on quit, so a missing file means cmux is not
-running. The password comes from `DASHBOARD_CMUX_PASSWORD_FILE`. The
-password is sent as the first line of a new connection and then dropped;
-it never appears in a log entry, an error, or an answer.
+running. The password comes from `DASHBOARD_CMUX_PASSWORD_FILE`, by default
+the state file above. The password is sent as the first line of a new
+connection and then dropped; it never appears in a log entry, an error, or
+an answer. The handshake and each later request get their own
+`TIMEOUTS.cmuxRequestMs`.
 
 The module speaks to cmux two ways:
 
@@ -546,16 +551,20 @@ The module speaks to cmux two ways:
   focuses; `system.identify` reads the focused surface back.
 - `cmux sessions list --json`, run as a subprocess with `CMUX_QUIET=1`,
   lists the agent sessions. It reads cmux's hook store and needs no
-  socket. A session appears there only when its agent was started from
-  a cmux terminal (cmux's wrapper on `PATH` registers it); one started
-  from another terminal is invisible to the dashboard.
+  socket. The binary is `DASHBOARD_CMUX_CLI`, by default the one inside
+  the app bundle, because the LaunchAgent's `PATH` does not include
+  `/opt/homebrew/bin`, where the cask links `cmux` for shells. A missing
+  binary is logged once as `cmux_cli_missing`. A session appears in the
+  listing only when its agent was started from a cmux terminal (cmux's
+  wrapper on `PATH` registers it); one started from another terminal is
+  invisible to the dashboard.
 
 `inventory()` answers
 
 ```json
 { "available": true, "stale": false, "refreshedAt": "<ISO>",
   "workspaces": [{ "id": "<uuid>", "name": "~", "cwd": "/Users/hunter" }],
-  "surfaces": [{ "id": "<uuid>", "workspaceId": "<uuid>", "panelId": "<uuid>", "title": "Terminal", "cwd": "/Users/hunter" }],
+  "surfaces": [{ "id": "<uuid>", "workspaceId": "<uuid>", "paneId": "<uuid>", "title": "Terminal", "cwd": "/Users/hunter" }],
   "agents": [{ "sessionId": "<uuid>", "agent": "claude", "state": "running", "cwd": "/Users/hunter/repo",
                "workspaceId": "<uuid>", "surfaceId": "<uuid>", "startedAt": "<ISO>", "updatedAt": "<ISO>", "live": true }] }
 ```
@@ -567,9 +576,14 @@ one is a terminal that has closed, and the view should say so instead of
 offering to open it. When cmux cannot be reached the lists are empty and
 `available` is false with a `reason`: `not_running`, `no_password`,
 `auth_failed` (a refused password, or the default socket mode; logged
-once, not per call), or `error`. A timeout, a dropped connection, an
-oversize frame, or a listing that fails to parse after at least one good
-answer returns that answer again with `stale: true`.
+once, not per call), or `error`. A timeout, a dropped or refused
+connection, an oversize frame, a listing that fails to parse, a
+`surface.list` reply without its array or for another workspace than the
+one asked for (`surface.list` with no workspace answers for the selected
+one, so the reply's `workspace_id` is checked), or every workspace
+answering `not_found`, is transient: after at least one good answer it
+returns that answer again with `stale: true`, for up to
+`TIMEOUTS.cmuxStaleMs`, then `error`. Answers are frozen.
 
 `focus({ workspaceId, surfaceId })` lists that workspace's surfaces
 again, and unless the surface is there it answers `{ "ok": false,
@@ -580,8 +594,8 @@ reasons are the inventory's.
 
 There is no push yet. cmux advertises `events.stream`, but the spike
 recorded the CLI's view of it, not the socket request or how event frames
-share a connection with replies, so the hub polls `refresh()` every 10
-seconds while the Agents view is open.
+share a connection with replies. `refresh()` is the call a poll would make;
+the hub does not poll yet.
 
 The module never starts cmux, never creates, closes, or moves a surface,
 never sends text or keys, never focuses a surface it did not just see in
@@ -631,7 +645,8 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
 | `DASHBOARD_THREADS_DIR` | `var/threads` | Persona session pointers and message caches. Resolved from this directory; created on the first write. |
 | `DASHBOARD_CMUX_SOCKET_PATH_FILE` | `~/.local/state/cmux/last-socket-path` | File cmux writes its socket path to while it runs. Missing means cmux is not running. |
-| `DASHBOARD_CMUX_PASSWORD_FILE` | `~/Library/Application Support/cmux/socket-control-password` | The cmux socket password. Read on each call, never logged. |
+| `DASHBOARD_CMUX_PASSWORD_FILE` | `~/.local/state/cmux/socket-control-password` | The cmux socket password, where cmux keeps it. Read on each call, never logged. |
+| `DASHBOARD_CMUX_CLI` | `/Applications/cmux.app/Contents/Resources/bin/cmux` | The cmux binary for `sessions list`. The LaunchAgent's `PATH` has no `cmux`. |
 
 The server always binds `127.0.0.1`. PUT and POST requests must send an
 `Origin` that matches the request's Host, and JSON unless they are one of the
@@ -648,8 +663,9 @@ text and, for a failure before init, the CLI's last 2 KiB of stderr),
 `persona_api_key_refused`, `persona_start_error`, `persona_interrupt`,
 `persona_turn_aborted`, `persona_turn_timeout`, and `thread_resume_failed`,
 and the cmux events `cmux_auth_failed`, `cmux_inventory_error`,
-`cmux_frame_too_large`, `cmux_record_skipped`, and `cmux_focus` (workspace
-and surface ids with the outcome).
+`cmux_frame_too_large`, `cmux_surface_list_shape`, `cmux_record_skipped`,
+`cmux_cli_missing`, and `cmux_focus` (workspace and surface ids with the
+outcome).
 They never contain request bodies, brief text, persona messages, tool
 inputs, or the cmux password.
 

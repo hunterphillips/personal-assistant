@@ -104,13 +104,20 @@ The Routines and Agents views and the persona runtime read the agent registry fr
 
 ## cmux
 
-The dashboard reads cmux's terminals and agent sessions over cmux's own socket. cmux's default socket mode admits only processes cmux started, so the daemon cannot connect until this is done once:
+The dashboard reads cmux's terminals and agent sessions over cmux's own socket. cmux's default socket mode admits only processes cmux started, so the daemon cannot connect until this is done once. Verified on 2026-09-28 with cmux 0.64.25; the app was quit throughout.
 
-1. In `~/.config/cmux/cmux.json`, set `automation.socketControlMode` to `password`.
-2. In cmux's Settings, set the socket password. cmux stores it at `~/Library/Application Support/cmux/socket-control-password`; make sure only this account can read it (`chmod 600`).
-3. Restart cmux. From a terminal that is not inside cmux, `CMUX_SOCKET_PASSWORD=<the password> cmux ping` should print `PONG`.
+1. Back up `~/.config/cmux/cmux.json` beside itself (`cmux.json.bak-<date>`), then add one active key to it, keeping everything else:
 
-The daemon never starts cmux. While cmux is not running, or before the steps above, the module reports why (`not_running`, `no_password`, or `auth_failed`) and lists nothing; a refused password is logged once as `cmux_auth_failed` and tried again on the next call, so fixing the file or the setting needs no dashboard restart. Set `DASHBOARD_CMUX_SOCKET_PATH_FILE` and `DASHBOARD_CMUX_PASSWORD_FILE` if cmux keeps either file elsewhere.
+   ```json
+   "automation": { "socketControlMode": "password" },
+   ```
+
+   `cmux config doctor` should report the file valid with `automation` among its keys.
+2. Write a random password to `~/Library/Application Support/cmux/socket-control-password` with mode 600, for example `(umask 077; openssl rand -hex 32 > "$HOME/Library/Application Support/cmux/socket-control-password")`. Settings is not involved; nothing needs to be typed there.
+3. Launch cmux normally. On launch it moves that file to `~/.local/state/cmux/socket-control-password` (still mode 600) and keeps it there across quits. That is the file the daemon reads (`DASHBOARD_CMUX_PASSWORD_FILE`).
+4. From a terminal that is not inside cmux, `cmux ping` should print `PONG` with no password flag or variable; `cmux --password wrong ping` should print `Error: ERROR: Invalid password`. The shell needs `cmux` on `PATH` (`/opt/homebrew/bin/cmux`, the cask's link into the app bundle). The daemon does not use `PATH`: it runs the bundle binary at `DASHBOARD_CMUX_CLI`.
+
+The daemon never starts cmux. While cmux is not running, or before the steps above, the module reports why (`not_running`, `no_password`, or `auth_failed`) and lists nothing; a refused password is logged once as `cmux_auth_failed` and tried again on the next call, so fixing the file or the setting needs no dashboard restart. Set `DASHBOARD_CMUX_SOCKET_PATH_FILE`, `DASHBOARD_CMUX_PASSWORD_FILE`, or `DASHBOARD_CMUX_CLI` if cmux keeps a file or its binary elsewhere; a missing binary is logged once as `cmux_cli_missing`.
 
 Only agents started from a cmux terminal appear: cmux registers `claude` through a wrapper it puts on `PATH`, and the daemon reads that register with `cmux sessions list --json`. A Claude session started from another terminal has no row.
 
