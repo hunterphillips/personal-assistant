@@ -170,7 +170,7 @@ test.describe('with sessions', () => {
     await expect(page.locator('#agent-new-thread')).toBeHidden();
     await expect(page.locator('#agent-routines-toggle')).toBeHidden();
     await expect(page.locator('#agent-composer')).toBeHidden();
-    await expect(page.locator('#agent-foot')).toHaveText('Codex threads take messages in the terminal.');
+    await expect(page.locator('#agent-foot')).toHaveText('Type to this thread in its terminal.');
     await expect(messages(page)).toHaveText([/^Fix the flaky test\./, /^Which colour\?/]);
     await expect(messages(page).nth(0)).toHaveClass(/thread-message-user/);
     await expect(row(page, 'Fix the flaky test')).toHaveAttribute('aria-current', 'true');
@@ -236,15 +236,64 @@ test.describe('with sessions', () => {
     await expect(request.locator('.request-note')).toHaveText('Answer this one in the terminal.');
     await expect(request.getByRole('button')).toHaveCount(0);
 
-    // An input without any of those parts is shown as it came.
+    // A request of a kind the view does not know is headed by what it is
+    // for, not its wire method, and its input is shown as it came.
     hub.codex.set('codex:t2', {
       state: 'waiting',
       pending: { requestId: 'a-3', kind: 'approval', toolName: 'mcpServer/elicitation/request', native: true, input: { threadId: 't2', message: 'Hi' } },
     });
-    await expect(request.locator('.request-title')).toHaveText('other wants to run mcpServer/elicitation/request');
+    await expect(request.locator('.request-title')).toHaveText('other is waiting on the terminal');
     await expect(request.locator('.request-details')).toHaveCount(0);
     await expect(request.locator('.request-input')).toHaveText('{\n  "threadId": "t2",\n  "message": "Hi"\n}');
+    await expect(request.locator('.request-note')).toHaveText('Answer this one in the terminal.');
     await expect(request.getByRole('button')).toHaveCount(0);
+  });
+
+  test('a Codex question without Other has no field, and a secret answer is typed into a password field', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=codex:t2`);
+    const request = page.locator('#agent-request');
+    hub.codex.set('codex:t2', {
+      state: 'waiting',
+      pending: {
+        ...QUESTION, requestId: 'q-2',
+        input: { threadId: 't2', questions: [{ id: 'branch', question: 'Which branch?', isOther: false, isSecret: false, options: [{ label: 'main' }, { label: 'dev' }] }] },
+      },
+    });
+    await expect(request.locator('.request-title')).toHaveText('Which branch?');
+    await expect(request.locator('.option .option-label')).toHaveText(['main', 'dev']);
+    await expect(request.locator('.request-other')).toHaveCount(0);
+    await request.getByRole('button', { name: 'Answer' }).click();
+    await expect(request.locator('.request-missing')).toHaveText('Every question needs an answer.');
+    await expect(request.locator('.option').nth(0)).toBeFocused();
+    await request.locator('.option').nth(1).click();
+    await request.getByRole('button', { name: 'Answer' }).click();
+    await expect(request).toBeHidden();
+    expect(hub.codex.calls.at(-1)).toEqual(['answer', 'codex:t2', 'q-2', { answers: { branch: 'dev' } }]);
+
+    hub.codex.set('codex:t2', {
+      state: 'waiting',
+      pending: {
+        ...QUESTION, requestId: 'q-3',
+        input: { threadId: 't2', questions: [{ id: 'token', question: 'Paste the token.', isOther: true, isSecret: true, options: [] }] },
+      },
+    });
+    await expect(request.locator('.request-title')).toHaveText('Paste the token.');
+    const field = request.locator('.request-other-field');
+    await expect(field).toHaveAttribute('type', 'password');
+    await expect(field).toHaveAttribute('autocomplete', 'off');
+    await field.fill('invented-secret');
+    await request.getByRole('button', { name: 'Answer' }).click();
+    await expect(request).toBeHidden();
+    expect(hub.codex.calls.at(-1)).toEqual(['answer', 'codex:t2', 'q-3', { answers: { token: 'invented-secret' } }]);
+  });
+
+  test('a failed turn says only that the turn failed, whatever the server said', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=codex:t2`);
+    hub.codex.set('codex:t2', { state: 'error', lastError: 'Rate limited: retry after 30s' });
+    await expect(page.locator('#agent-notice')).toHaveText('The last turn failed.');
+    await expect(row(page, 'other').locator('.agent-row-state')).toHaveText('The last turn failed');
+    await expect(page.locator('#agent-status')).toBeHidden();
+    await expect(page.locator('#agent-panel')).not.toContainText('Rate limited');
   });
 
   test('a Claude terminal shows where it runs and its state, with no messages and no composer', async ({ page, hub }) => {
@@ -252,7 +301,7 @@ test.describe('with sessions', () => {
     await expect(pane(page).locator('#agent-name')).toHaveText('catchup');
     await expect(pane(page).locator('#agent-chips .provider-chip')).toHaveText('Claude');
     await expect(page.locator('#agent-description')).toHaveText('~/work/catchup');
-    await expect(page.locator('#agent-messages .thread-line')).toHaveText(['This session runs in a cmux terminal.', 'Claude is working.']);
+    await expect(page.locator('#agent-messages .thread-line')).toHaveText(['Claude is working.']);
     await expect(messages(page)).toHaveCount(0);
     await expect(page.locator('#agent-composer')).toBeHidden();
     await expect(page.locator('#agent-foot')).toBeHidden();
@@ -265,18 +314,18 @@ test.describe('with sessions', () => {
     // The pane follows the terminal's state.
     hub.cmux.set(inventory({ agents: [{ ...inventory().agents[0], state: 'idle' }, inventory().agents[1]] }));
     await hub.state.refreshSessions();
-    await expect(page.locator('#agent-messages .thread-line')).toHaveText(['This session runs in a cmux terminal.', 'Claude is idle.']);
+    await expect(page.locator('#agent-messages .thread-line')).toHaveText(['Claude is idle.']);
     await expect(row(page, 'catchup').locator('.agent-row-state')).toHaveCount(0);
     hub.cmux.set(inventory({ agents: [{ ...inventory().agents[0], state: 'needsInput' }, inventory().agents[1]] }));
     await hub.state.refreshSessions();
-    await expect(page.locator('#agent-messages .thread-line')).toHaveText(['This session runs in a cmux terminal.', 'Claude is waiting for you.']);
+    await expect(page.locator('#agent-messages .thread-line')).toHaveText(['Claude is waiting for you.']);
     await expect(row(page, 'catchup').locator('.agent-row-state')).toHaveText('Waiting for you');
     await expect(row(page, 'catchup').locator('.agent-row-state')).toHaveClass(/agent-row-state-wait/);
 
     // A closed terminal says so and cannot be opened.
     await page.goto(`${hub.origin}/?agent=claude:${C_GONE}`);
     await expect(pane(page).locator('#agent-name')).toHaveText('notes');
-    await expect(page.locator('#agent-messages .thread-line')).toHaveText(['This session runs in a cmux terminal.', 'The terminal is closed.']);
+    await expect(page.locator('#agent-messages .thread-line')).toHaveText(['The terminal is closed.']);
     await expect(openButton(page)).toBeDisabled();
     await expect(terminalLine(page)).toHaveText('That terminal is closed.');
   });
@@ -303,7 +352,7 @@ test.describe('with sessions', () => {
 
     await page.goto(`${hub.origin}/?agent=codex:t2`);
     await expect(openButton(page)).toBeDisabled();
-    await expect(terminalLine(page)).toHaveText('This terminal was not started through the dashboard, so it cannot be opened from here.');
+    await expect(terminalLine(page)).toHaveText('This thread was not started with codex-new, so its terminal is not known.');
 
     await page.goto(`${hub.origin}/?agent=codex:t3`);
     await expect(openButton(page)).toBeDisabled();
@@ -380,13 +429,13 @@ test.describe('with the Codex server gone', () => {
     await expect(row(page, 'Fix the flaky test').locator('.agent-row-state')).toHaveText('Server stopped');
     await expect(page.locator('.agents-sessions-message')).toHaveCount(0);
     if (phone(page)) await page.locator('#agents-routines').click();
-    await expect(page.locator('#agents-availability p')).toHaveText(['Codex server disconnected.']);
+    await expect(page.locator('#agents-availability p')).toHaveText(['The Codex server disconnected.']);
 
     await page.goto(`${hub.origin}/?agent=codex:t1`);
     await expect(page.locator('#agent-notice')).toHaveText('The Codex server disconnected.');
     await expect(page.locator('#agent-messages')).toBeEmpty();
     await expect(page.locator('#agent-status')).toBeHidden();
-    await expect(page.locator('#agent-foot')).toHaveText('Codex threads take messages in the terminal.');
+    await expect(page.locator('#agent-foot')).toHaveText('Type to this thread in its terminal.');
     expect(hub.requests('/api/sessions/codex:t1/thread')).toEqual([]);
   });
 });
@@ -426,12 +475,12 @@ test.describe('with nothing to list and both sources off', () => {
     await expect(sentence).toHaveText('No coding sessions. Start the Codex server or open a terminal in cmux.');
     expect((await sentence.boundingBox()).y).toBeGreaterThan((await row(page, 'Focus').boundingBox()).y);
     if (phone(page)) await page.locator('#agents-routines').click();
-    await expect(page.locator('#agents-availability p')).toHaveText(['Codex server not running.', 'cmux is not running.']);
+    await expect(page.locator('#agents-availability p')).toHaveText(['The Codex server is not running.', 'cmux is not running.']);
 
     // With cmux back, the sentence goes: the pane says what is still off.
     hub.cmux.set(inventory({ agents: [] }));
     await hub.state.refreshSessions();
     await expect(sentence).toHaveCount(0);
-    await expect(page.locator('#agents-availability p')).toHaveText(['Codex server not running.']);
+    await expect(page.locator('#agents-availability p')).toHaveText(['The Codex server is not running.']);
   });
 });

@@ -27,14 +27,16 @@ test('groups keeps registry order under Work then Personal and drops empty group
 });
 
 test('groups nests sessions under their project in snapshot order and puts the rest under Other sessions', () => {
-  const agents = [{ id: 'b', group: 'work', kind: 'project' }, { id: 'a', group: 'personal', kind: 'persona' }];
+  const agents = [{ id: 'b', group: 'work', kind: 'project' }, { id: 'a', group: 'personal', kind: 'persona' }, { id: 'c', group: 'archive', kind: 'project' }];
   const sessions = [
     { id: 'codex:1', projectId: 'b' }, { id: 'claude:2', projectId: null }, { id: 'codex:3', projectId: 'b' }, { id: 'codex:4', projectId: 'gone' },
+    { id: 'codex:5', projectId: 'c' },
   ];
+  // A project in a group the list does not show (c) has no row, so its sessions are loose.
   assert.deepEqual(shape(view.groups(agents, sessions)), [
     ['Work', [['b', ['codex:1', 'codex:3']]]],
     ['Personal', [['a', []]]],
-    ['Other sessions', [[null, ['claude:2', 'codex:4']]]],
+    ['Other sessions', [[null, ['claude:2', 'codex:4', 'codex:5']]]],
   ]);
   assert.deepEqual(shape(view.groups([], sessions.slice(1, 2))), [['Other sessions', [[null, ['claude:2']]]]]);
 });
@@ -52,9 +54,10 @@ test('sessionsSentence speaks only when nothing is listed and both sources are o
 
 test('codexSentence and cmuxSentence say what is off and nothing while on', () => {
   assert.equal(view.codexSentence({ available: true }), '');
-  assert.equal(view.codexSentence({ available: false, reason: 'no_server' }), 'Codex server not running.');
-  assert.equal(view.codexSentence({ available: false, reason: 'disconnected' }), 'Codex server disconnected.');
-  assert.equal(view.codexSentence({ available: false, reason: 'ws_unavailable' }), 'Codex sessions are off.');
+  assert.equal(view.codexSentence({ available: false, reason: 'no_server' }), 'The Codex server is not running.');
+  assert.equal(view.codexSentence({ available: false, reason: 'disconnected' }), 'The Codex server disconnected.');
+  assert.equal(view.codexSentence({ available: false, reason: 'ws_unavailable' }), 'Codex sessions are off until npm ci runs.');
+  assert.equal(view.codexSentence({ available: false, reason: 'no_adapter' }), 'Codex sessions are off.');
   assert.equal(view.cmuxSentence({ available: true, stale: true }), '');
   assert.equal(view.cmuxSentence({ available: false, reason: 'not_running' }), 'cmux is not running.');
   assert.equal(view.cmuxSentence({ available: false, reason: 'no_password' }), 'cmux refused the connection. Check the socket password.');
@@ -66,9 +69,9 @@ test('codexSentence and cmuxSentence say what is off and nothing while on', () =
 test('terminalReason says why Open terminal is off, in order: no binding, cmux, closed', () => {
   const live = { workspaceId: 'ws', surfaceId: 'sf', live: true };
   const on = { cmux: { available: true } };
-  assert.equal(view.terminalReason({ binding: null }, on), 'This terminal was not started through the dashboard, so it cannot be opened from here.');
+  assert.equal(view.terminalReason({ binding: null }, on), 'This thread was not started with codex-new, so its terminal is not known.');
   assert.equal(view.terminalReason({ binding: { workspaceId: null, surfaceId: null, live: false } }, on),
-    'This terminal was not started through the dashboard, so it cannot be opened from here.');
+    'This thread was not started with codex-new, so its terminal is not known.');
   assert.equal(view.terminalReason({ binding: { ...live, live: false } }, { cmux: { available: false, reason: 'not_running' } }), 'cmux is not running.');
   assert.equal(view.terminalReason({ binding: { ...live, live: false } }, on), 'That terminal is closed.');
   assert.equal(view.terminalReason({ binding: live }, on), '');
@@ -76,7 +79,7 @@ test('terminalReason says why Open terminal is off, in order: no binding, cmux, 
 
 test('openRefusal turns each open-terminal refusal into a sentence', () => {
   assert.equal(view.openRefusal(null), 'The dashboard did not respond.');
-  assert.equal(view.openRefusal({ code: 'unbound' }), 'This terminal was not started through the dashboard, so it cannot be opened from here.');
+  assert.equal(view.openRefusal({ code: 'unbound' }), 'This thread was not started with codex-new, so its terminal is not known.');
   assert.equal(view.openRefusal({ code: 'terminal_closed' }), 'That terminal is closed.');
   assert.equal(view.openRefusal({ code: 'cmux_unavailable', reason: 'no_password' }), 'cmux refused the connection. Check the socket password.');
   assert.equal(view.openRefusal({ code: 'focus_failed', reason: 'not_found' }), 'That terminal is closed.');
@@ -102,7 +105,7 @@ test('displayName and shortPath name a session by its title or folder, with the 
 test('terminalState is a sentence for the terminal pane', () => {
   assert.equal(view.terminalState({ state: 'busy', binding: { live: true } }), 'Claude is working.');
   assert.equal(view.terminalState({ state: 'idle', binding: { live: true } }), 'Claude is idle.');
-  assert.equal(view.terminalState({ state: 'unknown', binding: { live: true } }), 'Claude\u2019s state is not known.');
+  assert.equal(view.terminalState({ state: 'unknown', binding: { live: true } }), 'Claude has not reported its state.');
   assert.equal(view.terminalState({ state: 'busy', binding: { live: false } }), 'The terminal is closed.');
 });
 
@@ -127,6 +130,13 @@ test('errorSentence turns each code into a sentence and passes adapter sentences
   assert.equal(view.errorSentence(persona({ lastError: null })), 'The last turn failed.');
   const resume = 'The stored session could not be resumed. Start a new thread.';
   assert.equal(view.errorSentence(persona({ lastError: resume })), resume);
+  // A session is named like its row, and the Codex server's own text never reaches the pane.
+  const session = (fields) => ({ id: 'codex:1', threadId: '1', title: null, cwd: '/home/h/work', state: 'error', ...fields });
+  assert.equal(view.errorSentence(session({ lastError: 'start_failed' })),
+    'The session file for work could not be read. Check the threads directory, then restart the dashboard.');
+  assert.equal(view.errorSentence(session({ lastError: 'server_gone' })), 'The Codex server disconnected.');
+  assert.equal(view.errorSentence(session({ lastError: 'Rate limited: retry after 30s' })), 'The last turn failed.');
+  assert.equal(view.errorSentence(session({ lastError: null })), 'The last turn failed.');
 });
 
 test('composerReason says why a message cannot be sent', () => {

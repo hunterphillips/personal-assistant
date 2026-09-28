@@ -34,8 +34,8 @@
 // (`codex:<thread>` or `claude:<cmux session>`) goes in `?agent=` like an
 // agent's. A Codex session opens the same pane, read and answered through
 // the session routes, with no composer: its messages are typed in the
-// terminal. A Claude terminal has nothing to read, so its pane says so
-// and shows its state. Both offer "Open terminal", which posts to the
+// terminal. A Claude terminal has nothing to read, so its pane is its
+// state. Both offer "Open terminal", which posts to the
 // session's open-terminal route and is off, with the reason under it,
 // unless the session's terminal is bound, still open, and cmux answers.
 (function () {
@@ -48,7 +48,7 @@
   var SESSION_ID = /^(?:codex|claude):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
   var NO_SESSIONS = 'No coding sessions. Start the Codex server or open a terminal in cmux.';
   var TERMINAL_ONLY = 'Answer this one in the terminal.';
-  var UNBOUND = 'This terminal was not started through the dashboard, so it cannot be opened from here.';
+  var UNBOUND = 'This thread was not started with codex-new, so its terminal is not known.';
   var TERMINAL_CLOSED = 'That terminal is closed.';
   var TICK_MS = 60000;
   var THREAD_TIMEOUT_MS = 8000;
@@ -138,15 +138,18 @@
 
   // The rows under each group heading in registry order, each with the
   // sessions nested under it (newest first, as the snapshot lists them);
-  // groups with no rows are left out. Sessions under no project form one
-  // more group after the others.
+  // groups with no rows are left out. Sessions under no project, or under
+  // a project in no listed group, form one more group after the others.
   function groups(agents, sessions) {
     var nested = {};
     var loose = [];
+    var listed = GROUPS.map(function (group) { return group[0]; });
     for (var s = 0; s < (sessions || []).length; s += 1) {
       var session = sessions[s];
       var projectId = session.projectId;
-      var known = projectId && (agents || []).some(function (agent) { return agent.id === projectId; });
+      var known = projectId && (agents || []).some(function (agent) {
+        return agent.id === projectId && listed.indexOf(agent.group) !== -1;
+      });
       if (!known) loose.push(session);
       else (nested[projectId] = nested[projectId] || []).push(session);
     }
@@ -174,8 +177,9 @@
   function codexSentence(codex) {
     if (!codex || codex.available !== false) return '';
     switch (codex.reason) {
-      case 'no_server': return 'Codex server not running.';
-      case 'disconnected': return 'Codex server disconnected.';
+      case 'no_server': return 'The Codex server is not running.';
+      case 'disconnected': return 'The Codex server disconnected.';
+      case 'ws_unavailable': return 'Codex sessions are off until npm ci runs.';
       default: return 'Codex sessions are off.';
     }
   }
@@ -234,14 +238,16 @@
   }
 
   // The persona's or session's lastError as a sentence the reader can act
-  // on. The adapter's own messages are already sentences and pass through.
+  // on. The Claude adapter's own messages are already sentences and pass
+  // through; a Codex thread's lastError is the server's text, which stays
+  // in the log, so the pane says only that the turn failed.
   function errorSentence(agent) {
     var code = agent.lastError;
     switch (code) {
       case 'api_key_in_env':
         return 'The dashboard started with an API key in its environment, so personas are off. Unset it and restart the dashboard.';
       case 'start_failed':
-        return 'The session file for ' + agent.name + ' could not be read. Check the threads directory, then restart the dashboard.';
+        return 'The session file for ' + displayName(agent) + ' could not be read. Check the threads directory, then restart the dashboard.';
       case 'server_gone':
         return 'The Codex server disconnected.';
       case 'sdk_unavailable':
@@ -256,7 +262,7 @@
       case '':
         return 'The last turn failed.';
       default:
-        return String(code);
+        return isSession(agent) ? 'The last turn failed.' : String(code);
     }
   }
 
@@ -332,7 +338,7 @@
       case 'busy': return 'Claude is working.';
       case 'idle': return 'Claude is idle.';
       case 'waiting': return 'Claude is waiting for you.';
-      default: return 'Claude’s state is not known.';
+      default: return 'Claude has not reported its state.';
     }
   }
 
@@ -519,7 +525,7 @@
       var sentence = sessionsSentence(state);
       if (sentence) groupsNode.appendChild(element('p', 'agents-message agents-sessions-message', sentence));
       if (focusedId) {
-        var again = groupsNode.querySelector('[data-agent="' + focusedId + '"]');
+        var again = groupsNode.querySelector('[data-agent="' + CSS.escape(focusedId) + '"]');
         if (again) again.focus();
       }
     }
@@ -537,8 +543,8 @@
 
     // The pane scrolls to the newest message when a thread first shows and
     // when the reader is already at the end; a reader who scrolled up stays
-    // where they were. A Claude terminal has no messages: its pane says
-    // where the session runs, then its state.
+    // where they were. A Claude terminal has no messages: its pane is its
+    // state.
     function renderMessages() {
       var agent = selectedAgent();
       var atEnd = messagesNode.scrollHeight - messagesNode.scrollTop - messagesNode.clientHeight <= SCROLL_END_PX;
@@ -546,7 +552,6 @@
       messagesNode.textContent = '';
       renderedVersion = thread.version;
       if (isTerminal(agent)) {
-        messagesNode.appendChild(element('p', 'thread-line', 'This session runs in a cmux terminal.'));
         messagesNode.appendChild(element('p', 'thread-line', terminalState(agent)));
         return;
       }
@@ -580,7 +585,9 @@
     }
 
     // A Codex question carries an id, which its answer is keyed by; a
-    // persona's is keyed by its text.
+    // persona's is keyed by its text. Codex also says whether a free-text
+    // answer is allowed (`isOther`, on by default) and whether the answer
+    // is a secret, which is then typed into a password field.
     function questionCard(question, index) {
       var card = element('section', 'request-card');
       card.setAttribute('data-question', typeof question.id === 'string' && question.id ? question.id : question.question);
@@ -595,12 +602,13 @@
         if (list[i] && typeof list[i].label === 'string') options.appendChild(optionButton(list[i]));
       }
       card.appendChild(options);
+      if (question.isOther === false) return card;
       var other = element('label', 'request-other');
       var otherId = 'agent-other-' + index;
       var otherLabel = element('span', 'request-other-label', 'Other');
       other.appendChild(otherLabel);
       var field = element('input', 'request-other-field');
-      field.type = 'text';
+      field.type = question.isSecret === true ? 'password' : 'text';
       field.id = otherId;
       field.setAttribute('aria-label', 'Other answer for: ' + question.question);
       field.autocomplete = 'off';
@@ -610,14 +618,17 @@
     }
 
     // The approval's heading: what the agent asks, by Codex's item kinds or
-    // the persona's tool name.
+    // the persona's tool name. A session request of a kind this view does
+    // not know is answered in the terminal, and the heading says so.
     function approvalTitle(agent, pending) {
       var name = displayName(agent);
       switch (pending.toolName) {
         case 'commandExecution': return name + ' wants to run a command';
         case 'fileChange': return name + ' wants to change files';
         case 'permissions': return name + ' asks for permission';
-        default: return name + ' wants to run ' + (pending.toolName || 'a tool');
+        default:
+          if (isSession(agent)) return name + ' is waiting on the terminal';
+          return name + ' wants to run ' + (pending.toolName || 'a tool');
       }
     }
 
@@ -741,12 +752,14 @@
         var labels = [];
         var pressed = card.querySelectorAll('.option[aria-pressed="true"]');
         for (var j = 0; j < pressed.length; j += 1) labels.push(pressed[j].getAttribute('data-label'));
-        var other = card.querySelector('.request-other-field').value.trim();
+        var otherField = card.querySelector('.request-other-field');
+        var other = otherField ? otherField.value.trim() : '';
         var multi = card.hasAttribute('data-multi');
         if (other && (multi || labels.length === 0)) labels.push(other);
         if (labels.length === 0) {
           if (missingNode) missingNode.textContent = 'Every question needs an answer.';
-          card.querySelector('.option, .request-other-field').focus();
+          var first = card.querySelector('.option, .request-other-field');
+          if (first) first.focus();
           return null;
         }
         answers[card.getAttribute('data-question')] = multi ? labels : other || labels[0];
@@ -865,7 +878,7 @@
         reason.textContent = reasonText;
         reason.hidden = !reasonText;
       }
-      foot.textContent = hasThread(agent) && session ? 'Codex threads take messages in the terminal.' : '';
+      foot.textContent = hasThread(agent) && session ? 'Type to this thread in its terminal.' : '';
       foot.hidden = !foot.textContent;
       failure.textContent = actionError;
       failure.hidden = !actionError;
