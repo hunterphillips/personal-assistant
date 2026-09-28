@@ -26,6 +26,7 @@
   var EDIT_LABEL = 'What should change?';
   var LABEL_MAX = 60;
   var EMPTY = 'Nothing in the vault yet.';
+  var TOO_LONG = 'That is too long for one message.';
 
   function element(tag, className, text) {
     var node = document.createElement(tag);
@@ -39,6 +40,7 @@
     if (status === 503 || (status === 409 && code === 'persona_unavailable') ||
         (status === 404 && code === 'no_such_agent')) return NOT_RUNNING;
     if (status === 404 && code === 'no_such_goal') return CHANGED;
+    if (status === 413) return TOO_LONG;
     return NO_ANSWER;
   }
 
@@ -294,7 +296,9 @@
         return;
       }
       var problems = arrayOf(data.problems).filter(function (text) { return typeof text === 'string'; });
-      var empty = sections.every(sectionEmpty);
+      // The empty sentence is for a vault that was read and holds nothing,
+      // not for a vault that could not be found.
+      var empty = typeof data.agentId === 'string' && sections.every(sectionEmpty);
       setMessage(empty ? [EMPTY].concat(problems) : problems);
       var saved = composerFocus();
       if (composer) composer.node.remove();

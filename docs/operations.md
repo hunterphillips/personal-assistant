@@ -189,7 +189,7 @@ These are steps Hunter runs manually. They change Tailscale Serve and eventually
    ```
 
    If the tailnet URL then answers 421 or 403, Tailscale is presenting a different Host or Origin than the one configured. Roll back as described under Rollback, then correct the origin and reinstall.
-6. From another tailnet device, load the existing HTTPS hostname and both direct routes (/focus, /brief). Verify the shell, touch layout, same-origin API requests, and real feedback saving. Hunter performs one intended Focus action and one intended feedback save; inspect their normal local outputs without inventing tasks on the live board. Confirm there is one exposed HTTPS service and no Funnel entry.
+6. From another tailnet device, load the existing HTTPS hostname and the direct routes (/focus, /reading, /goals). Verify the shell, touch layout, same-origin API requests, and real feedback saving. Hunter performs one intended Focus action and one intended feedback save; inspect their normal local outputs without inventing tasks on the live board. Confirm there is one exposed HTTPS service and no Funnel entry.
 7. Only after those checks, identify the current 8765 listener by PID, command, and working directory (`lsof -nP -iTCP:8765 -sTCP:LISTEN`). Stop that exact `serve.py` process gracefully; confirm 8765 is closed while 4242/4243 and the dashboard URL remain healthy. Keep `serve.py`, viewers, builders, briefs, and feedback for rollback.
 8. Check service recovery after login/restart when a suitable opportunity occurs. The app is available while the Mac is awake and the user LaunchAgent is loaded; this does not add an always-on host or machine-sleep policy.
 

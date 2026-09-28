@@ -11,7 +11,7 @@ from `daily-brief/briefs/`, and feedback is saved beside them.
 
 The plan is
 `thoughts/shared/plans/2026-09-25-dashboard-assistant-daemon-implementation.md`
-in the umbrella directory; Phases 1 to 3 shipped by 2026-09-28.
+in the umbrella directory; Phases 1 to 4 shipped by 2026-09-28.
 
 ## Status
 
@@ -260,7 +260,8 @@ and `/goals`. The Agents view is the page at `/`; `/agents` shows the same
 view and `/routines` shows it with the routines overview open. `/reading`
 and `/brief` show the Reading view, `/focus` Focus, and `/goals` Goals. The
 navigation is a rail of four icon links, Home, Reading, Focus, and Goals;
-the script switches views with the History API and handles
+a path the shell does not know lands on Agents. The script switches views
+with the History API and handles
 Back and Forward, and a reload or bookmark opens the same view. Each frame
 is created the first time its view opens and stays in the page afterwards,
 hidden while another view is shown, so Focus keeps its state and the brief
