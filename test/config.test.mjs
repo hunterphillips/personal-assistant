@@ -103,6 +103,18 @@ test('threads dir defaults under APP_ROOT and honors absolute and relative overr
   assert.equal(loadConfig({ DASHBOARD_THREADS_DIR: 'var/other' }).threadsDir, path.resolve(APP_ROOT, 'var/other'));
 });
 
+test('cmux files default under the home directory and honor absolute and relative overrides', () => {
+  const config = loadConfig({});
+  assert.equal(config.cmuxSocketPathFile, path.join(os.homedir(), '.local', 'state', 'cmux', 'last-socket-path'));
+  assert.equal(config.cmuxPasswordFile, path.join(os.homedir(), 'Library', 'Application Support', 'cmux', 'socket-control-password'));
+  const overridden = loadConfig({ DASHBOARD_CMUX_SOCKET_PATH_FILE: '/run/cmux/path', DASHBOARD_CMUX_PASSWORD_FILE: 'var/cmux-password' });
+  assert.equal(overridden.cmuxSocketPathFile, '/run/cmux/path');
+  assert.equal(overridden.cmuxPasswordFile, path.resolve(APP_ROOT, 'var/cmux-password'));
+  assert.equal(config.timeouts.cmuxRequestMs, 5_000);
+  assert.equal(config.timeouts.cmuxSessionsMs, 5_000);
+  assert.equal(config.limits.cmuxFrameBytes, 1_048_576);
+});
+
 test('persona limits and timeouts are exposed', () => {
   const config = loadConfig({});
   assert.equal(config.timeouts.drainMs, 30_000);
