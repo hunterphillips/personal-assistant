@@ -19,14 +19,25 @@
 // Refuses when no server is running (owner.json missing or stale). Without
 // CMUX_WORKSPACE_ID and CMUX_SURFACE_ID the thread is still recorded with
 // null ids, and "Open terminal" stays unavailable for it.
+//
+// One launcher per folder at a time. The server tells every client about
+// every thread/started, so two launchers waiting in the same folder could
+// each adopt the other's thread. While waiting, this one holds
+// var/codex/waiting/<sha256 of the real cwd>.json with its pid; a second
+// launcher that finds the marker held by a live pid refuses before
+// starting anything, and a marker whose pid is dead is taken over. The
+// marker is removed once the thread is recorded or the TUI exits. A
+// thread that bindings.json already binds to different surface ids is
+// left as it is, and the helper says so instead of recording.
 
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import WebSocket from 'ws';
 
-import { appendBinding } from '../lib/bindings.mjs';
+import { appendBinding, claimPidFile, findBinding } from '../lib/bindings.mjs';
 import { codexDirFrom } from '../lib/config.mjs';
 
 const RPC_TIMEOUT_MS = 15_000;
@@ -56,6 +67,29 @@ async function main() {
 
   const workspaceId = process.env.CMUX_WORKSPACE_ID || null;
   const surfaceId = process.env.CMUX_SURFACE_ID || null;
+
+  // The wait marker for this folder, held until the thread is recorded or
+  // the TUI exits, whichever comes first.
+  const waitDir = path.join(dir, 'waiting');
+  await fsp.mkdir(waitDir, { recursive: true, mode: 0o700 });
+  const marker = path.join(waitDir, `${createHash('sha256').update(realCwd).digest('hex')}.json`);
+  const claim = await claimPidFile(marker, `${JSON.stringify({ pid: process.pid, cwd: realCwd, startedAt: new Date().toISOString() })}\n`);
+  if (!claim.claimed) throw new Error('Another codex-new is waiting in this folder. Start it after that terminal reaches its prompt.');
+  let holding = true;
+  const release = async () => {
+    if (!holding) return;
+    holding = false;
+    await fsp.rm(marker, { force: true });
+  };
+
+  try {
+    await launch({ owner, cwd, realCwd, workspaceId, surfaceId, bindingsFile: path.join(dir, 'bindings.json'), release });
+  } finally {
+    await release();
+  }
+}
+
+async function launch({ owner, cwd, realCwd, workspaceId, surfaceId, bindingsFile, release }) {
   const watcher = await connect(owner.socket);
   console.log(`codex-new: connected to unix://${owner.socket}; the thread is recorded once the TUI starts it.`);
 
@@ -77,20 +111,30 @@ async function main() {
       exited.then(() => null),
     ]);
     if (threadId) {
-      await appendBinding(path.join(dir, 'bindings.json'), { threadId, cwd, workspaceId, surfaceId, createdAt: new Date().toISOString() });
-      outcome = workspaceId && surfaceId
-        ? `thread ${threadId} bound to this cmux terminal (workspace ${workspaceId}, surface ${surfaceId}).`
-        : `thread ${threadId} recorded; this terminal is not a cmux surface, so Open terminal will be unavailable for it.`;
+      const existing = await findBinding(bindingsFile, threadId);
+      if (existing && (existing.workspaceId !== workspaceId || existing.surfaceId !== surfaceId)) {
+        outcome = `thread ${threadId} is already bound to another terminal (workspace ${existing.workspaceId ?? 'none'}, surface ${existing.surfaceId ?? 'none'}); nothing was recorded.`;
+      } else {
+        await appendBinding(bindingsFile, { threadId, cwd, workspaceId, surfaceId, createdAt: new Date().toISOString() });
+        outcome = workspaceId && surfaceId
+          ? `thread ${threadId} bound to this cmux terminal (workspace ${workspaceId}, surface ${surfaceId}).`
+          : `thread ${threadId} recorded; this terminal is not a cmux surface, so Open terminal will be unavailable for it.`;
+      }
     } else {
       outcome = 'the TUI exited before starting a thread; nothing was recorded.';
     }
   } catch (error) {
-    outcome = `no thread was recorded: ${error.message}`;
+    outcome = error?.code === 'ENOENT' && typeof error?.syscall === 'string' && error.syscall.startsWith('spawn')
+      ? 'codex was not found on PATH; nothing was recorded.'
+      : `no thread was recorded: ${error.message}`;
   } finally {
     watcher.close();
+    await release();
   }
 
-  const [code, signal] = await exited;
+  // A spawn failure rejected the race above already; here it only means
+  // there is no exit status.
+  const [code, signal] = await exited.catch(() => [null, null]);
   console.log(`codex-new: ${outcome}`);
   process.exitCode = signal ? 1 : code ?? 1;
 }

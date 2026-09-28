@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { appendBinding } from '../lib/bindings.mjs';
 import { startCodexServer, until } from './support/codex-server.mjs';
 import { tempDir } from './support/harness.mjs';
 
@@ -224,4 +226,119 @@ test('codex-new records nothing when the TUI exits before starting a thread', as
   assert.equal(fs.existsSync(f.bindingsFile), false);
   assert.deepEqual(f.calls(), [['--remote', `unix://${server.socket}`, '-C', work]]);
   await until(() => server.live().length === 0, 2_000, 'helper connection closed');
+});
+
+// The wait marker codex-new holds for a folder while it waits for the thread.
+function markerFor(codexDir, dir) {
+  return path.join(codexDir, 'waiting', `${createHash('sha256').update(fs.realpathSync(dir)).digest('hex')}.json`);
+}
+
+async function serverFixture(t) {
+  const f = await fixture(t);
+  const server = await startCodexServer(t);
+  await fsp.mkdir(f.codexDir, { recursive: true });
+  await fsp.writeFile(f.ownerFile, JSON.stringify({ socket: server.socket, pid: process.pid, startedAt: 'x', codexVersion: 'y' }));
+  const work = path.join(f.root, 'work');
+  await fsp.mkdir(work);
+  return { ...f, server, work };
+}
+
+test('codex-new refuses a second launcher in the same folder while the first waits, and takes over a dead one\'s marker', async (t) => {
+  const f = await serverFixture(t);
+  const { server, work } = f;
+  // A marker left by a process that is gone does not block.
+  await fsp.mkdir(path.join(f.codexDir, 'waiting'), { recursive: true });
+  await fsp.writeFile(markerFor(f.codexDir, work), JSON.stringify({ pid: spawnSync(process.execPath, ['-e', '0']).pid, cwd: work, startedAt: 'x' }));
+  const first = runAsync(NEW, ['--cwd', work], { ...f.env, CMUX_WORKSPACE_ID: 'ws-1', CMUX_SURFACE_ID: 'sf-1', FAKE_CODEX_LINGER_MS: '10000' });
+  t.after(() => { if (first.child.exitCode === null) first.child.kill('SIGKILL'); });
+  await until(() => f.calls().length === 1, 5_000, 'TUI launch');
+  const marker = JSON.parse(await fsp.readFile(markerFor(f.codexDir, work), 'utf8'));
+  assert.equal(marker.pid, first.child.pid);
+  assert.equal(marker.cwd, await fsp.realpath(work));
+  assert.equal((await fsp.stat(markerFor(f.codexDir, work))).mode & 0o777, 0o600);
+
+  // The same folder through a symlink is the same folder: refused before
+  // anything is started or connected.
+  const alias = path.join(f.root, 'alias');
+  await fsp.symlink(work, alias);
+  const second = await runAsync(NEW, ['--cwd', alias], { ...f.env, CMUX_WORKSPACE_ID: 'ws-2', CMUX_SURFACE_ID: 'sf-2' }).exit;
+  assert.equal(second.code, 1);
+  assert.match(second.stderr, /^codex-new: Another codex-new is waiting in this folder\. Start it after that terminal reaches its prompt\.$/m);
+  assert.equal(f.calls().length, 1, 'the second launcher started no TUI');
+  assert.equal(server.live().length, 1, 'and opened no connection');
+  assert.equal(fs.existsSync(f.bindingsFile), false);
+
+  // Another folder is not blocked.
+  const elsewhere = path.join(f.root, 'elsewhere');
+  await fsp.mkdir(elsewhere);
+  const third = runAsync(NEW, ['--cwd', elsewhere], { ...f.env, FAKE_CODEX_LINGER_MS: '10000' });
+  t.after(() => { if (third.child.exitCode === null) third.child.kill('SIGKILL'); });
+  await until(() => f.calls().length === 2, 5_000, 'third TUI launch');
+  assert.equal(fs.existsSync(markerFor(f.codexDir, elsewhere)), true);
+
+  // The first launcher records its thread and drops its marker while its
+  // TUI keeps running; the other launcher's marker stays.
+  server.notify('thread/started', { thread: { id: 'tui-thread-1', cwd: work } });
+  await until(() => fs.existsSync(f.bindingsFile), 5_000, 'binding');
+  await until(() => !fs.existsSync(markerFor(f.codexDir, work)), 2_000, 'marker removed');
+  assert.equal(first.child.exitCode, null);
+  assert.equal(fs.existsSync(markerFor(f.codexDir, elsewhere)), true);
+  assert.deepEqual(JSON.parse(await fsp.readFile(f.bindingsFile, 'utf8')).map((b) => [b.threadId, b.workspaceId, b.surfaceId]), [['tui-thread-1', 'ws-1', 'sf-1']]);
+
+  // With the marker gone the folder takes a new launcher.
+  const fourth = await runAsync(NEW, ['--cwd', work], { ...f.env }).exit;
+  assert.equal(fourth.code, 0, fourth.stderr);
+  assert.match(fourth.stdout, /the TUI exited before starting a thread; nothing was recorded/);
+  assert.equal(f.calls().length, 3);
+
+  // A launcher whose TUI exits without a thread drops its marker too.
+  third.child.kill('SIGTERM');
+  const thirdResult = await third.exit;
+  assert.match(thirdResult.stdout, /the TUI exited before starting a thread; nothing was recorded/);
+  assert.equal(fs.existsSync(markerFor(f.codexDir, elsewhere)), false);
+  first.child.kill('SIGTERM');
+  const firstResult = await first.exit;
+  assert.match(firstResult.stdout, /thread tui-thread-1 bound to this cmux terminal \(workspace ws-1, surface sf-1\)/);
+  await until(() => server.live().length === 0, 2_000, 'connections closed');
+});
+
+test('codex-new leaves a thread that is already bound to another terminal alone', async (t) => {
+  const f = await serverFixture(t);
+  const { server, work } = f;
+  await appendBinding(f.bindingsFile, { threadId: 'tui-thread-1', cwd: work, workspaceId: 'ws-9', surfaceId: 'sf-9', createdAt: '2026-09-28T00:00:00.000Z' });
+  const before = await fsp.readFile(f.bindingsFile, 'utf8');
+
+  const first = runAsync(NEW, ['--cwd', work], { ...f.env, CMUX_WORKSPACE_ID: 'ws-7', CMUX_SURFACE_ID: 'sf-3', FAKE_CODEX_LINGER_MS: '600' });
+  t.after(() => { if (first.child.exitCode === null) first.child.kill('SIGKILL'); });
+  await until(() => f.calls().length === 1, 5_000, 'TUI launch');
+  server.notify('thread/started', { thread: { id: 'tui-thread-1', cwd: work } });
+  let result = await first.exit;
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /thread tui-thread-1 is already bound to another terminal \(workspace ws-9, surface sf-9\); nothing was recorded\./);
+  assert.equal(await fsp.readFile(f.bindingsFile, 'utf8'), before);
+
+  // The same terminal again only refreshes the record.
+  const second = runAsync(NEW, ['--cwd', work], { ...f.env, CMUX_WORKSPACE_ID: 'ws-9', CMUX_SURFACE_ID: 'sf-9', FAKE_CODEX_LINGER_MS: '600' });
+  t.after(() => { if (second.child.exitCode === null) second.child.kill('SIGKILL'); });
+  await until(() => f.calls().length === 2, 5_000, 'second TUI launch');
+  server.notify('thread/started', { thread: { id: 'tui-thread-1', cwd: work } });
+  result = await second.exit;
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /thread tui-thread-1 bound to this cmux terminal \(workspace ws-9, surface sf-9\)/);
+  const bindings = JSON.parse(await fsp.readFile(f.bindingsFile, 'utf8'));
+  assert.deepEqual(bindings.map((b) => [b.threadId, b.workspaceId, b.surfaceId]), [['tui-thread-1', 'ws-9', 'sf-9']]);
+  assert.notEqual(bindings[0].createdAt, '2026-09-28T00:00:00.000Z');
+  await until(() => server.live().length === 0, 2_000, 'connections closed');
+});
+
+test('codex-new reports it when codex cannot be started', async (t) => {
+  const f = await serverFixture(t);
+  const emptyBin = path.join(f.root, 'empty-bin');
+  await fsp.mkdir(emptyBin);
+  const result = await runAsync(NEW, ['--cwd', f.work], { ...f.env, PATH: emptyBin }).exit;
+  assert.equal(result.code, 1);
+  assert.match(result.stdout, /^codex-new: codex was not found on PATH; nothing was recorded\.$/m);
+  assert.equal(fs.existsSync(f.bindingsFile), false);
+  assert.deepEqual(await fsp.readdir(path.join(f.codexDir, 'waiting')), []);
+  await until(() => f.server.live().length === 0, 2_000, 'helper connection closed');
 });
