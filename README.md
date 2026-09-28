@@ -86,7 +86,7 @@ snapshot; concurrent requests share one check. It stays for one release.
 `lib/hub.mjs` keeps one snapshot in memory:
 
 ```json
-{ "revision": 7, "updatedAt": "<ISO>",
+{ "revision": 7, "updatedAt": "<ISO>", "home": "/Users/hunter",
   "focus": { "available": true },
   "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>" },
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
@@ -94,20 +94,22 @@ snapshot; concurrent requests share one check. It stays for one release.
                "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
                "lastError": null, "costUsd": 0.42 }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
-                 "cwd": "/Users/hunter/workspace/x", "title": "Fix the flaky test", "state": "waiting",
+                 "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
                  "pending": { "requestId": "2", "kind": "question", "toolName": "requestUserInput", "input": { "...": "..." }, "truncated": false },
                  "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" }, "lastError": null, "updatedAt": "<ISO>",
                  "binding": { "workspaceId": "...", "surfaceId": "...", "live": true } },
                { "id": "claude:a9d25355-6056-4302-9146-5d905cb8cec5", "provider": "claude", "kind": "terminal",
-                 "cwd": "/Users/hunter/workspace/y", "state": "busy", "updatedAt": "<ISO>",
+                 "cwd": "/Users/hunter/workspace/y", "projectId": null, "state": "busy", "updatedAt": "<ISO>",
                  "binding": { "workspaceId": "...", "surfaceId": "...", "live": true } }],
   "codex": { "available": true },
   "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] } }
 ```
 
-`revision` goes up by one on every change. `focus` and `brief` hold what the
-status route reports (`available` is null and `state` is `unknown` before the
-first check). Agents leave out `cwd` and `routines`. A persona also carries
+`revision` goes up by one on every change. `home` is the home directory,
+which the Agents view shortens to `~` in the paths it shows. `focus` and
+`brief` hold what the status route reports (`available` is null and
+`state` is `unknown` before the first check). Agents leave out `cwd` and
+`routines`. A persona also carries
 its runtime state (see Personas below); any other kind has `state: null`.
 `sessions` lists the Codex threads the
 dashboard follows but does not own (see Codex sessions below); it is empty
@@ -300,6 +302,74 @@ the routines overview until a persona is chosen. On a phone the list comes
 first, a Routines row at its top (with the number of routines once they
 have been read) opens the overview at `/routines`, and a thread or the
 overview takes the whole width with an "All agents" link back.
+
+#### Sessions
+
+The snapshot's coding sessions (see Sessions in the snapshot) are rows
+too. Each sits under the project row its `projectId` names, indented,
+newest first; sessions under no project sit in an "Other sessions" group
+after Personal. A session row shows its provider chip, a title (a Codex
+thread's title, else the last segment of its folder; a Claude terminal
+always uses the folder), the folder with the home directory as `~`, a
+relative time, and a state line: "Waiting for you" on a question or
+approval, "Working" during a turn, "The last turn failed", "Server
+stopped" while the Codex server is down, or "Terminal closed" when the
+terminal it was started in has gone. A Codex thread with an open turn
+says the turn, since it can still be answered here; a Claude terminal
+that has closed says only that. When there are no sessions and both the
+Codex server and cmux are off, one sentence ends the list: "No coding
+sessions. Start the Codex server or open a terminal in cmux." With only
+one of them off the list says nothing; the routines overview carries one
+line per source that is off, above its heading ("Codex server not
+running.", "Codex server disconnected.", "cmux is not running.", "cmux
+refused the connection. Check the socket password.", or "cmux is not
+reachable."), and nothing while both answer.
+
+A session's id goes in `?agent=` like an agent's (`/?agent=codex%3A<threadId>`;
+the plain `codex:` form works too), and the phone flow is the same. An id
+that is not in the snapshot shows "That session is not listed."
+
+A Codex session opens the thread pane: its title and provider chip, its
+folder, the messages from `GET /api/sessions/<id>/thread` (fetched on the
+same occasions as a persona's), the working or waiting line with
+Interrupt (`POST /api/sessions/<id>/interrupt`), and a question or
+approval card that posts to `POST /api/sessions/<id>/answer`; a Codex
+question's answers are keyed by its question ids. There is no New thread,
+no cost line, and no routines toggle, and in place of the composer one
+sentence: "Codex threads take messages in the terminal." An approval
+shows what it asks as parts when the input carries them, in place of the
+JSON: the command and its folder, the files of a change, the permissions
+asked for (one line per path with its access, and "network"), and the
+reason given; the heading reads "<title> wants to run a command", "wants
+to change files", or "asks for permission". A request only the terminal
+can answer (`native`) shows no Allow, Deny, or Answer, and says "Answer
+this one in the terminal." While the server is down the pane says "The
+Codex server disconnected." above the empty message area. A refusal is
+reported under the pane as for a persona ("Answer this one in the
+terminal." for `not_supported`, "The Codex server is not connected." for
+`unavailable`, "That session is no longer listed." for `no_such_session`).
+
+A Claude terminal opens a pane with the folder name, the Claude chip, and
+the folder, then "This session runs in a cmux terminal." and its state:
+"Claude is working.", "Claude is idle.", "Claude's state is not known.",
+or "The terminal is closed." It has no messages, no request, no
+Interrupt, and no composer. Its cmux workspace and surface ids are never
+shown.
+
+Both panes have an "Open terminal" button in the header. It is enabled
+only when the session's `binding` names a terminal, that terminal is
+`live`, and `cmux.available` is true; otherwise it is disabled with the
+reason beneath it, in this order: "This terminal was not started through
+the dashboard, so it cannot be opened from here." (no binding, or one
+recorded outside cmux), the cmux sentence above (cmux off), or "That
+terminal is closed." (not live). Choosing it posts to
+`POST /api/sessions/<id>/open-terminal`; a 200 shows nothing, since the
+terminal now has the focus, and a refusal puts its sentence beneath the
+button until the next attempt or another session is chosen (`unbound`,
+`terminal_closed`, `cmux_unavailable` with its reason, `focus_failed` as
+"That terminal is closed." for `not_found`, the cmux sentence for
+`not_running`, `no_password`, or `auth_failed`, else "cmux could not open
+that terminal.").
 
 #### Routines
 
@@ -739,6 +809,12 @@ answering it here is refused as `not_supported`.
 ### Sessions in the snapshot
 
 `sessions` lists two kinds of row, newest first by `updatedAt`.
+
+Every row carries `projectId`: the id of the registry project (kind
+`project`) whose `cwd` is the session's cwd or a parent of it, the deepest
+such project when several qualify, or null. The Agents view nests the row
+under that project. A registry change rebuilds the list, so the ids follow
+an edit.
 
 A Codex thread carries `id` (`codex:<threadId>`), `provider` `codex`,
 `threadId`, `cwd`, `title` (the thread's name, else the first line of its
