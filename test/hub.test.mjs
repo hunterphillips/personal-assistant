@@ -325,6 +325,7 @@ test('a persona whose provider has no adapter is unavailable with the reason', a
   const disabled = makeHub({ adaptersDisabled: 'api_key_in_env' });
   await disabled.hub.start();
   assert.equal(persona(disabled.hub).lastError, 'api_key_in_env');
+  assert.deepEqual(disabled.hub.snapshot().codex, { available: false, reason: 'api_key_in_env' });
 });
 
 test('a persona whose adapter fails to start is unavailable and logged', async () => {

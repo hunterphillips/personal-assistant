@@ -73,13 +73,34 @@ export function fakeRoutines(routines = []) {
   return fake;
 }
 
+// Terminal bindings that never read a file; `set(map)` replaces them and
+// notifies the hub as a re-read would.
+export function fakeBindings(initial = new Map()) {
+  let current = initial;
+  const listeners = new Set();
+  return {
+    current: () => current,
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    set(next) {
+      current = next;
+      for (const fn of listeners) fn(current);
+    },
+    start: async () => {},
+    stop() {},
+  };
+}
+
 // Builds a hub over the given focus and brief, with fake registry and
 // routines unless real ones are passed, and no persona adapters unless given.
 export function createTestHub({
-  config, focus, brief, registry = fakeRegistry(), routines = fakeRoutines(), adapters = {}, store = null, log = () => {},
+  config, focus, brief, registry = fakeRegistry(), routines = fakeRoutines(), adapters = {}, store = null, bindings = null,
+  log = () => {},
 }) {
   return createHub({
-    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, log,
+    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, log,
   });
 }
 
@@ -89,7 +110,7 @@ export function createTestHub({
 // `adapters` and `store` fakes (default none), started before the app
 // listens. `configure` may adjust config.
 export async function startApp(t, {
-  env = {}, focus, brief, registry, routines, hub, adapters, store, configure = (c) => c,
+  env = {}, focus, brief, registry, routines, hub, adapters, store, bindings, configure = (c) => c,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
@@ -107,7 +128,7 @@ export async function startApp(t, {
   const briefRoutes = brief ?? createBriefRoutes(config);
   const routinesModule = routines ?? fakeRoutines();
   const stateHub = hub ?? createTestHub({
-    config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, adapters, store, log,
+    config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, adapters, store, bindings, log,
   });
   if (!hub) await stateHub.start();
   const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, log });
