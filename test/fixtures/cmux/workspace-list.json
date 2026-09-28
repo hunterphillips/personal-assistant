@@ -13,7 +13,7 @@
       "title": "~",
       "latest_submitted_message": null,
       "description": null,
-      "current_directory": "/Users/hunterphillips",
+      "current_directory": "/Users/hunter",
       "selected": false,
       "remote": {
         "local_proxy_port": null,
@@ -74,10 +74,10 @@
       "ref": "workspace:2",
       "custom_color": null,
       "id": "33B8390A-D8B0-47D1-BDE5-CE1390415F37",
-      "title": "\u2026/scratchpad/cmux-spike/work",
+      "title": "\u2026/spike/work",
       "latest_submitted_message": null,
       "description": null,
-      "current_directory": "/private/tmp/claude-501/-Users-hunterphillips-workspace-personal-assistant/10880368-b60b-48fa-afad-b580e0f37456/scratchpad/cmux-spike/work",
+      "current_directory": "/Users/hunter/workspace/spike/work",
       "selected": true,
       "remote": {
         "local_proxy_port": null,

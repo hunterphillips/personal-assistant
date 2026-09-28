@@ -1,5 +1,5 @@
 {
-  "default_codex_home": "/Users/hunterphillips/.codex",
+  "default_codex_home": "/Users/hunter/.codex",
   "limit": 100,
   "sessions": [
     {
@@ -11,7 +11,7 @@
       "agent": "claude",
       "agent_display_name": "Claude Code",
       "agent_lifecycle": "running",
-      "cwd": "/private/tmp/claude-501/-Users-hunterphillips-workspace-personal-assistant/10880368-b60b-48fa-afad-b580e0f37456/scratchpad/cmux-spike/work",
+      "cwd": "/Users/hunter/workspace/spike/work",
       "default_visible": true,
       "fork_command_available": false,
       "fork_startup_input_available": false,
@@ -21,10 +21,10 @@
       "is_restorable": false,
       "last_prompt_turn_id": null,
       "launch_arguments": [
-        "/Users/hunterphillips/.local/bin/claude"
+        "/Users/hunter/.local/bin/claude"
       ],
       "launch_backed": true,
-      "launch_working_directory": "/private/tmp/claude-501/-Users-hunterphillips-workspace-personal-assistant/10880368-b60b-48fa-afad-b580e0f37456/scratchpad/cmux-spike/work",
+      "launch_working_directory": "/Users/hunter/workspace/spike/work",
       "pid": 83194,
       "runtime_status": null,
       "session_dir": null,
@@ -32,9 +32,9 @@
       "session_id": "a9d25355-6056-4302-9146-5d905cb8cec5",
       "stale_pid_blocks_restore_in_0_64_17": false,
       "started_at": "2026-09-28T11:59:16.395Z",
-      "store_path": "/Users/hunterphillips/.cmuxterm/claude-hook-sessions.json",
+      "store_path": "/Users/hunter/.cmuxterm/claude-hook-sessions.json",
       "stored_pid_arguments": [
-        "/Users/hunterphillips/.local/bin/claude",
+        "/Users/hunter/.local/bin/claude",
         "--session-id",
         "a9d25355-6056-4302-9146-5d905cb8cec5",
         "--settings",
@@ -44,7 +44,7 @@
       "stored_pid_exists": true,
       "surface_id": "00223EE0-DBBE-4EB8-9D20-9330C73C8389",
       "transcript_backed": false,
-      "transcript_path": "/Users/hunterphillips/.claude/projects/-private-tmp-claude-501--Users-hunterphillips-workspace-personal-assistant-10880368-b60b-48fa-afad-b580e0f37456-scratchpad-cmux-spike-work/a9d25355-6056-4302-9146-5d905cb8cec5.jsonl",
+      "transcript_path": "/Users/hunter/.claude/projects/-Users-hunter-workspace-spike-work/a9d25355-6056-4302-9146-5d905cb8cec5.jsonl",
       "updated_at": "2026-09-28T11:59:16.395Z",
       "updated_at_unix": 1790596756.394864,
       "workspace_id": "33B8390A-D8B0-47D1-BDE5-CE1390415F37"
@@ -58,7 +58,7 @@
       "agent": "claude",
       "agent_display_name": "Claude Code",
       "agent_lifecycle": "idle",
-      "cwd": "/private/tmp/dashboard-eval-20260915/claude-cmux-native-edge",
+      "cwd": "/Users/hunter/workspace/eval/native-edge",
       "default_visible": true,
       "fork_command_available": true,
       "fork_startup_input_available": true,
@@ -68,7 +68,7 @@
       "is_restorable": true,
       "last_prompt_turn_id": null,
       "launch_arguments": [
-        "/Users/hunterphillips/.local/bin/claude",
+        "/Users/hunter/.local/bin/claude",
         "--restricted",
         "--strict-mcp-config",
         "--setting-sources",
@@ -81,7 +81,7 @@
         "dashboard-cmux-native-edge"
       ],
       "launch_backed": true,
-      "launch_working_directory": "/private/tmp/dashboard-eval-20260915/claude-cmux-native-edge",
+      "launch_working_directory": "/Users/hunter/workspace/eval/native-edge",
       "pid": 2140,
       "runtime_status": null,
       "session_dir": null,
@@ -89,11 +89,11 @@
       "session_id": "4b90ed66-849b-4595-a67b-16a67aed112c",
       "stale_pid_blocks_restore_in_0_64_17": true,
       "started_at": "2026-09-15T16:54:27.119Z",
-      "store_path": "/Users/hunterphillips/.cmuxterm/claude-hook-sessions.json",
+      "store_path": "/Users/hunter/.cmuxterm/claude-hook-sessions.json",
       "stored_pid_exists": false,
       "surface_id": "E03C63C2-AD4F-4625-BDAA-9E5D3B3646F7",
       "transcript_backed": true,
-      "transcript_path": "/Users/hunterphillips/.claude/projects/-private-tmp-dashboard-eval-20260915-claude-cmux-native-edge/4b90ed66-849b-4595-a67b-16a67aed112c.jsonl",
+      "transcript_path": "/Users/hunter/.claude/projects/-Users-hunter-workspace-eval-native-edge/4b90ed66-849b-4595-a67b-16a67aed112c.jsonl",
       "updated_at": "2026-09-15T16:54:51.601Z",
       "updated_at_unix": 1789491291.6012778,
       "workspace_id": "7798011B-97D6-4743-B408-102EFE04852E"
@@ -103,24 +103,24 @@
       "agent_display_name": "Codex",
       "agent_lifecycle": "running",
       "session_id": "0193c1f0-0000-7000-8000-000000000001",
-      "cwd": "/Users/hunterphillips/workspace/work/investing/cfo",
+      "cwd": "/Users/hunter/workspace/cfo",
       "workspace_id": "33B8390A-D8B0-47D1-BDE5-CE1390415F37",
       "pid": 4242
     },
     "junk"
   ],
-  "state_dir": "/Users/hunterphillips/.cmuxterm",
+  "state_dir": "/Users/hunter/.cmuxterm",
   "stores": [
     {
       "agent": "claude",
       "exists": true,
-      "path": "/Users/hunterphillips/.cmuxterm/claude-hook-sessions.json",
+      "path": "/Users/hunter/.cmuxterm/claude-hook-sessions.json",
       "session_count": 2
     },
     {
       "agent": "codex",
       "exists": false,
-      "path": "/Users/hunterphillips/.cmuxterm/codex-hook-sessions.json",
+      "path": "/Users/hunter/.cmuxterm/codex-hook-sessions.json",
       "session_count": 0
     }
   ],
