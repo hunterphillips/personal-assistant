@@ -1,16 +1,21 @@
-// Routines view: one card per agent with scheduled jobs, one row per job,
+// Routines: one section per agent with scheduled jobs, one row per job,
 // rendered from the shell's state. The shell calls create({ requestState,
 // isStreaming }) once and then update(state, keys) on every change (keys is
-// null for a whole snapshot), show() when the view opens, and hide() when it
-// closes or the tab is hidden. Cards are rebuilt only while the view is
-// shown; show() renders the latest state.
+// null for a whole snapshot). The Agents view shows routines in two places
+// and drives both: the overview of every agent's routines in the pane
+// beside the list, with show() when it is on screen and hide() when it is
+// not, and one agent's routines under its thread header, with
+// mount(container, agentId) when that section opens and unmount() when it
+// closes. count(agentId) is how many routines an agent has. Nothing is
+// rebuilt while off screen; show() and mount() render the latest state.
 //
-// Routines are refreshed only on demand: when the view opens and the last
-// refresh is missing or older than 60 seconds, and when Refresh is chosen.
-// The Focus card carries Pause or Resume, forwarded to Focus; the server
-// refreshes routines after either succeeds, and the card follows the state.
-// A failed Pause or Resume is reported in the card until the next attempt or
-// until the state shows Focus paused or resumed.
+// Routines are refreshed only on demand: when the overview or an agent's
+// section opens and the last refresh is missing or older than 60 seconds,
+// and when Refresh is chosen. The Focus section carries Pause or Resume,
+// forwarded to Focus; the server refreshes routines after either succeeds,
+// and the section follows the state. A failed Pause or Resume is reported
+// there until the next attempt or until the state shows Focus paused or
+// resumed.
 (function () {
   'use strict';
 
@@ -123,7 +128,8 @@
     var cards = document.getElementById('routines-cards');
 
     var state = null;
-    var visible = false;
+    var visible = false; // the overview is on screen
+    var mounted = null; // { container, agentId } of the open agent section
     var checkOnOpen = false;
     var refreshing = false; // our refresh request is out
     var pauseBusy = false;
@@ -148,15 +154,21 @@
       return li;
     }
 
-    function card(group) {
-      var section = element('section', 'routine-card');
-      var headingId = 'routines-agent-' + group.id;
-      section.setAttribute('aria-labelledby', headingId);
+    // One agent's routines: as a card with the agent's name and role in the
+    // overview, or as a bare section under the agent's own thread header.
+    function section(group, titled) {
+      var node = element('section', titled ? 'routine-card' : 'thread-routines-list');
       var header = element('div', 'card-header');
-      var title = element('h2', 'card-name', group.name);
-      title.id = headingId;
-      header.appendChild(title);
-      if (group.role) header.appendChild(element('span', 'role-chip', group.role));
+      if (titled) {
+        var headingId = 'routines-agent-' + group.id;
+        node.setAttribute('aria-labelledby', headingId);
+        var title = element('h3', 'card-name', group.name);
+        title.id = headingId;
+        header.appendChild(title);
+        if (group.role) header.appendChild(element('span', 'role-chip', group.role));
+      } else {
+        node.setAttribute('aria-label', 'Routines');
+      }
 
       var scans = group.items.filter(isFocusScan);
       if (scans.length > 0) {
@@ -168,21 +180,34 @@
         button.disabled = pauseBusy;
         header.appendChild(button);
       }
-      section.appendChild(header);
+      if (header.childNodes.length > 0) node.appendChild(header);
 
       if (scans.length > 0 && state.routines.focusAvailable === false) {
-        section.appendChild(element('p', 'card-note', 'Focus is not responding; showing launchd status.'));
+        node.appendChild(element('p', 'card-note', 'Focus is not responding; showing launchd status.'));
       }
       if (scans.length > 0 && pauseError) {
         var failure = element('p', 'card-error', pauseError);
         failure.setAttribute('role', 'status');
-        section.appendChild(failure);
+        node.appendChild(failure);
       }
 
       var list = element('ul', 'routine-list');
       for (var i = 0; i < group.items.length; i += 1) list.appendChild(row(group.items[i]));
-      section.appendChild(list);
-      return section;
+      node.appendChild(list);
+      return node;
+    }
+
+    // Replaces `container`'s children with what `fill` appends, keeping
+    // keyboard focus on a Pause or Resume button across the rebuild.
+    function rebuild(container, fill) {
+      var active = document.activeElement;
+      var hadFocus = !!active && container.contains(active) && active.hasAttribute('data-routines-action');
+      container.textContent = '';
+      fill(container);
+      if (hadFocus) {
+        var again = container.querySelector('[data-routines-action]');
+        if (again) again.focus();
+      }
     }
 
     // `code`, when given, follows the text in a muted span.
@@ -195,19 +220,13 @@
       message.hidden = !text;
     }
 
-    function render() {
-      if (!state) return;
+    function renderOverview() {
       var routines = state.routines;
       var busy = refreshing || routines.refreshing === true;
       refreshButton.textContent = busy ? 'Refreshing…' : 'Refresh';
       refreshButton.disabled = busy;
       updated.textContent = routines.refreshedAt ? 'Updated ' + formatTime(routines.refreshedAt, Date.now()) : '';
 
-      // Keep keyboard focus on the card's button across a re-render.
-      var active = document.activeElement;
-      var hadFocus = !!active && cards.contains(active) && active.hasAttribute('data-routines-action');
-
-      cards.textContent = '';
       // A bad registry edit keeps the last good agents on the server, so the
       // cards stay while the sentence says the file could not be read.
       if (state.registry && state.registry.ok === false) setMessage('The registry could not be read.', state.registry.error || null);
@@ -215,11 +234,37 @@
       else if (routines.refreshedAt && (routines.items || []).length === 0) setMessage('No routines are registered.');
       else setMessage('');
 
-      var list = groups(state);
-      for (var i = 0; i < list.length; i += 1) cards.appendChild(card(list[i]));
-      if (hadFocus) {
-        var again = cards.querySelector('[data-routines-action]');
-        if (again) again.focus();
+      rebuild(cards, function (container) {
+        var list = groups(state);
+        for (var i = 0; i < list.length; i += 1) container.appendChild(section(list[i], true));
+      });
+    }
+
+    function itemsFor(agentId) {
+      var items = state && state.routines && state.routines.items ? state.routines.items : [];
+      return items.filter(function (item) { return item.agentId === agentId; });
+    }
+
+    function renderAgent() {
+      var items = itemsFor(mounted.agentId);
+      rebuild(mounted.container, function (container) {
+        if (items.length > 0) container.appendChild(section({ id: mounted.agentId, items: items }, false));
+      });
+    }
+
+    function render() {
+      if (!state) return;
+      if (visible) renderOverview();
+      if (mounted) renderAgent();
+    }
+
+    // Relative times move while anything is on screen.
+    function syncTick() {
+      var wanted = visible || !!mounted;
+      if (wanted && tick === null) tick = setInterval(render, TICK_MS);
+      if (!wanted && tick !== null) {
+        clearInterval(tick);
+        tick = null;
       }
     }
 
@@ -230,7 +275,7 @@
     }
 
     function maybeRefreshOnOpen() {
-      if (!visible || !checkOnOpen || !state) return;
+      if (!(visible || mounted) || !checkOnOpen || !state) return;
       checkOnOpen = false;
       if (!refreshing && state.routines.refreshing !== true && stale()) refresh();
     }
@@ -271,7 +316,8 @@
     }
 
     refreshButton.addEventListener('click', refresh);
-    cards.addEventListener('click', function (event) {
+    // Pause and Resume exist only in what this module renders.
+    document.addEventListener('click', function (event) {
       var button = event.target.closest && event.target.closest('button[data-routines-action]');
       if (button && !button.disabled) togglePause(button.getAttribute('data-routines-action'));
     });
@@ -281,20 +327,36 @@
         if (pauseError && state && focusPaused(state) !== focusPaused(next)) pauseError = '';
         state = next;
         var touched = !keys || keys.some(function (key) { return WATCHED.indexOf(key) !== -1; });
-        if (touched && visible) render();
+        if (touched) render();
         maybeRefreshOnOpen();
+      },
+      count: function (agentId) {
+        return itemsFor(agentId).length;
       },
       show: function () {
         if (!visible) checkOnOpen = true;
         visible = true;
-        if (tick === null) tick = setInterval(render, TICK_MS);
-        render();
+        syncTick();
+        if (state) renderOverview();
         maybeRefreshOnOpen();
       },
       hide: function () {
         visible = false;
-        if (tick !== null) clearInterval(tick);
-        tick = null;
+        syncTick();
+      },
+      mount: function (container, agentId) {
+        if (mounted && mounted.container === container && mounted.agentId === agentId) return;
+        mounted = { container: container, agentId: agentId };
+        checkOnOpen = true;
+        syncTick();
+        if (state) renderAgent();
+        maybeRefreshOnOpen();
+      },
+      unmount: function () {
+        if (!mounted) return;
+        mounted.container.textContent = '';
+        mounted = null;
+        syncTick();
       },
     };
   }
