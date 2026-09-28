@@ -1,0 +1,24 @@
+# Contribution and brief files carry exact financial figures and personal
+# context. They stay local, always; never commit them. Contracts and code are
+# tracked; outputs are not.
+*/contributions/
+*/briefs/*
+# The builder and the viewer check live beside the briefs and are code.
+!daily-brief/briefs/build.py
+!daily-brief/briefs/check-viewer.mjs
+
+# Session state and planning artifacts: synced, never committed (repo convention).
+thoughts/
+
+# Nested repositories with their own history.
+dashboard/app/
+dashboard/prototype/
+
+# Local tool state.
+.claude/
+.playwright-mcp/
+node_modules/
+__pycache__/
+*.log
+
+.DS_Store

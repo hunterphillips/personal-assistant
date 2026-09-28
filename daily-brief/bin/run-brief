@@ -1,0 +1,382 @@
+#!/bin/sh
+# Scheduled Daily Brief run. Invoked by com.personal-assistant.daily-brief
+# (launchd) or by hand. Gathers one packet per domain, curates the memo,
+# builds the viewer the dashboard serves, and verifies it.
+#
+#   run-brief [--date YYYY-MM-DD] [--dry-run] [--force] [--stage gather|curate|verify]
+#
+# Read-only toward every domain repo. The only writes are under
+# daily-brief/contributions/<date>/, daily-brief/briefs/, and the logs.
+# The plan: thoughts/shared/plans/2026-09-27-daily-brief-scheduled-run.md.
+
+set -u
+
+root=/Users/hunterphillips/workspace/personal-assistant
+brief_dir=$root/daily-brief
+briefs=$brief_dir/briefs
+contributions=$brief_dir/contributions
+prompts=$brief_dir/bin/prompts
+claude=/Users/hunterphillips/.local/bin/claude
+node=/Users/hunterphillips/.nvm/versions/node/v24.18.0/bin/node
+python3=/usr/bin/python3
+tz=America/Chicago
+
+log_file=/Users/hunterphillips/Library/Logs/daily-brief.log
+transcripts=/Users/hunterphillips/Library/Logs/daily-brief
+lock_dir=$briefs/.run.lock
+
+wait_seconds=${DAILY_BRIEF_WAIT_SECONDS:-1800}
+gather_seconds=${DAILY_BRIEF_GATHER_SECONDS:-900}
+curate_seconds=${DAILY_BRIEF_CURATE_SECONDS:-1200}
+
+# Upstream artifacts the run waits for. Checked, never triggered.
+catchup_dir=/Users/hunterphillips/workspace/work/nowgentic/.claude/catchup
+cfo_logs=/Users/hunterphillips/workspace/work/investing/cfo/logs
+focus_logs=/Users/hunterphillips/workspace/projects/AI/focus/logs
+
+# Roster: domain|cwd|model|kind. kind is repo (a session in the domain's
+# repo) or connector (a session here using the Google Calendar connector).
+# DAILY_BRIEF_MODEL_<domain> overrides a model; hyphens become underscores.
+roster='cfo|/Users/hunterphillips/workspace/work/investing/cfo|opus|repo
+focus|/Users/hunterphillips/workspace/projects/AI/focus|opus|repo
+second-brain|/Users/hunterphillips/workspace/second-brain|opus|repo
+calendar|'$root'|sonnet|connector'
+
+curator_model=${DAILY_BRIEF_MODEL_curator:-opus}
+
+# --- arguments --------------------------------------------------------------
+date=
+dry_run=${DAILY_BRIEF_DRY_RUN:-0}
+force=0
+stage=all
+while [ $# -gt 0 ]; do
+    case $1 in
+        --date) date=$2; shift 2 ;;
+        --dry-run) dry_run=1; shift ;;
+        --force) force=1; shift ;;
+        --stage) stage=$2; shift 2 ;;
+        -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+        *) printf 'run-brief: unknown argument %s\n' "$1" >&2; exit 2 ;;
+    esac
+done
+case $stage in all|gather|curate|verify) ;; *) printf 'run-brief: bad --stage %s\n' "$stage" >&2; exit 2 ;; esac
+
+[ -n "$date" ] || date=$(TZ=$tz /bin/date +%F)
+case $date in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) printf 'run-brief: not a date: %s\n' "$date" >&2; exit 2 ;; esac
+
+# --- helpers ----------------------------------------------------------------
+now_iso() { TZ=$tz /bin/date '+%Y-%m-%dT%H:%M:%S%z' | /usr/bin/sed 's/\([0-9][0-9]\)$/:\1/'; }
+day_iso() { TZ=$tz /bin/date -j -f '%Y-%m-%d %H:%M:%S' "$1 00:00:00" '+%Y-%m-%dT%H:%M:%S%z' | /usr/bin/sed 's/\([0-9][0-9]\)$/:\1/'; }
+add_days() { TZ=$tz /bin/date -j -v"+$2d" -f '%Y-%m-%d' "$1" +%F; }
+weekday() { TZ=$tz /bin/date -j -f '%Y-%m-%d' "$1" +%u; }
+
+log() {
+    printf '%s %s\n' "$(now_iso)" "$1" >>"$log_file"
+}
+
+say() { printf 'run-brief: %s\n' "$1"; }
+
+# Render a prompt file, substituting {{PLACEHOLDERS}}.
+render() {
+    /usr/bin/sed \
+        -e "s|{{DATE}}|$date|g" \
+        -e "s|{{CURSOR}}|$cursor|g" \
+        -e "s|{{DOMAIN}}|${domain:-}|g" \
+        -e "s|{{ROOT}}|$root|g" \
+        -e "s|{{WINDOW_START}}|${window_start:-}|g" \
+        -e "s|{{WINDOW_END}}|${window_end:-}|g" \
+        -e "s|{{PREVIOUS_MEMOS}}|${previous_memos:-none}|g" \
+        -e "s|{{NOW}}|$(now_iso)|g" \
+        "$prompts/$1"
+}
+
+# run_limited SECONDS TRANSCRIPT CMD... : run CMD with output to TRANSCRIPT,
+# TERM then KILL after SECONDS. Returns 124 on timeout.
+run_limited() {
+    limit=$1; out=$2; shift 2
+    "$@" >"$out" 2>&1 &
+    pid=$!
+    elapsed=0; timed_out=0
+    while kill -0 "$pid" 2>/dev/null; do
+        if [ "$elapsed" -ge "$limit" ]; then
+            timed_out=1
+            kill -TERM "$pid" 2>/dev/null
+            grace=0
+            while kill -0 "$pid" 2>/dev/null && [ "$grace" -lt 10 ]; do /bin/sleep 1; grace=$((grace + 1)); done
+            kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+            break
+        fi
+        /bin/sleep 5; elapsed=$((elapsed + 5))
+    done
+    wait "$pid"; status=$?
+    [ "$timed_out" = 1 ] && return 124
+    return "$status"
+}
+
+model_for() {
+    key=$(printf '%s' "$1" | /usr/bin/tr '-' '_')
+    eval "printf '%s' \"\${DAILY_BRIEF_MODEL_$key:-$2}\""
+}
+
+# A caveat the coordinator hands the curator, in run.yaml.
+run_caveats=
+add_run_caveat() {
+    run_caveats="$run_caveats
+  - id: run/$date/$1
+    kind: caveat
+    headline: >
+      $2
+    as_of: $(now_iso)
+    origin: internal
+    basis: recorded"
+}
+
+write_run_packet() {
+    {
+        printf 'domain: run\ngenerated_at: %s\ndata_as_of: %s\nsince: %s\n' "$(now_iso)" "$(now_iso)" "$cursor"
+        if [ -n "$run_caveats" ]; then
+            printf 'status: degraded\nnotes: "The scheduled run is missing or doubts one or more inputs; see items."\nitems:%s\n' "$run_caveats"
+        elif [ "$force" = 1 ]; then
+            printf 'status: ok\nnotes: "Run started with --force; the freshness check of upstream inputs was skipped."\nitems: []\n'
+        else
+            printf 'status: ok\nnotes: "Every input was present and fresh."\nitems: []\n'
+        fi
+    } >"$contributions/$date/run.yaml"
+}
+
+write_stub() {
+    cat >"$contributions/$date/$1.yaml" <<STUB
+domain: $1
+generated_at: $(now_iso)
+data_as_of: $(now_iso)
+since: $cursor
+status: failed
+notes: "No packet was produced by the scheduled run (timeout or error). See $transcripts/$date-$1.log."
+items: []
+STUB
+}
+
+# --- preflight --------------------------------------------------------------
+/bin/mkdir -p "$(/usr/bin/dirname "$log_file")" "$transcripts" || exit 1
+/usr/bin/touch "$log_file" && /bin/chmod 600 "$log_file"
+/bin/chmod 700 "$transcripts"
+
+for f in "$claude" "$node" "$python3"; do
+    [ -x "$f" ] || { log "exit=1 date=$date reason=missing-binary $f"; say "missing $f"; exit 1; }
+done
+for f in "$brief_dir/contribution-contract.md" "$brief_dir/curator.md" "$brief_dir/voice.md" \
+         "$prompts/contribute.md" "$prompts/calendar.md" "$prompts/curate.md" \
+         "$briefs/build.py" "$briefs/check-viewer.mjs"; do
+    [ -f "$f" ] || { log "exit=1 date=$date reason=missing-file $f"; say "missing $f"; exit 1; }
+done
+
+if [ "$stage" = all ] && [ "$force" = 0 ] && [ -f "$briefs/viewer-$date.html" ]; then
+    log "exit=0 date=$date reason=already-built"
+    say "viewer-$date.html exists; use --force to rebuild"
+    exit 0
+fi
+
+# Cursor: the newest brief before the run date. Phase 5 adds the read marker.
+cursor=
+for f in "$briefs"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md; do
+    [ -f "$f" ] || continue
+    d=$(/usr/bin/basename "$f" .md)
+    if [ "$d" \< "$date" ] && [ "$d" \> "$cursor" ]; then cursor=$d; fi
+done
+[ -n "$cursor" ] || cursor=$(add_days "$date" -7)
+
+window_start=$(day_iso "$date")
+window_end=$(day_iso "$(add_days "$date" 8)")
+
+previous_memos=
+for f in "$briefs"/memo-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md; do
+    [ -f "$f" ] || continue
+    d=$(/usr/bin/basename "$f" .md); d=${d#memo-}
+    [ "$d" \< "$date" ] && previous_memos="$previous_memos $d"
+done
+previous_memos=$(printf '%s\n' $previous_memos | /usr/bin/sort | /usr/bin/tail -2 | /usr/bin/sed "s|^|$briefs/memo-|; s|\$|.md|" | /usr/bin/tr '\n' ' ')
+
+if [ "$dry_run" = 1 ]; then
+    say "dry run for $date"
+    say "  cursor=$cursor"
+    say "  calendar window $window_start .. $window_end"
+    say "  previous memos: ${previous_memos:-none}"
+    say "  would wait up to ${wait_seconds}s for: $catchup_dir/$date-catchup.md (Mon-Fri), $cfo_logs/snapshot-$date.log, $focus_logs/last-notes.json and last-work.json newer than $date 00:00"
+    while IFS='|' read -r domain cwd model kind; do
+        [ -n "$domain" ] || continue
+        model=$(model_for "$domain" "$model")
+        case $kind in
+            repo) say "  gather $domain: (cd $cwd && $claude -p <prompts/contribute.md> --model $model --permission-mode auto --add-dir $contributions --allowedTools <read-only + Edit($contributions/$date/$domain.yaml)> --disallowedTools NotebookEdit,mcp__* --strict-mcp-config) timeout ${gather_seconds}s" ;;
+            connector) say "  gather $domain: (cd $root && $claude -p <prompts/calendar.md> --model $model --permission-mode auto --allowedTools <Google Calendar read tools + Edit($contributions/$date/calendar.yaml)>) timeout ${gather_seconds}s" ;;
+        esac
+    done <<ROSTER
+$roster
+ROSTER
+    say "  gather work: cp $catchup_dir/$date-catchup.md $contributions/$date/work.md (Mon-Fri)"
+    say "  write $contributions/$date/run.yaml"
+    say "  curate: (cd $root && $claude -p <prompts/curate.md> --model $curator_model --permission-mode auto --allowedTools Skill,Read,Glob,Grep,Edit(memo),Bash(build.py),Bash(check-viewer.mjs) --disallowedTools mcp__* --strict-mcp-config) timeout ${curate_seconds}s"
+    say "  verify: $python3 $briefs/build.py $date && $node $briefs/check-viewer.mjs $date"
+    exit 0
+fi
+
+# Woken from sleep: the network may not be up yet.
+attempt=0
+until /usr/bin/curl -sS --max-time 5 -o /dev/null https://api.anthropic.com 2>/dev/null; do
+    attempt=$((attempt + 1))
+    [ "$attempt" -ge 6 ] && { log "exit=1 date=$date reason=no-network"; exit 1; }
+    /bin/sleep 10
+done
+
+# --- single-run lock ----------------------------------------------------------
+stale_minutes=$(( (wait_seconds + gather_seconds + curate_seconds) / 60 + 5 ))
+if ! /bin/mkdir "$lock_dir" 2>/dev/null; then
+    if [ -n "$(/usr/bin/find "$lock_dir" -maxdepth 0 -mmin +$stale_minutes 2>/dev/null)" ]; then
+        /bin/rm -rf "$lock_dir"
+        /bin/mkdir "$lock_dir" 2>/dev/null || { log "exit=0 date=$date reason=locked"; exit 0; }
+    else
+        log "exit=0 date=$date reason=locked"; exit 0
+    fi
+fi
+trap '/bin/rm -rf "$lock_dir"' EXIT INT TERM
+
+cd "$root" || exit 1
+/bin/mkdir -p "$contributions/$date" || exit 1
+started=$(/bin/date +%s)
+
+# --- late start ---------------------------------------------------------------
+# The schedule is 06:05. A run starting well after that on its own date means
+# the Mac was asleep (or the job was kicked by hand); say so in the memo.
+scheduled_hhmm=${DAILY_BRIEF_SCHEDULED:-06:05}
+if [ "$stage" = all ] && [ "$force" = 0 ] && [ "$date" = "$(TZ=$tz /bin/date +%F)" ]; then
+    now_hhmm=$(TZ=$tz /bin/date +%H:%M)
+    late_after=$(TZ=$tz /bin/date -j -v+30M -f '%H:%M' "$scheduled_hhmm" +%H:%M)
+    if [ "$now_hhmm" \> "$late_after" ]; then
+        add_run_caveat late-start "This brief was built at $now_hhmm, not on the $scheduled_hhmm schedule; the Mac was most likely asleep until then."
+    fi
+fi
+
+# --- freshness wait -----------------------------------------------------------
+waited=0
+if [ "$stage" = all ] || [ "$stage" = gather ]; then
+    is_weekday=1; [ "$(weekday "$date")" -ge 6 ] && is_weekday=0
+    if [ "$force" = 0 ]; then
+        while :; do
+            missing=
+            [ "$is_weekday" = 1 ] && [ ! -f "$catchup_dir/$date-catchup.md" ] && missing="$missing catchup"
+            [ -f "$cfo_logs/snapshot-$date.log" ] || missing="$missing cfo-snapshot"
+            for src in notes work; do
+                f=$focus_logs/last-$src.json
+                if [ ! -f "$f" ] || [ -z "$(/usr/bin/find "$f" -newermt "$date 00:00:00" 2>/dev/null)" ]; then
+                    missing="$missing focus-$src"
+                fi
+            done
+            [ -z "$missing" ] && break
+            [ "$waited" -ge "$wait_seconds" ] && break
+            /bin/sleep 30; waited=$((waited + 30))
+        done
+        for m in $missing; do
+            case $m in
+                catchup) add_run_caveat catchup "Today's work brief had not been written when the run started, so the work section rests on nothing newer than the previous catchup." ;;
+                cfo-snapshot) add_run_caveat cfo-snapshot "cfo's daily snapshot had not run when the run started; its figures are from the previous snapshot." ;;
+                focus-notes) add_run_caveat focus-notes "Focus had not scanned the vault today when the run started." ;;
+                focus-work) add_run_caveat focus-work "Focus had not read today's work brief when the run started." ;;
+            esac
+        done
+    fi
+fi
+
+# --- gather -------------------------------------------------------------------
+packets=; stubs=
+if [ "$stage" = all ] || [ "$stage" = gather ]; then
+    while IFS='|' read -r domain cwd model kind; do
+        [ -n "$domain" ] || continue
+        model=$(model_for "$domain" "$model")
+        out=$transcripts/$date-$domain.log
+        target=$contributions/$date/$domain.yaml
+        case $kind in
+            repo)
+                prompt=$(render contribute.md)
+                (cd "$cwd" && run_limited "$gather_seconds" "$out" "$claude" -p "$prompt" \
+                    --model "$model" --permission-mode auto \
+                    --add-dir "$contributions" \
+                    --allowedTools "Read,Glob,Grep,Bash(make report-json),Bash(make drift-json),Bash(make cashflow-json),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git status:*),Bash(ls:*),Bash(cat:*),Bash(tail:*),Bash(date:*),Edit(/$target)" \
+                    --disallowedTools "NotebookEdit,mcp__*" --strict-mcp-config
+                 printf 'exit=%s\n' "$?" >>"$out") &
+                ;;
+            connector)
+                prompt=$(render calendar.md)
+                (cd "$root" && run_limited "$gather_seconds" "$out" "$claude" -p "$prompt" \
+                    --model "$model" --permission-mode auto \
+                    --allowedTools "mcp__claude_ai_Google_Calendar__list_calendars,mcp__claude_ai_Google_Calendar__list_events,mcp__claude_ai_Google_Calendar__list_events_for_calendars,mcp__claude_ai_Google_Calendar__search_events,mcp__claude_ai_Google_Calendar__get_event,Read,Edit(/$target)" \
+                    --disallowedTools "NotebookEdit,Bash,Glob,Grep,Agent"
+                 printf 'exit=%s\n' "$?" >>"$out") &
+                ;;
+        esac
+    done <<ROSTER
+$roster
+ROSTER
+    wait
+
+    while IFS='|' read -r domain cwd model kind; do
+        [ -n "$domain" ] || continue
+        f=$contributions/$date/$domain.yaml
+        if [ ! -s "$f" ]; then
+            write_stub "$domain"
+            stubs="$stubs${stubs:+,}$domain"
+            continue
+        fi
+        /bin/chmod 600 "$f"
+        head20=$(/usr/bin/head -20 "$f")
+        ok=1
+        printf '%s\n' "$head20" | /usr/bin/grep -q "^domain:" || ok=0
+        printf '%s\n' "$head20" | /usr/bin/grep -q "^status:" || ok=0
+        printf '%s\n' "$head20" | /usr/bin/grep -q "^since: *$cursor" || ok=0
+        [ "$ok" = 1 ] || add_run_caveat "$domain-header" "The $domain packet did not echo the cursor $cursor or is missing header fields; treat its window as uncertain."
+    done <<ROSTER
+$roster
+ROSTER
+    for f in "$transcripts/$date"-*.log; do [ -f "$f" ] && /bin/chmod 600 "$f"; done
+
+    if [ "$is_weekday" = 1 ] && [ -f "$catchup_dir/$date-catchup.md" ]; then
+        /bin/cp "$catchup_dir/$date-catchup.md" "$contributions/$date/work.md" && /bin/chmod 600 "$contributions/$date/work.md"
+    elif [ "$is_weekday" = 0 ]; then
+        : # weekend: no work brief is expected, and the curator knows
+    fi
+
+    write_run_packet
+    /bin/chmod 600 "$contributions/$date/run.yaml"
+    packets=$(cd "$contributions/$date" && ls *.yaml *.md 2>/dev/null | /usr/bin/tr '\n' ',' | /usr/bin/sed 's/,$//')
+fi
+
+# --- curate -------------------------------------------------------------------
+if [ "$stage" = all ] || [ "$stage" = curate ]; then
+    [ -d "$contributions/$date" ] || { log "exit=1 date=$date reason=no-contributions"; exit 1; }
+    prompt=$(render curate.md)
+    out=$transcripts/$date-curator.log
+    run_limited "$curate_seconds" "$out" "$claude" -p "$prompt" \
+        --model "$curator_model" --permission-mode auto \
+        --allowedTools "Skill,Read,Glob,Grep,Edit(/$briefs/memo-$date.md),Bash($python3 daily-brief/briefs/build.py:*),Bash(python3 daily-brief/briefs/build.py:*),Bash($node daily-brief/briefs/check-viewer.mjs:*),Bash(node daily-brief/briefs/check-viewer.mjs:*)" \
+        --disallowedTools "mcp__*,Agent,NotebookEdit" --strict-mcp-config
+    curate_exit=$?
+    printf 'exit=%s\n' "$curate_exit" >>"$out"; /bin/chmod 600 "$out"
+fi
+
+# --- verify -------------------------------------------------------------------
+viewer=MISSING; exit_code=0
+if [ -f "$briefs/memo-$date.md" ]; then
+    if "$python3" "$briefs/build.py" "$date" >>"$transcripts/$date-verify.log" 2>&1 \
+       && "$node" "$briefs/check-viewer.mjs" "$date" >>"$transcripts/$date-verify.log" 2>&1 \
+       && [ -f "$briefs/viewer-$date.html" ]; then
+        viewer=written
+    else
+        exit_code=1
+    fi
+else
+    exit_code=1
+fi
+[ -f "$transcripts/$date-verify.log" ] && /bin/chmod 600 "$transcripts/$date-verify.log"
+
+took=$(( $(/bin/date +%s) - started ))
+log "exit=$exit_code date=$date cursor=$cursor stage=$stage packets=${packets:--} stubs=${stubs:--} waited=${waited}s took=${took}s viewer=$viewer"
+say "$date: viewer=$viewer stubs=${stubs:-none} waited=${waited}s took=${took}s (log: $log_file)"
+exit "$exit_code"

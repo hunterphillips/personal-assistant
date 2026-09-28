@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "id": "cfo",
+      "name": "CFO",
+      "role": "Money",
+      "description": "I keep Hunter's money picture: drift against the investment policy, pending decisions, and the daily snapshot.",
+      "group": "work",
+      "kind": "persona",
+      "cwd": "/Users/hunterphillips/workspace/work/investing/cfo",
+      "provider": "claude",
+      "routines": ["com.hunter.cfo.daily"]
+    },
+    {
+      "id": "focus",
+      "name": "Focus",
+      "role": "Attention",
+      "description": "I curate the attention board: what deserves attention now, what aged out, and what he dismissed.",
+      "group": "personal",
+      "kind": "persona",
+      "cwd": "/Users/hunterphillips/workspace/projects/AI/focus",
+      "provider": "claude",
+      "routines": [
+        "com.focus.server",
+        "com.focus.scan-calendar",
+        "com.focus.scan-gmail",
+        "com.focus.scan-git",
+        "com.focus.scan-notes",
+        "com.focus.scan-work"
+      ]
+    },
+    {
+      "id": "second-brain",
+      "name": "Second brain",
+      "role": "Memory",
+      "description": "I hold what is true about Hunter and what he has decided: priorities, commitments, notes, and the log.",
+      "group": "personal",
+      "kind": "persona",
+      "cwd": "/Users/hunterphillips/workspace/second-brain",
+      "provider": "claude",
+      "routines": [
+        "com.hunter.brain-drain",
+        "com.hunter.brain-refresh",
+        "com.hunter.brain-audit"
+      ]
+    },
+    {
+      "id": "watch",
+      "name": "Watch",
+      "role": "Newsletters",
+      "description": "I read the newsletters he does not, and keep only what bears on a decision he is making.",
+      "group": "personal",
+      "kind": "persona",
+      "cwd": "/Users/hunterphillips/workspace/personal-assistant",
+      "provider": "claude",
+      "routines": []
+    },
+    {
+      "id": "nowgentic",
+      "name": "Nowgentic",
+      "role": "Work",
+      "description": "The work workspace. Its catchup brief runs every weekday morning.",
+      "group": "work",
+      "kind": "project",
+      "cwd": "/Users/hunterphillips/workspace/work/nowgentic",
+      "provider": "claude",
+      "routines": ["com.hunter.catchup.daily"]
+    },
+    {
+      "id": "assistant",
+      "name": "Assistant",
+      "role": "System",
+      "description": "The dashboard itself.",
+      "group": "personal",
+      "kind": "system",
+      "cwd": "/Users/hunterphillips/workspace/personal-assistant",
+      "routines": ["com.personal-assistant.dashboard"]
+    }
+  ]
+}

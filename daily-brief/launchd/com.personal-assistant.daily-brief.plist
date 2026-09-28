@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.personal-assistant.daily-brief</string>
+
+  <key>ProgramArguments</key>
+  <!-- caffeinate holds the Mac awake (idle and system sleep) for the run's
+       duration, so a scheduled or dark wake does not drop back to sleep
+       mid-run. It ends when run-brief exits. -->
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-is</string>
+    <string>/bin/sh</string>
+    <string>/Users/hunterphillips/workspace/personal-assistant/daily-brief/bin/run-brief</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/hunterphillips/workspace/personal-assistant</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/hunterphillips</string>
+    <key>PATH</key>
+    <string>/Users/hunterphillips/.local/bin:/Users/hunterphillips/.nvm/versions/node/v24.18.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- 06:05 every day. The upstream producers run first: catchup 05:15
+       (Mon-Fri), cfo snapshot 05:30, Focus notes and work scans 05:50. The
+       runner waits for their artifacts rather than trusting the clock, so a
+       late wake (all missed jobs fire at once) still runs in order. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>5</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Status only. Model transcripts go to ~/Library/Logs/daily-brief/ (mode 600). -->
+  <key>StandardOutPath</key>
+  <string>/Users/hunterphillips/Library/Logs/daily-brief.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/hunterphillips/Library/Logs/daily-brief.launchd.log</string>
+</dict>
+</plist>
