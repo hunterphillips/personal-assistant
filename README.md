@@ -2,8 +2,9 @@
 
 A local Node server that will become the single private entry point for Focus
 and the Daily Brief. It listens on `127.0.0.1:4243`; Tailscale serves it to the
-tailnet over HTTPS. The page is a shell with Home, Agents, Routines, Focus, and
-Daily Brief views. Focus runs in an iframe through a proxy to its own server.
+tailnet over HTTPS. The page is a shell with Agents, Focus, and Daily Brief
+views; Agents, with the routines beside it, is the page at `/`. Focus runs in
+an iframe through a proxy to its own server.
 Briefs are read from `daily-brief/briefs/`, and feedback is saved beside them.
 
 The plan is
@@ -20,7 +21,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 
 | Route | Purpose |
 | --- | --- |
-| `GET /`, `/focus`, `/brief`, `/routines`, `/agents`, `/goals` | The shell. |
+| `GET /`, `/agents`, `/routines`, `/focus`, `/brief`, `/goals` | The shell. `/`, `/agents`, and `/routines` show the Agents view. |
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
 | `GET /api/state` | Checks Focus and the brief, then returns the state hub's snapshot (below). |
 | `GET /api/events` | Server-Sent Events: the snapshot, then each change (below). |
@@ -211,9 +212,10 @@ when asked.
 
 `public/index.html`, `public/shell.js`, `public/agents.js`,
 `public/routines.js`, and `public/styles.css` make up the page served at
-`/`, `/agents`, `/routines`, `/focus`, and `/brief`. `/goals` serves the
-same page, which shows Home there, as it does for any path it does not
-know. The navigation links are
+`/`, `/agents`, `/routines`, `/focus`, and `/brief`. The Agents view is the
+page at `/`; `/agents` shows the same view, `/routines` shows it with the
+routines overview open, and `/goals` or any path the shell does not know
+lands there too. The navigation is Agents, Focus, and Daily Brief, as
 ordinary links; the script switches views with the History API and handles
 Back and Forward, and a reload or bookmark opens the same view. Each frame
 is created the first time its view opens and stays in the page afterwards,
@@ -258,52 +260,56 @@ error, such as a 409 for a brief replaced under the same date or a 502 from
 Focus, the frame stays hidden, the view shows its notice, and the state is
 fetched again at once. Retry reloads that frame.
 
-Home links to Agents, Routines, Focus, and the Daily Brief. Under Agents it
-names who is waiting for an answer ("CFO is waiting for you"), or counts the
-agents; under Routines it shows the number of routines, or "Not refreshed
-yet" before the first refresh.
-
 Wide screens get a navigation column; below 720px it becomes a row across the
 top. The page is exactly one screen tall and each frame fills the rest, so the
 child page does its own scrolling and keeps its fixed bar in view.
 
-### Routines view
-
-The Routines view has one card for each agent that has routines, in
-registry order, with the agent's name and role. Each routine is a row with
-its name, schedule, last run, and outcome, and Focus scans with failures in
-the last 24 hours also show how many. Times under a day are relative ("12
-minutes ago"); older ones read "Yesterday 21:00" or "Sep 3 21:00". The
-header shows when the routines were last refreshed and has a Refresh button,
-which reads "Refreshing…" while a refresh runs.
-
-Routines are refreshed only on demand: when the view opens and the last
-refresh is missing or more than 60 seconds old, and when Refresh is chosen.
-The Focus card shows "Paused" when any scan is paused, and a Pause or
-Resume button that posts to the forwarded `/api/pause` or `/api/resume`;
-the server then refreshes the routines, and the card follows the state. If
-the request gets no answer, or the proxy answers 502 or 504 because Focus
-gave none, the card says "Focus did not respond."; any other error status
-is Focus's own and shows "Focus reported an error." The message clears on the
-next attempt or when the state shows the scans paused or resumed. A
-registry that cannot be read (followed by the registry's error), a failed
-refresh, and an empty list each get one plain sentence, and when Focus did
-not answer during the refresh the Focus card says its rows come from
-launchd. While the view is hidden its cards are not rebuilt; opening it
-renders the latest state.
-
 ### Agents view
 
-The Agents view lists every registry agent under Work and Personal, in
-registry order: name, role, provider (Claude or Codex), and for a persona
-its last message with a relative time, plus a line for its state: "Waiting
-for you" on a question or approval, "Working" during a turn, "The last turn
-failed", or "Unavailable". A project folder or system agent shows its
-description instead and opens nothing. Choosing a persona opens its thread
-and puts `?agent=<id>` in the URL, so a reload or a shared link lands on the
-same thread; Back and Forward move between threads. From 720px the list and
-the thread sit side by side; on a phone the list comes first and the thread
-takes the whole width with an "All agents" link back.
+The Agents view is the page at `/`. It lists every registry agent under
+Work and Personal, in registry order: name, role, provider (Claude or
+Codex), and for a persona its last message with a relative time, plus a
+line for its state: "Waiting for you" on a question or approval, "Working"
+during a turn, "The last turn failed", or "Unavailable". A project folder
+or system agent shows its description instead and opens nothing. Choosing
+a persona opens its thread and puts `?agent=<id>` in the URL (`/?agent=cfo`;
+`/agents?agent=cfo` opens the same thread), so a reload or a shared link
+lands on the same thread; Back and Forward move between threads. From
+720px the list and the pane beside it sit side by side, and the pane shows
+the routines overview until a persona is chosen. On a phone the list comes
+first, a Routines row at its top (with the number of routines once they
+have been read) opens the overview at `/routines`, and a thread or the
+overview takes the whole width with an "All agents" link back.
+
+#### Routines
+
+The overview has one card for each agent that has routines, in registry
+order, with the agent's name and role. Each routine is a row with its name,
+schedule, last run, and outcome, and Focus scans with failures in the last
+24 hours also show how many. Times under a day are relative ("12 minutes
+ago"); older ones read "Yesterday 21:00" or "Sep 3 21:00". The header shows
+when the routines were last refreshed and has a Refresh button, which reads
+"Refreshing…" while a refresh runs.
+
+A persona's own routines also sit under its thread header, behind a
+"Routines (n)" button that expands them above the messages; an agent with
+no routines has no button. The rows and the Focus controls are the same,
+without the card heading.
+
+Routines are refreshed only on demand: when the overview or a thread's
+routines open and the last refresh is missing or more than 60 seconds old,
+and when Refresh is chosen. The Focus card shows "Paused" when any scan is
+paused, and a Pause or Resume button that posts to the forwarded
+`/api/pause` or `/api/resume`; the server then refreshes the routines, and
+the card follows the state. If the request gets no answer, or the proxy
+answers 502 or 504 because Focus gave none, the card says "Focus did not
+respond."; any other error status is Focus's own and shows "Focus reported
+an error." The message clears on the next attempt or when the state shows
+the scans paused or resumed. A registry that cannot be read (followed by
+the registry's error), a failed refresh, and an empty list each get one
+plain sentence, and when Focus did not answer during the refresh the Focus
+card says its rows come from launchd. While the overview is off screen its
+cards are not rebuilt; opening it renders the latest state.
 
 The thread is read from `GET /api/agents/<id>/thread` when it opens and
 again whenever the state shows a new last message or a turn that started or
