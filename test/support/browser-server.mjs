@@ -12,7 +12,11 @@
 // state hub itself. Personas run on a fake Claude adapter over a real thread
 // store in the temporary directory (see fakePersonas): a send is answered by
 // an invented reply unless the persona is held, and `personas` lets a test
-// raise a question or approval, reply, or hold a turn open. stopStreams() ends every event stream with `bye` and
+// raise a question or approval, reply, or hold a turn open. Coding
+// sessions come from a fake Codex adapter (`codex`, see fakeCodex) and a
+// fake cmux client over a seeded inventory (`cmux`, harness.mjs), with
+// terminal bindings from `bindings`; none is present unless seeded.
+// stopStreams() ends every event stream with `bye` and
 // leaves the app refusing new ones (503 shutting_down), as during shutdown;
 // restartApp() then puts a new app handler over the same hub, as after a
 // restart. emitDelta(revision, patch) sends one delta with any revision to
@@ -34,7 +38,7 @@ import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { RuntimeError } from '../../lib/runtime/adapter.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
-import { closeServer, createTestHub, freePort, listen } from './harness.mjs';
+import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } from './harness.mjs';
 import { focusSourceAvailable, startIsolatedFocus } from './isolated-focus.mjs';
 
 const FORBIDDEN_PORTS = new Set([4242, 4243]);
@@ -50,8 +54,17 @@ export { focusSourceAvailable };
 //   personas   { <agentId>: { state, pending, lastError, costUsd, messages,
 //              startFails } } seeds each persona's runtime state and cached
 //              messages before the hub starts (see fakePersonas)
+//   codex      { sessions, status, threads }: the fake Codex adapter's rows,
+//              its status() answer, and the messages thread() answers by
+//              session id (see fakeCodex); without it there is no Codex
+//              adapter
+//   cmux       an inventory as cmux.mjs answers it (see fakeCmux); the hub
+//              refreshes sessions once at startup so it is in the snapshot
+//   bindings   { <threadId>: { workspaceId, surfaceId } } recorded terminals
+//   home       the home directory in the snapshot (default /invented)
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, routines: routinesSeed, personas: personaSeed = {},
+  codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
 } = {}) {
   const cleanups = [];
   const context = { after: (fn) => cleanups.push(fn) };
@@ -94,14 +107,20 @@ export async function startHub({
     for (const [id, seed] of Object.entries(personaSeed)) {
       for (const message of seed.messages ?? []) await store.append(id, message);
     }
+    const codex = codexSeed ? fakeCodex(codexSeed) : null;
+    const cmux = cmuxSeed ? fakeCmux(cmuxSeed) : null;
+    const bindings = fakeBindings(new Map(Object.entries(bindingSeed ?? {}).map(([threadId, ids]) => [threadId, Object.freeze({ ...ids })])));
+    const adapters = { claude: personas.adapter };
+    if (codex) adapters.codex = codex.adapter;
     const hub = createTestHub({
-      config, focus: focusRoutes, brief: briefRoutes, registry, routines, adapters: { claude: personas.adapter }, store,
+      config, focus: focusRoutes, brief: briefRoutes, registry, routines, adapters, store, bindings, cmux, home,
     });
     await hub.start();
     if (routinesSeed) {
       await hub.refreshRoutines();
       routines.calls = 0;
     }
+    if (cmux) await hub.refreshSessions();
     // The app subscribes through this wrapper so a test can send a delta the
     // hub never made.
     const streamListeners = new Set();
@@ -116,7 +135,7 @@ export async function startHub({
         };
       },
     };
-    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, log: () => {} });
+    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, log: () => {} });
     let handler = newHandler();
     cleanups.push(async () => {
       handler.closeStreams();
@@ -147,6 +166,9 @@ export async function startHub({
       registry,
       routines,
       personas,
+      codex,
+      cmux,
+      bindings,
       emitDelta: (revision, patch) => {
         for (const fn of [...streamListeners]) fn({ revision, patch });
       },
@@ -380,6 +402,64 @@ function fakePersonas(seed, store) {
       endTurn(id);
     },
   };
+}
+
+// A Codex adapter stand-in: no personas, the seeded session rows, and
+// recorded calls. answer() clears the row's request and marks it busy;
+// interrupt() marks it idle; thread() answers the seeded messages. Controls
+// on the returned object:
+//   set(id, fields)   replaces fields on one row and tells the hub
+//   setStatus(status) replaces what status() answers and tells the hub
+//   calls             [['answer', id, requestId, answer], ['interrupt', id], ['thread', id], ...]
+function fakeCodex({ sessions = [], status = { available: true }, threads = {} }) {
+  const listeners = new Set();
+  const calls = [];
+  const at = () => new Date().toISOString();
+  const emit = () => {
+    for (const fn of [...listeners]) fn({ type: 'sessions', agentId: 'codex', at: at() });
+  };
+  const fake = {
+    list: sessions.map((row) => ({ ...row })),
+    status,
+    calls,
+    set(id, fields) {
+      fake.list = fake.list.map((row) => (row.id === id ? { ...row, ...fields } : row));
+      emit();
+    },
+    setStatus(next) {
+      fake.status = next;
+      emit();
+    },
+  };
+  const rowFor = (id) => fake.list.find((row) => row.id === id) ?? null;
+  fake.adapter = {
+    kind: 'codex',
+    sessions: () => fake.list,
+    status: () => fake.status,
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    start: () => Promise.reject(new RuntimeError('not_supported', { message: 'Codex threads take messages in their own terminal.' })),
+    state: () => ({ state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null }),
+    async answer(agent, requestId, answer) {
+      calls.push(['answer', agent.id, requestId, answer]);
+      const row = rowFor(agent.id);
+      if (!row?.pending || row.pending.requestId !== requestId) throw new RuntimeError('no_such_request');
+      if (row.pending.native) throw new RuntimeError('not_supported');
+      fake.set(agent.id, { pending: null, state: 'busy' });
+    },
+    async interrupt(agent) {
+      calls.push(['interrupt', agent.id]);
+      fake.set(agent.id, { pending: null, state: 'idle' });
+    },
+    async thread(agent) {
+      calls.push(['thread', agent.id]);
+      return { messages: threads[agent.id] ?? [] };
+    },
+    close: async () => {},
+  };
+  return fake;
 }
 
 async function selfSignedCertificate(root) {
