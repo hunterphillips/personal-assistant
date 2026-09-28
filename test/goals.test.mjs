@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { cp, mkdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { LIMITS } from '../lib/config.mjs';
 import { createGoals } from '../lib/goals.mjs';
+import { parseBlocks, splitLines } from '../lib/goals-markdown.mjs';
 import { tempDir } from './support/harness.mjs';
 
 const FIXTURE_VAULT = fileURLToPath(new URL('./fixtures/vault/', import.meta.url));
@@ -50,6 +51,7 @@ test('the fixture vault reads with no problems and the five sections in order', 
   assert.equal(result.agentId, 'second-brain');
   assert.deepEqual(result.problems, []);
   assert.deepEqual(result.sections.map((entry) => entry.id), ['now', 'later', 'not-now', 'long-term', 'goals']);
+  assert.equal(section(result, 'goals').title, 'Goal notes');
   assert.ok(Object.isFrozen(result));
   assert.ok(Object.isFrozen(result.sections[0].items[0].prose));
   assert.ok(!Number.isNaN(Date.parse(result.readAt)));
@@ -365,4 +367,102 @@ test('find cuts a long item at 4 KiB on a line boundary', async (t) => {
   assert.equal(kept[0], '# Long');
   // Every kept line is whole.
   for (const line of kept.slice(2, -1)) assert.ok(lines.includes(line), line);
+});
+
+test('a title that repeats an earlier suffixed id still gets an id of its own', async (t) => {
+  const root = await vaultCopy(t);
+  await writeFile(path.join(root, CURRENT), [
+    '## 1. Repeat', '', 'First.', '', '## 2. Repeat', '', 'Second.', '', '## 3. Repeat 2', '', 'Third.', '',
+  ].join('\n'));
+  const { goals } = goalsFor(root);
+  const ids = section(await goals.read(), 'now').items.map((item) => item.id);
+  assert.deepEqual(ids, ['now:repeat', 'now:repeat-2', 'now:repeat-2-2']);
+  const found = await Promise.all(ids.map((id) => goals.find(id)));
+  assert.deepEqual(found.map((item) => item.title), ['Repeat', 'Repeat', 'Repeat 2']);
+});
+
+test('a read error is not cached, and a log that throws does not reject', { skip: process.getuid?.() === 0 }, async (t) => {
+  const root = await vaultCopy(t);
+  const file = path.join(root, 'notes/goals/zine.md');
+  const { mode } = await stat(file);
+  t.after(() => chmod(file, mode).catch(() => {}));
+  await chmod(file, 0o000);
+  const logs = [];
+  const { goals } = goalsFor(root, { log: (entry) => logs.push(entry) });
+  const failed = await goals.read();
+  assert.equal(mentions(failed.problems, 'notes/goals/zine.md').length, 1);
+  assert.deepEqual(logs.map((entry) => [entry.event, entry.path]), [['goals_read_error', 'notes/goals/zine.md']]);
+
+  const throwing = goalsFor(root, { log: () => { throw new Error('log down'); } }).goals;
+  assert.equal(mentions((await throwing.read()).problems, 'notes/goals/zine.md').length, 1);
+
+  // chmod changes ctime only, so the signature is the same as before.
+  await chmod(file, mode);
+  const retried = await goals.read();
+  assert.deepEqual(retried.problems, []);
+  assert.ok(section(retried, 'goals').items.some((item) => item.id === 'goal:zine'));
+});
+
+test('a CRLF source parses the same as LF', async (t) => {
+  const root = await vaultCopy(t);
+  const lf = await goalsFor(root).goals.read();
+  const file = path.join(root, CURRENT);
+  await writeFile(file, (await readFile(file, 'utf8')).replace(/\n/g, '\r\n'));
+  const { goals } = goalsFor(root);
+  const crlf = await goals.read();
+  assert.deepEqual(crlf.problems, []);
+  assert.deepEqual(crlf.sections, lf.sections);
+  assert.equal((await goals.find('now:learn-the-cello')).text.includes('\r'), false);
+});
+
+test('a note that starts with a byte order mark still has its frontmatter', async (t) => {
+  const root = await vaultCopy(t);
+  const file = path.join(root, 'notes/goals/boat.md');
+  await writeFile(file, `\uFEFF${await readFile(file, 'utf8')}`);
+  const boat = section(await goalsFor(root).goals.read(), 'goals').items.find((item) => item.id === 'goal:boat');
+  assert.equal(boat.updated, '2026-02-05');
+  assert.equal(boat.horizon, 'five years');
+  assert.equal(boat.title, 'Build a boat');
+});
+
+test('an empty Now, Why, or What label is null', async (t) => {
+  const root = await vaultCopy(t);
+  await writeFile(path.join(root, CURRENT), '## 1. Empty labels\n\n- **Now:**\n- **Why:**   \n');
+  await writeFile(path.join(root, 'notes/goals/boat.md'), '# Build a boat\n\n**What:**\n\n**Why:**\n');
+  const result = await goalsFor(root).goals.read();
+  const [now] = section(result, 'now').items;
+  assert.equal(now.now, null);
+  assert.equal(now.why, null);
+  const boat = section(result, 'goals').items.find((item) => item.id === 'goal:boat');
+  assert.equal(boat.what, null);
+  assert.equal(boat.why, null);
+});
+
+test('a wrapped line starting with a number other than 1 continues the paragraph', () => {
+  const blocks = parseBlocks(splitLines('We ship it by the end of\n2026. Then we go.\n\nA list:\n1. one\n2. two'));
+  assert.deepEqual(blocks.map((block) => block.type), ['p', 'p', 'list']);
+  assert.equal(blocks[0].raw, 'We ship it by the end of 2026. Then we go.');
+  assert.deepEqual(blocks[2].items.map((item) => item.raw), ['one', 'two']);
+});
+
+test('a thematic break ends a block and yields nothing', () => {
+  for (const rule of ['---', '***', '___', ' - - -', '* * *  ']) {
+    const blocks = parseBlocks(splitLines(`para one\n${rule}\npara two`));
+    assert.deepEqual(blocks.map((block) => [block.type, block.raw]), [['p', 'para one'], ['p', 'para two']], rule);
+  }
+  const list = parseBlocks(splitLines('- item\n***\n- next'));
+  assert.deepEqual(list.map((block) => block.items.length), [1, 1]);
+});
+
+test('find cuts a first line longer than 4 KiB within the line, on a character boundary', async (t) => {
+  const root = await vaultCopy(t);
+  const line = 'é'.repeat(3000); // 6000 bytes
+  await writeFile(path.join(root, 'notes/goals/wide.md'), `${line}\nsecond line\n`);
+  const { text } = await goalsFor(root).goals.find('goal:wide');
+  assert.ok(Buffer.byteLength(text) <= 4096);
+  const [first, cut, ...rest] = text.split('\n');
+  assert.deepEqual(rest, []);
+  assert.equal(cut, '(cut; the rest is in the file)');
+  assert.ok(first.length > 0 && line.startsWith(first));
+  assert.ok(!first.includes('\uFFFD'));
 });
