@@ -400,7 +400,98 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 
 .agents-message { margin: 0 0 12px; }
 
-#view-goals { padding: 40px 34px; }
+/* Goals: the vault's priorities and goal notes, one card per section. */
+
+#view-goals {
+  min-height: 0;
+  padding: 40px 34px;
+  overflow: auto;
+}
+
+#view-goals > * {
+  width: 100%;
+  max-width: 720px;
+}
+
+#view-goals .goals-heading { margin: 0; }
+
+.goal-item { padding: 10px 0 12px; }
+.goal-item + .goal-item { border-top: 1px solid var(--line); }
+
+.goal-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.goal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.goal-item-head .button-small { margin-left: auto; }
+
+.goal-item-head .role-chip { overflow-wrap: anywhere; }
+
+.goal-line,
+.goal-principle {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.goal-principle { font-family: var(--serif); font-size: 17px; }
+
+.goal-prose h4 { margin: 12px 0 0; font-size: 14px; }
+
+.goal-prose p,
+.goal-prose ul {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.goal-prose ul { padding-left: 20px; }
+
+.goal-top {
+  margin: 8px 0 0;
+  padding-left: 22px;
+}
+.goal-top > .goal-item { padding: 4px 0; }
+.goal-top > .goal-item + .goal-item { border-top: 0; }
+.goal-top .goal-title { flex: 1; min-width: 0; font-weight: 400; }
+
+.goal-horizons { margin: 10px 0 12px; }
+.goal-horizons dt { float: left; margin-right: 6px; font-weight: 600; }
+.goal-horizons dt::after { content: ":"; }
+.goal-horizons dd { margin: 0 0 4px; overflow-wrap: anywhere; }
+
+.goal-quote {
+  margin: 0 0 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.goal-quote p { margin: 0 0 4px; }
+
+.goal-composer .composer-input {
+  display: block;
+  width: 100%;
+}
+
+.button-small {
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.composer.goal-composer {
+  margin: 10px 0 12px;
+  padding: 0;
+  border-top: 0;
+}
+
+.goal-composer-actions { margin-top: 8px; }
 
 .agent-group { margin-bottom: 20px; }
 

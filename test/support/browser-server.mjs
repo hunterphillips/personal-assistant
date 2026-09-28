@@ -15,7 +15,8 @@
 // raise a question or approval, reply, or hold a turn open. Coding
 // sessions come from a fake Codex adapter (`codex`, see fakeCodex) and a
 // fake cmux client over a seeded inventory (`cmux`, harness.mjs), with
-// terminal bindings from `bindings`; none is present unless seeded.
+// terminal bindings from `bindings`; none is present unless seeded. Goals
+// reads a temporary copy of the `vault` option's notes, when given.
 // stopStreams() ends every event stream with `bye` and
 // leaves the app refusing new ones (503 shutting_down), as during shutdown;
 // restartApp() then puts a new app handler over the same hub, as after a
@@ -26,7 +27,7 @@
 // directories.
 
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
 import os from 'node:os';
@@ -63,9 +64,14 @@ export { focusSourceAvailable };
 //              refreshes sessions once at startup so it is in the snapshot
 //   bindings   { <threadId>: { workspaceId, surfaceId } } recorded terminals
 //   home       the home directory in the snapshot (default /invented)
+//   vault      a directory of notes (such as test/fixtures/vault) copied into
+//              a temporary vault, or true for an empty one; either adds the
+//              persona SECOND_BRAIN, whose cwd is that vault, to `agents`, so
+//              Goals reads it and propose sends to it. `vaultDir` is its path.
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, routines: routinesSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
+  vault = null,
 } = {}) {
   const cleanups = [];
   const context = { after: (fn) => cleanups.push(fn) };
@@ -78,6 +84,11 @@ export async function startHub({
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     const briefsDir = path.join(root, 'briefs');
     await mkdir(briefsDir);
+    // Inside the temporary directory, so stop() removes it with the rest.
+    const vaultDir = vault ? path.join(root, 'vault') : null;
+    if (typeof vault === 'string') await cp(vault, vaultDir, { recursive: true });
+    else if (vault) await mkdir(vaultDir);
+    if (vaultDir) agents = [...agents, { ...SECOND_BRAIN, cwd: vaultDir }];
 
     const focus = withFocus && focusSourceAvailable() ? await startIsolatedFocus(context) : null;
     const focusOrigin = focus?.origin ?? `http://127.0.0.1:${await freePort()}`;
@@ -155,6 +166,7 @@ export async function startHub({
       origin: `http://127.0.0.1:${plainPort}`,
       secureOrigin: `https://localhost:${securePort}`,
       briefsDir,
+      vaultDir,
       focus,
       writeBrief: (date, options) => writeFile(path.join(briefsDir, `viewer-${date}.html`), inventedViewer({ date, ...options })),
       writeRawBrief: (date, html) => writeFile(path.join(briefsDir, `viewer-${date}.html`), html),
@@ -186,6 +198,12 @@ export async function startHub({
     throw error;
   }
 }
+
+// The persona the `vault` option adds; the Goals routes look it up by id.
+export const SECOND_BRAIN = Object.freeze({
+  id: 'second-brain', name: 'Second brain', role: 'Memory', description: 'Invented.',
+  group: 'personal', kind: 'persona', provider: 'claude',
+});
 
 // A registry held in memory. set(fields) replaces what current() returns and
 // notifies the hub, as a changed registry file would.

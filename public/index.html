@@ -120,12 +120,18 @@
       </section>
 
       <section class="view" id="view-goals" data-view="goals" aria-label="Goals" hidden>
-        <h1 class="goals-heading">Goals</h1>
+        <div class="routines-header">
+          <h1 class="goals-heading">Goals</h1>
+          <button type="button" class="button" id="goals-add" data-goal-action="add">Add goal</button>
+        </div>
+        <p class="routines-message" id="goals-message" hidden></p>
+        <div class="routines-cards" id="goals-cards"></div>
       </section>
     </main>
   </div>
   <script src="/assets/routines.js"></script>
   <script src="/assets/agents.js"></script>
+  <script src="/assets/goals.js"></script>
   <script src="/assets/shell.js"></script>
 </body>
 </html>

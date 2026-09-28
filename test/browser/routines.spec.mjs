@@ -434,7 +434,7 @@ test('with no agents, Home shows the routines overview and refreshes it once', a
 test('the rail holds four links without scrolling, and /brief and /reading show Reading', async ({ page, hub }) => {
   await page.goto(`${hub.origin}/goals`);
   await expectView(page, 'goals', 'Goals');
-  await expect(page.locator('#view-goals')).toHaveText('Goals');
+  await expect(page.locator('#view-goals h1')).toHaveText('Goals');
   const links = page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link');
   await expect(links).toHaveCount(4);
   for (const [i, name] of ['Home', 'Reading', 'Focus', 'Goals'].entries()) {

@@ -253,7 +253,7 @@ when asked.
 ### Shell
 
 `public/index.html`, `public/shell.js`, `public/agents.js`,
-`public/routines.js`, and `public/styles.css` make up the page served at
+`public/routines.js`, `public/goals.js`, and `public/styles.css` make up the page served at
 `/`, `/agents`, `/routines`, `/focus`, and `/brief`. The Agents view is the
 page at `/`; `/agents` shows the same view, `/routines` shows it with the
 routines overview open, and `/goals` or any path the shell does not know

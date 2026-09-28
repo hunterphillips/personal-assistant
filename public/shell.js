@@ -1,7 +1,8 @@
-// Dashboard shell: switches between Agents (Home), Reading (the Daily Brief),
-// Focus, and Goals with the History API, creates each child frame the first
-// time its view is shown and keeps it afterwards, and keeps one copy of the
-// server's state. Agents is the page at `/`; `/agents` and `/routines` show it
+// Dashboard shell: switches between Agents (Home, agents.js), Reading (the
+// Daily Brief), Focus, and Goals (goals.js) with the History API, creates
+// each child frame the first time its view is shown and keeps it afterwards,
+// and keeps one copy of the server's state, which it hands to the Agents and
+// Goals views. Agents is the page at `/`; `/agents` and `/routines` show it
 // too, `/brief` shows Reading, and any unknown path lands on Agents.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
@@ -66,6 +67,7 @@
   };
   var routines = window.DashboardRoutines ? window.DashboardRoutines.create(shellApi) : null;
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi, routines) : null;
+  var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -190,6 +192,7 @@
     render(fresh);
     if (routines) routines.update(state, keys);
     if (agents) agents.update(state, keys);
+    if (goals) goals.update(state, keys);
   }
 
   function isSnapshot(body) {
@@ -339,10 +342,15 @@
       else links[j].removeAttribute('aria-current');
     }
     document.title = TITLES[view] + ' · Dashboard';
-    // The Agents view shows and hides the routines it holds.
+    // The Agents view shows and hides the routines it holds; Goals fetches
+    // the vault while shown.
     if (agents) {
       if (view === 'agents') agents.show();
       else agents.hide();
+    }
+    if (goals) {
+      if (view === 'goals') goals.show();
+      else goals.hide();
     }
     render(false);
     fetchState();
@@ -380,9 +388,11 @@
     if (document.hidden) {
       disconnect();
       if (agents) agents.hide();
+      if (goals) goals.hide();
     } else {
       connect();
       if (agents && current === 'agents') agents.show();
+      if (goals && current === 'goals') goals.show();
     }
   });
 
