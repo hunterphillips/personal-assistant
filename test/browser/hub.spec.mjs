@@ -374,7 +374,6 @@ test('navigation and the brief Save control stay reachable, with one scroll owne
   const viewport = page.viewportSize();
 
   const names = ['Home', 'Reading', 'Focus', 'Goals'];
-  await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(names);
   for (const name of names) {
     const link = nav(page, name);
     await expect(link).toBeInViewport();

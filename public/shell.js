@@ -1,8 +1,8 @@
 // Dashboard shell: switches between Agents (Home), Reading (the Daily Brief),
-// Focus, and Goals with the History API, creates each child frame the first time its view is shown and
-// keeps it afterwards, and keeps one copy of the server's state. Agents is
-// the page at `/`; `/agents` and `/routines` show it too, `/brief` shows
-// Reading, and any unknown path lands on Agents.
+// Focus, and Goals with the History API, creates each child frame the first
+// time its view is shown and keeps it afterwards, and keeps one copy of the
+// server's state. Agents is the page at `/`; `/agents` and `/routines` show it
+// too, `/brief` shows Reading, and any unknown path lands on Agents.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
 // `snapshot` replaces it, `delta` applies a patch when its revision is the

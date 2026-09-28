@@ -420,11 +420,9 @@ test.describe('with no routines registered', () => {
   });
 });
 
-test('the nav lists Home, Reading, Focus, and Goals, and Home shows Agents', async ({ page, hub }) => {
+test('with no agents, Home shows the routines overview and refreshes it once', async ({ page, hub }) => {
   await page.goto(`${hub.origin}/`);
   await expectView(page, 'agents', 'Agents');
-  await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link'))
-    .toHaveText(['Home', 'Reading', 'Focus', 'Goals']);
   await expect(page.locator('#agents-message')).toHaveText('No agents are registered.');
   if (phone(page)) await page.locator('#agents-routines').click();
   await expect(page.locator('#routines-overview')).toBeVisible();
@@ -442,7 +440,24 @@ test('the rail holds four links without scrolling, and /brief and /reading show 
   for (const [i, name] of ['Home', 'Reading', 'Focus', 'Goals'].entries()) {
     await expect(links.nth(i)).toHaveAccessibleName(name);
   }
-  expect(await page.locator('.nav').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const onPhone = test.info().project.name === 'mobile-webkit';
+  for (const link of await links.all()) {
+    const box = await link.boundingBox();
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    const label = link.locator('.nav-label');
+    if (onPhone) {
+      await expect(label).toBeVisible();
+    } else {
+      const labelBox = await label.boundingBox();
+      expect(labelBox.width).toBeLessThanOrEqual(1);
+      expect(labelBox.height).toBeLessThanOrEqual(1);
+    }
+  }
+  // The phone rail runs across the top; all four links fit without scrolling.
+  if (onPhone) {
+    expect(await page.locator('.nav').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  }
 
   for (const path of ['/brief', '/reading']) {
     await page.goto(`${hub.origin}${path}`);

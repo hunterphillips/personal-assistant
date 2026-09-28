@@ -74,7 +74,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   width: 44px;
   height: 44px;
   border-radius: 7px;
-  color: var(--muted);
+  color: #5d6a61;
   text-decoration: none;
   white-space: nowrap;
 }
@@ -390,7 +390,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   border-right: 1px solid var(--line);
 }
 
-.agents-heading {
+.agents-heading, .goals-heading {
   margin: 0 0 12px;
   font-family: var(--serif);
   font-size: 24px;
@@ -399,6 +399,8 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 
 .agents-message { margin: 0 0 12px; }
+
+#view-goals { padding: 40px 34px; }
 
 .agent-group { margin-bottom: 20px; }
 
@@ -876,6 +878,8 @@ a.agent-row[aria-current="true"] {
     gap: 2px;
     padding: 4px 8px;
     padding-top: max(4px, env(safe-area-inset-top));
+    padding-right: max(8px, env(safe-area-inset-right));
+    padding-left: max(8px, env(safe-area-inset-left));
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
@@ -906,6 +910,8 @@ a.agent-row[aria-current="true"] {
   .notice { padding: 8px 14px; }
 
   .routines { padding: 4px 16px 20px; }
+
+  #view-goals { padding: 20px 16px; }
 
   .agents { grid-template-columns: minmax(0, 1fr); }
 

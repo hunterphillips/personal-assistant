@@ -2,11 +2,11 @@
 
 A local Node server that will become the single private entry point for Focus
 and the Daily Brief. It listens on `127.0.0.1:4243`; Tailscale serves it to the
-tailnet over HTTPS. The page is a shell whose rail holds Home (the Agents
-view, with the routines beside it, at `/`), Reading (the Daily Brief), Focus,
-and Goals. Focus runs in
-an iframe through a proxy to its own server.
-Briefs are read from `daily-brief/briefs/`, and feedback is saved beside them.
+tailnet over HTTPS. The page is a shell with a rail of four views. Home is the
+Agents view at `/`, with the routines beside it; Reading is the Daily Brief;
+Focus and Goals are their own views. Focus runs in an iframe through a proxy
+to its own server. Briefs are read from `daily-brief/briefs/`, and feedback is
+saved beside them.
 
 The plan is
 `thoughts/shared/plans/2026-09-22-dashboard-integrated-hub-implementation.md`
