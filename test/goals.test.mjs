@@ -219,6 +219,32 @@ test('a section that parses to nothing is a problem naming its file', async (t) 
   assert.equal(section(result, 'long-term').horizons.length, 1);
 });
 
+test('a missing Later, Deliberately not now, Horizons, or principle is not a problem', async (t) => {
+  const root = await vaultCopy(t);
+  await writeFile(path.join(root, CURRENT), '# Current priorities\n\n## 1. Ship the garden planner\n\nDo it.\n');
+  await writeFile(path.join(root, LONG_TERM), [
+    '# Long-term priorities', '', '## Top 3 priorities', '', '1. A workshop of my own', '',
+  ].join('\n'));
+  const result = await goalsFor(root).goals.read();
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(section(result, 'later').items, []);
+  assert.deepEqual(section(result, 'not-now').items, []);
+  assert.equal(section(result, 'long-term').principle, null);
+  assert.deepEqual(section(result, 'long-term').horizons, []);
+});
+
+test('no numbered sections in current-priorities.md is a problem naming that file', async (t) => {
+  const root = await vaultCopy(t);
+  await writeFile(path.join(root, CURRENT), [
+    '# Current priorities', '', '## Later', '', '- Plain item', '',
+  ].join('\n'));
+  const result = await goalsFor(root).goals.read();
+  assert.equal(result.problems.length, 1);
+  assert.equal(mentions(result.problems, CURRENT).length, 1);
+  assert.deepEqual(section(result, 'now').items, []);
+  assert.deepEqual(section(result, 'later').items.map((item) => item.id), ['later:plain-item']);
+});
+
 test('a file over the byte cap is one problem and is not read', async (t) => {
   const root = await vaultCopy(t);
   const limits = { ...LIMITS, goalsFileBytes: 2048 };
