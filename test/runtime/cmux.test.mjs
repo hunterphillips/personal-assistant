@@ -493,14 +493,50 @@ test('focus lists the workspace afresh, focuses with both ids, reads back, and l
   ]);
 });
 
-test('focus reports verified false when the read-back names another surface or fails', async (t) => {
+test('focus reads back again while cmux still names the previous surface, and is verified once it matches', async (t) => {
+  const handlers = defaultHandlers();
+  let identifies = 0;
+  // cmux answers surface.focus before the focus lands: the first two
+  // read-backs still name SF2, the surface focused before.
+  handlers['system.identify'] = () => {
+    identifies += 1;
+    const identity = fixture('identify.json');
+    if (identifies <= 2) return { ok: true, result: identity };
+    return { ok: true, result: { ...identity, focused: { ...identity.focused, surface_id: SF3, surface_ref: 'surface:3' } } };
+  };
+  const server = await startFakeCmux(t, { handlers });
+  const { focus, logs } = await setup(t, { server });
+  const startedAt = Date.now();
+  assert.deepEqual(await focus({ workspaceId: WS2, surfaceId: SF3 }), { ok: true, verified: true });
+  assert.ok(Date.now() - startedAt >= 200, 'waited between read-backs');
+  assert.deepEqual(methods(server), ['surface.list', 'surface.focus', 'system.identify', 'system.identify', 'system.identify']);
+  assert.deepEqual(events(logs, 'cmux_focus'), [
+    { event: 'cmux_focus', workspaceId: WS2, surfaceId: SF3, ok: true, verified: true },
+  ]);
+});
+
+test('focus reports verified false when every read-back names another surface or fails', async (t) => {
   const handlers = defaultHandlers();
   handlers['system.identify'] = () => ({ ok: true, result: fixture('identify.json') });
   const server = await startFakeCmux(t, { handlers });
   const { focus } = await setup(t, { server });
   assert.deepEqual(await focus({ workspaceId: WS2, surfaceId: SF3 }), { ok: true, verified: false });
+  assert.equal(methods(server).filter((method) => method === 'system.identify').length, 5, 'five read-backs before giving up');
+  server.calls.length = 0;
   handlers['system.identify'] = () => rpcError('internal', 'boom');
   assert.deepEqual(await focus({ workspaceId: WS2, surfaceId: SF2 }), { ok: true, verified: false });
+  assert.equal(methods(server).filter((method) => method === 'system.identify').length, 5);
+});
+
+test('the read-back stops within the request budget', async (t) => {
+  const handlers = defaultHandlers();
+  handlers['system.identify'] = () => ({ ok: true, result: fixture('identify.json') });
+  const server = await startFakeCmux(t, { handlers });
+  // A budget that allows one wait after the first read-back and no more.
+  const { focus } = await setup(t, { server, timeouts: { cmuxRequestMs: 250 } });
+  assert.deepEqual(await focus({ workspaceId: WS2, surfaceId: SF3 }), { ok: true, verified: false });
+  const readBacks = methods(server).filter((method) => method === 'system.identify').length;
+  assert.ok(readBacks >= 2 && readBacks <= 3, `read back ${readBacks} times within a 250 ms budget`);
 });
 
 test('focus of a surface missing from the fresh listing is not_found and focuses nothing', async (t) => {
