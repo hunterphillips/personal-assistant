@@ -1,7 +1,8 @@
-// Entry point: load configuration, load the agent registry, compose the
-// routines view, thread store, persona adapters, state hub, and app, start
-// the personas, listen on 127.0.0.1, and shut down within a bounded window
-// on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
+// Entry point: load configuration, load the agent registry and the Codex
+// terminal bindings, compose the routines view, thread store, runtime
+// adapters (Claude for personas, Codex for the shared app-server's threads),
+// state hub, and app, start the personas, listen on 127.0.0.1, and shut down
+// within a bounded window on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
 // runs main(). A missing or invalid registry does not stop startup; the hub
 // reports it.
 //
@@ -11,14 +12,17 @@
 // turns must bill the subscription, never an API key.
 //
 // Shutdown order: end event streams and refuse new sends (closeStreams),
-// close each adapter (which drains running turns for up to drainMs, then
-// aborts the rest and waits abortGraceMs for them), close the hub, stop the
-// registry, then close the server (shutdownMs grace). main() forces exit
+// close each adapter (Claude drains running turns for up to drainMs, then
+// aborts the rest and waits abortGraceMs for them; Codex closes its socket),
+// close the hub, stop the registry and bindings polls, then close the server
+// (shutdownMs grace). main() forces exit
 // forcedExitMs(timeouts) after the signal: one second past that sum.
 
 import http from 'node:http';
+import path from 'node:path';
 
 import { createApp, defaultLog } from './lib/app.mjs';
+import { createBindings } from './lib/bindings.mjs';
 import { createBriefRoutes } from './lib/brief-adapter.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
@@ -26,12 +30,20 @@ import { createHub } from './lib/hub.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { createRoutines } from './lib/routines.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
+import { createCodexAdapter } from './lib/runtime/codex.mjs';
 import { createThreadStore } from './lib/threads.mjs';
 
 const API_KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 
+// The Codex adapter is always created: it watches for the owner file itself
+// and follows nothing until bin/codex-serve has written one.
 function defaultAdapters({ config, store, log }) {
-  return { claude: createClaudeAdapter({ store, config, log }) };
+  return {
+    claude: createClaudeAdapter({ store, config, log }),
+    codex: createCodexAdapter({
+      ownerFile: path.join(config.codexDir, 'owner.json'), log, timeouts: config.timeouts, limits: config.limits,
+    }),
+  };
 }
 
 // Starts the dashboard and resolves once it is listening. Rejects on invalid
@@ -44,6 +56,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   const brief = createBriefRoutes(config);
   const logEntry = log ?? defaultLog;
   const registry = createRegistry({ path: config.registryPath, log: logEntry });
+  const bindings = createBindings({ path: path.join(config.codexDir, 'bindings.json'), pollMs: config.timeouts.codexPollMs, log: logEntry });
   const routines = createRoutines({
     registry,
     launchAgentsDir: config.launchAgentsDir,
@@ -68,6 +81,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     limits: config.limits,
     adapters,
     store,
+    bindings,
     adaptersDisabled: apiKeyInEnv ? 'api_key_in_env' : null,
     log: logEntry,
   });
@@ -82,9 +96,10 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     await Promise.all(Object.values(adapters).map((adapter) => adapter.close()));
     hub.close();
     registry.stop();
+    bindings.stop();
   };
 
-  await registry.start();
+  await Promise.all([registry.start(), bindings.start()]);
   await hub.start();
   try {
     await new Promise((resolve, reject) => {
