@@ -146,21 +146,19 @@ test.describe('with an empty vault', () => {
     await expectView(page, 'goals', 'Goals');
     const message = page.locator('#goals-message');
     await expect(message).toBeVisible();
-    await expect(message.locator('br')).toHaveCount(2);
+    await expect(message.locator('br')).toHaveCount(3);
     await expect(message).toContainText('notes/current-priorities.md is missing.');
     await expect(cards(page)).toHaveCount(0);
   });
 
-  test('says the vault is empty when every section is empty and nothing is wrong', async ({ page, hub }) => {
-    const sections = [['now', 'Now'], ['later', 'Later'], ['not-now', 'Not now'], ['long-term', 'Long term'], ['goals', 'Goal notes']]
-      .map(([id, title]) => ({ id, title, source: null, updated: null, items: [] }));
-    await page.route('**/api/goals', (route) => route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ agentId: 'second-brain', readAt: new Date().toISOString(), problems: [], sections }),
-    }));
+  test('says the vault is empty, with what is missing listed under it', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/goals`);
-    await expect(page.locator('#goals-message')).toHaveText('Nothing in the vault yet.');
+    await expectView(page, 'goals', 'Goals');
+    const message = page.locator('#goals-message');
+    await expect(message).toBeVisible();
+    const text = await message.textContent();
+    expect(text.startsWith('Nothing in the vault yet.')).toBe(true);
+    expect(text).toContain('notes/current-priorities.md is missing.');
     await expect(cards(page)).toHaveCount(0);
   });
 });

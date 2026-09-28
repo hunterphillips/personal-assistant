@@ -229,7 +229,7 @@
       if (!data || !Array.isArray(data.sections)) return;
       var problems = Array.isArray(data.problems) ? data.problems : [];
       var empty = data.sections.every(sectionEmpty);
-      setMessage(problems.length > 0 ? problems : empty ? [EMPTY] : []);
+      setMessage(empty ? [EMPTY].concat(problems) : problems);
       items = {};
       if (composer) composer.node.remove();
       cards.textContent = '';
