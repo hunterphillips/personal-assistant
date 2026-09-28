@@ -10,9 +10,22 @@
   <a class="skip" href="#content">Skip to content</a>
   <div class="shell">
     <nav class="nav" aria-label="Dashboard">
-      <a href="/" data-view="agents">Agents</a>
-      <a href="/focus" data-view="focus">Focus</a>
-      <a href="/brief" data-view="brief">Daily Brief</a>
+      <a href="/" data-view="agents" title="Home">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 10.5 12 4l8 6.5"/><path d="M6 9v11h12V9"/><path d="M10 20v-6h4v6"/></svg>
+        <span class="nav-label">Home</span>
+      </a>
+      <a href="/reading" data-view="reading" title="Reading">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 6.5C10 5 7 4.5 3 5v13c4-.5 7 0 9 1.5 2-1.5 5-2 9-1.5V5c-4-.5-7 0-9 1.5z"/><path d="M12 6.5v13"/></svg>
+        <span class="nav-label">Reading</span>
+      </a>
+      <a href="/focus" data-view="focus" title="Focus">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="1.5"/></svg>
+        <span class="nav-label">Focus</span>
+      </a>
+      <a href="/goals" data-view="goals" title="Goals">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4.5L17 13H5"/></svg>
+        <span class="nav-label">Goals</span>
+      </a>
     </nav>
     <main id="content" class="content" tabindex="-1">
       <div class="notice" id="shell-notice" role="status" hidden>
@@ -94,7 +107,7 @@
         <div class="frame-slot" id="focus-slot"></div>
       </section>
 
-      <section class="view" id="view-brief" data-view="brief" aria-label="Daily Brief" hidden>
+      <section class="view" id="view-reading" data-view="reading" aria-label="Reading" hidden>
         <div class="notice" id="brief-newer" role="status" hidden>
           <span>A newer brief is available.</span>
           <button type="button" data-action="load-newer">Load newer brief</button>
@@ -104,6 +117,10 @@
           <button type="button" data-action="retry">Retry</button>
         </div>
         <div class="frame-slot" id="brief-slot"></div>
+      </section>
+
+      <section class="view" id="view-goals" data-view="goals" aria-label="Goals" hidden>
+        <h1 class="goals-heading">Goals</h1>
       </section>
     </main>
   </div>

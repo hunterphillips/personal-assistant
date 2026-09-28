@@ -1,8 +1,8 @@
-// Dashboard shell: switches between Agents, Focus, and Daily Brief with the
-// History API, creates each child frame the first time its view is shown and
+// Dashboard shell: switches between Agents (Home), Reading (the Daily Brief),
+// Focus, and Goals with the History API, creates each child frame the first time its view is shown and
 // keeps it afterwards, and keeps one copy of the server's state. Agents is
-// the page at `/`; `/agents` and `/routines` show it too, and any unknown
-// path lands there.
+// the page at `/`; `/agents` and `/routines` show it too, `/brief` shows
+// Reading, and any unknown path lands on Agents.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
 // `snapshot` replaces it, `delta` applies a patch when its revision is the
@@ -23,8 +23,11 @@
 (function () {
   'use strict';
 
-  var ROUTES = { '/': 'agents', '/agents': 'agents', '/routines': 'agents', '/focus': 'focus', '/brief': 'brief' };
-  var TITLES = { agents: 'Agents', focus: 'Focus', brief: 'Daily Brief' };
+  var ROUTES = {
+    '/': 'agents', '/agents': 'agents', '/routines': 'agents', '/focus': 'focus',
+    '/reading': 'reading', '/brief': 'reading', '/goals': 'goals',
+  };
+  var TITLES = { agents: 'Agents', reading: 'Reading', focus: 'Focus', goals: 'Goals' };
   var FALLBACK_POLL_MS = 30000;
   var STATE_TIMEOUT_MS = 5000;
   var BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
@@ -54,6 +57,12 @@
   var shellApi = {
     requestState: function () { fetchState(); },
     isStreaming: function () { return streaming; },
+    // Lands on a persona's thread without a page load; a link with a query
+    // is left to the browser.
+    openAgent: function (id) {
+      history.pushState(null, '', '/?agent=' + encodeURIComponent(id));
+      show('agents');
+    },
   };
   var routines = window.DashboardRoutines ? window.DashboardRoutines.create(shellApi) : null;
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi, routines) : null;
@@ -147,7 +156,7 @@
     $('focus-notice').hidden = !(focusDown() || failed(frames.focus));
 
     // Daily Brief
-    if (fresh && current === 'brief' && !frames.brief && isReady(brief)) mountBrief(brief);
+    if (fresh && current === 'reading' && !frames.brief && isReady(brief)) mountBrief(brief);
     var newer = !!frames.brief && isReady(brief) &&
       (brief.date !== mountedBrief.date || brief.revision !== mountedBrief.revision);
     $('brief-newer').hidden = !newer;

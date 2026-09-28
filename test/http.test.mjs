@@ -171,7 +171,7 @@ function pipingFocus(upstreamPort) {
 test('shell routes serve the same HTML with the shell CSP', async (t) => {
   const app = await startApp(t);
   const bodies = [];
-  for (const path of ['/', '/focus', '/brief', '/?view=x']) {
+  for (const path of ['/', '/focus', '/reading', '/brief', '/?view=x']) {
     const response = await request(app, 'GET', path);
     assert.equal(response.status, 200, path);
     assert.match(response.headers['content-type'], /^text\/html/);
@@ -218,7 +218,7 @@ test('missing briefs and unavailable Focus do not affect health or shell', async
   const app = await startApp(t, {
     env: { DASHBOARD_BRIEFS_DIR: path.join(await tempDir(t), 'missing') },
   });
-  for (const path of ['/', '/focus', '/brief', '/healthz']) {
+  for (const path of ['/', '/focus', '/reading', '/brief', '/healthz']) {
     assert.equal((await request(app, 'GET', path)).status, 200, path);
   }
   const status = await request(app, 'GET', '/api/dashboard/status');

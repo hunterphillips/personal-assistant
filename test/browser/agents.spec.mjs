@@ -127,12 +127,12 @@ test.describe('with seeded agents', () => {
     expect(hub.personas.calls).toEqual([]);
   });
 
-  test('the page at / is the list beside the routines overview, and the nav is Agents, Focus, Daily Brief', async ({ page, hub }) => {
+  test('the page at / is the list beside the routines overview, and the nav is Home, Reading, Focus, Goals', async ({ page, hub }) => {
     test.skip(phone(page), 'the phone puts the overview behind a row; see below');
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link'))
-      .toHaveText(['Agents', 'Focus', 'Daily Brief']);
+      .toHaveText(['Home', 'Reading', 'Focus', 'Goals']);
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#agents-routines')).toBeHidden();
     const overview = page.locator('#routines-overview');
@@ -214,7 +214,7 @@ test.describe('with seeded agents', () => {
     await expect(pane(page).locator('#agent-name')).toHaveText('CFO');
     await expect(messages(page)).toHaveCount(2);
 
-    await nav(page, 'Agents').click();
+    await nav(page, 'Home').click();
     await expect(page).toHaveURL(`${hub.origin}/`);
     await expect(pane(page)).toBeHidden();
   });
@@ -676,7 +676,7 @@ test.describe('with an unreadable registry', () => {
     await expect(listMessage).toHaveText('The registry could not be read.');
     await expect(overviewMessage).toBeHidden();
 
-    await nav(page, 'Agents').click();
+    await nav(page, 'Home').click();
     await expect(page.locator('#agent-empty')).toBeHidden();
     if (phone(page)) await expect(listMessage).toHaveText('The registry could not be read.');
     else await expect(listMessage).toBeHidden();

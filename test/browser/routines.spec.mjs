@@ -370,7 +370,7 @@ test.describe('with stale routines', () => {
     await expect(page.locator('#agent-name')).toHaveText('Scribe');
     await page.waitForTimeout(300);
     expect(hub.routines.calls).toBe(0);
-    await nav(page, 'Agents').click();
+    await nav(page, 'Home').click();
     if (phone(page)) await page.locator('#agents-routines').click();
     await expect(page.locator('#routines-updated')).toHaveText('Updated just now');
     await page.waitForTimeout(300);
@@ -420,17 +420,40 @@ test.describe('with no routines registered', () => {
   });
 });
 
-test('the nav lists Agents, Focus, and Daily Brief, and unknown paths show Agents', async ({ page, hub }) => {
-  await page.goto(`${hub.origin}/goals`);
+test('the nav lists Home, Reading, Focus, and Goals, and Home shows Agents', async ({ page, hub }) => {
+  await page.goto(`${hub.origin}/`);
   await expectView(page, 'agents', 'Agents');
   await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link'))
-    .toHaveText(['Agents', 'Focus', 'Daily Brief']);
+    .toHaveText(['Home', 'Reading', 'Focus', 'Goals']);
   await expect(page.locator('#agents-message')).toHaveText('No agents are registered.');
   if (phone(page)) await page.locator('#agents-routines').click();
   await expect(page.locator('#routines-overview')).toBeVisible();
   await expect(page.locator('#routines-refresh')).toBeVisible();
   // The overview opened with nothing refreshed, so it refreshed once.
   await expect.poll(() => hub.routines.calls).toBe(1);
+});
+
+test('the rail holds four links without scrolling, and /brief and /reading show Reading', async ({ page, hub }) => {
+  await page.goto(`${hub.origin}/goals`);
+  await expectView(page, 'goals', 'Goals');
+  await expect(page.locator('#view-goals')).toHaveText('Goals');
+  const links = page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link');
+  await expect(links).toHaveCount(4);
+  for (const [i, name] of ['Home', 'Reading', 'Focus', 'Goals'].entries()) {
+    await expect(links.nth(i)).toHaveAccessibleName(name);
+  }
+  expect(await page.locator('.nav').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+  for (const path of ['/brief', '/reading']) {
+    await page.goto(`${hub.origin}${path}`);
+    await expect(page.locator('#view-reading')).toBeVisible();
+    await expect(page).toHaveTitle('Reading · Dashboard');
+  }
+  await nav(page, 'Home').click();
+  await expectView(page, 'agents', 'Agents');
+  await nav(page, 'Goals').click();
+  await expect(page).toHaveURL(`${hub.origin}/goals`);
+  await expectView(page, 'goals', 'Goals');
 });
 
 test.describe('stream client', () => {

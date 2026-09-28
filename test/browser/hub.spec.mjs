@@ -33,10 +33,10 @@ test('deep links, links, Back and Forward, and reload show the right view', asyn
   await focusBoardReady(page);
 
   await page.goto(`${hub.origin}/brief`);
-  await expectView(page, 'brief', 'Daily Brief');
+  await expectView(page, 'reading', 'Reading');
   await briefReady(page);
 
-  await nav(page, 'Agents').click();
+  await nav(page, 'Home').click();
   await expect(page).toHaveURL(`${hub.origin}/`);
   await expectView(page, 'agents', 'Agents');
 
@@ -49,7 +49,7 @@ test('deep links, links, Back and Forward, and reload show the right view', asyn
   await expectView(page, 'agents', 'Agents');
   await page.goBack();
   await expect(page).toHaveURL(`${hub.origin}/brief`);
-  await expectView(page, 'brief', 'Daily Brief');
+  await expectView(page, 'reading', 'Reading');
   await page.goForward();
   await expect(page).toHaveURL(`${hub.origin}/`);
   await expectView(page, 'agents', 'Agents');
@@ -59,9 +59,9 @@ test('deep links, links, Back and Forward, and reload show the right view', asyn
   await page.reload();
   await expectView(page, 'focus', 'Focus');
   await focusBoardReady(page);
-  await nav(page, 'Daily Brief').click();
+  await nav(page, 'Reading').click();
   await page.reload();
-  await expectView(page, 'brief', 'Daily Brief');
+  await expectView(page, 'reading', 'Reading');
   await briefReady(page);
 });
 
@@ -76,19 +76,19 @@ test('frames are created once and kept, hidden, across navigation', async ({ pag
   const focusFrame = await frameOf(page, '#focus-frame');
   await focusFrame.evaluate(() => { window.dashboardMarker = 'focus-kept'; });
 
-  await nav(page, 'Daily Brief').click();
+  await nav(page, 'Reading').click();
   await briefReady(page);
   const briefFrame = await frameOf(page, '#brief-frame');
   await briefFrame.evaluate(() => { window.dashboardMarker = 'brief-kept'; });
   await expect(page.locator('#focus-frame')).toBeHidden();
 
-  await nav(page, 'Agents').click();
+  await nav(page, 'Home').click();
   await expect(page.locator('#focus-frame')).toBeHidden();
   await expect(page.locator('#brief-frame')).toBeHidden();
   await nav(page, 'Focus').click();
   await page.goBack();
   await page.goBack();
-  await expectView(page, 'brief', 'Daily Brief');
+  await expectView(page, 'reading', 'Reading');
   await nav(page, 'Focus').click();
 
   await expect(page.locator('iframe')).toHaveCount(2);
@@ -96,7 +96,7 @@ test('frames are created once and kept, hidden, across navigation', async ({ pag
   expect(await (await frameOf(page, '#brief-frame')).evaluate(() => window.dashboardMarker)).toBe('brief-kept');
 
   // Keyboard focus never reaches a hidden view.
-  await expect(page.locator('#view-brief')).toBeHidden();
+  await expect(page.locator('#view-reading')).toBeHidden();
   const reachable = await page.evaluate(() => [...document.querySelectorAll('section.view[hidden] a, section.view[hidden] button, section.view[hidden] iframe')]
     .filter((element) => element.getClientRects().length > 0).length);
   expect(reachable).toBe(0);
@@ -148,8 +148,8 @@ test('marks survive navigation and reload through the viewer storage key', async
   const viewer = page.frameLocator('#brief-frame');
   await viewer.locator('#overall').fill('Unsaved invented draft.');
 
-  await nav(page, 'Agents').click();
-  await nav(page, 'Daily Brief').click();
+  await nav(page, 'Home').click();
+  await nav(page, 'Reading').click();
   await expect(markButton(page, 'invented-two', 'Dismiss')).toHaveAttribute('aria-pressed', 'true');
   await expect(viewer.locator('#overall')).toHaveValue('Unsaved invented draft.');
 
@@ -184,7 +184,7 @@ test('when Focus stops, the shell reports it and keeps the mounted frame', async
   await expect(page.locator('#focus-notice')).toBeHidden();
 
   await hub.focus.stop();
-  await nav(page, 'Agents').click();
+  await nav(page, 'Home').click();
   await expectView(page, 'agents', 'Agents');
   await nav(page, 'Focus').click();
   const notice = page.locator('#focus-notice');
@@ -195,7 +195,7 @@ test('when Focus stops, the shell reports it and keeps the mounted frame', async
   await expect(notice).toBeVisible();
   expect(await (await frameOf(page, '#focus-frame')).evaluate(() => window.dashboardMarker)).toBe('still-here');
 
-  await nav(page, 'Daily Brief').click();
+  await nav(page, 'Reading').click();
   await briefReady(page);
 });
 
@@ -212,7 +212,7 @@ test.describe('with Focus not running', () => {
     await notice.getByRole('button', { name: 'Retry' }).click();
     await retried;
     await expect(notice).toBeVisible();
-    await nav(page, 'Daily Brief').click();
+    await nav(page, 'Reading').click();
     await briefReady(page);
   });
 });
@@ -225,9 +225,9 @@ test('a newer brief is offered, and the open one stays until it is loaded', asyn
   await expect(page.locator('#brief-newer')).toBeHidden();
 
   await hub.writeBrief(NEXT_DATE);
-  await nav(page, 'Agents').click();
+  await nav(page, 'Home').click();
   await expect.poll(async () => (await (await page.request.get(`${hub.origin}/api/state`)).json()).brief.date).toBe(NEXT_DATE);
-  await nav(page, 'Daily Brief').click();
+  await nav(page, 'Reading').click();
   const newer = page.locator('#brief-newer');
   await expect(newer).toContainText('A newer brief is available.');
   await briefReady(page);
@@ -255,8 +255,8 @@ test('a same-date replacement refuses the stale save and keeps the draft', async
   await expect(markButton(page, 'invented-one', 'Approve')).toHaveAttribute('aria-pressed', 'true');
   await expect(hub.readFeedback(DATE)).rejects.toThrow();
 
-  await nav(page, 'Agents').click();
-  await nav(page, 'Daily Brief').click();
+  await nav(page, 'Home').click();
+  await nav(page, 'Reading').click();
   await page.locator('#brief-newer').getByRole('button', { name: 'Load newer brief' }).click();
   await briefReady(page, revised);
   await expect(markButton(page, 'invented-one', 'Approve')).toHaveAttribute('aria-pressed', 'true');
@@ -280,7 +280,7 @@ test('a brief replaced before its view opens is mounted from fresh status', asyn
 
   const revised = `Daily Brief — ${DATE} (revised)`;
   await hub.writeBrief(DATE, { heading: revised });
-  await nav(page, 'Daily Brief').click();
+  await nav(page, 'Reading').click();
   await briefReady(page, revised);
   await expect(page.locator('#brief-frame')).toBeVisible();
   expect(refused).toEqual([]);
@@ -293,8 +293,8 @@ test('a same-date replacement of a mounted brief is offered and never shown as a
   const refused = watchBriefPages(page);
 
   await hub.writeBrief(DATE, { heading: `Daily Brief — ${DATE} (revised)` });
-  await nav(page, 'Agents').click();
-  await nav(page, 'Daily Brief').click();
+  await nav(page, 'Home').click();
+  await nav(page, 'Reading').click();
   const newer = page.locator('#brief-newer');
   await expect(newer).toContainText('A newer brief is available.');
   await briefReady(page);
@@ -363,7 +363,7 @@ test('brief states other than ready read plainly and leave Focus usable', async 
   await focusBoardReady(page);
 
   await hub.writeRawBrief(DATE, '<!doctype html><html><body>Invented, unsupported.</body></html>\n');
-  await nav(page, 'Daily Brief').click();
+  await nav(page, 'Reading').click();
   await expect(notice).toContainText(`The brief for ${DATE} could not be opened.`);
 });
 
@@ -373,7 +373,7 @@ test('navigation and the brief Save control stay reachable, with one scroll owne
   await briefReady(page);
   const viewport = page.viewportSize();
 
-  const names = ['Agents', 'Focus', 'Daily Brief'];
+  const names = ['Home', 'Reading', 'Focus', 'Goals'];
   await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(names);
   for (const name of names) {
     const link = nav(page, name);

@@ -2,8 +2,9 @@
 
 A local Node server that will become the single private entry point for Focus
 and the Daily Brief. It listens on `127.0.0.1:4243`; Tailscale serves it to the
-tailnet over HTTPS. The page is a shell with Agents, Focus, and Daily Brief
-views; Agents, with the routines beside it, is the page at `/`. Focus runs in
+tailnet over HTTPS. The page is a shell whose rail holds Home (the Agents
+view, with the routines beside it, at `/`), Reading (the Daily Brief), Focus,
+and Goals. Focus runs in
 an iframe through a proxy to its own server.
 Briefs are read from `daily-brief/briefs/`, and feedback is saved beside them.
 
@@ -21,7 +22,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 
 | Route | Purpose |
 | --- | --- |
-| `GET /`, `/agents`, `/routines`, `/focus`, `/brief`, `/goals` | The shell. `/`, `/agents`, and `/routines` show the Agents view. |
+| `GET /`, `/agents`, `/routines`, `/focus`, `/reading`, `/brief`, `/goals` | The shell. `/`, `/agents`, and `/routines` show the Agents view. |
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
 | `GET /api/state` | Checks Focus and the brief, then returns the state hub's snapshot (below). |
 | `GET /api/events` | Server-Sent Events: the snapshot, then each change (below). |
@@ -43,7 +44,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/sessions/<id>/open-terminal` | Brings the session's recorded cmux terminal to the front. |
 | `POST /api/sessions/refresh` | Re-reads the cmux inventory and the Codex catalogue now and answers `{"ok": true, "revision": N}`. |
 
-`/focus/`, `/brief/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
+`/focus/`, `/reading/`, `/brief/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
 paths without the slash. A known path
 with the wrong method is 405, and anything else is 404. Errors are JSON bodies of the form
 `{"error": "<code>"}`. The comment at the top of each route module describes

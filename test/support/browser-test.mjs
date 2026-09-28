@@ -48,9 +48,12 @@ export function nav(page, name) {
   return page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link', { name, exact: true });
 }
 
+// The Agents view is titled "Agents" but its nav link is "Home".
+const NAV_NAMES = { agents: 'Home', reading: 'Reading', focus: 'Focus', goals: 'Goals' };
+
 export async function expectView(page, view, title) {
   await expect(page.locator(`#view-${view}`)).toBeVisible();
   await expect(page.locator('section.view:visible')).toHaveCount(1);
-  await expect(nav(page, title)).toHaveAttribute('aria-current', 'page');
+  await expect(nav(page, NAV_NAMES[view])).toHaveAttribute('aria-current', 'page');
   await expect(page).toHaveTitle(`${title} · Dashboard`);
 }
