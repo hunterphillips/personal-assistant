@@ -60,7 +60,7 @@ Run the install command again to reinstall. Before replacing an existing plist, 
 
 After pulling a new revision, run `npm ci` in `dashboard/app` before the installer. The app has two runtime dependencies (`@anthropic-ai/claude-agent-sdk` and `ws`), and the LaunchAgent does not install packages; a dashboard started without the SDK shows every persona as unavailable with `sdk_unavailable`, and one started without `ws` follows no Codex threads and reports `codex.reason` `ws_unavailable`.
 
-If the job is loaded, the installer first asks the running dashboard for `GET /api/state` on 127.0.0.1, at the port recorded in the installed plist (the new `--port` only when no previous plist can be read). If any persona is busy or waiting on an answer, it stops without unloading anything and names those personas. Wait for them to finish, or pass `--force` to unload anyway. If the dashboard does not answer, the installer goes on.
+If the job is loaded, the installer first asks the running dashboard for `GET /api/state` on 127.0.0.1, at the port recorded in the installed plist (the new `--port` only when no previous plist can be read). If any persona is busy or waiting on an answer, it stops without unloading anything and names those personas. Wait for them to finish, or pass `--force` to unload anyway. If the dashboard does not answer, the installer goes on. Codex sessions are not part of this check: their pending questions and approvals live on the app-server, not in the dashboard, and are replayed to it when it resumes the threads after the restart.
 
 It then unloads only `com.personal-assistant.dashboard` and waits up to 40 seconds for the old process to exit, which covers the shutdown below.
 
@@ -68,9 +68,9 @@ It then unloads only `com.personal-assistant.dashboard` and waits up to 40 secon
 
 On SIGTERM or SIGINT, as when launchd unloads the job, the dashboard:
 
-1. Ends every event stream and refuses new persona messages and new threads with 503 `shutting_down`.
-2. Drains persona turns. A turn waiting on a question or approval is aborted at once. Running turns get up to 30 seconds (`TIMEOUTS.drainMs`) to finish; any still running are then aborted and given 2 seconds (`TIMEOUTS.abortGraceMs`) to end.
-3. Stops the state hub and the registry poll.
+1. Ends every event stream and refuses new persona messages, new threads, new event streams, and `POST /api/sessions/refresh` with 503 `shutting_down`.
+2. Closes the adapters, both at once. The Claude adapter drains persona turns: a turn waiting on a question or approval is aborted at once, running turns get up to 30 seconds (`TIMEOUTS.drainMs`) to finish, and any still running are then aborted and given 2 seconds (`TIMEOUTS.abortGraceMs`) to end. The Codex adapter stops its poll and closes its socket; questions and approvals still open stay on the app-server, where the terminal can answer them and the next dashboard picks them up on resume.
+3. Closes the cmux client's socket (`cmux.close()`), then stops the state hub, the registry poll, and the bindings poll.
 4. Closes the server, giving open requests up to 5 seconds (`TIMEOUTS.shutdownMs`) before cutting them.
 
 If all of that has not finished 38 seconds after the signal (the three waits plus one second), or if the shutdown itself fails, the process exits with status 1.
@@ -126,7 +126,7 @@ The socket path must stay under 104 bytes, the macOS limit for a Unix socket; `c
 
 Answering from the dashboard sends only once-only decisions: a question's answers, `accept` or `decline` for a command or file change, and a permission grant limited to the request and the turn. Anything broader, such as a session-wide grant, is answered in the terminal, and the dashboard marks such requests as terminal only. If the socket drops while the server is up, the rows stay listed as `unavailable` and `codex.reason` is `disconnected` until the dashboard reconnects with backoff, lists and resumes the threads again, and any request still waiting is replayed to it.
 
-A thread started moments ago shows as `Untitled thread` until its first turn: the server has not written it to disk yet, so the dashboard's resume fails and is retried every few seconds (up to every 30 seconds). Its first question arrives with the resume that succeeds, so it can trail the terminal by up to half a minute. Each failed attempt prints an `ERROR ... no rollout found` line in the `codex-serve` terminal; that is expected for a fresh thread.
+A thread started moments ago is listed by its folder name, with no title, until its first turn: the server has not written it to disk yet, so the dashboard's resume fails and is retried every few seconds (up to every 30 seconds). Its first question arrives with the resume that succeeds, so it can trail the terminal by up to half a minute. Each failed attempt prints an `ERROR ... no rollout found` line in the `codex-serve` terminal; that is expected for a fresh thread.
 
 `npm run verify:codex -- --yes` runs a live check on a disposable server and bills one short turn; use it after a Codex upgrade. `npm ci` must have been run: without `ws` the dashboard starts but reports `ws_unavailable` and follows nothing.
 
@@ -155,7 +155,7 @@ Only agents started from a cmux terminal appear: cmux registers `claude` through
 
 The daemon reads cmux only while a browser has the dashboard open. When the first event stream opens it refreshes the inventory once, then every 10 seconds (`TIMEOUTS.sessionsPollMs`) while any stream stays open, and once more on each `POST /api/sessions/refresh`; with no stream open it reads nothing, and the last inventory stands until the next. One refresh is one `workspace.list` and one `surface.list` per workspace over the socket, all on the daemon's single connection (each request bounded by `TIMEOUTS.cmuxRequestMs`, 5 seconds), plus one `cmux sessions list --json` subprocess (bounded by `TIMEOUTS.cmuxSessionsMs`, 5 seconds), which is the larger of the two costs. The same pass asks the Codex adapter for a poll now, but that adapter already polls its owner file and catalogue every 3 seconds (`TIMEOUTS.codexPollMs`) on its own, stream or no stream; the interval only brings one poll forward. Refreshes never overlap: a slow one is shared by the callers that arrive during it. A refresh that fails keeps the last good listing for up to five minutes, marked `stale` in the snapshot's `cmux`. Each refresh commits a new revision only when something in `sessions` or `cmux` changed, so an idle cmux costs the streams nothing.
 
-"Open terminal" in the dashboard is `POST /api/sessions/<id>/open-terminal`. It focuses the exact workspace and surface recorded for the session (by `bin/codex-new` for a Codex thread, by cmux itself for a Claude terminal), never one chosen by folder, and refuses when nothing was recorded (`unbound`), when cmux cannot be reached (`cmux_unavailable`), or when that terminal is no longer in the inventory (`terminal_closed`). Every focus is logged as `cmux_focus` with the ids and the outcome.
+"Open terminal" in the dashboard is `POST /api/sessions/<id>/open-terminal`. It focuses the exact workspace and surface recorded for the session (by `bin/codex-new` for a Codex thread, by cmux itself for a Claude terminal), never one chosen by folder, and refuses when nothing was recorded (`unbound`), when cmux cannot be reached (`cmux_unavailable`, with the inventory's reason, or `no_client` when the dashboard runs without a cmux client), or when that terminal is no longer in the inventory (`terminal_closed`). Every focus is logged as `cmux_focus` with the ids and the outcome.
 
 ## Node path after upgrades
 

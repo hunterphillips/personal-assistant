@@ -325,10 +325,11 @@ that has closed says only that. When there are no sessions and both the
 Codex server and cmux are off, one sentence ends the list: "No coding
 sessions. Start the Codex server or open a terminal in cmux." With only
 one of them off the list says nothing; the routines overview carries one
-line per source that is off, above its heading ("Codex server not
-running.", "Codex server disconnected.", "cmux is not running.", "cmux
-refused the connection. Check the socket password.", or "cmux is not
-reachable."), and nothing while both answer.
+line per source that is off, above its heading ("The Codex server is not
+running.", "The Codex server disconnected.", "Codex sessions are off
+until npm ci runs.", "cmux is not running.", "cmux refused the
+connection. Check the socket password.", or "cmux is not reachable."),
+and nothing while both answer.
 
 A session's id goes in `?agent=` like an agent's (`/?agent=codex%3A<threadId>`;
 the plain `codex:` form works too), and the phone flow is the same. An id
@@ -339,35 +340,39 @@ folder, the messages from `GET /api/sessions/<id>/thread` (fetched on the
 same occasions as a persona's), the working or waiting line with
 Interrupt (`POST /api/sessions/<id>/interrupt`), and a question or
 approval card that posts to `POST /api/sessions/<id>/answer`; a Codex
-question's answers are keyed by its question ids. There is no New thread,
+question's answers are keyed by its question ids; a question whose
+`isOther` is false has no Other field, and one whose `isSecret` is true
+takes its Other answer in a password field. There is no New thread,
 no cost line, and no routines toggle, and in place of the composer one
-sentence: "Codex threads take messages in the terminal." An approval
+sentence: "Type to this thread in its terminal." An approval
 shows what it asks as parts when the input carries them, in place of the
 JSON: the command and its folder, the files of a change, the permissions
 asked for (one line per path with its access, and "network"), and the
 reason given; the heading reads "<title> wants to run a command", "wants
-to change files", or "asks for permission". A request only the terminal
-can answer (`native`) shows no Allow, Deny, or Answer, and says "Answer
-this one in the terminal." While the server is down the pane says "The
-Codex server disconnected." above the empty message area. A refusal is
-reported under the pane as for a persona ("Answer this one in the
-terminal." for `not_supported`, "The Codex server is not connected." for
-`unavailable`, "That session is no longer listed." for `no_such_session`).
+to change files", or "asks for permission", and for a request of a kind
+the view does not know, "<title> is waiting on the terminal". A request
+only the terminal can answer (`native`) shows no Allow, Deny, or Answer,
+and says "Answer this one in the terminal." While the server is down the
+pane says "The Codex server disconnected." above the empty message area;
+after a failed turn it says "The last turn failed." (the server's own
+error text stays in the log). A refusal is reported under the pane as
+for a persona ("Answer this one in the terminal." for `not_supported`,
+"The Codex server is not connected." for `unavailable`, "That session is
+no longer listed." for `no_such_session`).
 
 A Claude terminal opens a pane with the folder name, the Claude chip, and
-the folder, then "This session runs in a cmux terminal." and its state:
-"Claude is working.", "Claude is idle.", "Claude's state is not known.",
-or "The terminal is closed." It has no messages, no request, no
-Interrupt, and no composer. Its cmux workspace and surface ids are never
-shown.
+the folder, then its state: "Claude is working.", "Claude is idle.",
+"Claude is waiting for you.", "Claude has not reported its state.", or
+"The terminal is closed." It has no messages, no request, no Interrupt,
+and no composer. Its cmux workspace and surface ids are never shown.
 
 Both panes have an "Open terminal" button in the header. It is enabled
 only when the session's `binding` names a terminal, that terminal is
 `live`, and `cmux.available` is true; otherwise it is disabled with the
-reason beneath it, in this order: "This terminal was not started through
-the dashboard, so it cannot be opened from here." (no binding, or one
-recorded outside cmux), the cmux sentence above (cmux off), or "That
-terminal is closed." (not live). Choosing it posts to
+reason beneath it, in this order: "This thread was not started with
+codex-new, so its terminal is not known." (no binding, or one recorded
+outside cmux), the cmux sentence above (cmux off), or "That terminal is
+closed." (not live). Choosing it posts to
 `POST /api/sessions/<id>/open-terminal`; a 200 shows nothing, since the
 terminal now has the focus, and a refusal puts its sentence beneath the
 button until the next attempt or another session is chosen (`unbound`,
@@ -509,12 +514,16 @@ of the adapter's own refusal of an API-key turn:
 
 ### Shutdown
 
-On SIGTERM or SIGINT the server ends the event streams and refuses new sends and new
-threads with 503 `shutting_down`, then drains the personas: turns waiting on
-an answer are aborted at once, running turns get up to 30 seconds
-(`TIMEOUTS.drainMs`), and the rest are aborted and given 2 seconds
-(`TIMEOUTS.abortGraceMs`) to end. Then it closes the hub and the registry
-poll, and finally the server, which cuts requests still open after 5 seconds
+On SIGTERM or SIGINT the server ends the event streams and refuses new
+sends, new threads, new event streams, and `POST /api/sessions/refresh`
+with 503 `shutting_down`, then closes the adapters in parallel: the Claude
+adapter drains the personas (turns waiting on an answer are aborted at
+once, running turns get up to 30 seconds (`TIMEOUTS.drainMs`), and the rest
+are aborted and given 2 seconds (`TIMEOUTS.abortGraceMs`) to end), and the
+Codex adapter stops its poll and closes its socket, leaving pending
+requests on the app-server. Then it closes the cmux client's socket
+(`cmux.close()`), the hub, the registry poll, and the bindings poll, and
+finally the server, which cuts requests still open after 5 seconds
 (`TIMEOUTS.shutdownMs`). The process exits with status 1 if all of this has
 not finished 38 seconds after the signal (those three, plus one second), or
 if the shutdown itself fails. The installer refuses to unload a dashboard
@@ -614,6 +623,7 @@ directory.
 | `TIMEOUTS.codexPollMs` | 3 seconds | How often the Codex adapter checks `owner.json` and the daemon checks `bindings.json` |
 | `TIMEOUTS.codexReconnectMs` | 1 second | First wait before reconnecting to the Codex app-server |
 | `TIMEOUTS.codexReconnectMaxMs` | 30 seconds | The reconnect wait doubles up to this |
+| `TIMEOUTS.codexRpcMs` | 15 seconds | One request to the Codex app-server must be answered within this |
 | `TIMEOUTS.sessionsPollMs` | 10 seconds | The cmux inventory and Codex catalogue refresh while any event stream is open |
 | `TIMEOUTS.cmuxRequestMs` | 5 seconds | The cmux auth handshake, and separately each socket request |
 | `TIMEOUTS.cmuxSessionsMs` | 5 seconds | One `cmux sessions list --json` |
@@ -799,8 +809,10 @@ with "no rollout found"; while the thread is loaded the adapter keeps the
 row and retries with a doubling wait (6, 12, 24, then 30 seconds), and the
 question from its first turn arrives with the resume that succeeds. The
 same failure for a thread that is only bound means it does not exist on
-this server; that, like any other resume failure, drops the thread for
-good and is logged once, not retried on every reconnect. Rows are capped
+this server; that, like any other resume failure (a timeout, an rpc
+error), drops the thread for the rest of the connection and is logged
+once. The next connection tries every thread afresh, so a transient
+failure never loses a bound thread for the daemon's lifetime. Rows are capped
 at 20 (`LIMITS.codexThreads`): past that, the oldest idle unbound thread
 with nothing pending is evicted and skipped until the next connection;
 busy, waiting, and bound threads are never evicted.
@@ -834,13 +846,16 @@ answering it here is refused as `not_supported`.
 
 Every row carries `projectId`: the id of the registry project (kind
 `project`) whose `cwd` is the session's cwd or a parent of it, the deepest
-such project when several qualify, or null. The Agents view nests the row
-under that project. A registry change rebuilds the list, so the ids follow
-an edit.
+such project when several qualify, or null. The match is on the path
+strings as given, not their real paths: a session in a symlinked or
+otherwise differently spelled directory sits under no project. The
+Agents view nests the row under that project. A registry change rebuilds
+the list, so the ids follow an edit.
 
 A Codex thread carries `id` (`codex:<threadId>`), `provider` `codex`,
 `threadId`, `cwd`, `title` (the thread's name, else the first line of its
-preview, `Untitled thread` until the first resume), `state` (`idle`,
+preview; null until the first resume, and the view then shows the
+folder), `state` (`idle`,
 `busy` while a turn runs, `waiting` on a question or approval, `error`
 after a failed turn, `unavailable` while the connection is down), `pending` in the same
 form as a persona's plus `native` when only the terminal can answer,
@@ -871,7 +886,9 @@ last good answer after a transient failure), or `{ "available": false,
 The list, `codex`, and `cmux` are rebuilt on every adapter event, every
 bindings change, and every `refreshSessions()`, which refreshes the cmux
 inventory and asks the Codex adapter for one poll now, in parallel
-(single-flight). A new
+(single-flight); the Codex poll is waited on for at most
+`TIMEOUTS.statusMs` (2 seconds), and one that runs longer lands later as
+an adapter event. A new
 revision is committed only when something differs. The inventory is
 refreshed when the first event stream opens, every 10 seconds while any
 stream is open, and on `POST /api/sessions/refresh`; without an open
@@ -887,7 +904,8 @@ route answers 503 `shutting_down`.
 
 Each route names the session by its id, `codex:<threadId>` or
 `claude:<cmux session id>`; an id not in `sessions` is 404
-`no_such_session`. POSTs follow the usual rules: exact `Origin`, JSON for
+`no_such_session`, as is a thread the adapter dropped after the snapshot
+listed it. POSTs follow the usual rules: exact `Origin`, JSON for
 `answer`, no body for `interrupt`, `open-terminal`, and
 `/api/sessions/refresh`.
 
@@ -895,19 +913,20 @@ Each route names the session by its id, `codex:<threadId>` or
 | --- | --- | --- |
 | `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 409 `no_such_request`, 409 `not_supported` (answer it in the terminal, or a terminal row) |
 | `POST interrupt` | 200 `{"ok": true}` | 409 `not_supported` (a terminal row) |
-| `GET thread` | 200 `{"messages": [...]}` | 503 `unavailable` (no connection), 409 `not_supported` (a terminal row) |
+| `GET thread` | 200 `{"messages": [...]}` | 503 `unavailable` (no connection), 404 `no_such_session` (dropped since it was listed), 409 `not_supported` (a terminal row) |
 | `POST open-terminal` | 200 `{"ok": true, "verified"}` | 409 `unbound`, 503 `cmux_unavailable` (with `reason`), 409 `terminal_closed`, 502 `focus_failed` (with `reason`) |
 | `POST /api/sessions/refresh` | 200 `{"ok": true, "revision"}` | 503 `shutting_down` |
 
 `answers` maps a question's id (or its text) to a string or a list of
 strings; `decision` is `allow` or `deny`. `thread` reads the user and
-assistant messages of the last 20 turns from the app-server each time;
-nothing is cached to disk. There is no `send` and no `new-thread` for a
-session.
+assistant messages of the last 20 turns from the app-server each time and
+answers the newest 200 of them (`LIMITS.threadCacheMessages`); nothing is
+cached to disk. There is no `send` and no `new-thread` for a session.
 
 `open-terminal` focuses the cmux surface in the row's `binding` and
 nothing else: it refuses `unbound` when the row has no recorded terminal,
-`cmux_unavailable` (with the snapshot's `cmux.reason`) while the inventory
+`cmux_unavailable` (with the snapshot's `cmux.reason`, or `no_client`
+when the dashboard runs without a cmux client) while the inventory
 cannot be read, and `terminal_closed` when the bound surface was not in
 the last inventory; otherwise it asks the client to focus that exact
 workspace and surface, which lists the workspace again first, and answers
@@ -916,7 +935,9 @@ workspace and surface, which lists the workspace again first, and answers
 `no_password`, `auth_failed`, `error`). No route ever picks a terminal by
 its working directory. `POST /api/sessions/refresh` refreshes the cmux
 inventory and the Codex catalogue now and answers the revision after
-that, as `/api/routines/refresh` does for routines.
+that, as `/api/routines/refresh` does for routines; it waits for the
+Codex poll no longer than `TIMEOUTS.statusMs` and answers with the
+revision it has then.
 
 ### Logs
 
@@ -993,7 +1014,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
 | `DASHBOARD_THREADS_DIR` | `var/threads` | Persona session pointers and message caches. Resolved from this directory; created on the first write. |
-| `DASHBOARD_CODEX_DIR` | `var/codex` | The Codex socket, `owner.json`, and `bindings.json`, shared with `bin/codex-serve` and `bin/codex-new`. Resolved from this directory. |
+| `DASHBOARD_CODEX_DIR` | `var/codex` | The Codex socket, `owner.json`, `bindings.json` and its `bindings.lock`, and the `waiting/` markers, shared with `bin/codex-serve` and `bin/codex-new`. Resolved from this directory. |
 | `DASHBOARD_CMUX_SOCKET_PATH_FILE` | `~/.local/state/cmux/last-socket-path` | File cmux writes its socket path to while it runs. Missing means cmux is not running. |
 | `DASHBOARD_CMUX_PASSWORD_FILE` | `~/.local/state/cmux/socket-control-password` | The cmux socket password, where cmux keeps it. Read on each call, never logged. |
 | `DASHBOARD_CMUX_CLI` | `/Applications/cmux.app/Contents/Resources/bin/cmux` | The cmux binary for `sessions list`. The LaunchAgent's `PATH` has no `cmux`. |
@@ -1012,9 +1033,11 @@ never completed is logged with status 0. They also carry the persona events:
 `persona_init`, `persona_usage`, `persona_turn_error` (with bounded error
 text and, for a failure before init, the CLI's last 2 KiB of stderr),
 `persona_api_key_refused`, `persona_start_error`, `persona_interrupt`,
-`persona_turn_aborted`, `persona_turn_timeout`, and `thread_resume_failed`,
-the Codex events listed under Codex sessions, the hub's
-`sessions_refresh_error` (an error code), and the cmux events
+`persona_turn_aborted`, `persona_turn_timeout`, `persona_cwd_changed`, and
+`thread_resume_failed`, the Codex events listed under Codex sessions, the
+hub's `sessions_refresh_error` (an error code), `hub_listener_error`, and
+`thread_cache_error`, the bindings reader's `bindings_error` and
+`bindings_listener_error`, and the cmux events
 `cmux_auth_failed`, `cmux_inventory_error`, `cmux_frame_too_large`,
 `cmux_surface_list_shape`, `cmux_record_skipped`, `cmux_cli_missing`, and
 `cmux_focus` (workspace and surface ids with the outcome).
