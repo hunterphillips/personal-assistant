@@ -10,7 +10,7 @@
 # Session state and planning artifacts: synced, never committed (repo convention).
 thoughts/
 
-# Nested repositories with their own history.
+# Its own repository and Sites deployment.
 dashboard/prototype/
 
 # Local tool state.

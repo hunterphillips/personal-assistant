@@ -77,7 +77,7 @@ rounded deltas, with exact figures staying in cfo.
 
 ## Status
 
-The dashboard in `dashboard/app/` (its own Git repository) is installed as a
+The dashboard in `dashboard/app/` is installed as a
 user LaunchAgent and is what the tailnet URL serves since 2026-09-23. Phases
 1 to 3 of the
 [daemon plan](thoughts/shared/plans/2026-09-25-dashboard-assistant-daemon-implementation.md)

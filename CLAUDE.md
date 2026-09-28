@@ -62,7 +62,7 @@ One directory per use case; a later weekly review or decision prep sits beside
 
 - `dashboard/app/` — the dashboard daemon (Node 24; two runtime
   dependencies, the Claude Agent SDK and `ws`, so run `npm ci` after
-  pulling); its own Git repository, run by a user LaunchAgent on
+  pulling); run by a user LaunchAgent on
   127.0.0.1:4243. Routes, snapshot shape, the `bin/codex-serve` and
   `bin/codex-new` helpers, cmux setup, tests, and operations live in its
   README and `docs/operations.md`. Never run its tests against ports 4242,
@@ -72,7 +72,7 @@ One directory per use case; a later weekly review or decision prep sits beside
   is local state, gitignored.
 - `registry/agents.json` — the agent registry the dashboard reads: personas
   and project folders with role, description, group, cwd, provider, and the
-  launchd labels each owns. Umbrella config, unversioned, absolute paths;
+  launchd labels each owns. Umbrella config with absolute paths;
   the daemon keeps the last good copy when an edit is bad.
 - `dashboard/prototype/` — standalone static design study with illustrative data;
   its own Git repository and private Sites deployment. See its README for local preview.
@@ -127,8 +127,9 @@ One directory per use case; a later weekly review or decision prep sits beside
   exists; `--force` rebuilds and skips the freshness wait. Never run it from
   a test against a real date; the timeout test in the plan uses a far date
   and deletes its output.
-- **The umbrella is not a Git repo.** `dashboard/app/` and
-  `dashboard/prototype/` each have their own repository.
+- **The umbrella is one Git repo** (private, `hunterphillips/personal-assistant`).
+  `dashboard/app/` was folded in with its history on 2026-09-28;
+  `dashboard/prototype/` keeps its own repository and is ignored here.
 
 ## Boundaries with other projects
 
