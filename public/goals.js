@@ -6,7 +6,9 @@
 //
 // While shown, the view fetches /api/goals on show(), every 60 seconds, and
 // at once when the second-brain persona leaves busy or waiting (its turn may
-// have written the vault). A refetch keeps an open composer and its text.
+// have written the vault). A refetch keeps an open composer, its text, and its
+// focus, and an answer identical to the last one rendered changes nothing.
+// A body that is not the expected shape shows the no-answer sentence.
 // Buttons carry data-goal-action, never data-action, which the shell's own
 // click handler owns. Every text node is set with textContent.
 (function () {
@@ -19,6 +21,10 @@
   var BUSY = 'Second brain is in the middle of a turn. Try again when it is idle.';
   var NOT_RUNNING = 'Second brain is not running.';
   var CHANGED = 'That goal has changed. Try again.';
+  var CHANGED_GONE = 'That goal has changed. Send this as a new goal, or cancel.';
+  var ADD_LABEL = 'What do you want to work toward?';
+  var EDIT_LABEL = 'What should change?';
+  var LABEL_MAX = 60;
   var EMPTY = 'Nothing in the vault yet.';
 
   function element(tag, className, text) {
@@ -65,14 +71,23 @@
     return node;
   }
 
+  function arrayOf(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  // The objects in a list, without nulls or other stray values.
+  function objectsIn(value) {
+    return arrayOf(value).filter(function (entry) { return entry !== null && typeof entry === 'object'; });
+  }
+
   function prose(blocks) {
     var node = element('div', 'goal-prose');
-    (blocks || []).forEach(function (block) {
+    objectsIn(blocks).forEach(function (block) {
       if (block.type === 'p') node.appendChild(element('p', null, block.text));
       else if (block.type === 'h') node.appendChild(element('h4', null, block.text));
       else if (block.type === 'list') {
         var list = element('ul');
-        (block.items || []).forEach(function (text) { list.appendChild(element('li', null, text)); });
+        arrayOf(block.items).forEach(function (text) { list.appendChild(element('li', null, text)); });
         node.appendChild(list);
       }
     });
@@ -80,7 +95,7 @@
   }
 
   function paragraphs(blocks) {
-    return (blocks || []).filter(function (block) { return block.type === 'p'; })
+    return objectsIn(blocks).filter(function (block) { return block.type === 'p'; })
       .map(function (block) { return block.text; });
   }
 
@@ -96,7 +111,7 @@
   }
 
   function sectionEmpty(section) {
-    return (section.items || []).length === 0 && !section.principle && (section.horizons || []).length === 0;
+    return objectsIn(section.items).length === 0 && !section.principle && objectsIn(section.horizons).length === 0;
   }
 
   function create(shellApi) {
@@ -108,8 +123,11 @@
     var poll = null;
     var sequence = 0;
     var brainState = null;
-    var composer = null; // { kind, target, node, input, send, reason, pending }
+    // { kind, target, opener, node, quote, label, input, send, reason, pending };
+    // opener is the id of the Edit button's item, or null for Add goal.
+    var composer = null;
     var items = {}; // id -> item, from the last render
+    var rendered = null; // the JSON text of the answer on screen
 
     function editButton(item) {
       var button = element('button', 'button button-small', 'Edit');
@@ -117,7 +135,11 @@
       button.setAttribute('data-goal-action', 'edit');
       button.setAttribute('data-goal-id', item.id);
       var name = item.title || paragraphs(item.prose)[0] || '';
-      if (name) button.setAttribute('aria-label', 'Edit ' + name);
+      if (name) {
+        var label = 'Edit ' + name;
+        if (label.length > LABEL_MAX) label = label.slice(0, LABEL_MAX - 1) + '\u2026';
+        button.setAttribute('aria-label', label);
+      }
       return button;
     }
 
@@ -167,9 +189,10 @@
 
     function renderLongTerm(section, card) {
       if (section.principle) card.appendChild(element('p', 'goal-principle', section.principle));
-      if ((section.items || []).length > 0) {
+      var top = objectsIn(section.items);
+      if (top.length > 0) {
         var list = element('ol', 'goal-top');
-        section.items.forEach(function (item) {
+        top.forEach(function (item) {
           var li = element('li', 'goal-item');
           if (item.id) li.setAttribute('data-goal-item', item.id);
           li.appendChild(head(item));
@@ -177,9 +200,10 @@
         });
         card.appendChild(list);
       }
-      if ((section.horizons || []).length > 0) {
+      var spans = objectsIn(section.horizons);
+      if (spans.length > 0) {
         var horizons = element('dl', 'goal-horizons');
-        section.horizons.forEach(function (horizon) {
+        spans.forEach(function (horizon) {
           horizons.appendChild(element('dt', null, horizon.label));
           horizons.appendChild(element('dd', null, horizon.text));
         });
@@ -201,7 +225,7 @@
       if (section.id === 'long-term') renderLongTerm(section, card);
       else {
         var fill = section.id === 'now' ? renderNow : section.id === 'goals' ? renderNote : renderListed;
-        (section.items || []).forEach(function (item) { card.appendChild(fill(item)); });
+        objectsIn(section.items).forEach(function (item) { card.appendChild(fill(item)); });
       }
       return card;
     }
@@ -215,65 +239,143 @@
       message.hidden = lines.length === 0;
     }
 
+    function setNoAnswer() {
+      setMessage([NO_ANSWER]);
+      rendered = null;
+    }
+
+    // What has focus inside the composer, and the text selection when it is
+    // the textarea, so a move or re-render can put both back.
+    function composerFocus() {
+      if (!composer || !composer.node.contains(document.activeElement)) return null;
+      var active = document.activeElement;
+      var saved = { node: active, start: null, end: null };
+      if (active === composer.input) {
+        saved.start = active.selectionStart;
+        saved.end = active.selectionEnd;
+      }
+      return saved;
+    }
+
+    function restoreFocus(saved) {
+      if (!saved || !composer || !composer.node.contains(saved.node)) return;
+      saved.node.focus();
+      if (saved.node === composer.input && saved.start !== null) {
+        composer.input.setSelectionRange(saved.start, saved.end);
+      }
+    }
+
     // Puts the open composer under its item, or at the top of the cards.
     function placeComposer() {
       if (!composer) return;
-      var hadFocus = composer.node.contains(document.activeElement);
+      var saved = composerFocus();
       var host = composer.target ? cards.querySelector('[data-goal-item="' + CSS.escape(composer.target) + '"]') : null;
       if (host) host.appendChild(composer.node);
       else cards.insertBefore(composer.node, cards.firstChild);
-      if (hadFocus) composer.input.focus();
+      restoreFocus(saved);
     }
 
+    // Builds every card before touching the page, so a body that is not the
+    // expected shape leaves the last render in place and says so.
     function render() {
-      if (!data || !Array.isArray(data.sections)) return;
-      var problems = Array.isArray(data.problems) ? data.problems : [];
-      var empty = data.sections.every(sectionEmpty);
+      if (!data) return;
+      var sections = objectsIn(data.sections);
+      var built = [];
+      var found = {};
+      var previous = items;
+      try {
+        items = found;
+        sections.forEach(function (section) {
+          if (!sectionEmpty(section)) built.push(renderSection(section));
+        });
+      } catch (_error) {
+        items = previous;
+        setNoAnswer();
+        return;
+      }
+      var problems = arrayOf(data.problems).filter(function (text) { return typeof text === 'string'; });
+      var empty = sections.every(sectionEmpty);
       setMessage(empty ? [EMPTY].concat(problems) : problems);
-      items = {};
+      var saved = composerFocus();
       if (composer) composer.node.remove();
       cards.textContent = '';
-      data.sections.forEach(function (section) {
-        if (!sectionEmpty(section)) cards.appendChild(renderSection(section));
-      });
+      built.forEach(function (card) { cards.appendChild(card); });
       placeComposer();
+      restoreFocus(saved);
+      rendered = JSON.stringify(data);
     }
 
+    // Resolves once the answer is handled.
     function load() {
       var id = ++sequence;
-      request('/api/goals', { method: 'GET' }).then(function (result) {
+      return request('/api/goals', { method: 'GET' }).then(function (result) {
         if (id !== sequence) return;
         if (result && result.status === 200 && result.body && Array.isArray(result.body.sections)) {
+          var text = JSON.stringify(result.body);
           data = result.body;
-          if (visible) render();
+          if (visible && text !== rendered) render();
         } else if (visible) {
-          setMessage([NO_ANSWER]);
+          setNoAnswer();
         }
       });
     }
 
-    function closeComposer() {
+    // fromUser: a Cancel or Escape, which puts focus back on the button that
+    // opened the composer.
+    function closeComposer(fromUser) {
       if (!composer) return;
+      var opener = composer.opener;
       composer.node.remove();
       composer = null;
+      if (!fromUser) return;
+      var button = opener
+        ? cards.querySelector('button[data-goal-action="edit"][data-goal-id="' + CSS.escape(opener) + '"]')
+        : document.getElementById('goals-add');
+      if (button) button.focus();
+    }
+
+    // Turns an edit composer whose goal is gone into an Add composer at the
+    // top, keeping the text.
+    function editToAdd(open) {
+      open.kind = 'add';
+      open.target = null;
+      open.opener = null;
+      if (open.quote) open.quote.remove();
+      open.quote = null;
+      open.label.textContent = ADD_LABEL;
+      placeComposer();
     }
 
     function openComposer(kind, target) {
-      closeComposer();
+      if (composer && composer.target === target) {
+        composer.input.focus();
+        return;
+      }
+      closeComposer(false);
       var item = target ? items[target] : null;
       var form = element('form', 'composer goal-composer');
       var inputId = 'goals-input';
+      var quote = null;
       if (item) {
-        var quote = element('blockquote', 'goal-quote');
+        quote = element('blockquote', 'goal-quote');
         quoteFor(item).forEach(function (text) { quote.appendChild(element('p', null, text)); });
         form.appendChild(quote);
       }
-      var label = element('label', 'composer-label', item ? 'What should change?' : 'What do you want to work toward?');
+      var label = element('label', 'composer-label', item ? EDIT_LABEL : ADD_LABEL);
       label.htmlFor = inputId;
       form.appendChild(label);
       var input = element('textarea', 'composer-input');
       input.id = inputId;
       input.rows = 3;
+      input.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeComposer(true);
+        } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          submit();
+        }
+      });
       form.appendChild(input);
       var row = element('div', 'composer-row goal-composer-actions');
       var send = element('button', 'button button-primary', 'Send');
@@ -292,7 +394,10 @@
         event.preventDefault();
         submit();
       });
-      composer = { kind: item ? 'edit' : 'add', target: item ? target : null, node: form, input: input, send: send, reason: reason, pending: false };
+      composer = {
+        kind: item ? 'edit' : 'add', target: item ? target : null, opener: item ? target : null,
+        node: form, quote: quote, label: label, input: input, send: send, reason: reason, pending: false,
+      };
       placeComposer();
       input.focus();
     }
@@ -318,14 +423,24 @@
         open.send.disabled = false;
         if (composer !== open) return;
         if (result && result.status === 202) {
-          closeComposer();
-          shellApi.openAgent(result.body && typeof result.body.agentId === 'string' ? result.body.agentId : AGENT_ID);
+          closeComposer(false);
+          if (visible) shellApi.openAgent(result.body && typeof result.body.agentId === 'string' ? result.body.agentId : AGENT_ID);
           return;
         }
         var code = result && result.body && typeof result.body.error === 'string' ? result.body.error : null;
+        if (result && result.status === 404 && code === 'no_such_goal') {
+          // Refetch, then say whether the goal is gone or only changed.
+          load().then(function () {
+            if (composer !== open) return;
+            var gone = open.kind === 'edit' && !Object.prototype.hasOwnProperty.call(items, open.target);
+            if (gone) editToAdd(open);
+            open.reason.textContent = gone ? CHANGED_GONE : CHANGED;
+            open.reason.hidden = false;
+          });
+          return;
+        }
         open.reason.textContent = result ? refusalSentence(result.status, code) : NO_ANSWER;
         open.reason.hidden = false;
-        if (result && result.status === 404 && code === 'no_such_goal') load();
       });
     }
 
@@ -337,7 +452,7 @@
       if (!button) return;
       var action = button.getAttribute('data-goal-action');
       if (action === 'edit') openComposer('edit', button.getAttribute('data-goal-id'));
-      else if (action === 'cancel') closeComposer();
+      else if (action === 'cancel') closeComposer(true);
     });
 
     function brainStateIn(state) {

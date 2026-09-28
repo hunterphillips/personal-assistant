@@ -10,6 +10,7 @@ import { expect, expectView, test } from '../support/browser-test.mjs';
 
 const VAULT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'vault');
 const BUSY = 'Second brain is in the middle of a turn. Try again when it is idle.';
+const NO_ANSWER = 'The dashboard did not respond.';
 
 const cards = (page) => page.locator('#goals-cards .goal-card');
 const item = (page, id) => page.locator(`[data-goal-item="${id}"]`);
@@ -76,37 +77,114 @@ test.describe('with the fixture vault', () => {
     expect(hub.personas.calls[0][2]).toMatch(/^Edit a goal from the dashboard: "Build a boat" in notes\/goals\/boat\.md\./);
   });
 
-  test('only one composer is open, and Cancel closes it', async ({ page, hub }) => {
+  test('only one composer is open; Cancel and Escape close it and return focus', async ({ page, hub }) => {
     await openGoals(page, hub);
     await page.getByRole('button', { name: 'Add goal' }).click();
-    await item(page, 'later:kayak-trip').getByRole('button', { name: 'Edit Kayak trip' }).click();
+    const kayak = item(page, 'later:kayak-trip').getByRole('button', { name: 'Edit Kayak trip' });
+    await kayak.click();
     await expect(composer(page)).toHaveCount(1);
     await expect(item(page, 'later:kayak-trip').locator('blockquote p')).toHaveText(['Kayak trip', 'pick a river in May.']);
+    await composer(page).getByLabel('What should change?').fill('Go in June.');
+    await kayak.click();
+    await expect(composer(page).getByLabel('What should change?')).toHaveValue('Go in June.');
     await composer(page).getByRole('button', { name: 'Cancel' }).click();
     await expect(composer(page)).toHaveCount(0);
+    await expect(kayak).toBeFocused();
+
+    await page.getByRole('button', { name: 'Add goal' }).click();
+    await composer(page).getByLabel('What do you want to work toward?').press('Escape');
+    await expect(composer(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Add goal' })).toBeFocused();
   });
 
-  test('pressing Edit does not fetch the state', async ({ page, hub }) => {
+  test('Control+Enter sends', async ({ page, hub }) => {
     await openGoals(page, hub);
-    await expect.poll(() => hub.requests('/api/state').length).toBeGreaterThan(0);
-    await page.waitForTimeout(300);
-    const before = hub.requests('/api/state').length;
-    await item(page, 'goal:zine').getByRole('button', { name: 'Edit Zine' }).click();
-    await expect(composer(page)).toHaveCount(1);
-    await page.waitForTimeout(300);
-    expect(hub.requests('/api/state').length).toBe(before);
+    await page.getByRole('button', { name: 'Add goal' }).click();
+    const input = composer(page).getByLabel('What do you want to work toward?');
+    await input.fill('Plant an orchard.');
+    await input.press('Control+Enter');
+    await expect(page).toHaveURL(`${hub.origin}/?agent=second-brain`);
+    expect(hub.requests('/api/goals/propose')).toEqual([{ method: 'POST', status: 202 }]);
   });
 
-  test('an edit of a goal that has gone says so and refetches', async ({ page, hub }) => {
+  test('a refetch keeps the composer, its text, and its focus', async ({ page, hub }) => {
+    await page.clock.install();
+    await openGoals(page, hub);
+    await page.getByRole('button', { name: 'Add goal' }).click();
+    const input = composer(page).getByLabel('What do you want to work toward?');
+    await input.pressSequentially('Swim a mile');
+    await writeFile(path.join(hub.vaultDir, 'notes', 'goals', 'swim.md'), '# Swim a mile\n');
+    const before = hub.requests('/api/goals').length;
+
+    await page.clock.runFor(60_000);
+    await expect.poll(() => hub.requests('/api/goals').length).toBe(before + 1);
+    await expect(item(page, 'goal:swim').locator('h3')).toHaveText('Swim a mile');
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue('Swim a mile');
+    await input.press('End');
+    await input.pressSequentially('.');
+    await expect(input).toHaveValue('Swim a mile.');
+  });
+
+  test('the view stops reading the vault once it is left', async ({ page, hub }) => {
+    await page.clock.install();
+    await openGoals(page, hub);
+    await page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link', { name: 'Home', exact: true }).click();
+    await expectView(page, 'agents', 'Agents');
+    const before = hub.requests('/api/goals').length;
+    await page.clock.runFor(120_000);
+    expect(hub.requests('/api/goals').length).toBe(before);
+  });
+
+  test('says the dashboard did not respond when /api/goals hangs', async ({ page, hub }) => {
+    await page.clock.install();
+    let stalled = null;
+    const asked = new Promise((resolve) => {
+      page.route('**/api/goals', (route) => {
+        stalled = route;
+        resolve();
+      });
+    });
+    await page.goto(`${hub.origin}/goals`);
+    await expectView(page, 'goals', 'Goals');
+    await asked;
+    await page.clock.runFor(8_000);
+    await expect(page.locator('#goals-message')).toHaveText(NO_ANSWER);
+    await expect(cards(page)).toHaveCount(0);
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await stalled.abort().catch(() => {});
+  });
+
+  test('an edit of a goal that has gone becomes a new goal with the same text', async ({ page, hub }) => {
     await openGoals(page, hub);
     await item(page, 'goal:zine').getByRole('button', { name: 'Edit Zine' }).click();
     await composer(page).getByLabel('What should change?').fill('Add a third issue.');
     await rm(path.join(hub.vaultDir, 'notes', 'goals', 'zine.md'));
     await composer(page).getByRole('button', { name: 'Send' }).click();
 
-    await expect(composer(page).locator('.composer-reason')).toHaveText('That goal has changed. Try again.');
+    const form = page.locator('#goals-cards > form.goal-composer:first-child');
+    await expect(form.locator('.composer-reason')).toHaveText('That goal has changed. Send this as a new goal, or cancel.');
     await expect(item(page, 'goal:zine')).toHaveCount(0);
-    await expect(composer(page).getByLabel('What should change?')).toHaveValue('Add a third issue.');
+    await expect(form.locator('blockquote')).toHaveCount(0);
+    await expect(form.getByLabel('What do you want to work toward?')).toHaveValue('Add a third issue.');
+    await expectView(page, 'goals', 'Goals');
+
+    const posted = page.waitForRequest('**/api/goals/propose');
+    await form.getByRole('button', { name: 'Send' }).click();
+    expect((await posted).postDataJSON()).toEqual({ kind: 'add', text: 'Add a third issue.' });
+    await expect(page).toHaveURL(`${hub.origin}/?agent=second-brain`);
+  });
+});
+
+test.describe('with the second-brain persona not started', () => {
+  test.use({ hubOptions: { vault: VAULT, personas: { 'second-brain': { startFails: true } } } });
+
+  test('Send says the persona is not running', async ({ page, hub }) => {
+    await openGoals(page, hub);
+    await page.getByRole('button', { name: 'Add goal' }).click();
+    await composer(page).getByLabel('What do you want to work toward?').fill('Learn to weld.');
+    await composer(page).getByRole('button', { name: 'Send' }).click();
+    await expect(composer(page).locator('.composer-reason')).toHaveText('Second brain is not running.');
     await expectView(page, 'goals', 'Goals');
   });
 });
@@ -131,8 +209,6 @@ test.describe('with the second-brain persona busy', () => {
   test('the view reads the vault again when the persona goes idle', async ({ page, hub }) => {
     await openGoals(page, hub);
     await writeFile(path.join(hub.vaultDir, 'notes', 'goals', 'weld.md'), '# Learn to weld\n');
-    await page.waitForTimeout(300);
-    await expect(item(page, 'goal:weld')).toHaveCount(0);
     await hub.personas.reply('second-brain', 'Wrote notes/goals/weld.md.');
     await expect(item(page, 'goal:weld').locator('h3')).toHaveText('Learn to weld');
   });
@@ -141,24 +217,15 @@ test.describe('with the second-brain persona busy', () => {
 test.describe('with an empty vault', () => {
   test.use({ hubOptions: { vault: true } });
 
-  test('lists what is missing, one sentence per line, and no cards', async ({ page, hub }) => {
+  test('says the vault is empty, then what is missing, one sentence per line', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/goals`);
     await expectView(page, 'goals', 'Goals');
     const message = page.locator('#goals-message');
     await expect(message).toBeVisible();
-    await expect(message.locator('br')).toHaveCount(3);
-    await expect(message).toContainText('notes/current-priorities.md is missing.');
-    await expect(cards(page)).toHaveCount(0);
-  });
-
-  test('says the vault is empty, with what is missing listed under it', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/goals`);
-    await expectView(page, 'goals', 'Goals');
-    const message = page.locator('#goals-message');
-    await expect(message).toBeVisible();
-    const text = await message.textContent();
-    expect(text.startsWith('Nothing in the vault yet.')).toBe(true);
-    expect(text).toContain('notes/current-priorities.md is missing.');
+    const lines = await message.evaluate((node) => Array.from(node.childNodes)
+      .filter((child) => child.nodeType === Node.TEXT_NODE).map((child) => child.textContent));
+    expect(lines[0]).toBe('Nothing in the vault yet.');
+    expect(lines.slice(1)).toContain('notes/current-priorities.md is missing.');
     await expect(cards(page)).toHaveCount(0);
   });
 });

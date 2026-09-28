@@ -210,6 +210,11 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   cursor: default;
 }
 
+.button-small {
+  padding: 0 12px;
+  font-size: 13px;
+}
+
 .routines-message {
   margin: 0 0 16px;
 }
@@ -426,9 +431,12 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 
 .goal-title {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .goal-item-head .button-small { margin-left: auto; }
@@ -459,7 +467,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 .goal-top > .goal-item { padding: 4px 0; }
 .goal-top > .goal-item + .goal-item { border-top: 0; }
-.goal-top .goal-title { flex: 1; min-width: 0; font-weight: 400; }
+.goal-top .goal-title { font-weight: 400; }
 
 .goal-horizons { margin: 10px 0 12px; }
 .goal-horizons dt { float: left; margin-right: 6px; font-weight: 600; }
@@ -478,11 +486,6 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .goal-composer .composer-input {
   display: block;
   width: 100%;
-}
-
-.button-small {
-  padding: 0 12px;
-  font-size: 13px;
 }
 
 .composer.goal-composer {

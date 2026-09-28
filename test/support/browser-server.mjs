@@ -68,11 +68,19 @@ export { focusSourceAvailable };
 //              a temporary vault, or true for an empty one; either adds the
 //              persona SECOND_BRAIN, whose cwd is that vault, to `agents`, so
 //              Goals reads it and propose sends to it. `vaultDir` is its path.
+//              It cannot be combined with a second-brain entry in `agents`
+//              or with a `registry` that carries its own agents.
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, routines: routinesSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
   vault = null,
 } = {}) {
+  if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
+    throw new Error('startHub: the vault option adds second-brain; remove it from agents.');
+  }
+  if (vault && registryState && 'agents' in registryState) {
+    throw new Error('startHub: the vault option cannot be combined with a registry that carries its own agents.');
+  }
   const cleanups = [];
   const context = { after: (fn) => cleanups.push(fn) };
   const stop = async () => {
