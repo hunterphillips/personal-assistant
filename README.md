@@ -43,6 +43,19 @@ with the wrong method is 405, and anything else is 404. Errors are JSON bodies o
 `{"error": "<code>"}`. The comment at the top of each route module describes
 what `lib/app.mjs` expects from it.
 
+### Modules
+
+- `lib/app.mjs` routes requests, checks Host and Origin, logs, and serves the shell, assets, health, status, state, and routines refresh.
+- `lib/agent-routes.mjs` serves the persona routes under `/api/agents/`.
+- `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
+- `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
+- `lib/focus-proxy.mjs` forwards the Focus routes.
+- `lib/brief-adapter.mjs` serves the brief routes over `lib/briefs.mjs` and `lib/feedback.mjs`.
+- `lib/hub.mjs` keeps the state snapshot and its subscribers.
+- `lib/registry.mjs` and `lib/routines.mjs` read the agent registry and its launchd jobs; `lib/launchd.mjs` renders the plist for `bin/dashboard-install`.
+- `lib/threads.mjs` and `lib/runtime/` hold the persona thread files and the runtime adapter.
+- `lib/config.mjs` and `lib/assets.mjs` hold configuration and the asset allowlist.
+
 ### Dashboard status
 
 `GET /api/dashboard/status` always answers 200 with
