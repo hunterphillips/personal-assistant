@@ -40,6 +40,8 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/sessions/<id>/answer` | Answers a Codex thread's open question or approval (below). |
 | `POST /api/sessions/<id>/interrupt` | Stops the Codex thread's running turn. |
 | `GET /api/sessions/<id>/thread` | The Codex thread's recent messages, read from the app-server. |
+| `POST /api/sessions/<id>/open-terminal` | Brings the session's recorded cmux terminal to the front. |
+| `POST /api/sessions/refresh` | Re-reads the cmux inventory and the Codex catalogue now and answers `{"ok": true, "revision": N}`. |
 
 `/focus/`, `/brief/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
 paths without the slash. A known path
@@ -102,6 +104,7 @@ snapshot; concurrent requests share one check. It stays for one release.
                  "cwd": "/Users/hunter/workspace/y", "projectId": null, "state": "busy", "updatedAt": "<ISO>",
                  "binding": { "workspaceId": "...", "surfaceId": "...", "live": true } }],
   "codex": { "available": true },
+  "cmux": { "available": true },
   "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] } }
 ```
 
@@ -111,14 +114,16 @@ which the Agents view shortens to `~` in the paths it shows. `focus` and
 `state` is `unknown` before the first check). Agents leave out `cwd` and
 `routines`. A persona also carries
 its runtime state (see Personas below); any other kind has `state: null`.
-`sessions` lists the Codex threads the
-dashboard follows but does not own (see Codex sessions below); it is empty
-while no app-server is known. `codex` says whether the shared app-server
+`sessions` lists the coding sessions the dashboard follows but does not
+own: the Codex threads on the shared app-server and the Claude terminals
+cmux has registered, each row's shape under Sessions in the snapshot
+below. `codex` says whether the shared app-server
 is connected and, when not, why: `{ "available": false, "reason": ... }`
 with `no_server` (no `owner.json`, or its pid is gone), `disconnected`
 (a server is known but the socket is down; the rows are kept as
 `unavailable` meanwhile), `ws_unavailable` (the `ws` package is not
-installed), `no_adapter`, or `api_key_in_env`. `routines.items` is empty
+installed), `no_adapter`, or `api_key_in_env`. `cmux` says the same for
+the cmux inventory (its reasons are listed with the rows). `routines.items` is empty
 until the first refresh; a failed refresh keeps the previous items and sets
 `error` to `refresh_failed`. `GET /api/state` refreshes Focus and the brief
 the same way the status route does (one shared check, bounded by
@@ -604,6 +609,12 @@ directory.
 | `TIMEOUTS.drainMs` | 30 seconds | Wait for running turns at shutdown |
 | `TIMEOUTS.abortGraceMs` | 2 seconds | Wait for aborted turns to end after the drain |
 | `TIMEOUTS.turnMaxMs` | 30 minutes | A persona turn, time waiting on an answer included, is interrupted after this |
+| `LIMITS.codexThreads` | 20 | Codex threads listed and followed; past that the oldest idle unbound thread is dropped |
+| `LIMITS.codexFrameBytes` | 1 MiB | One frame from the Codex app-server; a larger one is dropped |
+| `TIMEOUTS.codexPollMs` | 3 seconds | How often the Codex adapter checks `owner.json` and the daemon checks `bindings.json` |
+| `TIMEOUTS.codexReconnectMs` | 1 second | First wait before reconnecting to the Codex app-server |
+| `TIMEOUTS.codexReconnectMaxMs` | 30 seconds | The reconnect wait doubles up to this |
+| `TIMEOUTS.sessionsPollMs` | 10 seconds | The cmux inventory and Codex catalogue refresh while any event stream is open |
 | `TIMEOUTS.cmuxRequestMs` | 5 seconds | The cmux auth handshake, and separately each socket request |
 | `TIMEOUTS.cmuxSessionsMs` | 5 seconds | One `cmux sessions list --json` |
 | `TIMEOUTS.cmuxStaleMs` | 5 minutes | How long a cached cmux inventory is served stale after a transient failure |
@@ -742,6 +753,17 @@ are passed per launch by `bin/codex-serve`.
   outcome is printed after the TUI exits. Outside cmux the ids are
   recorded as null and the helper says so; "Open terminal" is then
   unavailable for that thread. The file keeps the 200 newest records.
+  One launcher waits per folder at a time: the server announces every
+  new thread to every client, so a second launcher in the same folder
+  could adopt the first one's thread. While waiting, the helper holds
+  `var/codex/waiting/<sha256 of the real cwd>.json` with its pid, and
+  another launcher that finds it held by a live pid refuses before
+  starting anything ("Another codex-new is waiting in this folder");
+  a marker whose pid is gone is taken over. The marker is removed once
+  the thread is recorded or the TUI exits. A thread `bindings.json`
+  already binds to other surface ids is left alone, and the helper says
+  so. Writers to `bindings.json` take turns through `bindings.lock`
+  beside it.
 
 Both read `DASHBOARD_CODEX_DIR` (default `var/codex`, created with mode
 0700) so they agree with the daemon.
@@ -830,9 +852,11 @@ the last cmux inventory; null when nothing was recorded.
 A Claude terminal, one cmux agent record whose `agent` is `claude`, carries
 `id` (`claude:<cmux session id>`), `provider` `claude`, `kind` `terminal`,
 `cwd` and `updatedAt` as cmux reports them, `state` (`busy` for cmux's
-`running`, which is also an empty prompt, `idle` for `idle`, else
-`unknown`), and a `binding` that is always present, its `live` false once
-the terminal has closed. Terminal rows have no adapter: the dashboard
+`running`, which is also an empty prompt, `idle` for `idle`, `waiting`
+for `needsInput`, else `unknown`), and a `binding` that is always
+present, its `live` false once the terminal has closed. A session id the
+listing carries twice is one row, from the record with the newest
+`updatedAt`. Terminal rows have no adapter: the dashboard
 cannot answer, interrupt, or read them, only open their terminal. Codex
 agent records in the cmux listing are ignored; the Codex adapter is the
 source for those threads.
@@ -846,13 +870,18 @@ last good answer after a transient failure), or `{ "available": false,
 
 The list, `codex`, and `cmux` are rebuilt on every adapter event, every
 bindings change, and every `refreshSessions()`, which refreshes the cmux
-inventory and the Codex catalogue in parallel (single-flight). A new
+inventory and asks the Codex adapter for one poll now, in parallel
+(single-flight). A new
 revision is committed only when something differs. The inventory is
 refreshed when the first event stream opens, every 10 seconds while any
 stream is open, and on `POST /api/sessions/refresh`; without an open
 stream the last inventory stands, so `binding.live` may be out of date
-until a stream opens again. A refresh that throws is logged as
-`sessions_refresh_error`.
+until a stream opens again. The Codex adapter does not wait for that: it
+polls `owner.json` and its catalogue every 3 seconds on its own, so the
+interval only brings a poll forward. A refresh that throws is logged as
+`sessions_refresh_error`. Once the hub is closed, `refreshSessions()`
+does nothing, so shutdown never reopens the cmux connection, and the
+route answers 503 `shutting_down`.
 
 ### Session routes
 
@@ -868,7 +897,7 @@ Each route names the session by its id, `codex:<threadId>` or
 | `POST interrupt` | 200 `{"ok": true}` | 409 `not_supported` (a terminal row) |
 | `GET thread` | 200 `{"messages": [...]}` | 503 `unavailable` (no connection), 409 `not_supported` (a terminal row) |
 | `POST open-terminal` | 200 `{"ok": true, "verified"}` | 409 `unbound`, 503 `cmux_unavailable` (with `reason`), 409 `terminal_closed`, 502 `focus_failed` (with `reason`) |
-| `POST /api/sessions/refresh` | 200 `{"ok": true, "revision"}` | |
+| `POST /api/sessions/refresh` | 200 `{"ok": true, "revision"}` | 503 `shutting_down` |
 
 `answers` maps a question's id (or its text) to a string or a list of
 strings; `decision` is `allow` or `deny`. `thread` reads the user and
