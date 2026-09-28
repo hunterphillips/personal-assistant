@@ -31,6 +31,10 @@ async function testEnv(t) {
     DASHBOARD_REGISTRY_PATH: path.join(await tempDir(t), 'agents.json'),
     DASHBOARD_LAUNCH_AGENTS_DIR: await tempDir(t),
     DASHBOARD_THREADS_DIR: path.join(await tempDir(t), 'threads'),
+    DASHBOARD_CODEX_DIR: path.join(await tempDir(t), 'codex'),
+    DASHBOARD_CMUX_SOCKET_PATH_FILE: path.join(await tempDir(t), 'no-cmux-socket'),
+    DASHBOARD_CMUX_PASSWORD_FILE: path.join(await tempDir(t), 'no-cmux-password'),
+    DASHBOARD_CMUX_CLI: path.join(await tempDir(t), 'no-cmux'),
   };
 }
 

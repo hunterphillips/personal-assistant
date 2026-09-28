@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { fakeRoutines, request, startApp, startSyntheticFocus } from './support/harness.mjs';
+import { fakeCmux, fakeRoutines, request, startApp, startSyntheticFocus } from './support/harness.mjs';
 import { openEvents } from './support/sse.mjs';
 
 const REVISION = 'b'.repeat(64);
@@ -172,6 +172,30 @@ test('the shared status poll runs only while a stream is open', async (t) => {
   const closed = app.counts.health;
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.ok(app.counts.health <= closed + 1, 'polling stopped with the last stream');
+});
+
+test('the sessions poll refreshes cmux once when the first stream opens, then on its interval, and stops with the last stream', async (t) => {
+  const cmux = fakeCmux({ available: false, reason: 'not_running', stale: false, workspaces: [], surfaces: [], agents: [] });
+  const app = await startStreamingApp(t, { cmux, configure: withTimeouts({ sessionsPollMs: 15 }) });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(cmux.refreshes, 0);
+  assert.deepEqual(app.hub.snapshot().cmux, { available: false, reason: 'not_refreshed' });
+
+  const first = await open(t, app);
+  const second = await open(t, app);
+  await Promise.all([first.next(), second.next()]);
+  await waitFor(() => cmux.refreshes >= 4);
+  assert.deepEqual(app.hub.snapshot().cmux, { available: false, reason: 'not_running' });
+
+  await first.close();
+  const oneLeft = cmux.refreshes;
+  await waitFor(() => cmux.refreshes >= oneLeft + 2);
+
+  await second.close();
+  await waitFor(() => app.hub.clientCount() === 0);
+  const closed = cmux.refreshes;
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.ok(cmux.refreshes <= closed + 1, 'polling stopped with the last stream');
 });
 
 test('GET /api/state checks Focus and the brief, then returns the hub snapshot', async (t) => {

@@ -1,7 +1,7 @@
 // Entry point: load configuration, load the agent registry and the Codex
 // terminal bindings, compose the routines view, thread store, runtime
 // adapters (Claude for personas, Codex for the shared app-server's threads),
-// state hub, and app, start the personas, listen on 127.0.0.1, and shut down
+// the cmux client, state hub, and app, start the personas, listen on 127.0.0.1, and shut down
 // within a bounded window on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
 // runs main(). A missing or invalid registry does not stop startup; the hub
 // reports it.
@@ -14,7 +14,8 @@
 // Shutdown order: end event streams and refuse new sends (closeStreams),
 // close each adapter (Claude drains running turns for up to drainMs, then
 // aborts the rest and waits abortGraceMs for them; Codex closes its socket),
-// close the hub, stop the registry and bindings polls, then close the server
+// close the cmux client's socket, close the hub, stop the registry and
+// bindings polls, then close the server
 // (shutdownMs grace). main() forces exit
 // forcedExitMs(timeouts) after the signal: one second past that sum.
 
@@ -30,6 +31,7 @@ import { createHub } from './lib/hub.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { createRoutines } from './lib/routines.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
+import { createCmux } from './lib/runtime/cmux.mjs';
 import { createCodexAdapter } from './lib/runtime/codex.mjs';
 import { createThreadStore } from './lib/threads.mjs';
 
@@ -76,6 +78,16 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   } else {
     adapters = createAdapters({ config, store, log: logEntry, bindings });
   }
+  // The cmux client is not a model runtime, so the cost guard leaves it be.
+  // It reads nothing until the first refresh.
+  const cmux = createCmux({
+    socketPathFile: config.cmuxSocketPathFile,
+    passwordFile: config.cmuxPasswordFile,
+    cli: config.cmuxCli,
+    log: logEntry,
+    timeouts: config.timeouts,
+    limits: config.limits,
+  });
   const hub = createHub({
     registry,
     routines,
@@ -86,10 +98,11 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     adapters,
     store,
     bindings,
+    cmux,
     adaptersDisabled: apiKeyInEnv ? 'api_key_in_env' : null,
     log: logEntry,
   });
-  const app = createApp({ config, focus, brief, hub, store, log: logEntry });
+  const app = createApp({ config, focus, brief, hub, store, cmux, log: logEntry });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;
   server.requestTimeout = config.timeouts.requestMs;
@@ -98,6 +111,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   const shutdownState = async () => {
     app.closeStreams();
     await Promise.all(Object.values(adapters).map((adapter) => adapter.close()));
+    cmux.close();
     hub.close();
     registry.stop();
     bindings.stop();
