@@ -1,0 +1,42 @@
+{
+  "surfaces": [
+    {
+      "focused": true,
+      "id": "00223EE0-DBBE-4EB8-9D20-9330C73C8389",
+      "index": 0,
+      "index_in_pane": 0,
+      "initial_command": null,
+      "pane_id": "DAB1AFE6-E7DA-4AD0-A750-A17E69E869FB",
+      "pane_ref": "pane:2",
+      "ref": "surface:2",
+      "render_health": "rendering",
+      "requested_working_directory": "/private/tmp/claude-501/-Users-hunterphillips-workspace-personal-assistant/10880368-b60b-48fa-afad-b580e0f37456/scratchpad/cmux-spike/work",
+      "resume_binding": null,
+      "selected_in_pane": true,
+      "title": "\u2026/scratchpad/cmux-spike/work",
+      "tmux_start_command": null,
+      "type": "terminal"
+    },
+    {
+      "focused": false,
+      "id": "FAC38F03-4197-411A-94CD-ADE92213534C",
+      "index": 1,
+      "index_in_pane": 1,
+      "initial_command": null,
+      "pane_id": "DAB1AFE6-E7DA-4AD0-A750-A17E69E869FB",
+      "pane_ref": "pane:2",
+      "ref": "surface:3",
+      "render_health": "not_started",
+      "requested_working_directory": "/private/tmp/claude-501/-Users-hunterphillips-workspace-personal-assistant/10880368-b60b-48fa-afad-b580e0f37456/scratchpad/cmux-spike/work",
+      "resume_binding": null,
+      "selected_in_pane": false,
+      "title": "Terminal",
+      "tmux_start_command": null,
+      "type": "terminal"
+    }
+  ],
+  "window_id": "69CA1266-5A6A-4865-A747-6577E4D2AE45",
+  "window_ref": "window:1",
+  "workspace_id": "33B8390A-D8B0-47D1-BDE5-CE1390415F37",
+  "workspace_ref": "workspace:2"
+}

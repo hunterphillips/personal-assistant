@@ -1,0 +1,134 @@
+{
+  "window_ref": "window:1",
+  "window_id": "69CA1266-5A6A-4865-A747-6577E4D2AE45",
+  "workspaces": [
+    {
+      "pinned": false,
+      "listening_ports": [],
+      "custom_title": null,
+      "has_custom_title": false,
+      "ref": "workspace:1",
+      "custom_color": null,
+      "id": "1F9F550D-BA32-4C4D-86E1-C4C6FBDB192F",
+      "title": "~",
+      "latest_submitted_message": null,
+      "description": null,
+      "current_directory": "/Users/hunterphillips",
+      "selected": false,
+      "remote": {
+        "local_proxy_port": null,
+        "cloud_vm_base": null,
+        "detail": null,
+        "destination": null,
+        "conflicted_ports": [],
+        "connected": false,
+        "detected_ports": [],
+        "state": "disconnected",
+        "transport": null,
+        "terminal_transport": null,
+        "enabled": false,
+        "terminal_profile": null,
+        "heartbeat": {
+          "age_seconds": null,
+          "last_seen_at": null,
+          "count": 0
+        },
+        "persistent_daemon_slot": null,
+        "daemon": {
+          "name": null,
+          "capabilities": [],
+          "detail": null,
+          "version": null,
+          "state": "unavailable",
+          "remote_path": null
+        },
+        "terminal_tmux_session": null,
+        "has_identity_file": false,
+        "cloud_vm_transport": null,
+        "active_terminal_sessions": 0,
+        "proxy": {
+          "state": "unavailable",
+          "url": null,
+          "port": null,
+          "host": null,
+          "error_code": null,
+          "schemes": [
+            "socks5",
+            "http_connect"
+          ]
+        },
+        "has_ssh_options": false,
+        "port": null,
+        "forwarded_ports": [],
+        "cloud_vm_id": null
+      },
+      "latest_submitted_at": null,
+      "index": 0,
+      "latest_conversation_message": null
+    },
+    {
+      "pinned": false,
+      "listening_ports": [],
+      "custom_title": null,
+      "has_custom_title": false,
+      "ref": "workspace:2",
+      "custom_color": null,
+      "id": "33B8390A-D8B0-47D1-BDE5-CE1390415F37",
+      "title": "\u2026/scratchpad/cmux-spike/work",
+      "latest_submitted_message": null,
+      "description": null,
+      "current_directory": "/private/tmp/claude-501/-Users-hunterphillips-workspace-personal-assistant/10880368-b60b-48fa-afad-b580e0f37456/scratchpad/cmux-spike/work",
+      "selected": true,
+      "remote": {
+        "local_proxy_port": null,
+        "cloud_vm_base": null,
+        "detail": null,
+        "destination": null,
+        "conflicted_ports": [],
+        "connected": false,
+        "detected_ports": [],
+        "state": "disconnected",
+        "transport": null,
+        "terminal_transport": null,
+        "enabled": false,
+        "terminal_profile": null,
+        "heartbeat": {
+          "age_seconds": null,
+          "last_seen_at": null,
+          "count": 0
+        },
+        "persistent_daemon_slot": null,
+        "daemon": {
+          "name": null,
+          "capabilities": [],
+          "detail": null,
+          "version": null,
+          "state": "unavailable",
+          "remote_path": null
+        },
+        "terminal_tmux_session": null,
+        "has_identity_file": false,
+        "cloud_vm_transport": null,
+        "active_terminal_sessions": 0,
+        "proxy": {
+          "state": "unavailable",
+          "url": null,
+          "port": null,
+          "host": null,
+          "error_code": null,
+          "schemes": [
+            "socks5",
+            "http_connect"
+          ]
+        },
+        "has_ssh_options": false,
+        "port": null,
+        "forwarded_ports": [],
+        "cloud_vm_id": null
+      },
+      "latest_submitted_at": null,
+      "index": 1,
+      "latest_conversation_message": null
+    }
+  ]
+}

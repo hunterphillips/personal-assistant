@@ -1,0 +1,25 @@
+{
+  "surfaces": [
+    {
+      "focused": true,
+      "id": "9211C31B-34F1-47BF-88D4-C3B1D414A8B3",
+      "index": 0,
+      "index_in_pane": 0,
+      "initial_command": null,
+      "pane_id": "C9E6F4FA-3675-4E1D-ADD6-E93CC8B0B233",
+      "pane_ref": "pane:1",
+      "ref": "surface:1",
+      "render_health": "rendering",
+      "requested_working_directory": "/Users/hunterphillips",
+      "resume_binding": null,
+      "selected_in_pane": true,
+      "title": "~",
+      "tmux_start_command": null,
+      "type": "terminal"
+    }
+  ],
+  "window_id": "69CA1266-5A6A-4865-A747-6577E4D2AE45",
+  "window_ref": "window:1",
+  "workspace_id": "1F9F550D-BA32-4C4D-86E1-C4C6FBDB192F",
+  "workspace_ref": "workspace:1"
+}
