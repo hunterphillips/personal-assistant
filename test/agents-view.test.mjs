@@ -136,6 +136,7 @@ test('errorSentence turns each code into a sentence and passes adapter sentences
     'The session file for work could not be read. Check the threads directory, then restart the dashboard.');
   assert.equal(view.errorSentence(session({ lastError: 'server_gone' })), 'The Codex server disconnected.');
   assert.equal(view.errorSentence(session({ lastError: 'Rate limited: retry after 30s' })), 'The last turn failed.');
+  assert.equal(view.errorSentence(session({ lastError: 'turn_failed' })), 'The last turn failed.');
   assert.equal(view.errorSentence(session({ lastError: null })), 'The last turn failed.');
 });
 

@@ -385,6 +385,31 @@ test('notifications drive state, messages, errors, usage, and membership', async
   assert.equal(ofType(events, 'sessions').every((e) => e.agentId === 'codex'), true);
 });
 
+test('a status change to systemError without a message sets lastError turn_failed until a message arrives', async (t) => {
+  const { server, adapter, events } = await setup(t, { threads: [thread('e'), thread('r', { updatedAt: 50, status: { type: 'systemError' } })] });
+  await connected(server, adapter, events, 2);
+  // A thread resumed while already in systemError says so at once.
+  assert.deepEqual(adapter.sessions().map((s) => [s.threadId, s.state, s.lastError]), [['e', 'idle', null], ['r', 'error', 'turn_failed']]);
+
+  server.notify('turn/started', { threadId: 'e', turn: { id: 'turn-1', items: [], status: 'inProgress' } });
+  server.notify('thread/status/changed', { threadId: 'e', status: { type: 'systemError' } });
+  await until(() => adapter.state('codex:e').state === 'error', 2_000, 'error state');
+  assert.deepEqual(adapter.state('codex:e'), { state: 'error', pending: null, lastError: 'turn_failed', sessionId: 'e', costUsd: null });
+  assert.equal(adapter.sessions().find((s) => s.threadId === 'e').lastError, 'turn_failed');
+
+  // The server's own message, when it comes, replaces the placeholder.
+  server.notify('turn/completed', { threadId: 'e', turn: { id: 'turn-1', items: [], status: 'failed', error: { message: 'Usage limit reached' } } });
+  await until(() => adapter.state('codex:e').lastError === 'Usage limit reached', 2_000, 'message');
+  server.notify('thread/status/changed', { threadId: 'e', status: { type: 'systemError' } });
+  await sleep(20);
+  assert.equal(adapter.state('codex:e').lastError, 'Usage limit reached', 'a repeated status change keeps the message');
+
+  // The next turn clears it.
+  server.notify('turn/started', { threadId: 'e', turn: { id: 'turn-2', items: [], status: 'inProgress' } });
+  await until(() => adapter.state('codex:e').state === 'busy', 2_000, 'busy');
+  assert.equal(adapter.state('codex:e').lastError, null);
+});
+
 test('a dropped socket keeps the rows unavailable until the reconnect lists and resumes them again', async (t) => {
   const { server, adapter, events, logs } = await setup(t, { threads: [thread('k')] });
   await connected(server, adapter, events, 1);

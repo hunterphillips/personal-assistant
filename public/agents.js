@@ -256,6 +256,7 @@
         return providerName(agent) ? 'There is no runtime for ' + providerName(agent) + ' yet.' : 'There is no runtime for this provider yet.';
       case 'turn_timeout':
         return 'The last turn ran too long and was stopped.';
+      case 'turn_failed':
       case 'error':
       case null:
       case undefined:
