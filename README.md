@@ -708,9 +708,13 @@ returns that answer again with `stale: true`, for up to
 `focus({ workspaceId, surfaceId })` lists that workspace's surfaces
 again, and unless the surface is there it answers `{ "ok": false,
 "reason": "not_found" }` without asking cmux to focus anything. Otherwise
-it focuses, reads back, and answers `{ "ok": true, "verified": true }`;
-`verified` is false when the read-back names another surface. The other
-reasons are the inventory's.
+it focuses and reads the focused surface back with `system.identify`.
+cmux answers `surface.focus` before the focus has landed, so the read-back
+is repeated up to five times, 100 ms apart (about half a second in all,
+and never past `TIMEOUTS.cmuxRequestMs`). The answer is
+`{ "ok": true, "verified": true }` as soon as one read-back names the
+surface asked for, and `verified` false when the last one still names
+another. The other reasons are the inventory's.
 
 There is no push yet. cmux advertises `events.stream`, but the spike
 recorded the CLI's view of it, not the socket request or how event frames
@@ -744,7 +748,10 @@ are passed per launch by `bin/codex-serve`.
   (the path is resolved to an absolute one first) with both
   feature flags, writes `var/codex/owner.json` (`socket`, `pid`,
   `startedAt`, `codexVersion`), and removes that file when the server
-  stops. It refuses while `owner.json` names a running process, and it
+  stops: on Ctrl-C, SIGTERM, or SIGHUP the file goes first, then the
+  signal is forwarded and the helper waits for the server to exit, which
+  can take half a minute while a TUI is attached. It refuses while
+  `owner.json` names a running process, and it
   refuses a socket path over 100 bytes, since macOS allows 104 for a Unix
   socket path; that is why the socket lives under `var/codex/` rather than a
   deeper directory. `--socket PATH` overrides the path.
@@ -783,7 +790,12 @@ Both read `DASHBOARD_CODEX_DIR` (default `var/codex`, created with mode
 `lib/runtime/codex.mjs` checks `owner.json` every 3 seconds
 (`TIMEOUTS.codexPollMs`). A missing file, or one whose `pid` is no longer
 running, means no server: the connection is dropped, `sessions` becomes
-empty, and `codex.reason` is `no_server`. A file that appears, or that
+empty, and `codex.reason` is `no_server`. So does a socket that is not
+there: two consecutive connection attempts failing with `ENOENT` or
+`ECONNREFUSED` (the server closed its socket on Ctrl-C but is still
+exiting, or its owner file outlived it) are logged once as
+`codex_server_gone` and clear the rows; the file is still polled, and
+nothing is retried until it changes. A file that appears, or that
 names a new socket or pid (a `codex-serve` restart), starts a connection
 to it: `ws` over the Unix socket with compression off, `initialize` with
 `experimentalApi` on, then `initialized`. `ws` is loaded on first use, so
@@ -930,7 +942,9 @@ when the dashboard runs without a cmux client) while the inventory
 cannot be read, and `terminal_closed` when the bound surface was not in
 the last inventory; otherwise it asks the client to focus that exact
 workspace and surface, which lists the workspace again first, and answers
-`verified` true when cmux reports that surface focused afterwards, or
+`verified` true when cmux reports that surface focused afterwards (read
+back up to five times over about half a second, since the focus lands
+after cmux's reply), or
 `focus_failed` with the client's reason (`not_found`, `not_running`,
 `no_password`, `auth_failed`, `error`). No route ever picks a terminal by
 its working directory. `POST /api/sessions/refresh` refreshes the cmux
@@ -944,7 +958,9 @@ revision it has then.
 The Codex runtime logs, each with the fields named:
 
 - `codex_server_found` (socket, pid, codexVersion), `codex_server_gone`
-  (socket, pid), `codex_owner_unreadable` (error code),
+  (socket, pid, reason: `owner` when the file went or its pid died,
+  `socket` when two connections in a row found no socket),
+  `codex_owner_unreadable` (error code),
   `codex_owner_invalid` (reason: `oversized`, `json`, `shape`);
 - `codex_ws_unavailable` (once), `codex_connect_error` (error code),
   `codex_socket_error` (error code), `codex_connected` (socket,
