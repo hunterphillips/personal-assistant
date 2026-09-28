@@ -117,6 +117,7 @@ test('cmux files default under the home directory and honor absolute and relativ
   assert.equal(config.timeouts.cmuxRequestMs, 5_000);
   assert.equal(config.timeouts.cmuxSessionsMs, 5_000);
   assert.equal(config.timeouts.cmuxStaleMs, 300_000);
+  assert.equal(config.timeouts.sessionsPollMs, 10_000);
   assert.equal(config.limits.cmuxFrameBytes, 1_048_576);
 });
 

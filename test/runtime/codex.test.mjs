@@ -448,6 +448,23 @@ test('no owner file means no server; one that appears is picked up, and a dead p
   await until(() => server.live().length === 0, 2_000, 'socket closed');
 });
 
+test('refresh() polls the owner file and the catalogue now instead of waiting for the interval', async (t) => {
+  const { server, adapter, events } = await setup(t, { threads: [thread('r1')], timeouts: { codexPollMs: 60_000 } });
+  await connected(server, adapter, events, 1);
+  const lists = () => requestsFor(server, 'thread/loaded/list').length;
+  const before = lists();
+  server.threads.set('r2', thread('r2', { updatedAt: 1_790_596_500 }));
+  server.loaded.add('r2');
+  await adapter.refresh();
+  assert.ok(lists() > before, 'refresh listed the loaded threads');
+  await connected(server, adapter, events, 2);
+  assert.deepEqual(adapter.sessions().map((s) => s.threadId), ['r2', 'r1']);
+  await server.removeOwner();
+  await adapter.refresh();
+  assert.deepEqual(adapter.status(), { available: false, reason: 'no_server' });
+  assert.deepEqual(adapter.sessions(), []);
+});
+
 test('without the ws package the adapter reports ws_unavailable once and does not retry', async (t) => {
   const { server, adapter, logs } = await setup(t, {
     threads: [thread('o')],
