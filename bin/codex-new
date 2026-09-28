@@ -1,0 +1,168 @@
+#!/usr/bin/env node
+
+// Starts one Codex thread on the shared app-server and attaches this
+// terminal's TUI to it. Run it inside a cmux terminal: it records the
+// thread with the cmux workspace and surface from the environment in
+// var/codex/bindings.json, which is how the dashboard's "Open terminal"
+// finds the right terminal, then runs
+// `codex --remote unix://<socket> -C <cwd> resume <threadId>` and exits with
+// its status.
+//
+//   bin/codex-new [--cwd DIR] [--help]
+//
+// Refuses when no server is running (owner.json missing or stale). Without
+// CMUX_WORKSPACE_ID and CMUX_SURFACE_ID the thread is still started and
+// recorded with null ids, and "Open terminal" stays unavailable for it.
+
+import { spawn } from 'node:child_process';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+
+import WebSocket from 'ws';
+
+import { appendBinding } from '../lib/bindings.mjs';
+import { codexDirFrom } from '../lib/config.mjs';
+
+const RPC_TIMEOUT_MS = 15_000;
+const USAGE = `usage: codex-new [--cwd DIR]
+
+Starts a Codex thread on the shared app-server (bin/codex-serve), records
+this cmux terminal for it, and opens the Codex TUI on that thread.
+
+  --cwd DIR   the thread's working directory (default: the current directory)
+  --help      show this text`;
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    console.log(USAGE);
+    return;
+  }
+  const cwd = path.resolve(options.cwd ?? process.cwd());
+  const stats = await fsp.stat(cwd).catch(() => null);
+  if (!stats?.isDirectory()) throw new Error(`--cwd must be an existing directory: ${cwd}`);
+
+  const dir = codexDirFrom(process.env);
+  const owner = await readOwner(path.join(dir, 'owner.json'));
+  if (!owner) throw new Error('no Codex app-server is running. Start bin/codex-serve in a terminal you keep open, then run this again.');
+
+  const threadId = await startThread(owner.socket, cwd);
+  const workspaceId = process.env.CMUX_WORKSPACE_ID || null;
+  const surfaceId = process.env.CMUX_SURFACE_ID || null;
+  await appendBinding(path.join(dir, 'bindings.json'), { threadId, cwd, workspaceId, surfaceId, createdAt: new Date().toISOString() });
+  if (workspaceId && surfaceId) {
+    console.log(`codex-new: thread ${threadId} bound to this cmux terminal (workspace ${workspaceId}, surface ${surfaceId}).`);
+  } else {
+    console.log(`codex-new: thread ${threadId} started; this terminal is not a cmux surface, so Open terminal will be unavailable for it.`);
+  }
+
+  const child = spawn('codex', ['--remote', `unix://${owner.socket}`, '-C', cwd, 'resume', threadId], { stdio: 'inherit' });
+  // The TUI owns the terminal; a Ctrl-C there is its own to handle.
+  process.on('SIGINT', () => {});
+  process.on('SIGTERM', () => child.kill('SIGTERM'));
+  const [code, signal] = await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (exitCode, exitSignal) => resolve([exitCode, exitSignal]));
+  });
+  process.exitCode = signal ? 1 : code ?? 1;
+}
+
+function parseArgs(args) {
+  const options = { help: false, cwd: null };
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--help' || argument === '-h') {
+      options.help = true;
+      continue;
+    }
+    if (argument === '--cwd') {
+      const value = args[++index];
+      if (value === undefined || value.startsWith('--')) throw new Error('--cwd requires a value');
+      options.cwd = value;
+      continue;
+    }
+    throw new Error(`unknown argument: ${argument}`);
+  }
+  return options;
+}
+
+// The owner record when it names a running server, else null.
+async function readOwner(file) {
+  let raw;
+  try {
+    raw = await fsp.readFile(file, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== 'object' || !Number.isInteger(value.pid) || typeof value.socket !== 'string') return null;
+  try {
+    process.kill(value.pid, 0);
+  } catch (error) {
+    if (error?.code !== 'EPERM') return null;
+  }
+  return value;
+}
+
+// One short connection: initialize, thread/start with the cwd, done.
+async function startThread(socket, cwd) {
+  const ws = new WebSocket(`ws+unix://${socket}:/`, { perMessageDeflate: false });
+  const calls = new Map();
+  let nextId = 1;
+  const request = (method, params) => new Promise((resolve, reject) => {
+    const id = nextId;
+    nextId += 1;
+    const timer = setTimeout(() => {
+      calls.delete(id);
+      reject(new Error(`${method} timed out`));
+    }, RPC_TIMEOUT_MS);
+    calls.set(id, { resolve, reject, timer });
+    ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+  });
+  ws.on('message', (data) => {
+    let message;
+    try {
+      message = JSON.parse(data.toString('utf8'));
+    } catch {
+      return;
+    }
+    const call = message?.id !== undefined && !message.method ? calls.get(message.id) : null;
+    if (!call) return;
+    calls.delete(message.id);
+    clearTimeout(call.timer);
+    if (message.error) call.reject(new Error(message.error?.message ?? 'request failed'));
+    else call.resolve(message.result);
+  });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`could not connect to ${socket}: no answer within ${RPC_TIMEOUT_MS / 1000} seconds`)), RPC_TIMEOUT_MS);
+    ws.once('open', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    ws.once('error', (error) => {
+      clearTimeout(timer);
+      reject(new Error(`could not connect to ${socket}: ${error?.code ?? error?.message ?? 'unknown'}`));
+    });
+  });
+  try {
+    await request('initialize', { clientInfo: { name: 'personal-assistant-codex-new', version: '0.1.0' }, capabilities: { experimentalApi: true } });
+    ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} }));
+    const result = await request('thread/start', { cwd });
+    const threadId = result?.thread?.id;
+    if (typeof threadId !== 'string' || threadId === '') throw new Error('thread/start returned no thread id');
+    return threadId;
+  } finally {
+    ws.terminate();
+  }
+}
+
+main().catch((error) => {
+  console.error(`codex-new: ${error.message}`);
+  process.exitCode = 1;
+});

@@ -1,0 +1,158 @@
+#!/usr/bin/env node
+
+// Foreground owner of the shared Codex app-server. Run it in a cmux
+// terminal you keep open: it starts `codex app-server` on a Unix socket
+// under the Codex directory, writes var/codex/owner.json so the dashboard
+// can find the server, and removes that file when the server stops. The
+// dashboard never starts the server itself.
+//
+//   bin/codex-serve [--socket PATH] [--help]
+//
+// Refuses when owner.json already names a running server, and when the
+// socket path is over 100 bytes (macOS allows 104 for a Unix socket path).
+// Both feature flags the dashboard relies on are passed per launch:
+// request_user_input as the default question mode and the permissions
+// tool.
+
+import { spawn, spawnSync } from 'node:child_process';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+
+import { codexDirFrom } from '../lib/config.mjs';
+import { atomicWrite } from '../lib/threads.mjs';
+
+const SOCKET_PATH_MAX_BYTES = 100;
+const FEATURE_FLAGS = ['features.default_mode_request_user_input=true', 'features.request_permissions_tool=true'];
+const USAGE = `usage: codex-serve [--socket PATH]
+
+Starts \`codex app-server\` on a Unix socket for the dashboard and keeps it in
+the foreground. Writes owner.json to the Codex directory (DASHBOARD_CODEX_DIR,
+default var/codex) and removes it on exit.
+
+  --socket PATH   listen on PATH instead of <codex dir>/app.sock (at most
+                  ${SOCKET_PATH_MAX_BYTES} bytes)
+  --help          show this text`;
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    console.log(USAGE);
+    return;
+  }
+  const dir = codexDirFrom(process.env);
+  const ownerFile = path.join(dir, 'owner.json');
+  const socket = path.resolve(options.socket ?? path.join(dir, 'app.sock'));
+  if (Buffer.byteLength(socket, 'utf8') > SOCKET_PATH_MAX_BYTES) {
+    throw new Error(
+      `the socket path is ${Buffer.byteLength(socket, 'utf8')} bytes; a Unix socket path must stay under 104 bytes, ` +
+      `so this helper allows ${SOCKET_PATH_MAX_BYTES}. Pass --socket with a shorter path: ${socket}`,
+    );
+  }
+
+  await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
+  await fsp.chmod(dir, 0o700);
+
+  const existing = await readOwner(ownerFile);
+  if (existing && processAlive(existing.pid)) {
+    throw new Error(`a Codex app-server is already running (pid ${existing.pid}, socket ${existing.socket}). Stop it first.`);
+  }
+  if (existing) await fsp.rm(ownerFile, { force: true });
+  await fsp.rm(socket, { force: true });
+
+  const codexVersion = readCodexVersion();
+  const args = ['app-server', '--listen', `unix://${socket}`, ...FEATURE_FLAGS.flatMap((flag) => ['-c', flag])];
+  const child = spawn('codex', args, { stdio: 'inherit' });
+  const spawned = new Promise((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', reject);
+  });
+  await spawned;
+
+  const owner = { socket, pid: child.pid, startedAt: new Date().toISOString(), codexVersion };
+  await atomicWrite(dir, 'owner.json', `${JSON.stringify(owner, null, 2)}\n`);
+  console.log(`codex-serve: app-server starting on unix://${socket}; the dashboard will pick it up.`);
+
+  const stop = (signal) => {
+    if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+  };
+  process.on('SIGINT', () => stop('SIGTERM'));
+  process.on('SIGTERM', () => stop('SIGTERM'));
+  process.on('SIGHUP', () => stop('SIGTERM'));
+
+  const [code, signal] = await new Promise((resolve) => child.once('exit', (exitCode, exitSignal) => resolve([exitCode, exitSignal])));
+  await removeOwner(ownerFile, child.pid);
+  await fsp.rm(socket, { force: true });
+  if (signal) {
+    console.error(`codex-serve: app-server stopped by ${signal}`);
+    process.exitCode = 1;
+  } else if (code !== 0) {
+    console.error(`codex-serve: app-server exited with status ${code}`);
+    process.exitCode = code ?? 1;
+  }
+}
+
+function parseArgs(args) {
+  const options = { help: false, socket: null };
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--help' || argument === '-h') {
+      options.help = true;
+      continue;
+    }
+    if (argument === '--socket') {
+      const value = args[++index];
+      if (value === undefined || value.startsWith('--')) throw new Error('--socket requires a value');
+      options.socket = value;
+      continue;
+    }
+    throw new Error(`unknown argument: ${argument}`);
+  }
+  return options;
+}
+
+async function readOwner(file) {
+  let raw;
+  try {
+    raw = await fsp.readFile(file, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+  try {
+    const value = JSON.parse(raw);
+    if (value && typeof value === 'object' && Number.isInteger(value.pid) && typeof value.socket === 'string') return value;
+  } catch {
+    // A file that does not parse is stale.
+  }
+  return null;
+}
+
+// Removes owner.json only while it still names this server's pid.
+async function removeOwner(file, pid) {
+  const current = await readOwner(file).catch(() => null);
+  if (current && current.pid !== pid) return;
+  await fsp.rm(file, { force: true });
+}
+
+function readCodexVersion() {
+  const result = spawnSync('codex', ['--version'], { encoding: 'utf8' });
+  if (result.error) throw new Error(`could not run codex: ${result.error.message}. Is the Codex CLI on PATH?`);
+  if (result.status !== 0) throw new Error(`codex --version exited with status ${result.status}`);
+  const version = result.stdout.trim();
+  if (!version) throw new Error('codex --version printed nothing');
+  return version;
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+main().catch((error) => {
+  console.error(`codex-serve: ${error.message}`);
+  process.exitCode = 1;
+});
