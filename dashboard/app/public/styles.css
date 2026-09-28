@@ -1,0 +1,1051 @@
+:root {
+  --bg: #f7f8f5;
+  --paper: #fff;
+  --side: #eef0e9;
+  --ink: #25352d;
+  --muted: #66736a;
+  --line: #dfe5dc;
+  --green: #426e52;
+  --green-dark: #2f5a40;
+  --amber: #8b6022;
+  --amber-bg: #f8efdc;
+  --green-bg: #e6efe8;
+  --red: #8a3b32;
+  --red-bg: #f6e3df;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --serif: Georgia, "Times New Roman", serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  color: var(--ink);
+  background: var(--bg);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+a, button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+
+a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.skip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  padding: 8px 12px;
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  transform: translateY(-200%);
+}
+.skip:focus { transform: none; }
+
+.shell {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 28px 10px;
+  background: var(--side);
+  border-right: 1px solid var(--line);
+}
+
+.nav a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 7px;
+  color: #5d6a61;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nav-icon { flex: none; }
+.nav-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+}
+.nav a:hover { background: #ffffff85; }
+.nav a[aria-current="page"] {
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px #25352d14;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.content:focus { outline: none; }
+
+.view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.frame-slot {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.frame {
+  display: block;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--paper);
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 20px;
+  background: var(--amber-bg);
+  color: var(--amber);
+  border-bottom: 1px solid var(--line);
+}
+
+.notice button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--green);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.notice button:hover { background: var(--green-dark); }
+
+/* Routines: the overview beside the agents list, and one agent's rows
+   under its thread header. */
+
+.routines {
+  flex: 1;
+  min-height: 0;
+  padding: 40px 34px;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.routines > * {
+  width: 100%;
+  max-width: 720px;
+}
+
+.routines-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.routines-heading {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.routines-updated {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.routines-updated:empty { display: none; }
+
+.button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.button:hover { border-color: #c9d3c5; }
+.button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.button-small {
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.routines-message {
+  margin: 0 0 16px;
+}
+
+/* What is off: the Codex server, cmux. Nothing while both answer. */
+.availability {
+  margin-bottom: 16px;
+  color: var(--amber);
+}
+.availability p { margin: 0; }
+
+.routines-code {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.routines-cards {
+  display: grid;
+  gap: 12px;
+}
+
+.thread-routines {
+  max-height: 50%;
+  padding: 4px 24px 12px;
+  overflow: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+/* With no Focus controls above them, the rows start right under the header. */
+.thread-routines-list > .routine-list:first-child { margin-top: 0; }
+.thread-routines-list > .routine-list:first-child > .routine-row:first-child { border-top: 0; }
+
+.routine-card {
+  min-width: 0;
+  padding: 14px 20px 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+
+.card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-height: 44px;
+}
+
+.card-name {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.role-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.card-action { margin-left: auto; }
+
+.card-note {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.card-error {
+  margin: 4px 0 0;
+  color: var(--red);
+  font-size: 13px;
+}
+
+.routine-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.routine-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name badge"
+    "when when";
+  align-items: center;
+  gap: 2px 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.routine-name {
+  grid-area: name;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.routine-when {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  grid-area: when;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.routine-schedule,
+.routine-run {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.routine-run {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  color: var(--ink);
+}
+
+.routine-failures { color: var(--muted); }
+
+.badge {
+  grid-area: badge;
+  justify-self: end;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-good { background: var(--green-bg); color: var(--green-dark); }
+.badge-wait { background: var(--amber-bg); color: var(--amber); }
+.badge-bad { background: var(--red-bg); color: var(--red); }
+
+.button-primary {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+.button-primary:hover { border-color: var(--green-dark); background: var(--green-dark); }
+.button-primary:disabled {
+  border-color: var(--line);
+  background: var(--side);
+  color: var(--muted);
+}
+
+.link-button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--green);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Agents */
+
+.agents {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agents-list {
+  min-height: 0;
+  padding: 40px 24px 24px;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+}
+
+.agents-heading, .goals-heading {
+  margin: 0 0 12px;
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.agents-message { margin: 0 0 12px; }
+
+/* Goals: the vault's priorities and goal notes, one card per section. */
+
+#view-goals {
+  min-height: 0;
+  padding: 40px 34px;
+  overflow: auto;
+}
+
+#view-goals > * {
+  width: 100%;
+  max-width: 720px;
+}
+
+#view-goals .goals-heading { margin: 0; }
+
+.goal-item { padding: 10px 0 12px; }
+.goal-item + .goal-item { border-top: 1px solid var(--line); }
+
+.goal-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.goal-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.goal-item-head .button-small { margin-left: auto; }
+
+.goal-item-head .role-chip { overflow-wrap: anywhere; }
+
+.goal-line,
+.goal-principle {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.goal-principle { font-family: var(--serif); font-size: 17px; }
+
+.goal-prose h4 { margin: 12px 0 0; font-size: 14px; }
+
+.goal-prose p,
+.goal-prose ul {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.goal-prose ul { padding-left: 20px; }
+
+.goal-top {
+  margin: 8px 0 0;
+  padding-left: 22px;
+}
+.goal-top > .goal-item { padding: 4px 0; }
+.goal-top > .goal-item + .goal-item { border-top: 0; }
+.goal-top .goal-title { font-weight: 400; }
+
+.goal-horizons { margin: 10px 0 12px; }
+.goal-horizons dt { float: left; margin-right: 6px; font-weight: 600; }
+.goal-horizons dt::after { content: ":"; }
+.goal-horizons dd { margin: 0 0 4px; overflow-wrap: anywhere; }
+
+.goal-quote {
+  margin: 0 0 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.goal-quote p { margin: 0 0 4px; }
+
+.goal-composer .composer-input {
+  display: block;
+  width: 100%;
+}
+
+.composer.goal-composer {
+  margin: 10px 0 12px;
+  padding: 0;
+  border-top: 0;
+}
+
+.goal-composer-actions { margin-top: 8px; }
+
+.agent-group { margin-bottom: 20px; }
+
+.agent-group-heading {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agent-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 44px;
+  padding: 10px 12px;
+  margin: 0 -12px;
+  border-radius: 10px;
+  color: var(--ink);
+  text-decoration: none;
+}
+a.agent-row:hover { background: #ffffff85; }
+a.agent-row[aria-current="true"] {
+  background: var(--paper);
+  box-shadow: 0 1px 3px #25352d14;
+}
+.agent-row-plain { color: var(--ink); }
+
+/* A coding session under its project row. */
+.agent-row-session { padding-left: 28px; }
+.agent-group-other .agent-row-session { padding-left: 12px; }
+
+.agent-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.agent-row-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.provider-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--side);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agent-row-time {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.agent-row-preview {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.agent-row-preview:empty { display: none; }
+
+/* The overview sits beside the list from 720px; the row is for phones. */
+.agents-routines { display: none; }
+
+.agent-row-state {
+  font-size: 13px;
+  font-weight: 600;
+}
+.agent-row-state-wait { color: var(--amber); }
+.agent-row-state-muted { color: var(--muted); font-weight: 400; }
+.agent-row-state-bad { color: var(--red); }
+
+.agent-thread {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--paper);
+}
+
+.thread-empty {
+  margin: 0;
+  padding: 40px 34px;
+  color: var(--muted);
+}
+.thread-empty:empty { display: none; }
+
+.thread-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.thread-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.thread-back {
+  display: none;
+  align-items: center;
+  min-height: 44px;
+  color: var(--green);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.thread-title {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.thread-name {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.thread-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.thread-cost {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Why Open terminal is off, or why it was refused: a line under the buttons. */
+.thread-terminal-reason {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.thread-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 24px;
+  background: var(--amber-bg);
+  color: var(--amber);
+  border-bottom: 1px solid var(--line);
+}
+
+.thread-description {
+  margin: 0;
+  padding: 16px 24px;
+  color: var(--muted);
+}
+
+.thread-notice {
+  margin: 0;
+  padding: 10px 24px;
+  background: var(--red-bg);
+  color: var(--red);
+  border-bottom: 1px solid var(--line);
+}
+
+.thread-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 16px 24px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.thread-line {
+  margin: 0;
+  color: var(--muted);
+}
+
+.thread-message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 44em;
+}
+.thread-message-user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+.thread-message-system {
+  align-self: center;
+  align-items: center;
+}
+
+.thread-message-text {
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.thread-message-user .thread-message-text {
+  background: var(--green-bg);
+  color: var(--ink);
+}
+.thread-message-assistant .thread-message-text {
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.thread-message-system .thread-message-text {
+  padding: 2px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.thread-message-meta {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.thread-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 24px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+.thread-status .button { margin-left: auto; }
+
+.thread-request {
+  max-height: 60%;
+  padding: 12px 24px;
+  overflow: auto;
+  background: var(--amber-bg);
+  border-top: 1px solid var(--line);
+}
+
+.request-card {
+  padding: 12px 0;
+}
+.request-card + .request-card { border-top: 1px solid #00000014; }
+
+.request-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+}
+
+.request-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.request-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.request-options {
+  display: grid;
+  gap: 8px;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.option:hover { border-color: #c9d3c5; }
+.option[aria-pressed="true"] {
+  border-color: var(--green);
+  background: var(--green-bg);
+  box-shadow: inset 0 0 0 1px var(--green);
+}
+.option:disabled { color: var(--muted); cursor: default; }
+
+.option-label { font-weight: 600; }
+.option-description { color: var(--muted); font-size: 13px; }
+
+.request-other {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 8px;
+}
+.request-other-label { font-weight: 600; }
+
+.request-other-field {
+  flex: 1;
+  min-width: 160px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.request-input {
+  max-height: 240px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.request-note {
+  margin: 0 0 8px;
+  color: var(--amber);
+  font-size: 13px;
+}
+
+/* An approval's command, folder, files, or permissions. */
+.request-details {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.request-detail { margin: 0; }
+.request-detail-label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.request-detail .request-input { margin: 4px 0 0; }
+.request-detail ul {
+  margin: 0;
+  padding-left: 1.2em;
+  overflow-wrap: anywhere;
+}
+.request-detail-text { overflow-wrap: anywhere; }
+
+.request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 8px;
+}
+
+.request-missing { color: var(--red); font-size: 13px; }
+
+.composer {
+  padding: 12px 24px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+}
+
+.composer-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+  resize: vertical;
+}
+.composer-input:disabled { background: var(--bg); color: var(--muted); }
+
+.composer-reason {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Under a session's messages, where a persona has its composer. */
+.thread-foot {
+  margin: 0;
+  padding: 12px 24px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+
+.thread-failure {
+  margin: 0;
+  padding: 0 24px 12px;
+  color: var(--red);
+  font-size: 13px;
+}
+
+@media (min-width: 720px) {
+  .routine-row {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1fr) 9.5em;
+    grid-template-areas: "name schedule run badge";
+  }
+
+  .routine-when { display: contents; }
+  .routine-schedule { grid-area: schedule; }
+  .routine-run {
+    flex-direction: column;
+    grid-area: run;
+  }
+}
+
+@media (max-width: 719.98px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .nav {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 2px;
+    padding: 4px 8px;
+    padding-top: max(4px, env(safe-area-inset-top));
+    padding-right: max(8px, env(safe-area-inset-right));
+    padding-left: max(8px, env(safe-area-inset-left));
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav a {
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    min-height: 44px;
+    padding: 4px 0;
+  }
+
+  .nav-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .notice { padding: 8px 14px; }
+
+  .routines { padding: 4px 16px 20px; }
+
+  #view-goals { padding: 20px 16px; }
+
+  .agents { grid-template-columns: minmax(0, 1fr); }
+
+  .agents-routines {
+    display: flex;
+    margin-bottom: 20px;
+  }
+
+  .agents-list {
+    padding: 20px 16px;
+    border-right: 0;
+  }
+
+  .agents.agents-open .agents-list { display: none; }
+  .agents:not(.agents-open) .agent-thread { display: none; }
+
+  .thread-back {
+    display: flex;
+    flex-basis: 100%;
+  }
+
+  .thread-header { padding-top: 4px; }
+
+  /* The name and chips take a line; the buttons sit under them. */
+  .thread-title { flex-basis: 100%; }
+
+  .thread-header,
+  .thread-confirm,
+  .thread-routines,
+  .thread-notice,
+  .thread-description,
+  .thread-messages,
+  .thread-status,
+  .thread-request,
+  .composer,
+  .thread-foot,
+  .thread-failure {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .thread-empty { padding: 20px 16px; }
+}

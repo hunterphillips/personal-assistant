@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Dashboard</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <div class="shell">
+    <nav class="nav" aria-label="Dashboard">
+      <a href="/" data-view="agents" title="Home">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 10.5 12 4l8 6.5"/><path d="M6 9v11h12V9"/><path d="M10 20v-6h4v6"/></svg>
+        <span class="nav-label">Home</span>
+      </a>
+      <a href="/reading" data-view="reading" title="Reading">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 6.5C10 5 7 4.5 3 5v13c4-.5 7 0 9 1.5 2-1.5 5-2 9-1.5V5c-4-.5-7 0-9 1.5z"/><path d="M12 6.5v13"/></svg>
+        <span class="nav-label">Reading</span>
+      </a>
+      <a href="/focus" data-view="focus" title="Focus">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="1.5"/></svg>
+        <span class="nav-label">Focus</span>
+      </a>
+      <a href="/goals" data-view="goals" title="Goals">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4.5L17 13H5"/></svg>
+        <span class="nav-label">Goals</span>
+      </a>
+    </nav>
+    <main id="content" class="content" tabindex="-1">
+      <div class="notice" id="shell-notice" role="status" hidden>
+        <span>The dashboard is not responding.</span>
+        <button type="button" data-action="retry">Retry</button>
+      </div>
+
+      <section class="view agents" id="view-agents" data-view="agents" aria-label="Agents">
+        <div class="agents-list" id="agents-list">
+          <h1 class="agents-heading">Agents</h1>
+          <p class="agents-message" id="agents-message" hidden></p>
+          <a class="agent-row agents-routines" id="agents-routines" href="/routines">
+            <span class="agent-row-head"><span class="agent-row-name">Routines</span></span>
+            <span class="agent-row-preview" id="agents-routines-count"></span>
+          </a>
+          <div id="agents-groups"></div>
+        </div>
+        <div class="agent-thread" id="agent-thread">
+          <section class="routines" id="routines-overview" aria-labelledby="routines-heading">
+            <div class="availability" id="agents-availability" role="status" hidden></div>
+            <div class="routines-header">
+              <a class="thread-back" id="routines-back" href="/">All agents</a>
+              <div class="routines-title">
+                <h2 class="routines-heading" id="routines-heading">Routines</h2>
+                <p class="routines-updated" id="routines-updated"></p>
+              </div>
+              <button type="button" class="button" id="routines-refresh">Refresh</button>
+            </div>
+            <p class="routines-message" id="routines-message" hidden></p>
+            <div class="routines-cards" id="routines-cards"></div>
+          </section>
+          <p class="thread-empty" id="agent-empty" hidden></p>
+          <div class="thread-panel" id="agent-panel" hidden>
+            <div class="thread-header">
+              <a class="thread-back" id="agent-back" href="/">All agents</a>
+              <div class="thread-title">
+                <h2 class="thread-name" id="agent-name"></h2>
+                <span class="thread-chips" id="agent-chips"></span>
+                <span class="thread-cost" id="agent-cost"></span>
+              </div>
+              <button type="button" class="button" id="agent-routines-toggle" data-agent-action="toggle-routines" aria-expanded="false" aria-controls="agent-routines" hidden>Routines</button>
+              <button type="button" class="button thread-new" id="agent-new-thread" data-agent-action="new-thread">New thread</button>
+              <button type="button" class="button" id="agent-open-terminal" data-agent-action="open-terminal" hidden>Open terminal</button>
+              <p class="thread-terminal-reason" id="agent-terminal-reason" role="status" hidden></p>
+            </div>
+            <div class="thread-confirm" id="agent-confirm" role="group" aria-label="New thread" hidden>
+              <span id="agent-confirm-text">Start a new thread? The persona will not remember this one.</span>
+              <button type="button" class="button button-primary" data-agent-action="confirm-new-thread">Start new thread</button>
+              <button type="button" class="button" data-agent-action="cancel-new-thread">Cancel</button>
+            </div>
+            <div class="thread-routines" id="agent-routines" hidden></div>
+            <p class="thread-description" id="agent-description" hidden></p>
+            <p class="thread-notice" id="agent-notice" role="status" hidden></p>
+            <div class="thread-messages" id="agent-messages" aria-live="polite"></div>
+            <div class="thread-status" id="agent-status" role="status" tabindex="-1" hidden>
+              <span id="agent-status-text"></span>
+              <button type="button" class="button" data-agent-action="interrupt">Interrupt</button>
+            </div>
+            <div class="thread-request" id="agent-request" hidden></div>
+            <form class="composer" id="agent-composer" hidden>
+              <label class="composer-label" id="agent-input-label" for="agent-input"></label>
+              <div class="composer-row">
+                <textarea class="composer-input" id="agent-input" rows="2"></textarea>
+                <button type="submit" class="button button-primary" id="agent-send">Send</button>
+              </div>
+              <p class="composer-reason" id="agent-composer-reason" hidden></p>
+            </form>
+            <p class="thread-foot" id="agent-foot" hidden></p>
+            <p class="thread-failure" id="agent-failure" role="status" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-focus" data-view="focus" aria-label="Focus" hidden>
+        <div class="notice" id="focus-notice" role="status" hidden>
+          <span>Focus is not responding.</span>
+          <button type="button" data-action="retry">Retry</button>
+        </div>
+        <div class="frame-slot" id="focus-slot"></div>
+      </section>
+
+      <section class="view" id="view-reading" data-view="reading" aria-label="Reading" hidden>
+        <div class="notice" id="brief-newer" role="status" hidden>
+          <span>A newer brief is available.</span>
+          <button type="button" data-action="load-newer">Load newer brief</button>
+        </div>
+        <div class="notice" id="brief-notice" role="status" hidden>
+          <span id="brief-notice-text"></span>
+          <button type="button" data-action="retry">Retry</button>
+        </div>
+        <div class="frame-slot" id="brief-slot"></div>
+      </section>
+
+      <section class="view" id="view-goals" data-view="goals" aria-label="Goals" hidden>
+        <div class="routines-header">
+          <h1 class="goals-heading">Goals</h1>
+          <button type="button" class="button" id="goals-add">Add goal</button>
+        </div>
+        <p class="routines-message" id="goals-message" role="status" hidden></p>
+        <div class="routines-cards" id="goals-cards"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/assets/routines.js"></script>
+  <script src="/assets/agents.js"></script>
+  <script src="/assets/goals.js"></script>
+  <script src="/assets/shell.js"></script>
+</body>
+</html>

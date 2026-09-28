@@ -11,7 +11,6 @@
 thoughts/
 
 # Nested repositories with their own history.
-dashboard/app/
 dashboard/prototype/
 
 # Local tool state.

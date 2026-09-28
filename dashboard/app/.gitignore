@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Runtime state, logs, and local configuration
+var/
+*.log
+.env
+.env.*
+*.local.*
+
+# Browser test output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# OS noise
+.DS_Store

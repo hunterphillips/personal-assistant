@@ -1,0 +1,17 @@
+{
+  "caller": null,
+  "focused": {
+    "is_browser_surface": false,
+    "surface_id": "00223EE0-DBBE-4EB8-9D20-9330C73C8389",
+    "workspace_ref": "workspace:2",
+    "surface_ref": "surface:2",
+    "workspace_id": "33B8390A-D8B0-47D1-BDE5-CE1390415F37",
+    "pane_ref": "pane:2",
+    "pane_id": "DAB1AFE6-E7DA-4AD0-A750-A17E69E869FB",
+    "tab_id": "00223EE0-DBBE-4EB8-9D20-9330C73C8389",
+    "surface_type": "terminal",
+    "tab_ref": "tab:2",
+    "window_ref": "window:1",
+    "window_id": "69CA1266-5A6A-4865-A747-6577E4D2AE45"
+  }
+}
