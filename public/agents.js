@@ -312,6 +312,7 @@
     var closed = isSession(agent) && !!agent.binding && agent.binding.live === false;
     if (isTerminal(agent)) {
       if (closed) return { text: 'Terminal closed', tone: 'muted' };
+      if (agent.state === 'waiting') return { text: 'Waiting for you', tone: 'wait' };
       return agent.state === 'busy' ? { text: 'Working', tone: 'muted' } : null;
     }
     if (!hasThread(agent)) return null;
@@ -330,6 +331,7 @@
     switch (session.state) {
       case 'busy': return 'Claude is working.';
       case 'idle': return 'Claude is idle.';
+      case 'waiting': return 'Claude is waiting for you.';
       default: return 'Claude’s state is not known.';
     }
   }

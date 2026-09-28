@@ -67,10 +67,12 @@ const SF_GONE = 'E03C63C2-AD4F-4625-BDAA-9E5D3B3646F7';
 const CLAUDE_RUNNING = 'a9d25355-6056-4302-9146-5d905cb8cec5';
 const CLAUDE_IDLE = 'b1c2d3e4-0000-4000-8000-000000000002';
 const CLAUDE_GONE = 'c1c2d3e4-0000-4000-8000-000000000003';
+const CLAUDE_ASKING = 'd1c2d3e4-0000-4000-8000-000000000004';
 
 // An inventory as cmux.mjs answers it: two live surfaces, a Claude session
-// on each state cmux reports, one whose terminal closed, and a Codex agent
-// record, which the hub leaves to the Codex adapter.
+// on each state cmux reports (and one in a state the hub does not map),
+// one whose terminal closed, and a Codex agent record, which the hub
+// leaves to the Codex adapter.
 function inventory(extra = {}) {
   return Object.freeze({
     available: true,
@@ -84,7 +86,8 @@ function inventory(extra = {}) {
     agents: [
       { sessionId: CLAUDE_RUNNING, agent: 'claude', state: 'running', cwd: '/invented/claude', workspaceId: WS, surfaceId: SF_CLAUDE, startedAt: AT, updatedAt: '2026-09-28T11:30:00.000Z', live: true },
       { sessionId: CLAUDE_IDLE, agent: 'claude', state: 'idle', cwd: '/invented/claude', workspaceId: WS, surfaceId: SF_OPEN, startedAt: AT, updatedAt: '2026-09-28T13:00:00.000Z', live: true },
-      { sessionId: CLAUDE_GONE, agent: 'claude', state: 'needsInput', cwd: null, workspaceId: WS, surfaceId: SF_GONE, startedAt: AT, updatedAt: null, live: false },
+      { sessionId: CLAUDE_GONE, agent: 'claude', state: 'stopped', cwd: null, workspaceId: WS, surfaceId: SF_GONE, startedAt: AT, updatedAt: null, live: false },
+      { sessionId: CLAUDE_ASKING, agent: 'claude', state: 'needsInput', cwd: '/invented/claude', workspaceId: WS, surfaceId: SF_CLAUDE, startedAt: AT, updatedAt: '2026-09-28T10:00:00.000Z', live: true },
       { sessionId: 'codex-record', agent: 'codex', state: 'running', cwd: '/invented/work', workspaceId: WS, surfaceId: SF_OPEN, startedAt: AT, updatedAt: AT, live: true },
     ],
     ...extra,
@@ -222,7 +225,7 @@ test('sessions are the union of Codex threads and cmux Claude terminals, newest 
   assert.deepEqual(Object.keys(deltas.at(-1).patch).sort(), ['cmux', 'sessions']);
   const { sessions, cmux: cmuxState } = app.hub.snapshot();
   assert.deepEqual(cmuxState, { available: true });
-  assert.deepEqual(sessions.map((s) => s.id), [`claude:${CLAUDE_IDLE}`, 'codex:t1', `claude:${CLAUDE_RUNNING}`, 'codex:t2', `claude:${CLAUDE_GONE}`]);
+  assert.deepEqual(sessions.map((s) => s.id), [`claude:${CLAUDE_IDLE}`, 'codex:t1', `claude:${CLAUDE_RUNNING}`, 'codex:t2', `claude:${CLAUDE_ASKING}`, `claude:${CLAUDE_GONE}`]);
   assert.deepEqual(sessions[1].binding, { workspaceId: WS, surfaceId: SF_OPEN.toLowerCase(), live: true });
   assert.deepEqual(sessions[3].binding, { workspaceId: WS, surfaceId: SF_GONE, live: false });
   assert.deepEqual(sessions[0], {
@@ -230,7 +233,8 @@ test('sessions are the union of Codex threads and cmux Claude terminals, newest 
     updatedAt: '2026-09-28T13:00:00.000Z', binding: { workspaceId: WS, surfaceId: SF_OPEN, live: true },
   });
   assert.deepEqual([sessions[2].state, sessions[2].binding.live], ['busy', true]);
-  assert.deepEqual(sessions[4], {
+  assert.deepEqual([sessions[4].state, sessions[4].binding.live], ['waiting', true], 'needsInput is waiting');
+  assert.deepEqual(sessions[5], {
     id: `claude:${CLAUDE_GONE}`, provider: 'claude', kind: 'terminal', cwd: null, projectId: null, state: 'unknown', updatedAt: null,
     binding: { workspaceId: WS, surfaceId: SF_GONE, live: false },
   });
@@ -332,7 +336,7 @@ test('POST /api/sessions/refresh refreshes the inventory and the Codex catalogue
   assert.deepEqual([cmux.refreshes, codexRefreshes], [1, 1]);
   assert.ok(response.json.revision > before);
   assert.deepEqual(response.json, { ok: true, revision: app.hub.snapshot().revision });
-  assert.equal(app.hub.snapshot().sessions.filter((s) => s.kind === 'terminal').length, 3);
+  assert.equal(app.hub.snapshot().sessions.filter((s) => s.kind === 'terminal').length, 4);
   const again = await post(app, '/api/sessions/refresh');
   assert.deepEqual(again.json, { ok: true, revision: response.json.revision }, 'nothing changed, so no bump');
   const noOrigin = await request(app, 'POST', '/api/sessions/refresh');
@@ -341,6 +345,29 @@ test('POST /api/sessions/refresh refreshes the inventory and the Codex catalogue
   assert.equal(withBody.status, 413);
   const wrongMethod = await request(app, 'GET', '/api/sessions/refresh');
   assert.equal(wrongMethod.status, 405);
+});
+
+test('a session id the inventory lists twice is one row, from the record with the newest updatedAt', async (t) => {
+  const record = (state, updatedAt) => ({ sessionId: CLAUDE_IDLE, agent: 'claude', state, cwd: '/invented/claude', workspaceId: WS, surfaceId: SF_OPEN, startedAt: AT, updatedAt, live: true });
+  const cmux = fakeCmux(inventory({ agents: [record('idle', '2026-09-28T13:00:00.000Z'), record('needsInput', '2026-09-28T14:00:00.000Z'), record('running', null)] }));
+  const app = await startSessions(t, { cmux });
+  await app.hub.refreshSessions();
+  const rows = app.hub.snapshot().sessions.filter((s) => s.kind === 'terminal');
+  assert.deepEqual(rows.map((s) => [s.id, s.state, s.updatedAt]), [[`claude:${CLAUDE_IDLE}`, 'waiting', '2026-09-28T14:00:00.000Z']]);
+});
+
+test('sessions/refresh answers 503 once the app is shutting down, and a closed hub refreshes nothing', async (t) => {
+  const cmux = fakeCmux(inventory());
+  const app = await startSessions(t, { cmux });
+  await app.hub.refreshSessions();
+  assert.equal(cmux.refreshes, 1);
+  app.handler.closeStreams();
+  const response = await post(app, '/api/sessions/refresh');
+  assert.deepEqual([response.status, response.json], [503, { error: 'shutting_down' }]);
+  assert.equal(cmux.refreshes, 1, 'the refusal reached no client');
+  app.hub.close();
+  await app.hub.refreshSessions();
+  assert.equal(cmux.refreshes, 1, 'a closed hub leaves the cmux connection closed');
 });
 
 test('without a Codex adapter the snapshot says so', async (t) => {

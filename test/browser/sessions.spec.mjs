@@ -267,6 +267,11 @@ test.describe('with sessions', () => {
     await hub.state.refreshSessions();
     await expect(page.locator('#agent-messages .thread-line')).toHaveText(['This session runs in a cmux terminal.', 'Claude is idle.']);
     await expect(row(page, 'catchup').locator('.agent-row-state')).toHaveCount(0);
+    hub.cmux.set(inventory({ agents: [{ ...inventory().agents[0], state: 'needsInput' }, inventory().agents[1]] }));
+    await hub.state.refreshSessions();
+    await expect(page.locator('#agent-messages .thread-line')).toHaveText(['This session runs in a cmux terminal.', 'Claude is waiting for you.']);
+    await expect(row(page, 'catchup').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'catchup').locator('.agent-row-state')).toHaveClass(/agent-row-state-wait/);
 
     // A closed terminal says so and cannot be opened.
     await page.goto(`${hub.origin}/?agent=claude:${C_GONE}`);
