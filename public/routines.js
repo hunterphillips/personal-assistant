@@ -333,9 +333,13 @@
       count: function (agentId) {
         return itemsFor(agentId).length;
       },
+      // Renders once when the overview comes on screen; while it stays
+      // there, update() alone rebuilds it, so a repeated show() changes
+      // nothing.
       show: function () {
-        if (!visible) checkOnOpen = true;
+        if (visible) return;
         visible = true;
+        checkOnOpen = true;
         syncTick();
         if (state) renderOverview();
         maybeRefreshOnOpen();

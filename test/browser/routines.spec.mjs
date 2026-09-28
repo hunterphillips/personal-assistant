@@ -71,6 +71,18 @@ function row(page, name) {
   return page.locator('.routine-row').filter({ has: page.locator('.routine-name', { hasText: new RegExp(`^${name}$`) }) });
 }
 
+function agentRow(page, name) {
+  return page.locator('.agent-row').filter({ has: page.locator('.agent-row-name', { hasText: new RegExp(`^${name}$`) }) });
+}
+
+// The vertical gap from the bottom of `above` to the top of `below`, or null
+// while either is off the page (a rebuild replaces both mid-measure).
+async function gap(scope, above, below) {
+  const top = await scope.locator(above).boundingBox();
+  const bottom = await scope.locator(below).boundingBox();
+  return top && bottom ? bottom.y - (top.y + top.height) : null;
+}
+
 function pad(n) {
   return String(n).padStart(2, '0');
 }
@@ -192,9 +204,38 @@ test.describe('with seeded routines', () => {
     await expect(section).toBeHidden();
   });
 
+  test('a thread\'s routines close when another agent opens and stay closed on return', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(`${hub.origin}/?agent=brain`);
+    const toggle = page.locator('#agent-routines-toggle');
+    const section = page.locator('#agent-routines');
+    await expect(toggle).toHaveText('Routines (3)');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(section.locator('.routine-name')).toHaveText(['brain-drain', 'brain-audit', 'brain-refresh']);
+
+    await agentRow(page, 'CFO').click();
+    await expect(page.locator('#agent-name')).toHaveText('CFO');
+    await expect(toggle).toHaveText('Routines (1)');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(section).toBeHidden();
+    await expect(section).toBeEmpty();
+
+    await agentRow(page, 'Second brain').click();
+    await expect(page.locator('#agent-name')).toHaveText('Second brain');
+    await expect(toggle).toHaveText('Routines (3)');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(section).toBeHidden();
+    await expect(section).toBeEmpty();
+  });
+
   test('the Focus scans keep Pause and Resume under the Focus thread', async ({ page, hub }) => {
     let answer;
     const answered = new Promise((resolve) => { answer = resolve; });
+    const resumes = [];
+    page.on('request', (r) => {
+      if (new URL(r.url()).pathname === '/api/resume') resumes.push(r);
+    });
     await page.route('**/api/resume', async (route) => {
       await answered;
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
@@ -209,11 +250,13 @@ test.describe('with seeded routines', () => {
     await expect(button).toBeDisabled();
     answer();
     await expect(button).toBeEnabled();
+    expect(resumes.length).toBe(1);
 
     hub.routines.items = items({ paused: false });
     await hub.state.refreshRoutines();
     await expect(section.getByRole('button')).toHaveText(['Pause']);
     await expect(section.locator('.card-header .badge')).toHaveCount(0);
+    expect(resumes.length).toBe(1);
   });
 
   test('Refresh posts the control and reads Refreshing… until the refresh finishes', async ({ page, hub }) => {
@@ -299,9 +342,8 @@ test.describe('with seeded routines', () => {
     await page.goto(`${hub.origin}/routines`);
     await expect(page.locator('.routine-card')).toHaveCount(3);
     const stacked = row(page, 'scan-gmail');
-    const name = await stacked.locator('.routine-name').boundingBox();
-    const schedule = await stacked.locator('.routine-schedule').boundingBox();
-    expect(schedule.y).toBeGreaterThanOrEqual(name.y + name.height - 1);
+    // The schedule sits under the name.
+    await expect.poll(() => gap(stacked, '.routine-name', '.routine-schedule')).toBeGreaterThanOrEqual(-1);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
     for (const box of await page.locator('.routine-card').evaluateAll((cards) => cards.map((c) => c.getBoundingClientRect().right))) {
@@ -310,12 +352,13 @@ test.describe('with seeded routines', () => {
 
     if (!wide) return;
     await page.setViewportSize({ width: 1280, height: 800 });
-    const lefts = await page.locator('.routine-schedule').evaluateAll((cells) => cells.map((c) => Math.round(c.getBoundingClientRect().left)));
-    expect(new Set(lefts).size).toBe(1);
-    const inline = await stacked.locator('.routine-schedule').boundingBox();
-    const inlineName = await stacked.locator('.routine-name').boundingBox();
-    expect(Math.abs(inline.y - inlineName.y)).toBeLessThan(inlineName.height);
-    expect((await page.locator('.routine-card').first().boundingBox()).width).toBeLessThanOrEqual(720);
+    await expect.poll(async () => {
+      const lefts = await page.locator('.routine-schedule').evaluateAll((cells) => cells.map((c) => Math.round(c.getBoundingClientRect().left)));
+      return new Set(lefts).size;
+    }).toBe(1);
+    // The schedule sits beside the name: it starts above the name's bottom.
+    await expect.poll(() => gap(stacked, '.routine-name', '.routine-schedule')).toBeLessThan(0);
+    await expect.poll(async () => (await page.locator('.routine-card').first().boundingBox())?.width ?? null).toBeLessThanOrEqual(720);
   });
 });
 

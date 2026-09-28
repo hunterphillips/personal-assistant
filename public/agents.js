@@ -243,6 +243,7 @@
     var visible = false;
     var selectedId = null;
     var overviewOpen = false; // the phone's Routines row was chosen (`/routines`)
+    var overviewTold = false; // what `routines` was last told: the overview is on screen
     var routinesOpen = false; // the open agent's routines are expanded
     var wide = window.matchMedia('(min-width: 720px)');
     var thread = { id: null, messages: null, loading: false, error: false, fresh: true, version: 0 };
@@ -287,17 +288,25 @@
       return node;
     }
 
+    // The sentence above the list. The overview says when the registry could
+    // not be read, so the list says it only while the overview is off screen.
+    function renderMessage() {
+      if (!state) return;
+      var registry = state.registry;
+      var text = '';
+      if (registry && registry.ok === false) text = overviewShown() ? '' : 'The registry could not be read.';
+      else if ((state.agents || []).length === 0) text = 'No agents are registered.';
+      message.textContent = text;
+      message.hidden = !text;
+    }
+
     function renderList() {
       if (!state) return;
       // Keep keyboard focus on the same row across the rebuild.
       var active = document.activeElement;
       var focusedId = active && groupsNode.contains(active) && active.hasAttribute('data-agent') ? active.getAttribute('data-agent') : null;
       groupsNode.textContent = '';
-      var registry = state.registry;
-      if (registry && registry.ok === false) message.textContent = 'The registry could not be read.';
-      else if ((state.agents || []).length === 0) message.textContent = 'No agents are registered.';
-      else message.textContent = '';
-      message.hidden = !message.textContent;
+      renderMessage();
       routinesRowCount.textContent = routinesCount(state);
 
       var list = groups(state.agents);
@@ -470,14 +479,22 @@
       return visible && !selectedId && (overviewOpen || wide.matches);
     }
 
+    // Tells `routines` when the overview comes on or goes off screen, and
+    // only then: it rebuilds the overview itself on every state change.
+    function syncOverview() {
+      var shown = overviewShown();
+      if (!routines || shown === overviewTold) return;
+      overviewTold = shown;
+      if (shown) routines.show();
+      else routines.hide();
+    }
+
     function renderThread() {
       var agent = selectedAgent();
       view.classList.toggle('agents-open', !!selectedId || overviewOpen);
       overview.hidden = !!selectedId;
-      if (routines) {
-        if (overviewShown()) routines.show();
-        else routines.hide();
-      }
+      syncOverview();
+      renderMessage();
       if (!selectedId) {
         empty.hidden = true;
         panel.hidden = true;
@@ -611,15 +628,17 @@
       resetThread(id);
     }
 
+    // A history entry is added only when the URL names a different agent
+    // (or the phone's overview), so choosing the open row from `/agents`
+    // or `/?agent=` adds nothing.
     function select(id, push) {
-      var url = id ? '/?agent=' + id : '/';
-      if (push && location.pathname + location.search !== url) history.pushState(null, '', url);
+      if (push && (agentFromUrl() !== id || overviewOpen)) history.pushState(null, '', id ? '/?agent=' + id : '/');
       overviewOpen = false;
       if (id === selectedId) return;
       setSelected(id);
       render();
       syncThread();
-      if (isPersona(selectedAgent()) && window.matchMedia('(min-width: 720px)').matches) input.focus();
+      if (isPersona(selectedAgent()) && wide.matches) input.focus();
     }
 
     // Resolves with { ok, status, code }, or null when the request itself
@@ -774,7 +793,8 @@
       }
     });
 
-    // Crossing 720px moves the overview on or off screen.
+    // Crossing 720px moves the overview on or off screen with no agent open;
+    // with one open, nothing here changes and nothing is rebuilt.
     wide.addEventListener('change', function () {
       if (visible) renderThread();
     });
@@ -801,10 +821,8 @@
         visible = false;
         if (tick !== null) clearInterval(tick);
         tick = null;
-        if (routines) {
-          routines.hide();
-          routines.unmount();
-        }
+        syncOverview();
+        if (routines) routines.unmount();
       },
     };
   }
