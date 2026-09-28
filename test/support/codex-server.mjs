@@ -5,10 +5,12 @@
 // records every client request, reply, and notification, and can push
 // notifications and server requests to its connections. `threads` entries
 // follow the wire shape ({ id, cwd, name, preview, updatedAt, status }) plus
-// three test-only fields: `turns` (what thread/turns/list returns),
+// four test-only fields: `turns` (what thread/turns/list returns),
 // `waiting` ({ id, method, params }), a request replayed after each
-// thread/resume, and `unpersisted`, which makes thread/resume fail the way
-// the real server does for a thread with no rollout yet. `loaded` is the
+// thread/resume, `unpersisted`, which makes thread/resume fail the way
+// the real server does for a thread with no rollout yet, and `silent`,
+// which makes thread/resume send no reply at all, as a hung server would
+// (a handler returns NO_REPLY for the same effect). `loaded` is the
 // set of ids thread/loaded/list returns (default: every thread; tests
 // mutate `server.loaded`), paged `pageSize` at a time regardless of the
 // requested limit.
@@ -21,6 +23,8 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 
 export const FAKE_VERSION = 'codex-cli 0.0.0-fake';
+// A handler's answer that sends nothing back.
+export const NO_REPLY = Symbol('no reply');
 
 export async function startCodexServer(t, { threads = [], handlers = {}, loaded = null, pageSize = null } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cx-'));
@@ -64,6 +68,7 @@ export async function startCodexServer(t, { threads = [], handlers = {}, loaded 
       const thread = fake.threads.get(params?.threadId);
       if (!thread) throw new Error(`no rollout found for thread id ${params?.threadId}`);
       if (thread.unpersisted) throw new Error(`no rollout found for thread id ${thread.id}`);
+      if (thread.silent) return NO_REPLY;
       fake.loaded.add(thread.id);
       if (thread.waiting) {
         setImmediate(() => conn.ask(thread.waiting.method, thread.waiting.id, { threadId: thread.id, ...thread.waiting.params }));
@@ -127,11 +132,13 @@ export async function startCodexServer(t, { threads = [], handlers = {}, loaded 
         let reply;
         try {
           if (!handler) throw new Error(`unknown method ${message.method}`);
-          reply = { jsonrpc: '2.0', id: message.id, result: handler(message.params, conn) ?? {} };
+          const result = handler(message.params, conn);
+          if (result === NO_REPLY) return;
+          reply = { jsonrpc: '2.0', id: message.id, result: result ?? {} };
         } catch (error) {
           reply = { jsonrpc: '2.0', id: message.id, error: { code: -32000, message: error.message } };
         }
-        if (reply !== null) ws.send(JSON.stringify(reply));
+        ws.send(JSON.stringify(reply));
       } else if (message.id !== undefined) {
         fake.replies.push(message);
         conn.replies.push(message);
@@ -179,7 +186,7 @@ export async function startCodexServer(t, { threads = [], handlers = {}, loaded 
 }
 
 function publicThread(thread) {
-  const { turns, waiting, unpersisted, ...wire } = thread;
+  const { turns, waiting, unpersisted, silent, ...wire } = thread;
   return wire;
 }
 

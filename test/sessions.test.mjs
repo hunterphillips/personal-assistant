@@ -51,12 +51,12 @@ function fakeCodexAdapter(sessions = []) {
   return adapter;
 }
 
-async function startSessions(t, { sessions, bindings = fakeBindings(), agents = [], cmux = null } = {}) {
+async function startSessions(t, { sessions, bindings = fakeBindings(), agents = [], cmux = null, configure } = {}) {
   const adapter = fakeCodexAdapter(sessions ?? [
     session('t1', { state: 'waiting', pending: { requestId: '0', kind: 'question', toolName: 'requestUserInput', input: QUESTION_INPUT, at: AT, native: false }, lastMessage: { role: 'assistant', text: 'x'.repeat(300), at: AT } }),
     session('t2', { updatedAt: '2026-09-28T11:00:00.000Z' }),
   ]);
-  const app = await startApp(t, { ...status, registry: fakeRegistry(agents), adapters: { codex: adapter }, bindings, cmux });
+  const app = await startApp(t, { ...status, registry: fakeRegistry(agents), adapters: { codex: adapter }, bindings, cmux, configure });
   return { ...app, adapter, bindings, cmux };
 }
 
@@ -347,6 +347,22 @@ test('POST /api/sessions/refresh refreshes the inventory and the Codex catalogue
   assert.equal(wrongMethod.status, 405);
 });
 
+test('sessions/refresh does not wait for a Codex poll past statusMs; the poll lands later as an event', async (t) => {
+  const cmux = fakeCmux(inventory());
+  const app = await startSessions(t, { cmux, configure: (c) => ({ ...c, timeouts: { ...c.timeouts, statusMs: 50 } }) });
+  let release;
+  app.adapter.refresh = () => new Promise((resolve) => { release = resolve; });
+  const started = Date.now();
+  const response = await post(app, '/api/sessions/refresh');
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.json, { ok: true, revision: app.hub.snapshot().revision });
+  assert.ok(Date.now() - started < 1_000, 'answered while the poll was still out');
+  assert.equal(cmux.refreshes, 1);
+  assert.equal(app.hub.snapshot().sessions.filter((s) => s.kind === 'terminal').length, 4);
+  assert.ok(!app.logs.some((entry) => entry.event === 'sessions_refresh_error'));
+  release();
+});
+
 test('a session id the inventory lists twice is one row, from the record with the newest updatedAt', async (t) => {
   const record = (state, updatedAt) => ({ sessionId: CLAUDE_IDLE, agent: 'claude', state, cwd: '/invented/claude', workspaceId: WS, surfaceId: SF_OPEN, startedAt: AT, updatedAt, live: true });
   const cmux = fakeCmux(inventory({ agents: [record('idle', '2026-09-28T13:00:00.000Z'), record('needsInput', '2026-09-28T14:00:00.000Z'), record('running', null)] }));
@@ -420,6 +436,11 @@ test('interrupt and thread go through the adapter; send and new-thread do not ex
   app.adapter.behavior.thread = 'unavailable';
   const down = await request(app, 'GET', '/api/sessions/codex:t2/thread');
   assert.deepEqual([down.status, down.json], [503, { error: 'unavailable' }]);
+  // Listed in the snapshot, but the adapter dropped it since.
+  app.adapter.behavior.thread = 'invalid_agent';
+  const dropped = await request(app, 'GET', '/api/sessions/codex:t2/thread');
+  assert.deepEqual([dropped.status, dropped.json], [404, { error: 'no_such_session' }]);
+  app.adapter.behavior.thread = null;
   for (const path of ['/api/sessions/codex:t2/send', '/api/sessions/codex:t2/new-thread', '/api/sessions/t2/thread', '/api/sessions/codex:t2/thread/x', '/api/sessions/codex:../thread']) {
     const response = await request(app, 'GET', path);
     assert.equal(response.status, 404, path);

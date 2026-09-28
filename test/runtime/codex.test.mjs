@@ -177,7 +177,7 @@ test('the catalogue is loaded or bound threads only, re-read on every poll', asy
   assert.deepEqual(logs.filter((entry) => entry.event === 'codex_catalogue').map((entry) => [entry.added, entry.dropped]), [[2, 0], [1, 0], [0, 1], [0, 1]]);
 });
 
-test('a loaded thread with no rollout keeps its row and is resumed once it has one; a bound-only one without a rollout, or any other failure, is dropped for good', async (t) => {
+test('a loaded thread with no rollout keeps its row and is resumed once it has one; a bound-only one without a rollout is dropped until the next connection', async (t) => {
   const { server, adapter, events, logs } = await setup(t, {
     threads: [thread('ok', { updatedAt: 300 }), thread('fresh', { updatedAt: 200, unpersisted: true })],
     bound: () => ['ghost'],
@@ -188,7 +188,7 @@ test('a loaded thread with no rollout keeps its row and is resumed once it has o
     { event: 'codex_resume_error', threadId: 'fresh', error: 'not_persisted', retry: true },
     { event: 'codex_resume_error', threadId: 'ghost', error: 'not_persisted', retry: false },
   ]);
-  assert.deepEqual(adapter.sessions().map((s) => [s.threadId, s.title, s.state]), [['ok', 'Prompt for ok', 'idle'], ['fresh', 'Untitled thread', 'idle']]);
+  assert.deepEqual(adapter.sessions().map((s) => [s.threadId, s.title, s.state]), [['ok', 'Prompt for ok', 'idle'], ['fresh', null, 'idle']]);
 
   // Retried with a growing wait, logged once.
   await until(() => requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'fresh').length >= 3, 2_000, 'retries');
@@ -196,13 +196,41 @@ test('a loaded thread with no rollout keeps its row and is resumed once it has o
   await until(() => adapter.sessions().some((s) => s.threadId === 'fresh' && s.title === 'Prompt for fresh'), 2_000, 'resumed');
   assert.equal(logs.filter((entry) => entry.event === 'codex_resume_error' && entry.threadId === 'fresh').length, 1);
 
-  // The failed one is not tried again, not even after a reconnect.
-  await server.disconnectAll();
-  await until(() => server.connections.length === 2, 2_000, 'reconnect');
-  await until(() => requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'ok').length === 2, 2_000, 'second resume');
+  // The failed one is not tried again on this connection.
   await sleep(60);
   assert.equal(requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'ghost').length, 1);
   assert.equal(logs.filter((entry) => entry.event === 'codex_resume_error' && entry.threadId === 'ghost').length, 1);
+
+  // The next connection starts over: tried once more, logged once more.
+  await server.disconnectAll();
+  await until(() => server.connections.length === 2, 2_000, 'reconnect');
+  await until(() => requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'ghost').length === 2, 2_000, 'second attempt');
+  await until(() => logs.filter((entry) => entry.event === 'codex_resume_error' && entry.threadId === 'ghost').length === 2, 2_000, 'logged again');
+  await sleep(60);
+  assert.equal(requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'ghost').length, 2);
+  assert.ok(!adapter.sessions().some((s) => s.threadId === 'ghost'));
+});
+
+test('a bound thread whose resume timed out is skipped for that connection and followed on the next', async (t) => {
+  const { server, adapter, events, logs } = await setup(t, {
+    threads: [thread('ok', { updatedAt: 300 }), thread('slow', { updatedAt: 200, silent: true })],
+    loaded: ['ok'],
+    bound: () => ['slow'],
+    timeouts: { codexRpcMs: 60 },
+  });
+  await connected(server, adapter, events, 1);
+  await until(() => logs.some((entry) => entry.event === 'codex_resume_error' && entry.threadId === 'slow'), 2_000, 'timeout');
+  assert.deepEqual(logs.filter((entry) => entry.event === 'codex_resume_error'), [{ event: 'codex_resume_error', threadId: 'slow', error: 'timeout', retry: false }]);
+  assert.deepEqual(adapter.sessions().map((s) => s.threadId), ['ok']);
+  await sleep(100);
+  assert.equal(requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'slow').length, 1, 'not tried again on this connection');
+
+  server.threads.get('slow').silent = false;
+  await server.disconnectAll();
+  await until(() => server.connections.length === 2, 2_000, 'reconnect');
+  await until(() => adapter.sessions().some((s) => s.threadId === 'slow' && s.state === 'idle' && s.title === 'Prompt for slow'), 2_000, 'followed');
+  assert.equal(requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'slow').length, 2);
+  assert.deepEqual(adapter.sessions().map((s) => s.threadId), ['ok', 'slow']);
 });
 
 test('a question is answered with the exact Codex reply shape, keyed by question id or text', async (t) => {

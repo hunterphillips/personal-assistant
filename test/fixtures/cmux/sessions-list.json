@@ -107,6 +107,16 @@
       "workspace_id": "33B8390A-D8B0-47D1-BDE5-CE1390415F37",
       "pid": 4242
     },
+    {
+      "agent": "claude",
+      "agent_display_name": "Claude",
+      "agent_lifecycle": "idle",
+      "session_id": "../not/an/id",
+      "cwd": "/Users/hunter/workspace/eval",
+      "workspace_id": "33B8390A-D8B0-47D1-BDE5-CE1390415F37",
+      "surface_id": "6F2D1C0B-9A8E-4F7D-8C6B-5A4E3D2C1B0A",
+      "pid": 4243
+    },
     "junk"
   ],
   "state_dir": "/Users/hunter/.cmuxterm",

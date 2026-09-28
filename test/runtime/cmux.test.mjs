@@ -298,10 +298,10 @@ test('inventory lists workspaces, surfaces, and agents with a live flag, over on
     [{ workspace_id: WS1 }, { workspace_id: WS2 }]);
   assert.equal(spawnCalls.length, 1);
   assert.equal(server.connections, 1);
-  // The malformed record and the non-object were skipped, each logged once.
-  assert.deepEqual(events(logs, 'cmux_record_skipped').map((entry) => entry.reason).sort(), ['no_surface_id', 'not_an_object']);
+  // The malformed records and the non-object were skipped, each logged once.
+  assert.deepEqual(events(logs, 'cmux_record_skipped').map((entry) => entry.reason).sort(), ['invalid_session_id', 'no_surface_id', 'not_an_object']);
   await inventory();
-  assert.equal(events(logs, 'cmux_record_skipped').length, 2);
+  assert.equal(events(logs, 'cmux_record_skipped').length, 3);
   assert.equal(server.connections, 1, 'the second call reused the connection');
 });
 

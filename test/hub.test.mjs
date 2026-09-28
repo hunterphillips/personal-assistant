@@ -495,6 +495,20 @@ test('without a cmux client the snapshot says so and refreshSessions still polls
   assert.deepEqual(deltas, []);
 });
 
+test('refreshSessions waits for the Codex poll no longer than statusMs', async () => {
+  const codex = {
+    kind: 'codex', sessions: () => [], status: () => ({ available: true }), subscribe: () => () => {},
+    start: () => Promise.reject(new RuntimeError('not_supported')), state: () => ({}), close: async () => {},
+    refresh: () => new Promise(() => {}),
+  };
+  const { hub, logs } = makeHub({ adapters: { codex } });
+  const started = Date.now();
+  await hub.refreshSessions();
+  const took = Date.now() - started;
+  assert.ok(took >= 150 && took < 1_000, `took ${took}ms against a 200ms budget`);
+  assert.ok(!logs.some((entry) => entry.event === 'sessions_refresh_error'));
+});
+
 test('refreshSessions is single-flight, commits only what differs, and logs a refresh that throws', async () => {
   const gate = deferred();
   let inventory = null;
