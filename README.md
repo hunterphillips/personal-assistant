@@ -53,7 +53,7 @@ what `lib/app.mjs` expects from it.
 - `lib/brief-adapter.mjs` serves the brief routes over `lib/briefs.mjs` and `lib/feedback.mjs`.
 - `lib/hub.mjs` keeps the state snapshot and its subscribers.
 - `lib/registry.mjs` and `lib/routines.mjs` read the agent registry and its launchd jobs; `lib/launchd.mjs` renders the plist for `bin/dashboard-install`.
-- `lib/threads.mjs` and `lib/runtime/` hold the persona thread files and the runtime adapter.
+- `lib/threads.mjs` and `lib/runtime/` hold the persona thread files, the Claude runtime adapter, and the cmux client.
 - `lib/config.mjs` and `lib/assets.mjs` hold configuration and the asset allowlist.
 
 ### Dashboard status
@@ -506,6 +506,87 @@ directory.
 | `TIMEOUTS.drainMs` | 30 seconds | Wait for running turns at shutdown |
 | `TIMEOUTS.abortGraceMs` | 2 seconds | Wait for aborted turns to end after the drain |
 | `TIMEOUTS.turnMaxMs` | 30 minutes | A persona turn, time waiting on an answer included, is interrupted after this |
+| `TIMEOUTS.cmuxRequestMs` | 5 seconds | One cmux socket request, the auth handshake included |
+| `TIMEOUTS.cmuxSessionsMs` | 5 seconds | One `cmux sessions list --json` |
+| `LIMITS.cmuxFrameBytes` | 1 MiB | One line from the cmux socket; a longer one drops the connection |
+
+## Runtimes
+
+`lib/runtime/` holds one module per program the daemon talks to. The
+Claude persona adapter is described under Personas above.
+
+### cmux
+
+`lib/runtime/cmux.mjs` lists the terminals open in cmux and the agent
+sessions cmux has registered, and focuses one exact terminal. It is a
+library with tests; the hub does not call it yet.
+
+cmux only admits processes it started itself unless its socket mode is
+changed, so the daemon needs one setting made once: in
+`~/.config/cmux/cmux.json`, `automation.socketControlMode` set to
+`password`, with the password set in cmux's Settings. cmux keeps that
+password in `~/Library/Application Support/cmux/socket-control-password`.
+The steps are in [docs/operations.md](docs/operations.md). The 2026-09-28
+spike ran this mode from environment variables only; the first live run
+should confirm the stored file's path.
+
+Every call starts by reading two files. cmux writes its socket path to
+`~/.local/state/cmux/last-socket-path` (`DASHBOARD_CMUX_SOCKET_PATH_FILE`)
+on launch and deletes it on quit, so a missing file means cmux is not
+running. The password comes from `DASHBOARD_CMUX_PASSWORD_FILE`. The
+password is sent as the first line of a new connection and then dropped;
+it never appears in a log entry, an error, or an answer.
+
+The module speaks to cmux two ways:
+
+- Over its Unix socket, one connection shared by every call: `auth
+  <password>`, then newline-delimited JSON-RPC. `workspace.list` and
+  `surface.list` (once per workspace) build the inventory;
+  `surface.focus`, always with both the workspace and the surface id,
+  focuses; `system.identify` reads the focused surface back.
+- `cmux sessions list --json`, run as a subprocess with `CMUX_QUIET=1`,
+  lists the agent sessions. It reads cmux's hook store and needs no
+  socket. A session appears there only when its agent was started from
+  a cmux terminal (cmux's wrapper on `PATH` registers it); one started
+  from another terminal is invisible to the dashboard.
+
+`inventory()` answers
+
+```json
+{ "available": true, "stale": false, "refreshedAt": "<ISO>",
+  "workspaces": [{ "id": "<uuid>", "name": "~", "cwd": "/Users/hunter" }],
+  "surfaces": [{ "id": "<uuid>", "workspaceId": "<uuid>", "panelId": "<uuid>", "title": "Terminal", "cwd": "/Users/hunter" }],
+  "agents": [{ "sessionId": "<uuid>", "agent": "claude", "state": "running", "cwd": "/Users/hunter/repo",
+               "workspaceId": "<uuid>", "surfaceId": "<uuid>", "startedAt": "<ISO>", "updatedAt": "<ISO>", "live": true }] }
+```
+
+`state` is cmux's `agent_lifecycle`: `running` (working, or sitting at
+an empty prompt), `idle`, or `needsInput`. `live` is true only when the
+agent's surface is in the listing under the agent's workspace; a false
+one is a terminal that has closed, and the view should say so instead of
+offering to open it. When cmux cannot be reached the lists are empty and
+`available` is false with a `reason`: `not_running`, `no_password`,
+`auth_failed` (a refused password, or the default socket mode; logged
+once, not per call), or `error`. A timeout, a dropped connection, an
+oversize frame, or a listing that fails to parse after at least one good
+answer returns that answer again with `stale: true`.
+
+`focus({ workspaceId, surfaceId })` lists that workspace's surfaces
+again, and unless the surface is there it answers `{ "ok": false,
+"reason": "not_found" }` without asking cmux to focus anything. Otherwise
+it focuses, reads back, and answers `{ "ok": true, "verified": true }`;
+`verified` is false when the read-back names another surface. The other
+reasons are the inventory's.
+
+There is no push yet. cmux advertises `events.stream`, but the spike
+recorded the CLI's view of it, not the socket request or how event frames
+share a connection with replies, so the hub polls `refresh()` every 10
+seconds while the Agents view is open.
+
+The module never starts cmux, never creates, closes, or moves a surface,
+never sends text or keys, never focuses a surface it did not just see in
+the workspace it was given, and never binds a terminal to a session by
+guessing from a working directory.
 
 ## Commands
 
@@ -549,6 +630,8 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
 | `DASHBOARD_THREADS_DIR` | `var/threads` | Persona session pointers and message caches. Resolved from this directory; created on the first write. |
+| `DASHBOARD_CMUX_SOCKET_PATH_FILE` | `~/.local/state/cmux/last-socket-path` | File cmux writes its socket path to while it runs. Missing means cmux is not running. |
+| `DASHBOARD_CMUX_PASSWORD_FILE` | `~/Library/Application Support/cmux/socket-control-password` | The cmux socket password. Read on each call, never logged. |
 
 The server always binds `127.0.0.1`. PUT and POST requests must send an
 `Origin` that matches the request's Host, and JSON unless they are one of the
@@ -563,9 +646,12 @@ never completed is logged with status 0. They also carry the persona events:
 `persona_init`, `persona_usage`, `persona_turn_error` (with bounded error
 text and, for a failure before init, the CLI's last 2 KiB of stderr),
 `persona_api_key_refused`, `persona_start_error`, `persona_interrupt`,
-`persona_turn_aborted`, `persona_turn_timeout`, and `thread_resume_failed`.
-They never contain request bodies, brief text, persona messages, or tool
-inputs.
+`persona_turn_aborted`, `persona_turn_timeout`, and `thread_resume_failed`,
+and the cmux events `cmux_auth_failed`, `cmux_inventory_error`,
+`cmux_frame_too_large`, `cmux_record_skipped`, and `cmux_focus` (workspace
+and surface ids with the outcome).
+They never contain request bodies, brief text, persona messages, tool
+inputs, or the cmux password.
 
 Real briefs, contributions, and feedback contain personal data. They stay in
 `daily-brief/` and never enter this repository.

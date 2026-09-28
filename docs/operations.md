@@ -102,6 +102,18 @@ A persona turn is interrupted 30 minutes after it starts (`TIMEOUTS.turnMaxMs`),
 
 The Routines and Agents views and the persona runtime read the agent registry from `personal-assistant/registry/agents.json`, outside this repository. It is unversioned local configuration and holds absolute paths, so it is not committed anywhere. Set `DASHBOARD_REGISTRY_PATH` to use another file (default `../../registry/agents.json`, resolved from the app directory) and `DASHBOARD_LAUNCH_AGENTS_DIR` to read plists from another directory (default `~/Library/LaunchAgents`). The daemon checks the file every few seconds; if an edit leaves it unreadable or invalid, the daemon keeps the last good registry and reports the error in the state, and the Routines view shows it. Back up `registry/` with the rest of `personal-assistant/`.
 
+## cmux
+
+The dashboard reads cmux's terminals and agent sessions over cmux's own socket. cmux's default socket mode admits only processes cmux started, so the daemon cannot connect until this is done once:
+
+1. In `~/.config/cmux/cmux.json`, set `automation.socketControlMode` to `password`.
+2. In cmux's Settings, set the socket password. cmux stores it at `~/Library/Application Support/cmux/socket-control-password`; make sure only this account can read it (`chmod 600`).
+3. Restart cmux. From a terminal that is not inside cmux, `CMUX_SOCKET_PASSWORD=<the password> cmux ping` should print `PONG`.
+
+The daemon never starts cmux. While cmux is not running, or before the steps above, the module reports why (`not_running`, `no_password`, or `auth_failed`) and lists nothing; a refused password is logged once as `cmux_auth_failed` and tried again on the next call, so fixing the file or the setting needs no dashboard restart. Set `DASHBOARD_CMUX_SOCKET_PATH_FILE` and `DASHBOARD_CMUX_PASSWORD_FILE` if cmux keeps either file elsewhere.
+
+Only agents started from a cmux terminal appear: cmux registers `claude` through a wrapper it puts on `PATH`, and the daemon reads that register with `cmux sessions list --json`. A Claude session started from another terminal has no row.
+
 ## Node path after upgrades
 
 The plist records the absolute Node executable selected during installation. After upgrading or removing that Node installation, reinstall with Node 24 or newer so the plist points at the current executable. Normally the installer uses the Node process running it; an explicit executable can be selected with `--node /absolute/path/to/node`.
