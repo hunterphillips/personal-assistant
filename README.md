@@ -36,6 +36,9 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/agents/<id>/interrupt` | Stops the persona's turn. |
 | `POST /api/agents/<id>/new-thread` | Starts the persona on a new session. |
 | `GET /api/agents/<id>/thread` | The persona's cached messages. |
+| `POST /api/sessions/<id>/answer` | Answers a Codex thread's open question or approval (below). |
+| `POST /api/sessions/<id>/interrupt` | Stops the Codex thread's running turn. |
+| `GET /api/sessions/<id>/thread` | The Codex thread's recent messages, read from the app-server. |
 
 `/focus/`, `/brief/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
 paths without the slash. A known path
@@ -46,14 +49,15 @@ what `lib/app.mjs` expects from it.
 ### Modules
 
 - `lib/app.mjs` routes requests, checks Host and Origin, logs, and serves the shell, assets, health, status, state, and routines refresh.
-- `lib/agent-routes.mjs` serves the persona routes under `/api/agents/`.
+- `lib/agent-routes.mjs` serves the persona routes under `/api/agents/` and the session routes under `/api/sessions/`.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
 - `lib/focus-proxy.mjs` forwards the Focus routes.
 - `lib/brief-adapter.mjs` serves the brief routes over `lib/briefs.mjs` and `lib/feedback.mjs`.
 - `lib/hub.mjs` keeps the state snapshot and its subscribers.
 - `lib/registry.mjs` and `lib/routines.mjs` read the agent registry and its launchd jobs; `lib/launchd.mjs` renders the plist for `bin/dashboard-install`.
-- `lib/threads.mjs` and `lib/runtime/` hold the persona thread files and the runtime adapter.
+- `lib/threads.mjs` and `lib/runtime/` hold the persona thread files and the two runtime adapters: `claude.mjs` runs personas, `codex.mjs` follows the shared Codex app-server's threads.
+- `lib/bindings.mjs` reads the terminal bindings `bin/codex-new` records.
 - `lib/config.mjs` and `lib/assets.mjs` hold configuration and the asset allowlist.
 
 ### Dashboard status
@@ -88,6 +92,11 @@ snapshot; concurrent requests share one check. It stays for one release.
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona", "provider": "claude",
                "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
                "lastError": null, "costUsd": 0.42 }],
+  "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
+                 "cwd": "/Users/hunter/workspace/x", "title": "Fix the flaky test", "state": "waiting",
+                 "pending": { "requestId": "2", "kind": "question", "toolName": "requestUserInput", "input": { "...": "..." }, "truncated": false },
+                 "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" }, "lastError": null, "updatedAt": "<ISO>",
+                 "binding": { "workspaceId": "...", "surfaceId": "..." } }],
   "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] } }
 ```
 
@@ -95,7 +104,9 @@ snapshot; concurrent requests share one check. It stays for one release.
 status route reports (`available` is null and `state` is `unknown` before the
 first check). Agents leave out `cwd` and `routines`. A persona also carries
 its runtime state (see Personas below); any other kind has `state: null`.
-`routines.items` is empty
+`sessions` lists the Codex threads the
+dashboard follows but does not own (see Codex sessions below); it is empty
+while no app-server is reachable. `routines.items` is empty
 until the first refresh; a failed refresh keeps the previous items and sets
 `error` to `refresh_failed`. `GET /api/state` refreshes Focus and the brief
 the same way the status route does (one shared check, bounded by
@@ -333,8 +344,9 @@ thread is open.
 
 A persona is a long-lived Claude session whose working directory is the
 agent's repo. `lib/runtime/claude.mjs` runs persona turns through
-`@anthropic-ai/claude-agent-sdk`, the app's one runtime dependency, pinned to
-an exact version and loaded once when the personas start. Bumping the pin
+`@anthropic-ai/claude-agent-sdk`, pinned to an exact version and loaded once
+when the personas start; the app's only other runtime dependency is `ws`,
+pinned the same way and used only by the Codex runtime. Bumping the pin
 means re-running `scripts/spike-claude-sdk.mjs` and confirming the
 `apiKeySource` it reports is still `none`. The adapter contract, its methods
 and events, is in `lib/runtime/adapter.mjs`. The routes below are wired to
@@ -355,10 +367,11 @@ events. Each persona in `agents` carries:
 - `lastMessage`: null, or `{ role, text, at }` with the first 200
   characters. At startup it comes from the thread cache.
 - `lastError`: null, or why the last turn failed or why the persona is
-  unavailable: `provider_unavailable` (no runtime for its provider, such as
-  `codex` today), `api_key_in_env`, `sdk_unavailable` (the SDK package could
-  not be loaded; run `npm ci`), or `start_failed` (its session pointer could
-  not be read).
+  unavailable: `provider_unavailable` (its provider runs no personas; a
+  `codex` persona stays unavailable, since Codex threads are followed as
+  sessions instead), `api_key_in_env`, `sdk_unavailable` (the SDK package
+  could not be loaded; run `npm ci`), or `start_failed` (its session pointer
+  could not be read).
 - `costUsd`: null, or the session's running total.
 
 A persona whose turn runs longer than 30 minutes (`TIMEOUTS.turnMaxMs`) is
@@ -507,6 +520,117 @@ directory.
 | `TIMEOUTS.abortGraceMs` | 2 seconds | Wait for aborted turns to end after the drain |
 | `TIMEOUTS.turnMaxMs` | 30 minutes | A persona turn, time waiting on an answer included, is interrupted after this |
 
+## Codex sessions
+
+Codex threads are not personas. Hunter drives them from their own terminals;
+the dashboard follows them on a shared `codex app-server`, shows their state,
+and answers their questions and approvals. Nothing here starts a Codex turn.
+The protocol was verified on Codex 0.155.1
+(`thoughts/shared/research/2026-09-28-codex-app-server-spike.md` in the
+umbrella directory); the two feature flags it needs,
+`features.default_mode_request_user_input` and
+`features.request_permissions_tool`, are still marked under development and
+are passed per launch by `bin/codex-serve`.
+
+### Helpers
+
+- `bin/codex-serve` owns the server. Run it in a terminal you keep open: it
+  starts `codex app-server --listen unix://var/codex/app.sock` with both
+  feature flags, writes `var/codex/owner.json` (`socket`, `pid`,
+  `startedAt`, `codexVersion`), and removes that file when the server
+  stops. It refuses while `owner.json` names a running process, and it
+  refuses a socket path over 100 bytes, since macOS allows 104 for a Unix
+  socket path; that is why the socket lives under `var/codex/` rather than a
+  deeper directory. `--socket PATH` overrides the path.
+- `bin/codex-new [--cwd DIR]` starts one thread on that server with the
+  given working directory (default: the current one), records it in
+  `var/codex/bindings.json` with the cmux workspace and surface ids from
+  `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`, then runs
+  `codex --remote unix://<socket> -C <cwd> resume <threadId>` and exits
+  with its status. Outside cmux the ids are recorded as null and the
+  helper says so; "Open terminal" is then unavailable for that thread.
+  The file keeps the 200 newest records.
+
+Both read `DASHBOARD_CODEX_DIR` (default `var/codex`, created with mode
+0700) so they agree with the daemon.
+
+### Runtime
+
+`lib/runtime/codex.mjs` checks `owner.json` every 3 seconds
+(`TIMEOUTS.codexPollMs`). A missing file, or one whose `pid` is no longer
+running, means no server: the connection is dropped and `sessions` becomes
+empty. A file that appears starts a connection: `ws` over the Unix socket
+with compression off, `initialize` with `experimentalApi` on, then
+`initialized`. The catalogue is the 20 most recently updated threads
+(`LIMITS.codexThreads`) from paginated `thread/list`; each is resumed with
+`excludeTurns: true`, which subscribes the connection to it and, for a
+thread still waiting on a question or approval, replays that request with
+its original id, and its newest turn is read through `thread/turns/list`
+for the last message and the running turn id. A thread another client
+starts joins the catalogue the same way; an archived one leaves it.
+
+Reconnect rule: when the socket closes, the catalogue is emptied and the
+adapter reconnects after 1 second, doubling up to 30 seconds
+(`TIMEOUTS.codexReconnectMs`, `codexReconnectMaxMs`), then lists and
+resumes again. Pending requests belong to the thread, not the connection,
+so the server replays them on resume; the adapter keys every reply by
+thread and request id and sends it on the current connection. A request
+the server has since resolved, from the terminal or otherwise, is
+`no_such_request`. Writes are never retried. A frame over 1 MiB
+(`LIMITS.codexFrameBytes`) is dropped with an error and never parsed.
+
+Replies are the narrowest the protocol allows. A question is answered
+with `{ answers: { <questionId>: { answers: [text] } } }`, every question
+at once. A command or file-change approval is `accept` or `decline`;
+`acceptForSession`, policy amendments, and other grants are never sent. A
+permission request is denied with an empty profile for the turn or granted
+with exactly the permissions it asked for, also for the turn. A request
+the dashboard cannot express (a command approval whose available decisions
+lack `accept`, an MCP elicitation, or a request type this build does not
+know) is shown with `native: true` and must be answered in the terminal;
+answering it here is refused as `not_supported`.
+
+### Sessions in the snapshot
+
+Each entry in `sessions` carries `id` (`codex:<threadId>`), `provider`,
+`threadId`, `cwd`, `title` (the thread's name, else the first line of its
+preview), `state` (`idle`, `busy` while a turn runs, `waiting` on a
+question or approval, `error` after a failed turn), `pending` in the same
+form as a persona's plus `native` when only the terminal can answer,
+`lastMessage` cut to 200 characters, `lastError`, `updatedAt`, and
+`binding` (`{ workspaceId, surfaceId }` from `bindings.json`, or null).
+Entries are newest first. The list is rebuilt on every adapter event and
+every bindings change, and a new revision is committed only when it differs.
+
+### Session routes
+
+Each route names the session by its id, which must match `codex:<threadId>`;
+an id not in `sessions` is 404 `no_such_session`. POSTs follow the usual
+rules: exact `Origin`, JSON for `answer`, no body for `interrupt`.
+
+| Route | Success | Refusals |
+| --- | --- | --- |
+| `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 409 `no_such_request`, 409 `not_supported` (answer it in the terminal) |
+| `POST interrupt` | 200 `{"ok": true}` | |
+| `GET thread` | 200 `{"messages": [...]}` | 503 `unavailable` (no connection) |
+
+`answers` maps a question's id (or its text) to a string or a list of
+strings; `decision` is `allow` or `deny`. `thread` reads the user and
+assistant messages of the last 20 turns from the app-server each time;
+nothing is cached to disk. There is no `send` and no `new-thread` for a
+session.
+
+### Logs
+
+The Codex runtime logs `codex_server_found`, `codex_server_gone`,
+`codex_connected`, `codex_disconnected`, `codex_catalogue` (with the
+count), `codex_request` (method and whether it is native only),
+`codex_answer` (method and outcome), `codex_interrupt`,
+`codex_resume_error`, `codex_frame_dropped` (with the size),
+`codex_write_error`, and `codex_request_ignored` (a request for a thread
+it does not follow). None of them carries message text, question text,
+tool input, or file paths from a request.
+
 ## Commands
 
 Requires Node 24 (`.nvmrc`).
@@ -534,6 +658,11 @@ Requires Node 24 (`.nvmrc`).
   `lib/assets.mjs` and exists in `public/`.
 - `node scripts/spike-claude-sdk.mjs` re-runs the Phase 2 SDK spike under
   `SPIKE_ROOT`; it spends subscription usage. See the research note.
+- `npm run verify:codex -- --yes` starts a disposable real `codex app-server`
+  on a temporary socket, creates one thread, asks one question through the
+  adapter, answers it, archives the thread, stops the server, and prints the
+  Node, `ws`, and Codex versions. It runs one short model turn on the Codex
+  subscription and refuses without `--yes`. `--model NAME` picks the model.
 
 Still checked by hand: dragging to reorder in Focus, keyboard focus
 visibility, scrolling inside the frames, and a real phone after cutover.
@@ -549,6 +678,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
 | `DASHBOARD_THREADS_DIR` | `var/threads` | Persona session pointers and message caches. Resolved from this directory; created on the first write. |
+| `DASHBOARD_CODEX_DIR` | `var/codex` | The Codex socket, `owner.json`, and `bindings.json`, shared with `bin/codex-serve` and `bin/codex-new`. Resolved from this directory. |
 
 The server always binds `127.0.0.1`. PUT and POST requests must send an
 `Origin` that matches the request's Host, and JSON unless they are one of the
@@ -563,7 +693,8 @@ never completed is logged with status 0. They also carry the persona events:
 `persona_init`, `persona_usage`, `persona_turn_error` (with bounded error
 text and, for a failure before init, the CLI's last 2 KiB of stderr),
 `persona_api_key_refused`, `persona_start_error`, `persona_interrupt`,
-`persona_turn_aborted`, `persona_turn_timeout`, and `thread_resume_failed`.
+`persona_turn_aborted`, `persona_turn_timeout`, and `thread_resume_failed`,
+and the Codex events listed under Codex sessions.
 They never contain request bodies, brief text, persona messages, or tool
 inputs.
 

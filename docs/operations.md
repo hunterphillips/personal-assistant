@@ -58,7 +58,7 @@ Run the install command again to reinstall. Before replacing an existing plist, 
 
 ### Update
 
-After pulling a new revision, run `npm ci` in `dashboard/app` before the installer. The app has a runtime dependency (`@anthropic-ai/claude-agent-sdk`), and the LaunchAgent does not install packages; a dashboard started without it shows every persona as unavailable with `sdk_unavailable`.
+After pulling a new revision, run `npm ci` in `dashboard/app` before the installer. The app has two runtime dependencies (`@anthropic-ai/claude-agent-sdk` and `ws`), and the LaunchAgent does not install packages; a dashboard started without the SDK shows every persona as unavailable with `sdk_unavailable`, and one started without `ws` does not start at all.
 
 If the job is loaded, the installer first asks the running dashboard for `GET /api/state` on 127.0.0.1, at the port recorded in the installed plist (the new `--port` only when no previous plist can be read). If any persona is busy or waiting on an answer, it stops without unloading anything and names those personas. Wait for them to finish, or pass `--force` to unload anyway. If the dashboard does not answer, the installer goes on.
 
@@ -97,6 +97,32 @@ Each persona keeps two files in `var/threads/` (`DASHBOARD_THREADS_DIR`), readab
 Back up `var/` to keep the session pointers. `POST /api/agents/<id>/new-thread` deletes both files for that persona.
 
 A persona turn is interrupted 30 minutes after it starts (`TIMEOUTS.turnMaxMs`), and that clock keeps running while the persona waits on an answer: a question raised 10 minutes in leaves 20 minutes to answer it. The persona then shows `turn_timeout` as its last error until its next turn. Changing a persona's `cwd` in the registry keeps its session pointer; if the next turn cannot resume, start a new thread.
+
+## Running Codex sessions through the dashboard
+
+The dashboard follows Codex threads on one shared `codex app-server` that you own from a terminal; it never starts that server itself. Both helpers read `DASHBOARD_CODEX_DIR` (default `var/codex`).
+
+1. In a cmux terminal you keep open, start the server:
+
+   ```sh
+   ./bin/codex-serve
+   ```
+
+   It prints the socket path and writes `var/codex/owner.json`; the dashboard notices the file within a few seconds and lists the 20 most recently updated threads under `sessions`. Stop it with Ctrl-C; the owner file is removed and the dashboard's session list empties until the next start. If it says a server is already running, another `codex-serve` owns the socket; use that one or stop it first.
+
+2. In each new cmux terminal where you want a Codex thread, start it through the helper so the dashboard can find the terminal again:
+
+   ```sh
+   ./bin/codex-new --cwd ~/workspace/some/repo
+   ```
+
+   It creates the thread on the shared server, records the cmux workspace and surface in `var/codex/bindings.json`, and opens the Codex TUI on that thread. Run outside cmux it still works, but the record has no terminal and "Open terminal" stays unavailable for that thread. A thread started from a plain `codex` command, not on the shared server, is not seen by the dashboard at all.
+
+The socket path must stay under 104 bytes, the macOS limit for a Unix socket; `codex-serve` refuses one over 100. If the checkout ever lives somewhere deep, pass `--socket` with a shorter path. The server is started with `features.default_mode_request_user_input=true` and `features.request_permissions_tool=true`; both are still marked under development in Codex 0.155.1, so each thread prints a warning about them, and both are required for questions and permission requests to reach the dashboard.
+
+Answering from the dashboard sends only once-only decisions: a question's answers, `accept` or `decline` for a command or file change, and a permission grant limited to the request and the turn. Anything broader, such as a session-wide grant, is answered in the terminal, and the dashboard marks such requests as terminal only. If the server goes away, the dashboard reconnects with backoff, lists and resumes the threads again, and any request still waiting is replayed to it.
+
+`npm run verify:codex -- --yes` runs a live check on a disposable server and bills one short turn; use it after a Codex upgrade.
 
 ## Agent registry
 
