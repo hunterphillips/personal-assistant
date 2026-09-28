@@ -10,6 +10,7 @@ import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
+import { createGoals } from '../../lib/goals.mjs';
 import { createHub } from '../../lib/hub.mjs';
 
 export async function listen(server) {
@@ -138,9 +139,11 @@ export function fakeCmux(inventory = null) {
 // real phase 1 modules; tests may pass fakes. `registry` and `routines`
 // default to the fakes above, and `hub` to a hub over all four plus any
 // `adapters` and `store` fakes (default none), started before the app
-// listens. `configure` may adjust config.
+// listens. `goals` defaults to createGoals over the same registry; pass null
+// for an app without the Goals routes. `configure` may adjust config.
 export async function startApp(t, {
-  env = {}, focus, brief, registry, routines, hub, adapters, store, bindings, cmux = null, configure = (c) => c,
+  env = {}, focus, brief, registry = fakeRegistry(), routines, hub, adapters, store, bindings, cmux = null, goals,
+  configure = (c) => c,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
@@ -161,7 +164,8 @@ export async function startApp(t, {
     config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, adapters, store, bindings, cmux, log,
   });
   if (!hub) await stateHub.start();
-  const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, log });
+  const goalsReader = goals === undefined ? createGoals({ registry, limits: config.limits, log }) : goals;
+  const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, log });
   server.on('request', handler);
   t.after(() => {
     handler.closeStreams();

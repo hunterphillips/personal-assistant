@@ -44,6 +44,8 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/sessions/<id>/thread` | The Codex thread's recent messages, read from the app-server. |
 | `POST /api/sessions/<id>/open-terminal` | Brings the session's recorded cmux terminal to the front. |
 | `POST /api/sessions/refresh` | Re-reads the cmux inventory and the Codex catalogue now and answers `{"ok": true, "revision": N}`. |
+| `GET /api/goals` | Priorities and goal notes read from the vault (below). |
+| `POST /api/goals/propose` | Sends a new goal or a change to one to the second-brain persona; 202 `{"ok": true, "agentId": "second-brain"}` once the turn has started (below). |
 
 `/focus/`, `/reading/`, `/brief/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
 paths without the slash. A known path
@@ -55,6 +57,7 @@ what `lib/app.mjs` expects from it.
 
 - `lib/app.mjs` routes requests, checks Host and Origin, logs, and serves the shell, assets, health, status, state, and routines refresh.
 - `lib/agent-routes.mjs` serves the persona routes under `/api/agents/` and the session routes under `/api/sessions/`.
+- `lib/goals-routes.mjs` serves the Goals routes over `lib/goals.mjs`, which reads the vault.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
 - `lib/focus-proxy.mjs` forwards the Focus routes.
@@ -189,6 +192,16 @@ and the list at 200 items; beyond those it is 413. A revision that no longer
 matches the file is 409. On success the server writes
 `feedback-<date>.md` beside the viewer, replacing any earlier one for that
 date, with one write per date at a time.
+
+### Goals
+
+`GET /api/goals` reads three sources under the second-brain persona's cwd:
+`notes/current-priorities.md`, `notes/longterm-priorities.md`, and each
+`notes/goals/*.md`. `POST /api/goals/propose` takes `{"kind": "add", "text"}`
+or `{"kind": "edit", "target": "<item id>", "text"}`, sends the text to the
+second-brain persona as a new message, and the shell opens that persona's
+thread. The dashboard never writes the vault; the persona does, in its own
+turn.
 
 ### Focus proxy
 

@@ -136,6 +136,8 @@ A thread started moments ago is listed by its folder name, with no title, until 
 
 The Agents view and the persona runtime read the agent registry from `personal-assistant/registry/agents.json`, outside this repository. It is unversioned local configuration and holds absolute paths, so it is not committed anywhere. Set `DASHBOARD_REGISTRY_PATH` to use another file (default `../../registry/agents.json`, resolved from the app directory) and `DASHBOARD_LAUNCH_AGENTS_DIR` to read plists from another directory (default `~/Library/LaunchAgents`). The daemon checks the file every few seconds; if an edit leaves it unreadable or invalid, the daemon keeps the last good registry and reports the error in the state, and the Agents view shows it above the routines. Back up `registry/` with the rest of `personal-assistant/`.
 
+Goals needs a `second-brain` persona in the registry and reads its notes from that persona's cwd.
+
 ## cmux
 
 The dashboard reads cmux's terminals and agent sessions over cmux's own socket. cmux's default socket mode admits only processes cmux started, so the daemon cannot connect until this is done once. Verified on 2026-09-28 with cmux 0.64.25; the app was quit throughout.

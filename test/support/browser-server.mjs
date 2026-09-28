@@ -36,6 +36,7 @@ import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
+import { createGoals } from '../../lib/goals.mjs';
 import { RuntimeError } from '../../lib/runtime/adapter.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } from './harness.mjs';
@@ -135,7 +136,8 @@ export async function startHub({
         };
       },
     };
-    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, log: () => {} });
+    const goals = createGoals({ registry, limits: config.limits });
+    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, log: () => {} });
     let handler = newHandler();
     cleanups.push(async () => {
       handler.closeStreams();

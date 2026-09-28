@@ -1,7 +1,7 @@
 // Entry point: load configuration, load the agent registry and the Codex
 // terminal bindings, compose the routines view, thread store, runtime
 // adapters (Claude for personas, Codex for the shared app-server's threads),
-// the cmux client, state hub, and app, start the personas, listen on 127.0.0.1, and shut down
+// the cmux client, state hub, the Goals reader, and app, start the personas, listen on 127.0.0.1, and shut down
 // within a bounded window on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
 // runs main(). A missing or invalid registry does not stop startup; the hub
 // reports it.
@@ -27,6 +27,7 @@ import { createBindings } from './lib/bindings.mjs';
 import { createBriefRoutes } from './lib/brief-adapter.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
+import { createGoals } from './lib/goals.mjs';
 import { createHub } from './lib/hub.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { createRoutines } from './lib/routines.mjs';
@@ -102,7 +103,8 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     adaptersDisabled: apiKeyInEnv ? 'api_key_in_env' : null,
     log: logEntry,
   });
-  const app = createApp({ config, focus, brief, hub, store, cmux, log: logEntry });
+  const goals = createGoals({ registry, limits: config.limits, log: logEntry });
+  const app = createApp({ config, focus, brief, hub, store, cmux, goals, log: logEntry });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;
   server.requestTimeout = config.timeouts.requestMs;
