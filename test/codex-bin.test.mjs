@@ -16,21 +16,26 @@ const SERVE = path.join(APP_DIR, 'bin', 'codex-serve');
 const NEW = path.join(APP_DIR, 'bin', 'codex-new');
 
 // A stand-in for the Codex CLI: prints a version, records its arguments to
-// FAKE_CODEX_LOG, waits as app-server until told to stop (or, with
-// FAKE_CODEX_SERVER_EXIT, exits with that status on its own after 300ms),
-// and otherwise stands in for the TUI: it stays up for
-// FAKE_CODEX_LINGER_MS (default 0) and exits with FAKE_CODEX_EXIT.
+// FAKE_CODEX_LOG, waits as app-server until told to stop (exiting
+// FAKE_CODEX_SERVER_LINGER_MS, default 0, after SIGTERM, as the real one
+// does while a TUI is attached; or, with FAKE_CODEX_SERVER_EXIT, exits
+// with that status on its own after 300ms), and otherwise stands in for
+// the TUI: it stays up for FAKE_CODEX_LINGER_MS (default 0) and exits
+// with FAKE_CODEX_EXIT. The app-server records its arguments only once
+// its signal handler is in place, so a test that waits for the record
+// can signal it without hitting Node's default action.
 const FAKE_CODEX = `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
+if (args[0] === 'app-server') {
+  setInterval(() => {}, 1000);
+  process.on('SIGTERM', () => setTimeout(() => process.exit(0), Number(process.env.FAKE_CODEX_SERVER_LINGER_MS ?? 0)));
+  if (process.env.FAKE_CODEX_SERVER_EXIT) setTimeout(() => process.exit(Number(process.env.FAKE_CODEX_SERVER_EXIT)), 300);
+}
 if (process.env.FAKE_CODEX_LOG) fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify(args) + '\\n');
 if (args[0] === '--version') {
   process.stdout.write('codex-cli 0.0.0-fake\\n');
-} else if (args[0] === 'app-server') {
-  setInterval(() => {}, 1000);
-  process.on('SIGTERM', () => process.exit(0));
-  if (process.env.FAKE_CODEX_SERVER_EXIT) setTimeout(() => process.exit(Number(process.env.FAKE_CODEX_SERVER_EXIT)), 300);
-} else {
+} else if (args[0] !== 'app-server') {
   setTimeout(() => process.exit(Number(process.env.FAKE_CODEX_EXIT ?? 0)), Number(process.env.FAKE_CODEX_LINGER_MS ?? 0));
 }
 `;
@@ -123,6 +128,30 @@ test('codex-serve starts the app-server with the feature flags, writes owner.jso
   assert.match(result.stdout, new RegExp(`app-server starting on unix://${socket.replaceAll('.', '\\.')}; the dashboard will pick it up`));
   assert.equal(fs.existsSync(f.ownerFile), false);
   await until(() => { try { process.kill(owner.pid, 0); return false; } catch { return true; } }, 5_000, 'child exit');
+});
+
+test('codex-serve removes owner.json on SIGINT before the app-server exits, then waits for it', async (t) => {
+  const f = await fixture(t);
+  const { child, exit } = runAsync(SERVE, [], { ...f.env, FAKE_CODEX_SERVER_LINGER_MS: '1500' });
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
+  await until(() => fs.existsSync(f.ownerFile), 5_000, 'owner.json');
+  await until(() => f.calls().length === 2, 5_000, 'app-server up');
+  const owner = JSON.parse(await fsp.readFile(f.ownerFile, 'utf8'));
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+  const signalledAt = Date.now();
+  child.kill('SIGINT');
+  await until(() => !fs.existsSync(f.ownerFile), 1_000, 'owner.json removed');
+  assert.ok(Date.now() - signalledAt < 1_000, 'the owner file went before the server exited');
+  assert.equal(alive(owner.pid), true, 'the app-server is still running');
+  assert.equal(child.exitCode, null, 'codex-serve is still waiting for it');
+  child.kill('SIGINT'); // a second Ctrl-C is harmless
+
+  const result = await exit;
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(Date.now() - signalledAt >= 1_400, 'codex-serve waited for the server to exit');
+  await until(() => !alive(owner.pid), 5_000, 'child exit');
+  assert.equal(fs.existsSync(f.ownerFile), false);
 });
 
 test('codex-serve removes owner.json and reports the status when the app-server exits on its own', async (t) => {

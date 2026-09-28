@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
@@ -499,6 +500,83 @@ test('no owner file means no server; one that appears is picked up, and a dead p
   assert.deepEqual(adapter.status(), { available: false, reason: 'no_server' });
   assert.ok(logs.some((entry) => entry.event === 'codex_server_gone'));
   await until(() => server.live().length === 0, 2_000, 'socket closed');
+});
+
+test('a socket that is gone while the owner file lingers is the server gone after two failed connections', async (t) => {
+  const { server, adapter, events, logs } = await setup(t, { threads: [thread('g')] });
+  await connected(server, adapter, events, 1);
+  const gone = () => logs.filter((entry) => entry.event === 'codex_server_gone');
+  const socketErrors = () => logs.filter((entry) => entry.event === 'codex_socket_error');
+
+  // Ctrl-C in codex-serve: the socket closes at once, the owner file
+  // outlives it (here: the pid stays alive because it is this process).
+  await server.close();
+  await until(() => adapter.status().reason === 'no_server', 2_000, 'no_server');
+  assert.deepEqual(adapter.sessions(), []);
+  assert.deepEqual(gone(), [{ event: 'codex_server_gone', socket: server.socket, pid: process.pid, reason: 'socket' }]);
+  assert.deepEqual(socketErrors().map((entry) => entry.error), ['ENOENT', 'ENOENT']);
+  assert.equal(logs.filter((entry) => entry.event === 'codex_disconnected').length, 1);
+
+  // The lingering file is polled but not reconnected to, and not logged again.
+  await sleep(120);
+  assert.equal(socketErrors().length, 2, 'no further connection attempts');
+  assert.equal(gone().length, 1);
+  assert.deepEqual(adapter.status(), { available: false, reason: 'no_server' });
+
+  // The file going away is not a second "gone"; a new server is found.
+  await server.removeOwner();
+  await sleep(60);
+  assert.equal(gone().length, 1);
+  const next = await startCodexServer(t, { threads: [thread('h')] });
+  await writeFile(server.ownerFile, JSON.stringify({ socket: next.socket, pid: process.pid, startedAt: AT, codexVersion: 'codex-cli 0.0.0-fake' }));
+  await until(() => adapter.sessions().some((s) => s.threadId === 'h'), 2_000, 'new server followed');
+  assert.deepEqual(adapter.status(), { available: true });
+  assert.equal(logs.filter((entry) => entry.event === 'codex_server_found').length, 2);
+});
+
+test('ECONNREFUSED counts like ENOENT; a single failure or another error code does not', async (t) => {
+  // A scripted ws: every attempt fails before open with the next code in `codes`.
+  const fakeWs = (code) => {
+    const ws = new EventEmitter();
+    ws.terminate = () => {};
+    ws.close = () => {};
+    ws.send = () => {};
+    setImmediate(() => {
+      ws.emit('error', Object.assign(new Error(code), { code }));
+      ws.emit('close');
+    });
+    return ws;
+  };
+  const attempts = [];
+  const codes = ['ECONNREFUSED', 'EACCES', 'ECONNREFUSED', 'ENOENT'];
+  const { adapter, logs } = await setup(t, {
+    threads: [thread('c')],
+    connect: async () => {
+      const code = codes[Math.min(attempts.length, codes.length - 1)];
+      attempts.push(code);
+      return fakeWs(code);
+    },
+  });
+  await until(() => logs.some((entry) => entry.event === 'codex_server_gone'), 2_000, 'gone');
+  // The EACCES in between reset the count, so it took the third and fourth attempts.
+  assert.deepEqual(attempts, ['ECONNREFUSED', 'EACCES', 'ECONNREFUSED', 'ENOENT']);
+  assert.deepEqual(adapter.status(), { available: false, reason: 'no_server' });
+  await sleep(100);
+  assert.equal(attempts.length, 4, 'no reconnect after the server is gone');
+  assert.equal(logs.filter((entry) => entry.event === 'codex_server_gone').length, 1);
+});
+
+test('a connect() that rejects with ENOENT counts the same way', async (t) => {
+  const { adapter, logs } = await setup(t, {
+    threads: [thread('c')],
+    connect: () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+  });
+  await until(() => logs.some((entry) => entry.event === 'codex_server_gone'), 2_000, 'gone');
+  assert.equal(logs.filter((entry) => entry.event === 'codex_connect_error').length, 2);
+  await sleep(100);
+  assert.equal(logs.filter((entry) => entry.event === 'codex_connect_error').length, 2, 'no reconnect after the server is gone');
+  assert.equal(logs.filter((entry) => entry.event === 'codex_server_gone').length, 1);
+  assert.deepEqual(adapter.status(), { available: false, reason: 'no_server' });
 });
 
 test('refresh() polls the owner file and the catalogue now instead of waiting for the interval', async (t) => {

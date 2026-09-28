@@ -3,8 +3,12 @@
 // Foreground owner of the shared Codex app-server. Run it in a cmux
 // terminal you keep open: it starts `codex app-server` on a Unix socket
 // under the Codex directory, writes var/codex/owner.json so the dashboard
-// can find the server, and removes that file when the server stops. The
-// dashboard never starts the server itself.
+// can find the server, and removes that file when the server stops. On
+// SIGINT, SIGTERM, or SIGHUP the file goes first, before the signal is
+// forwarded to the server: the server closes its socket at once but can
+// take half a minute to exit while a TUI is attached, and the dashboard
+// should not spend that window reconnecting to a socket that is gone.
+// The dashboard never starts the server itself.
 //
 //   bin/codex-serve [--socket PATH] [--help]
 //
@@ -72,14 +76,20 @@ async function main() {
   await atomicWrite(dir, 'owner.json', `${JSON.stringify(owner, null, 2)}\n`);
   console.log(`codex-serve: app-server starting on unix://${socket}; the dashboard will pick it up.`);
 
-  const stop = (signal) => {
-    if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+  let stopping = null;
+  const stop = () => {
+    if (stopping) return stopping;
+    stopping = removeOwner(ownerFile, child.pid).catch(() => {}).then(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    });
+    return stopping;
   };
-  process.on('SIGINT', () => stop('SIGTERM'));
-  process.on('SIGTERM', () => stop('SIGTERM'));
-  process.on('SIGHUP', () => stop('SIGTERM'));
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  process.on('SIGHUP', stop);
 
   const [code, signal] = await new Promise((resolve) => child.once('exit', (exitCode, exitSignal) => resolve([exitCode, exitSignal])));
+  await stopping;
   await removeOwner(ownerFile, child.pid);
   await fsp.rm(socket, { force: true });
   if (signal) {
