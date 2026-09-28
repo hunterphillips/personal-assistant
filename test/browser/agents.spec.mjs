@@ -1,5 +1,7 @@
-// The Agents view in real browsers against the in-memory registry and the
-// fake persona adapter of test/support/browser-server.mjs.
+// The Agents view, the page at `/`, in real browsers against the in-memory
+// registry, routines, and fake persona adapter of
+// test/support/browser-server.mjs. The routines overview itself is covered
+// in routines.spec.mjs.
 
 import { expect, expectView, nav, test } from '../support/browser-test.mjs';
 
@@ -13,6 +15,23 @@ const AGENTS = [
   { id: 'dev', name: 'Dev', role: 'Code', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'codex' },
   { id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented task board.', group: 'personal', kind: 'system' },
 ];
+
+// CFO's two jobs; the other agents have none.
+const ROUTINES = ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'].map((label, i) => ({
+  label,
+  agentId: 'cfo',
+  agentName: 'CFO',
+  name: label.replace(/^com\.hunter\./, ''),
+  schedule: { kind: 'calendar', text: i === 0 ? 'Daily at 06:00' : 'Mondays at 06:00' },
+  logPath: `/invented/logs/${label}.log`,
+  lastRun: ago((i + 1) * 30 * MINUTE),
+  outcome: i === 0 ? 'ok' : 'failed',
+  exitStatus: i === 0 ? 0 : 1,
+  failures24h: null,
+  paused: null,
+  source: 'launchctl',
+  available: true,
+}));
 
 const QUESTION = 'Which color do you want?';
 const QUESTION_REQUEST = {
@@ -32,6 +51,7 @@ function seeded(extra = {}) {
   return {
     build: () => ({
       agents: AGENTS,
+      routines: { items: ROUTINES, focusAvailable: true, refreshedAt: ago(5_000) },
       personas: {
         cfo: {
           messages: [
@@ -52,15 +72,16 @@ function row(page, name) {
 
 const pane = (page) => page.locator('#agent-panel');
 const messages = (page) => page.locator('#agent-messages .thread-message');
+const phone = (page) => page.viewportSize().width < 720;
 
 test.describe('with seeded agents', () => {
   test.use({ hubOptions: seeded() });
 
   test('the list groups agents under Work and Personal with role and provider chips', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/agents`);
+    await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     await expect(page.locator('.agent-group-heading')).toHaveText(['Work', 'Personal']);
-    await expect(page.locator('.agent-row .agent-row-name')).toHaveText(['CFO', 'Catchup', 'Second brain', 'Dev', 'Focus']);
+    await expect(page.locator('#agents-groups .agent-row .agent-row-name')).toHaveText(['CFO', 'Catchup', 'Second brain', 'Dev', 'Focus']);
 
     const cfo = row(page, 'CFO');
     await expect(cfo.locator('.role-chip')).toHaveText('Money');
@@ -68,7 +89,7 @@ test.describe('with seeded agents', () => {
     await expect(cfo.locator('.agent-row-preview')).toHaveText('Cash is fine.');
     await expect(cfo.locator('.agent-row-time')).toHaveText('12 minutes ago');
     await expect(cfo.locator('.agent-row-state')).toHaveCount(0);
-    await expect(cfo).toHaveAttribute('href', '/agents?agent=cfo');
+    await expect(cfo).toHaveAttribute('href', '/?agent=cfo');
 
     const catchup = row(page, 'Catchup');
     await expect(catchup).not.toHaveAttribute('href', /.*/);
@@ -81,26 +102,81 @@ test.describe('with seeded agents', () => {
     await expect(row(page, 'Focus').locator('.provider-chip')).toHaveCount(0);
     await expect(row(page, 'Focus').locator('.agent-row-state')).toHaveCount(0);
 
-    for (const link of await page.locator('a.agent-row').all()) {
+    for (const link of await page.locator('#agents-groups a.agent-row').all()) {
       expect((await link.boundingBox()).height).toBeGreaterThanOrEqual(44);
     }
     expect(hub.personas.calls).toEqual([]);
   });
 
-  test('Home says who is waiting and the nav lists Agents', async ({ page, hub }) => {
+  test('the page at / is the list beside the routines overview, and the nav is Agents, Focus, Daily Brief', async ({ page, hub }) => {
+    test.skip(phone(page), 'the phone puts the overview behind a row; see below');
     await page.goto(`${hub.origin}/`);
-    await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link'))
-      .toHaveText(['Home', 'Agents', 'Routines', 'Focus', 'Daily Brief']);
-    await expect(page.locator('#home-agents')).toHaveText('Second brain is waiting for you');
-    await page.locator('#view-home').getByRole('link', { name: /Agents/ }).click();
-    await expect(page).toHaveURL(`${hub.origin}/agents`);
     await expectView(page, 'agents', 'Agents');
+    await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link'))
+      .toHaveText(['Agents', 'Focus', 'Daily Brief']);
+    await expect(page.locator('#agents-list')).toBeVisible();
+    await expect(page.locator('#agents-routines')).toBeHidden();
+    const overview = page.locator('#routines-overview');
+    await expect(overview).toBeVisible();
+    await expect(overview.getByRole('heading', { name: 'Routines', level: 2 })).toBeVisible();
+    await expect(overview.locator('#routines-back')).toBeHidden();
+    await expect(overview.locator('.routine-card .card-name')).toHaveText(['CFO']);
+    await expect(overview.locator('.routine-name')).toHaveText(['cfo.daily', 'cfo.weekly']);
+    await expect(page.locator('#agent-panel')).toBeHidden();
+    await expect(page.locator('#agent-empty')).toBeHidden();
+    const list = await page.locator('#agents-list').boundingBox();
+    const pane = await overview.boundingBox();
+    expect(pane.x).toBeGreaterThanOrEqual(list.x + list.width);
+    expect(hub.routines.calls).toBe(0);
+  });
+
+  test('/agents?agent=cfo and /?agent=cfo both open the thread', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await expectView(page, 'agents', 'Agents');
+    await expect(pane(page).locator('#agent-name')).toHaveText('CFO');
+    await expect(messages(page)).toHaveCount(2);
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expectView(page, 'agents', 'Agents');
+    await expect(pane(page).locator('#agent-name')).toHaveText('CFO');
+    await expect(messages(page)).toHaveCount(2);
+    await expect(page.locator('#routines-overview')).toBeHidden();
+  });
+
+  test('a persona with routines lists them behind a toggle in the thread header', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    const toggle = pane(page).locator('#agent-routines-toggle');
+    await expect(toggle).toHaveText('Routines (2)');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const section = page.locator('#agent-routines');
+    await expect(section).toBeHidden();
+    await expect(messages(page)).toHaveCount(2);
+    expect((await toggle.boundingBox()).height).toBeGreaterThanOrEqual(44);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(section).toBeVisible();
+    await expect(section.locator('.routine-name')).toHaveText(['cfo.daily', 'cfo.weekly']);
+    await expect(section.locator('.badge')).toHaveText(['OK', 'Failed (exit 1)']);
+    await expect(section.locator('.routine-run')).toHaveText(['30 minutes ago', '1 hour ago']);
+    await expect(section.getByRole('button')).toHaveCount(0);
+    await expect(messages(page)).toHaveCount(2);
+
+    await toggle.click();
+    await expect(section).toBeHidden();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('a persona without routines shows no toggle', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await expect(pane(page).locator('#agent-name')).toHaveText('Second brain');
+    await expect(page.locator('#agent-routines-toggle')).toBeHidden();
+    await expect(page.locator('#agent-routines')).toBeHidden();
   });
 
   test('opening a persona shows its thread, and a reload lands on it', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/agents`);
+    await page.goto(`${hub.origin}/`);
     await row(page, 'CFO').click();
-    await expect(page).toHaveURL(`${hub.origin}/agents?agent=cfo`);
+    await expect(page).toHaveURL(`${hub.origin}/?agent=cfo`);
     await expect(pane(page).locator('#agent-name')).toHaveText('CFO');
     await expect(pane(page).locator('#agent-chips .role-chip')).toHaveText('Money');
     await expect(pane(page).locator('#agent-chips .provider-chip')).toHaveText('Claude');
@@ -120,13 +196,13 @@ test.describe('with seeded agents', () => {
     await expect(messages(page)).toHaveCount(2);
 
     await nav(page, 'Agents').click();
-    await expect(page).toHaveURL(`${hub.origin}/agents`);
+    await expect(page).toHaveURL(`${hub.origin}/`);
     await expect(pane(page)).toBeHidden();
   });
 
   test('sending shows the message, the working line with Interrupt, and then the reply', async ({ page, hub }) => {
     hub.personas.hold('cfo');
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await expect(messages(page)).toHaveCount(2);
     await page.locator('#agent-input').fill('What about next month?');
     await page.locator('#agent-send').click();
@@ -155,7 +231,7 @@ test.describe('with seeded agents', () => {
 
   test('Interrupt ends the turn', async ({ page, hub }) => {
     hub.personas.hold('cfo');
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await page.locator('#agent-input').fill('Take your time.');
     await page.locator('#agent-send').click();
     await expect(page.locator('#agent-status')).toBeVisible();
@@ -166,7 +242,7 @@ test.describe('with seeded agents', () => {
   });
 
   test('a pending question renders its options, and answering clears the Waiting line and the card', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/agents?agent=brain`);
+    await page.goto(`${hub.origin}/?agent=brain`);
     const request = page.locator('#agent-request');
     await expect(request).toBeVisible();
     await expect(request.locator('.request-chip')).toHaveText('Color');
@@ -205,7 +281,7 @@ test.describe('with seeded agents', () => {
   });
 
   test('a typed Other answer is sent as the label, and wins over a pressed option', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/agents?agent=brain`);
+    await page.goto(`${hub.origin}/?agent=brain`);
     const request = page.locator('#agent-request');
     await request.locator('.option').nth(0).click();
     await request.locator('.request-other-field').fill('Teal');
@@ -216,7 +292,7 @@ test.describe('with seeded agents', () => {
 
   test('a multi-select question posts every pressed label as a list', async ({ page, hub }) => {
     hub.personas.hold('cfo');
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await page.locator('#agent-input').fill('Pick colors.');
     await page.locator('#agent-send').click();
     await expect(page.locator('#agent-status')).toBeVisible();
@@ -240,7 +316,7 @@ test.describe('with seeded agents', () => {
     await page.route('**/api/agents/brain/answer', (route) => route.fulfill({
       status: 409, contentType: 'application/json', body: '{"error":"no_such_request"}',
     }));
-    await page.goto(`${hub.origin}/agents?agent=brain`);
+    await page.goto(`${hub.origin}/?agent=brain`);
     const request = page.locator('#agent-request');
     await request.locator('.option').nth(0).click();
     await request.getByRole('button', { name: 'Answer' }).click();
@@ -251,7 +327,7 @@ test.describe('with seeded agents', () => {
 
   test('a pending approval shows the tool and its input, and Deny resolves it', async ({ page, hub }) => {
     hub.personas.hold('cfo');
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await page.locator('#agent-input').fill('List the files.');
     await page.locator('#agent-send').click();
     await expect(page.locator('#agent-status')).toBeVisible();
@@ -264,7 +340,6 @@ test.describe('with seeded agents', () => {
     await expect(request.getByRole('button')).toHaveText(['Allow', 'Deny']);
     await expect(page.locator('#agent-composer-reason')).toHaveText('Allow or deny the request first.');
     await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Waiting for you');
-    await expect(page.locator('#home-agents')).toHaveCount(1);
 
     await request.getByRole('button', { name: 'Deny' }).click();
     await expect(request).toBeHidden();
@@ -283,7 +358,7 @@ test.describe('with seeded agents', () => {
   });
 
   test('New thread asks inline, then starts the persona over', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await expect(messages(page)).toHaveCount(2);
     await page.locator('#agent-new-thread').click();
     const confirm = page.locator('#agent-confirm');
@@ -307,7 +382,7 @@ test.describe('with seeded agents', () => {
 
   test('a thread that cannot be read again keeps its messages, and Retry or the next change recovers', async ({ page, hub }) => {
     hub.personas.hold('cfo');
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await expect(messages(page)).toHaveCount(2);
 
     let failing = true;
@@ -339,7 +414,7 @@ test.describe('with seeded agents', () => {
 
   test('a draft typed for one persona is kept while another thread is open', async ({ page, hub }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await page.locator('#agent-input').fill('For CFO');
     await row(page, 'Second brain').click();
     await expect(pane(page).locator('#agent-name')).toHaveText('Second brain');
@@ -354,20 +429,21 @@ test.describe('with seeded agents', () => {
 
   test('Back from a thread returns to the list, and choosing the open row adds no history', async ({ page, hub }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
-    await page.goto(`${hub.origin}/agents`);
-    await expect(page.locator('#agent-empty')).toHaveText('Choose an agent.');
+    await page.goto(`${hub.origin}/`);
+    await expect(page.locator('#routines-overview')).toBeVisible();
     await row(page, 'CFO').click();
-    await expect(page).toHaveURL(`${hub.origin}/agents?agent=cfo`);
+    await expect(page).toHaveURL(`${hub.origin}/?agent=cfo`);
     await expect(pane(page)).toBeVisible();
+    await expect(page.locator('#routines-overview')).toBeHidden();
     await row(page, 'CFO').click();
     await page.goBack();
-    await expect(page).toHaveURL(`${hub.origin}/agents`);
+    await expect(page).toHaveURL(`${hub.origin}/`);
     await expect(pane(page)).toBeHidden();
-    await expect(page.locator('#agent-empty')).toHaveText('Choose an agent.');
+    await expect(page.locator('#routines-overview')).toBeVisible();
   });
 
   test('an unavailable persona shows why and a disabled composer', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/agents?agent=dev`);
+    await page.goto(`${hub.origin}/?agent=dev`);
     await expect(pane(page).locator('#agent-name')).toHaveText('Dev');
     await expect(page.locator('#agent-composer-reason')).toHaveText('There is no runtime for Codex yet.');
     await expect(page.locator('#agent-input')).toBeDisabled();
@@ -379,7 +455,7 @@ test.describe('with seeded agents', () => {
 
   test('a failed turn shows the adapter sentence and keeps the composer open', async ({ page, hub }) => {
     hub.personas.hold('cfo');
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await page.locator('#agent-input').fill('Resume please.');
     await page.locator('#agent-send').click();
     await expect(page.locator('#agent-status')).toBeVisible();
@@ -394,7 +470,7 @@ test.describe('with seeded agents', () => {
     await page.route('**/api/agents/cfo/send', (route) => route.fulfill({
       status: 503, contentType: 'application/json', body: '{"error":"shutting_down"}',
     }));
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await page.locator('#agent-input').fill('Anyone there?');
     await page.locator('#agent-send').click();
     await expect(page.locator('#agent-failure')).toHaveText('The dashboard is shutting down. Try again in a moment.');
@@ -403,7 +479,7 @@ test.describe('with seeded agents', () => {
   });
 
   test('a sent message clears the composer and leaves the keyboard in it', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await page.locator('#agent-input').fill('Hello');
     await page.locator('#agent-send').click();
     await expect(page.locator('#agent-input')).toHaveValue('');
@@ -412,7 +488,29 @@ test.describe('with seeded agents', () => {
 
   test('at phone width the list comes first and a row opens the thread full width with a way back', async ({ page, hub }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`${hub.origin}/agents`);
+    await page.goto(`${hub.origin}/`);
+    await expect(page.locator('#agents-list')).toBeVisible();
+    await expect(page.locator('#agent-thread')).toBeHidden();
+
+    // The Routines row leads the list and opens the overview full width.
+    const routinesRow = page.locator('#agents-routines');
+    await expect(routinesRow).toBeVisible();
+    await expect(routinesRow.locator('.agent-row-name')).toHaveText('Routines');
+    await expect(routinesRow.locator('.agent-row-preview')).toHaveText('2 routines');
+    expect((await routinesRow.boundingBox()).height).toBeGreaterThanOrEqual(44);
+    expect((await routinesRow.boundingBox()).y).toBeLessThan((await page.locator('.agent-group-heading').first().boundingBox()).y);
+    await routinesRow.click();
+    await expect(page).toHaveURL(`${hub.origin}/routines`);
+    await expect(page.locator('#agents-list')).toBeHidden();
+    const overview = page.locator('#routines-overview');
+    await expect(overview).toBeVisible();
+    expect((await overview.boundingBox()).width).toBe(390);
+    await expect(overview.locator('.routine-card .card-name')).toHaveText(['CFO']);
+    const overviewBack = page.locator('#routines-back');
+    await expect(overviewBack).toHaveText('All agents');
+    expect((await overviewBack.boundingBox()).height).toBeGreaterThanOrEqual(44);
+    await overviewBack.click();
+    await expect(page).toHaveURL(`${hub.origin}/`);
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#agent-thread')).toBeHidden();
 
@@ -428,13 +526,15 @@ test.describe('with seeded agents', () => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
 
+    await expect(page.locator('#agent-routines-toggle')).toHaveText('Routines (2)');
+
     await back.click();
-    await expect(page).toHaveURL(`${hub.origin}/agents`);
+    await expect(page).toHaveURL(`${hub.origin}/`);
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#agent-thread')).toBeHidden();
 
     await page.goBack();
-    await expect(page).toHaveURL(`${hub.origin}/agents?agent=cfo`);
+    await expect(page).toHaveURL(`${hub.origin}/?agent=cfo`);
     await expect(page.locator('#agent-thread')).toBeVisible();
   });
 });
@@ -443,7 +543,7 @@ test.describe('with a persona whose last turn the clock stopped', () => {
   test.use({ hubOptions: seeded({ cfo: { lastError: 'turn_timeout' } }) });
 
   test('the idle persona says why above the messages and takes a message', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/agents?agent=cfo`);
+    await page.goto(`${hub.origin}/?agent=cfo`);
     await expect(page.locator('#agent-notice')).toHaveText('The last turn ran too long and was stopped.');
     await expect(page.locator('#agent-send')).toBeEnabled();
     await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveCount(0);
@@ -452,8 +552,8 @@ test.describe('with a persona whose last turn the clock stopped', () => {
 
 test.describe('with no agents', () => {
   test('the list says none are registered', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/agents`);
+    await page.goto(`${hub.origin}/`);
     await expect(page.locator('#agents-message')).toHaveText('No agents are registered.');
-    await expect(page.locator('#home-agents')).toBeHidden();
+    await expect(page.locator('#agent-panel')).toBeHidden();
   });
 });

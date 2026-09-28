@@ -1,6 +1,7 @@
-// The Routines view and the shell's event stream client, in real browsers
-// against the in-memory registry and routines of test/support/browser-server.mjs.
-// Pause and Resume reach the isolated Focus copy, whose launchd stubs refuse.
+// The routines overview inside the Agents view, and the shell's event
+// stream client, in real browsers against the in-memory registry and
+// routines of test/support/browser-server.mjs. Pause and Resume reach the
+// isolated Focus copy, whose launchd stubs refuse.
 
 import { expect, expectView, nav, needsFocus, test } from '../support/browser-test.mjs';
 
@@ -74,13 +75,23 @@ function pad(n) {
   return String(n).padStart(2, '0');
 }
 
+const phone = (page) => page.viewportSize().width < 720;
+
+// The overview sits beside the list from 720px; a phone reaches it through
+// the Routines row at the top of the list.
+async function openOverview(page, hub) {
+  await page.goto(`${hub.origin}/`);
+  await expectView(page, 'agents', 'Agents');
+  if (phone(page)) await page.locator('#agents-routines').click();
+  await expect(page.locator('#routines-overview')).toBeVisible();
+}
+
 test.describe('with seeded routines', () => {
   test.use({ hubOptions: seeded() });
 
   test('each agent with routines gets a card with its rows and outcome badges', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/routines`);
-    await expectView(page, 'routines', 'Routines');
-    await expect(page.getByRole('heading', { name: 'Routines', level: 1 })).toBeVisible();
+    await openOverview(page, hub);
+    await expect(page.getByRole('heading', { name: 'Routines', level: 2 })).toBeVisible();
     await expect(page.locator('#routines-updated')).toHaveText('Updated just now');
     await expect(page.locator('#routines-refresh')).toHaveText('Refresh');
 
@@ -124,13 +135,89 @@ test.describe('with seeded routines', () => {
     // A fresh refreshedAt means opening the view did not refresh.
     expect(hub.routines.calls).toBe(0);
 
-    for (const button of await page.locator('#view-routines button').all()) {
+    for (const button of await page.locator('#routines-overview button').all()) {
       expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);
     }
   });
 
-  test('Refresh posts the control and reads Refreshing… until the refresh finishes', async ({ page, hub }) => {
+  test('/routines lands on the overview, and /agents shows the same page', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/routines`);
+    await expectView(page, 'agents', 'Agents');
+    await expect(page.locator('#routines-overview')).toBeVisible();
+    await expect(page.locator('.routine-card .card-name')).toHaveText(['Focus', 'Second brain', 'CFO']);
+    await expect(page.locator('#agent-panel')).toBeHidden();
+    if (phone(page)) {
+      await expect(page.locator('#agents-list')).toBeHidden();
+      await expect(page.locator('#routines-back')).toHaveText('All agents');
+    } else {
+      await expect(page.locator('#agents-list')).toBeVisible();
+      await expect(page.locator('#routines-back')).toBeHidden();
+    }
+
+    await page.goto(`${hub.origin}/agents`);
+    await expectView(page, 'agents', 'Agents');
+    await expect(page.locator('#agents-list')).toBeVisible();
+    await expect(page.locator('#agents-routines')).toBeVisible({ visible: phone(page) });
+    expect(hub.routines.calls).toBe(0);
+  });
+
+  test('a thread with routines lists them behind a toggle; one without has no toggle', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await expect(page.locator('#agent-name')).toHaveText('Second brain');
+    const toggle = page.locator('#agent-routines-toggle');
+    await expect(toggle).toHaveText('Routines (3)');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#agent-routines')).toBeHidden();
+    await expect(page.locator('#routines-overview')).toBeHidden();
+    expect((await toggle.boundingBox()).height).toBeGreaterThanOrEqual(44);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const section = page.locator('#agent-routines');
+    await expect(section).toBeVisible();
+    await expect(section.locator('.routine-name')).toHaveText(['brain-drain', 'brain-audit', 'brain-refresh']);
+    await expect(section.locator('.badge')).toHaveText(['OK', 'Failed (exit 78)', 'Not loaded']);
+    await expect(section.locator('.routine-run').last()).toHaveText('Never run');
+    await expect(section.locator('.card-name')).toHaveCount(0);
+    await expect(section.getByRole('button')).toHaveCount(0);
+    expect(hub.routines.calls).toBe(0);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(section).toBeHidden();
+
+    await page.goto(`${hub.origin}/?agent=scribe`);
+    await expect(page.locator('#agent-name')).toHaveText('Scribe');
+    await expect(toggle).toBeHidden();
+    await expect(section).toBeHidden();
+  });
+
+  test('the Focus scans keep Pause and Resume under the Focus thread', async ({ page, hub }) => {
+    let answer;
+    const answered = new Promise((resolve) => { answer = resolve; });
+    await page.route('**/api/resume', async (route) => {
+      await answered;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+    await page.goto(`${hub.origin}/?agent=focus`);
+    await page.locator('#agent-routines-toggle').click();
+    const section = page.locator('#agent-routines');
+    await expect(section.locator('.routine-row')).toHaveCount(6);
+    await expect(section.locator('.card-header .badge')).toHaveText('Paused');
+    const button = section.getByRole('button', { name: 'Resume' });
+    await button.click();
+    await expect(button).toBeDisabled();
+    answer();
+    await expect(button).toBeEnabled();
+
+    hub.routines.items = items({ paused: false });
+    await hub.state.refreshRoutines();
+    await expect(section.getByRole('button')).toHaveText(['Pause']);
+    await expect(section.locator('.card-header .badge')).toHaveCount(0);
+  });
+
+  test('Refresh posts the control and reads Refreshing… until the refresh finishes', async ({ page, hub }) => {
+    await openOverview(page, hub);
     const refresh = page.locator('#routines-refresh');
     await expect(refresh).toHaveText('Refresh');
     const release = hub.routines.hold();
@@ -154,7 +241,7 @@ test.describe('with seeded routines', () => {
       await answered;
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     });
-    await page.goto(`${hub.origin}/routines`);
+    await openOverview(page, hub);
     const focus = card(page, 'Focus');
     const button = focus.getByRole('button', { name: 'Resume' });
     await button.click();
@@ -172,7 +259,7 @@ test.describe('with seeded routines', () => {
 
   test('Resume reaches the isolated Focus, whose refusal is reported in the card', async ({ page, hub }) => {
     needsFocus();
-    await page.goto(`${hub.origin}/routines`);
+    await openOverview(page, hub);
     const focus = card(page, 'Focus');
     const response = page.waitForResponse((r) => r.url().endsWith('/api/resume'));
     await focus.getByRole('button', { name: 'Resume' }).click();
@@ -185,7 +272,7 @@ test.describe('with seeded routines', () => {
 
   test('a Resume that gets no answer says Focus did not respond, and a state change clears it', async ({ page, hub }) => {
     await page.route('**/api/resume', (route) => route.abort());
-    await page.goto(`${hub.origin}/routines`);
+    await openOverview(page, hub);
     const focus = card(page, 'Focus');
     await focus.getByRole('button', { name: 'Resume' }).click();
     await expect(focus.locator('.card-error')).toHaveText('Focus did not respond.');
@@ -197,7 +284,7 @@ test.describe('with seeded routines', () => {
   });
 
   test('a failed refresh says so and leaves Refresh available', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/routines`);
+    await openOverview(page, hub);
     await expect(page.locator('.routine-card')).toHaveCount(3);
     hub.routines.fail = true;
     await page.locator('#routines-refresh').click();
@@ -235,14 +322,25 @@ test.describe('with seeded routines', () => {
 test.describe('with stale routines', () => {
   test.use({ hubOptions: seeded({ refreshedAt: ago(5 * MINUTE) }) });
 
-  test('opening the view refreshes once', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/`);
-    await expect(page.locator('#home-routines')).toHaveText('10 routines');
+  test('opening the overview refreshes once', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=scribe`);
+    await expect(page.locator('#agent-name')).toHaveText('Scribe');
+    await page.waitForTimeout(300);
     expect(hub.routines.calls).toBe(0);
-    await nav(page, 'Routines').click();
+    await nav(page, 'Agents').click();
+    if (phone(page)) await page.locator('#agents-routines').click();
     await expect(page.locator('#routines-updated')).toHaveText('Updated just now');
     await page.waitForTimeout(300);
     expect(hub.routines.calls).toBe(1);
+  });
+
+  test('expanding a thread\'s routines refreshes once', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await expect(page.locator('#agent-routines-toggle')).toHaveText('Routines (3)');
+    await page.waitForTimeout(300);
+    expect(hub.routines.calls).toBe(0);
+    await page.locator('#agent-routines-toggle').click();
+    await expect.poll(() => hub.routines.calls).toBe(1);
   });
 });
 
@@ -250,7 +348,7 @@ test.describe('with Focus unreachable during the refresh', () => {
   test.use({ hubOptions: seeded({ focusAvailable: false }) });
 
   test('the Focus card says it is showing launchd status', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/routines`);
+    await openOverview(page, hub);
     await expect(card(page, 'Focus').locator('.card-note')).toHaveText('Focus is not responding; showing launchd status.');
     await expect(card(page, 'Second brain').locator('.card-note')).toHaveCount(0);
   });
@@ -259,8 +357,8 @@ test.describe('with Focus unreachable during the refresh', () => {
 test.describe('with an unreadable registry', () => {
   test.use({ hubOptions: { build: () => ({ ...seeded().build(), registry: { ok: false, error: 'registry_invalid_json' } }) } });
 
-  test('the view says the registry could not be read and keeps the last good cards', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/routines`);
+  test('the overview says the registry could not be read and keeps the last good cards', async ({ page, hub }) => {
+    await openOverview(page, hub);
     const message = page.locator('#routines-message');
     await expect(message).toHaveText('The registry could not be read. registry_invalid_json');
     await expect(message.locator('.routines-code')).toHaveText('registry_invalid_json');
@@ -271,30 +369,32 @@ test.describe('with an unreadable registry', () => {
 test.describe('with no routines registered', () => {
   test.use({ hubOptions: seeded({ items: [] }) });
 
-  test('the view says none are registered', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/routines`);
+  test('the overview says none are registered', async ({ page, hub }) => {
+    await openOverview(page, hub);
     await expect(page.locator('#routines-message')).toHaveText('No routines are registered.');
     await expect(page.locator('.routine-card')).toHaveCount(0);
     await expect(page.locator('#routines-refresh')).toBeEnabled();
   });
 });
 
-test('the nav lists Home, Agents, Routines, Focus, and Daily Brief, and unknown paths show Home', async ({ page, hub }) => {
-  await page.goto(`${hub.origin}/`);
-  await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link'))
-    .toHaveText(['Home', 'Agents', 'Routines', 'Focus', 'Daily Brief']);
-  await expect(page.locator('#view-home .destination-name')).toHaveText(['Agents', 'Routines', 'Focus', 'Daily Brief']);
-  await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
-  await page.locator('#view-home').getByRole('link', { name: /Routines/ }).click();
-  await expect(page).toHaveURL(`${hub.origin}/routines`);
-  await expectView(page, 'routines', 'Routines');
-  // The view opened with nothing refreshed, so it refreshed once.
-  await expect.poll(() => hub.routines.calls).toBe(1);
+test('the nav lists Agents, Focus, and Daily Brief, and unknown paths show Agents', async ({ page, hub }) => {
   await page.goto(`${hub.origin}/goals`);
-  await expectView(page, 'home', 'Home');
+  await expectView(page, 'agents', 'Agents');
+  await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link'))
+    .toHaveText(['Agents', 'Focus', 'Daily Brief']);
+  await expect(page.locator('#agents-message')).toHaveText('No agents are registered.');
+  if (phone(page)) await page.locator('#agents-routines').click();
+  await expect(page.locator('#routines-overview')).toBeVisible();
+  await expect(page.locator('#routines-refresh')).toBeVisible();
+  // The overview opened with nothing refreshed, so it refreshed once.
+  await expect.poll(() => hub.routines.calls).toBe(1);
 });
 
 test.describe('stream client', () => {
+  // Routines already read and none registered, so nothing refreshes on open
+  // and the count starts at zero on every width.
+  test.use({ hubOptions: seeded({ items: [] }) });
+
   function countRequests(page, suffix) {
     const seen = [];
     page.on('request', (r) => {
@@ -303,20 +403,24 @@ test.describe('stream client', () => {
     return seen;
   }
 
-  test('Home follows deltas without refetching the state', async ({ page, hub }) => {
-    await hub.writeBrief(DATE);
+  // The list's Routines row counts the routines on every width; it is
+  // shown only on a phone, so its text, not its visibility, is checked.
+  const count = (page) => page.locator('#agents-routines-count');
+
+  test('the Agents view follows deltas without refetching the state', async ({ page, hub }) => {
     const states = countRequests(page, '/api/state');
     await page.goto(`${hub.origin}/`);
-    await expect(page.locator('#home-brief')).toHaveText(DATE);
-    await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+    await expectView(page, 'agents', 'Agents');
+    await expect.poll(() => hub.state.clientCount()).toBe(1);
+    await settled(page, states);
     const before = states.length;
 
     hub.routines.items = items().slice(0, 1);
     await hub.state.refreshRoutines();
-    await expect(page.locator('#home-routines')).toHaveText('1 routine');
-    await hub.writeBrief('2026-09-16');
-    await hub.state.refreshStatus();
-    await expect(page.locator('#home-brief')).toHaveText('2026-09-16');
+    await expect(count(page)).toHaveText('1 routine');
+    hub.routines.items = items().slice(0, 2);
+    await hub.state.refreshRoutines();
+    await expect(count(page)).toHaveText('2 routines');
     expect(states.length).toBe(before);
   });
 
@@ -352,7 +456,7 @@ test.describe('stream client', () => {
   test('a delta that skips a revision fetches the state once and continues from it', async ({ page, hub }) => {
     const states = countRequests(page, '/api/state');
     await page.goto(`${hub.origin}/`);
-    await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+    await expect(count(page)).toHaveText('0 routines');
     await expect.poll(() => hub.state.clientCount()).toBe(1);
     await settled(page, states);
     const before = states.length;
@@ -363,20 +467,20 @@ test.describe('stream client', () => {
     const snapshot = await (await answered).json();
     expect(snapshot.revision).toBe(current);
     // The gap delta was not applied; the fetched snapshot was.
-    await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+    await expect(count(page)).toHaveText('0 routines');
     expect(states.length).toBe(before + 1);
 
     // The next real delta is revision + 1 of that snapshot and applies directly.
     hub.routines.items = items().slice(0, 1);
     await hub.state.refreshRoutines();
-    await expect(page.locator('#home-routines')).toHaveText('1 routine');
+    await expect(count(page)).toHaveText('1 routine');
     expect(states.length).toBe(before + 1);
   });
 
   test('a delta at or below the current revision is dropped without fetching the state', async ({ page, hub }) => {
     const states = countRequests(page, '/api/state');
     await page.goto(`${hub.origin}/`);
-    await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+    await expect(count(page)).toHaveText('0 routines');
     await expect.poll(() => hub.state.clientCount()).toBe(1);
     await settled(page, states);
     const before = states.length;
@@ -388,7 +492,7 @@ test.describe('stream client', () => {
     // A real change after them shows both were handled, in order.
     hub.routines.items = items().slice(0, 2);
     await hub.state.refreshRoutines();
-    await expect(page.locator('#home-routines')).toHaveText('2 routines');
+    await expect(count(page)).toHaveText('2 routines');
     expect(states.length).toBe(before);
   });
 
@@ -396,7 +500,7 @@ test.describe('stream client', () => {
 
   test('after the server ends the stream, the client reconnects and keeps following', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
-    await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+    await expect(count(page)).toHaveText('0 routines');
     await expect.poll(() => streamStatuses(hub)).toEqual([200]);
 
     hub.restartApp();
@@ -404,7 +508,7 @@ test.describe('stream client', () => {
     await expect(page.locator('#shell-notice')).toBeHidden();
     hub.routines.items = items().slice(0, 2);
     await hub.state.refreshRoutines();
-    await expect(page.locator('#home-routines')).toHaveText('2 routines');
+    await expect(count(page)).toHaveText('2 routines');
   });
 
   test('while new streams are refused the notice shows, and the next snapshot clears it', async ({ page, hub }) => {
@@ -424,7 +528,7 @@ test.describe('stream client', () => {
 
   test('Retry on the notice reconnects at once', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
-    await expect(page.locator('#home-routines')).toHaveText('Not refreshed yet');
+    await expect(count(page)).toHaveText('0 routines');
     hub.stopStreams();
     const notice = page.locator('#shell-notice');
     await expect(notice).toBeVisible();

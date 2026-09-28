@@ -140,47 +140,15 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 .notice button:hover { background: var(--green-dark); }
 
-.home {
-  overflow: auto;
-  padding: 40px 34px;
-}
-
-.destinations {
-  display: grid;
-  gap: 12px;
-  max-width: 520px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.destination {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 18px 20px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--paper);
-  color: var(--ink);
-  text-decoration: none;
-}
-.destination:hover { border-color: #c9d3c5; }
-
-.destination-name {
-  font-family: var(--serif);
-  font-size: 20px;
-}
-
-.destination-meta {
-  color: var(--muted);
-  font-size: 13px;
-}
-.destination-meta:empty { display: none; }
+/* Routines: the overview beside the agents list, and one agent's rows
+   under its thread header. */
 
 .routines {
-  overflow: auto;
+  flex: 1;
+  min-height: 0;
   padding: 40px 34px;
+  overflow: auto;
+  background: var(--bg);
 }
 
 .routines > * {
@@ -242,6 +210,17 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   display: grid;
   gap: 12px;
 }
+
+.thread-routines {
+  max-height: 50%;
+  padding: 4px 24px 12px;
+  overflow: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+/* With no Focus controls above them, the rows start right under the header. */
+.thread-routines-list > .routine-list:first-child { margin-top: 0; }
+.thread-routines-list > .routine-list:first-child > .routine-row:first-child { border-top: 0; }
 
 .routine-card {
   min-width: 0;
@@ -465,6 +444,10 @@ a.agent-row[aria-current="true"] {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.agent-row-preview:empty { display: none; }
+
+/* The overview sits beside the list from 720px; the row is for phones. */
+.agents-routines { display: none; }
 
 .agent-row-state {
   font-size: 13px;
@@ -834,9 +817,14 @@ a.agent-row[aria-current="true"] {
 
   .notice { padding: 8px 14px; }
 
-  .home, .routines { padding: 20px 16px; }
+  .routines { padding: 4px 16px 20px; }
 
   .agents { grid-template-columns: minmax(0, 1fr); }
+
+  .agents-routines {
+    display: flex;
+    margin-bottom: 20px;
+  }
 
   .agents-list {
     padding: 20px 16px;
@@ -853,8 +841,12 @@ a.agent-row[aria-current="true"] {
 
   .thread-header { padding-top: 4px; }
 
+  /* The name and chips take a line; the buttons sit under them. */
+  .thread-title { flex-basis: 100%; }
+
   .thread-header,
   .thread-confirm,
+  .thread-routines,
   .thread-notice,
   .thread-description,
   .thread-messages,

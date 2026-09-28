@@ -1,13 +1,21 @@
-// Agents view: the registry's agents as a list grouped Work and Personal,
-// and one persona's thread beside it. The shell calls create({ requestState,
-// isStreaming }) once, then update(state, keys) on every change (keys is
-// null for a whole snapshot), show() when the view opens, and hide() when it
-// closes or the tab is hidden. The list is rebuilt only while the view is
-// shown; show() renders the latest state.
+// Agents view, the page at `/`: the registry's agents as a list grouped
+// Work and Personal, and beside it either one persona's thread or, with no
+// agent open, the routines overview. The shell calls create({ requestState,
+// isStreaming }, routines) once, then update(state, keys) on every change
+// (keys is null for a whole snapshot), show() when the view opens, and
+// hide() when it closes or the tab is hidden. The list is rebuilt only
+// while the view is shown; show() renders the latest state.
 //
 // The open agent is `?agent=<id>` in the URL, so a reload lands on the same
 // thread and Back and Forward move between threads. Choosing a row pushes
 // that URL; the shell's popstate handler calls show(), which reads it back.
+// On a phone the list comes first and its Routines row opens the overview
+// at `/routines`, a view link the shell handles.
+//
+// `routines` (routines.js) renders the overview into its own pane and one
+// agent's routines under the thread header, behind a "Routines (n)" button
+// that appears only for agents with routines; this view says when each is
+// on screen.
 //
 // The thread is fetched from /api/agents/<id>/thread when a persona opens
 // and again whenever the snapshot shows its last message or its turn
@@ -24,7 +32,7 @@
 
   var GROUPS = [['work', 'Work'], ['personal', 'Personal']];
   var PROVIDERS = { claude: 'Claude', codex: 'Codex' };
-  var WATCHED = ['agents', 'registry'];
+  var WATCHED = ['agents', 'registry', 'routines'];
   var AGENT_ID = /^[a-z][a-z0-9-]{1,31}$/;
   var TICK_MS = 60000;
   var THREAD_TIMEOUT_MS = 8000;
@@ -87,15 +95,12 @@
     return result;
   }
 
-  // What the Home card says under Agents.
-  function summary(state) {
-    var agents = state && state.agents ? state.agents : [];
-    var waiting = agents.filter(function (agent) { return agent.state === 'waiting'; }).map(function (agent) { return agent.name; });
-    if (waiting.length === 1) return waiting[0] + ' is waiting for you';
-    if (waiting.length === 2) return waiting[0] + ' and ' + waiting[1] + ' are waiting for you';
-    if (waiting.length > 2) return waiting.length + ' agents are waiting for you';
-    if (agents.length === 0) return '';
-    return agents.length === 1 ? '1 agent' : agents.length + ' agents';
+  // What the phone's Routines row says once routines have been read.
+  function routinesCount(state) {
+    var routines = state && state.routines;
+    if (!routines || !routines.refreshedAt) return '';
+    var n = (routines.items || []).length;
+    return n === 1 ? '1 routine' : n + ' routines';
   }
 
   // The persona's lastError as a sentence the reader can act on. The
@@ -205,17 +210,19 @@
     return id && AGENT_ID.test(id) ? id : null;
   }
 
-  function create(shell) {
+  function create(shell, routines) {
     var view = document.getElementById('view-agents');
-    var listPane = document.getElementById('agents-list');
     var message = document.getElementById('agents-message');
+    var routinesRowCount = document.getElementById('agents-routines-count');
     var groupsNode = document.getElementById('agents-groups');
-    var pane = document.getElementById('agent-thread');
+    var overview = document.getElementById('routines-overview');
     var empty = document.getElementById('agent-empty');
     var panel = document.getElementById('agent-panel');
     var nameNode = document.getElementById('agent-name');
     var chips = document.getElementById('agent-chips');
     var cost = document.getElementById('agent-cost');
+    var routinesToggle = document.getElementById('agent-routines-toggle');
+    var routinesSection = document.getElementById('agent-routines');
     var newThread = document.getElementById('agent-new-thread');
     var confirmNode = document.getElementById('agent-confirm');
     var confirmText = document.getElementById('agent-confirm-text');
@@ -235,6 +242,9 @@
     var state = null;
     var visible = false;
     var selectedId = null;
+    var overviewOpen = false; // the phone's Routines row was chosen (`/routines`)
+    var routinesOpen = false; // the open agent's routines are expanded
+    var wide = window.matchMedia('(min-width: 720px)');
     var thread = { id: null, messages: null, loading: false, error: false, fresh: true, version: 0 };
     var renderedVersion = -1;
     var threadKey = null; // what the thread was last fetched against
@@ -259,7 +269,7 @@
     function row(agent) {
       var persona = isPersona(agent);
       var node = persona ? element('a', 'agent-row') : element('div', 'agent-row agent-row-plain');
-      if (persona) node.href = '/agents?agent=' + agent.id;
+      if (persona) node.href = '/?agent=' + agent.id;
       node.setAttribute('data-agent', agent.id);
       if (agent.id === selectedId) node.setAttribute('aria-current', 'true');
 
@@ -288,6 +298,7 @@
       else if ((state.agents || []).length === 0) message.textContent = 'No agents are registered.';
       else message.textContent = '';
       message.hidden = !message.textContent;
+      routinesRowCount.textContent = routinesCount(state);
 
       var list = groups(state.agents);
       for (var i = 0; i < list.length; i += 1) {
@@ -452,19 +463,32 @@
       return answers;
     }
 
+    // Whether the overview is on screen: the pane shows it whenever no
+    // agent is open, and on a phone the pane itself shows only once the
+    // Routines row was chosen.
+    function overviewShown() {
+      return visible && !selectedId && (overviewOpen || wide.matches);
+    }
+
     function renderThread() {
       var agent = selectedAgent();
-      view.classList.toggle('agents-open', !!selectedId);
+      view.classList.toggle('agents-open', !!selectedId || overviewOpen);
+      overview.hidden = !!selectedId;
+      if (routines) {
+        if (overviewShown()) routines.show();
+        else routines.hide();
+      }
       if (!selectedId) {
-        empty.textContent = 'Choose an agent.';
-        empty.hidden = false;
+        empty.hidden = true;
         panel.hidden = true;
+        if (routines) routines.unmount();
         return;
       }
       if (!agent) {
         empty.textContent = 'No agent named ' + selectedId + ' is registered.';
         empty.hidden = false;
         panel.hidden = true;
+        if (routines) routines.unmount();
         return;
       }
       empty.hidden = true;
@@ -478,6 +502,17 @@
       cost.textContent = persona && typeof agent.costUsd === 'number' ? '$' + agent.costUsd.toFixed(2) + ' this session' : '';
       description.textContent = persona ? '' : agent.description || '';
       description.hidden = !description.textContent;
+
+      var jobs = routines ? routines.count(agent.id) : 0;
+      var jobsOpen = routinesOpen && jobs > 0;
+      routinesToggle.hidden = jobs === 0;
+      routinesToggle.textContent = 'Routines (' + jobs + ')';
+      routinesToggle.setAttribute('aria-expanded', jobsOpen ? 'true' : 'false');
+      routinesSection.hidden = !jobsOpen;
+      if (routines) {
+        if (jobsOpen && visible) routines.mount(routinesSection, agent.id);
+        else routines.unmount();
+      }
 
       newThread.hidden = !persona;
       newThread.disabled = busy || !persona || agent.state === 'unavailable' || turnOpen(agent);
@@ -572,12 +607,14 @@
       input.value = (id && drafts[id]) || '';
       actionError = '';
       confirming = false;
+      routinesOpen = false;
       resetThread(id);
     }
 
     function select(id, push) {
-      var url = id ? '/agents?agent=' + id : '/agents';
+      var url = id ? '/?agent=' + id : '/';
       if (push && location.pathname + location.search !== url) history.pushState(null, '', url);
+      overviewOpen = false;
       if (id === selectedId) return;
       setSelected(id);
       render();
@@ -716,6 +753,10 @@
         case 'retry-thread':
           syncThread(true);
           break;
+        case 'toggle-routines':
+          routinesOpen = !routinesOpen;
+          renderThread();
+          break;
         default:
           break;
       }
@@ -733,6 +774,11 @@
       }
     });
 
+    // Crossing 720px moves the overview on or off screen.
+    wide.addEventListener('change', function () {
+      if (visible) renderThread();
+    });
+
     return {
       update: function (next, keys) {
         state = next;
@@ -745,6 +791,7 @@
       show: function () {
         visible = true;
         var id = agentFromUrl();
+        overviewOpen = location.pathname === '/routines';
         if (id !== selectedId) setSelected(id);
         if (tick === null) tick = setInterval(function () { refreshTimes(view); }, TICK_MS);
         render();
@@ -754,13 +801,17 @@
         visible = false;
         if (tick !== null) clearInterval(tick);
         tick = null;
+        if (routines) {
+          routines.hide();
+          routines.unmount();
+        }
       },
     };
   }
 
   window.DashboardAgents = {
     create: create,
-    summary: summary,
+    routinesCount: routinesCount,
     groups: groups,
     errorSentence: errorSentence,
     composerReason: composerReason,

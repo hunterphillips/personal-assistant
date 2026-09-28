@@ -10,9 +10,7 @@
   <a class="skip" href="#content">Skip to content</a>
   <div class="shell">
     <nav class="nav" aria-label="Dashboard">
-      <a href="/" data-view="home">Home</a>
-      <a href="/agents" data-view="agents">Agents</a>
-      <a href="/routines" data-view="routines">Routines</a>
+      <a href="/" data-view="agents">Agents</a>
       <a href="/focus" data-view="focus">Focus</a>
       <a href="/brief" data-view="brief">Daily Brief</a>
     </nav>
@@ -22,63 +20,39 @@
         <button type="button" data-action="retry">Retry</button>
       </div>
 
-      <section class="view home" id="view-home" data-view="home" aria-label="Home">
-        <ul class="destinations">
-          <li>
-            <a class="destination" href="/agents">
-              <span class="destination-name">Agents</span>
-              <span class="destination-meta" id="home-agents"></span>
-            </a>
-          </li>
-          <li>
-            <a class="destination" href="/routines">
-              <span class="destination-name">Routines</span>
-              <span class="destination-meta" id="home-routines"></span>
-            </a>
-          </li>
-          <li>
-            <a class="destination" href="/focus">
-              <span class="destination-name">Focus</span>
-              <span class="destination-meta" id="home-focus"></span>
-            </a>
-          </li>
-          <li>
-            <a class="destination" href="/brief">
-              <span class="destination-name">Daily Brief</span>
-              <span class="destination-meta" id="home-brief"></span>
-            </a>
-          </li>
-        </ul>
-      </section>
-
-      <section class="view routines" id="view-routines" data-view="routines" aria-label="Routines" hidden>
-        <div class="routines-header">
-          <div class="routines-title">
-            <h1 class="routines-heading">Routines</h1>
-            <p class="routines-updated" id="routines-updated"></p>
-          </div>
-          <button type="button" class="button" id="routines-refresh">Refresh</button>
-        </div>
-        <p class="routines-message" id="routines-message" hidden></p>
-        <div class="routines-cards" id="routines-cards"></div>
-      </section>
-
-      <section class="view agents" id="view-agents" data-view="agents" aria-label="Agents" hidden>
+      <section class="view agents" id="view-agents" data-view="agents" aria-label="Agents">
         <div class="agents-list" id="agents-list">
           <h1 class="agents-heading">Agents</h1>
           <p class="agents-message" id="agents-message" hidden></p>
+          <a class="agent-row agents-routines" id="agents-routines" href="/routines">
+            <span class="agent-row-head"><span class="agent-row-name">Routines</span></span>
+            <span class="agent-row-preview" id="agents-routines-count"></span>
+          </a>
           <div id="agents-groups"></div>
         </div>
         <div class="agent-thread" id="agent-thread">
-          <p class="thread-empty" id="agent-empty"></p>
+          <section class="routines" id="routines-overview" aria-labelledby="routines-heading">
+            <div class="routines-header">
+              <a class="thread-back" id="routines-back" href="/">All agents</a>
+              <div class="routines-title">
+                <h2 class="routines-heading" id="routines-heading">Routines</h2>
+                <p class="routines-updated" id="routines-updated"></p>
+              </div>
+              <button type="button" class="button" id="routines-refresh">Refresh</button>
+            </div>
+            <p class="routines-message" id="routines-message" hidden></p>
+            <div class="routines-cards" id="routines-cards"></div>
+          </section>
+          <p class="thread-empty" id="agent-empty" hidden></p>
           <div class="thread-panel" id="agent-panel" hidden>
             <div class="thread-header">
-              <a class="thread-back" id="agent-back" href="/agents">All agents</a>
+              <a class="thread-back" id="agent-back" href="/">All agents</a>
               <div class="thread-title">
                 <h2 class="thread-name" id="agent-name"></h2>
                 <span class="thread-chips" id="agent-chips"></span>
                 <span class="thread-cost" id="agent-cost"></span>
               </div>
+              <button type="button" class="button" id="agent-routines-toggle" data-agent-action="toggle-routines" aria-expanded="false" aria-controls="agent-routines" hidden>Routines</button>
               <button type="button" class="button thread-new" id="agent-new-thread" data-agent-action="new-thread">New thread</button>
             </div>
             <div class="thread-confirm" id="agent-confirm" role="group" aria-label="New thread" hidden>
@@ -86,6 +60,7 @@
               <button type="button" class="button button-primary" data-agent-action="confirm-new-thread">Start new thread</button>
               <button type="button" class="button" data-agent-action="cancel-new-thread">Cancel</button>
             </div>
+            <div class="thread-routines" id="agent-routines" hidden></div>
             <p class="thread-description" id="agent-description" hidden></p>
             <p class="thread-notice" id="agent-notice" role="status" hidden></p>
             <div class="thread-messages" id="agent-messages" aria-live="polite"></div>

@@ -24,14 +24,12 @@ test('groups keeps registry order under Work then Personal and drops empty group
   assert.deepEqual(plain(view.groups([])), []);
 });
 
-test('summary names who is waiting, or counts the agents', () => {
-  assert.equal(view.summary(null), '');
-  assert.equal(view.summary({ agents: [] }), '');
-  assert.equal(view.summary({ agents: [persona()] }), '1 agent');
-  assert.equal(view.summary({ agents: [persona(), { id: 'x', kind: 'system', state: null }] }), '2 agents');
-  assert.equal(view.summary({ agents: [persona({ state: 'waiting' })] }), 'CFO is waiting for you');
-  assert.equal(view.summary({ agents: [persona({ state: 'waiting' }), persona({ name: 'Brain', state: 'waiting' })] }), 'CFO and Brain are waiting for you');
-  assert.equal(view.summary({ agents: [1, 2, 3].map((n) => persona({ name: `P${n}`, state: 'waiting' })) }), '3 agents are waiting for you');
+test('routinesCount counts the routines once they have been read', () => {
+  assert.equal(view.routinesCount(null), '');
+  assert.equal(view.routinesCount({ routines: { refreshedAt: null, items: [{}] } }), '');
+  assert.equal(view.routinesCount({ routines: { refreshedAt: '2026-09-28T09:00:00.000Z', items: [] } }), '0 routines');
+  assert.equal(view.routinesCount({ routines: { refreshedAt: '2026-09-28T09:00:00.000Z', items: [{}] } }), '1 routine');
+  assert.equal(view.routinesCount({ routines: { refreshedAt: '2026-09-28T09:00:00.000Z', items: [{}, {}] } }), '2 routines');
 });
 
 test('errorSentence turns each code into a sentence and passes adapter sentences through', () => {

@@ -1,6 +1,8 @@
-// Dashboard shell: switches between Home, Agents, Routines, Focus, and Daily
-// Brief with the History API, creates each child frame the first time its view is
-// shown and keeps it afterwards, and keeps one copy of the server's state.
+// Dashboard shell: switches between Agents, Focus, and Daily Brief with the
+// History API, creates each child frame the first time its view is shown and
+// keeps it afterwards, and keeps one copy of the server's state. Agents is
+// the page at `/`; `/agents` and `/routines` show it too, and any unknown
+// path lands there.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
 // `snapshot` replaces it, `delta` applies a patch when its revision is the
@@ -21,8 +23,8 @@
 (function () {
   'use strict';
 
-  var ROUTES = { '/': 'home', '/agents': 'agents', '/routines': 'routines', '/focus': 'focus', '/brief': 'brief' };
-  var TITLES = { home: 'Home', agents: 'Agents', routines: 'Routines', focus: 'Focus', brief: 'Daily Brief' };
+  var ROUTES = { '/': 'agents', '/agents': 'agents', '/routines': 'agents', '/focus': 'focus', '/brief': 'brief' };
+  var TITLES = { agents: 'Agents', focus: 'Focus', brief: 'Daily Brief' };
   var FALLBACK_POLL_MS = 30000;
   var STATE_TIMEOUT_MS = 5000;
   var BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
@@ -54,12 +56,12 @@
     isStreaming: function () { return streaming; },
   };
   var routines = window.DashboardRoutines ? window.DashboardRoutines.create(shellApi) : null;
-  var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
+  var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi, routines) : null;
 
   function $(id) { return document.getElementById(id); }
 
   function viewFor(pathname) {
-    return Object.prototype.hasOwnProperty.call(ROUTES, pathname) ? ROUTES[pathname] : 'home';
+    return Object.prototype.hasOwnProperty.call(ROUTES, pathname) ? ROUTES[pathname] : 'agents';
   }
 
   function briefUrl(brief) {
@@ -133,25 +135,12 @@
     mountedBrief = { date: brief.date, revision: brief.revision };
   }
 
-  function countLabel(count, one, many) {
-    return count === 1 ? '1 ' + one : count + ' ' + many;
-  }
-
   // `fresh` is true only right after state arrives; frames are created only
   // then.
   function render(fresh) {
     var brief = briefKnown() ? state.brief : null;
 
     $('shell-notice').hidden = !(failures >= 2 && !streaming);
-
-    // Home
-    $('home-focus').textContent = focusDown() ? 'Focus is not responding.' : '';
-    $('home-brief').textContent = !brief ? '' : isReady(brief) ? brief.date : briefSentence(brief);
-    var list = state && state.routines;
-    $('home-routines').textContent = !list ? '' : list.refreshedAt
-      ? countLabel(list.items.length, 'routine', 'routines')
-      : 'Not refreshed yet';
-    $('home-agents').textContent = agents && state ? window.DashboardAgents.summary(state) : '';
 
     // Focus: mount once it answers; afterwards keep the frame and only report.
     if (fresh && current === 'focus' && !frames.focus && focusAvailable()) mountFocus();
@@ -341,10 +330,7 @@
       else links[j].removeAttribute('aria-current');
     }
     document.title = TITLES[view] + ' · Dashboard';
-    if (routines) {
-      if (view === 'routines') routines.show();
-      else routines.hide();
-    }
+    // The Agents view shows and hides the routines it holds.
     if (agents) {
       if (view === 'agents') agents.show();
       else agents.hide();
@@ -372,7 +358,7 @@
     if (!Object.prototype.hasOwnProperty.call(ROUTES, url.pathname)) return;
     event.preventDefault();
     // A view link drops any query, so Agents from an open thread returns
-    // to the list.
+    // to the list; the routines row and its way back are view links too.
     if (url.pathname !== location.pathname || location.search) history.pushState(null, '', url.pathname);
     show(viewFor(url.pathname));
   });
@@ -384,11 +370,9 @@
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
       disconnect();
-      if (routines) routines.hide();
       if (agents) agents.hide();
     } else {
       connect();
-      if (routines && current === 'routines') routines.show();
       if (agents && current === 'agents') agents.show();
     }
   });
