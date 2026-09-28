@@ -97,7 +97,10 @@ snapshot; concurrent requests share one check. It stays for one release.
                  "cwd": "/Users/hunter/workspace/x", "title": "Fix the flaky test", "state": "waiting",
                  "pending": { "requestId": "2", "kind": "question", "toolName": "requestUserInput", "input": { "...": "..." }, "truncated": false },
                  "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" }, "lastError": null, "updatedAt": "<ISO>",
-                 "binding": { "workspaceId": "...", "surfaceId": "..." } }],
+                 "binding": { "workspaceId": "...", "surfaceId": "...", "live": true } },
+               { "id": "claude:a9d25355-6056-4302-9146-5d905cb8cec5", "provider": "claude", "kind": "terminal",
+                 "cwd": "/Users/hunter/workspace/y", "state": "busy", "updatedAt": "<ISO>",
+                 "binding": { "workspaceId": "...", "surfaceId": "...", "live": true } }],
   "codex": { "available": true },
   "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] } }
 ```
@@ -544,8 +547,9 @@ Claude persona adapter is described under Personas above.
 ### cmux
 
 `lib/runtime/cmux.mjs` lists the terminals open in cmux and the agent
-sessions cmux has registered, and focuses one exact terminal. It is a
-library with tests; the hub does not call it yet.
+sessions cmux has registered, and focuses one exact terminal. The hub
+reads its inventory into `sessions` and `cmux` (see Sessions in the
+snapshot) and the `open-terminal` route calls its focus.
 
 cmux only admits processes it started itself unless its socket mode is
 changed, so the daemon needs one setting made once: in
@@ -619,8 +623,11 @@ reasons are the inventory's.
 
 There is no push yet. cmux advertises `events.stream`, but the spike
 recorded the CLI's view of it, not the socket request or how event frames
-share a connection with replies. `refresh()` is the call a poll would make;
-the hub does not poll yet.
+share a connection with replies. `refresh()` is the call the hub's
+`refreshSessions()` makes: the event stream calls it once when its first
+stream opens and every `TIMEOUTS.sessionsPollMs` (10 seconds) while any
+stream is open, and `POST /api/sessions/refresh` calls it on demand.
+Nothing polls while no browser has the dashboard open.
 
 The module never starts cmux, never creates, closes, or moves a surface,
 never sends text or keys, never focuses a surface it did not just see in
@@ -731,35 +738,80 @@ answering it here is refused as `not_supported`.
 
 ### Sessions in the snapshot
 
-Each entry in `sessions` carries `id` (`codex:<threadId>`), `provider`,
+`sessions` lists two kinds of row, newest first by `updatedAt`.
+
+A Codex thread carries `id` (`codex:<threadId>`), `provider` `codex`,
 `threadId`, `cwd`, `title` (the thread's name, else the first line of its
 preview, `Untitled thread` until the first resume), `state` (`idle`,
 `busy` while a turn runs, `waiting` on a question or approval, `error`
 after a failed turn, `unavailable` while the connection is down), `pending` in the same
 form as a persona's plus `native` when only the terminal can answer,
 `lastMessage` cut to 200 characters, `lastError`, `updatedAt`, and
-`binding` (`{ workspaceId, surfaceId }` from `bindings.json`, or null).
-Entries are newest first. The list and `codex` are rebuilt on every
-adapter event and every bindings change, and a new revision is committed
-only when something differs.
+`binding`: the `{ workspaceId, surfaceId }` that `bin/codex-new` recorded
+in `bindings.json`, plus `live`, true only while that exact surface is in
+the last cmux inventory; null when nothing was recorded.
+
+A Claude terminal, one cmux agent record whose `agent` is `claude`, carries
+`id` (`claude:<cmux session id>`), `provider` `claude`, `kind` `terminal`,
+`cwd` and `updatedAt` as cmux reports them, `state` (`busy` for cmux's
+`running`, which is also an empty prompt, `idle` for `idle`, else
+`unknown`), and a `binding` that is always present, its `live` false once
+the terminal has closed. Terminal rows have no adapter: the dashboard
+cannot answer, interrupt, or read them, only open their terminal. Codex
+agent records in the cmux listing are ignored; the Codex adapter is the
+source for those threads.
+
+`cmux` beside `codex` says whether the inventory could be read:
+`{ "available": true }` (with `"stale": true` while the client serves its
+last good answer after a transient failure), or `{ "available": false,
+"reason" }` with the client's reason (`not_running`, `no_password`,
+`auth_failed`, `error`), `not_refreshed` before the first refresh, or
+`no_client`.
+
+The list, `codex`, and `cmux` are rebuilt on every adapter event, every
+bindings change, and every `refreshSessions()`, which refreshes the cmux
+inventory and the Codex catalogue in parallel (single-flight). A new
+revision is committed only when something differs. The inventory is
+refreshed when the first event stream opens, every 10 seconds while any
+stream is open, and on `POST /api/sessions/refresh`; without an open
+stream the last inventory stands, so `binding.live` may be out of date
+until a stream opens again. A refresh that throws is logged as
+`sessions_refresh_error`.
 
 ### Session routes
 
-Each route names the session by its id, which must match `codex:<threadId>`;
-an id not in `sessions` is 404 `no_such_session`. POSTs follow the usual
-rules: exact `Origin`, JSON for `answer`, no body for `interrupt`.
+Each route names the session by its id, `codex:<threadId>` or
+`claude:<cmux session id>`; an id not in `sessions` is 404
+`no_such_session`. POSTs follow the usual rules: exact `Origin`, JSON for
+`answer`, no body for `interrupt`, `open-terminal`, and
+`/api/sessions/refresh`.
 
 | Route | Success | Refusals |
 | --- | --- | --- |
-| `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 409 `no_such_request`, 409 `not_supported` (answer it in the terminal) |
-| `POST interrupt` | 200 `{"ok": true}` | |
-| `GET thread` | 200 `{"messages": [...]}` | 503 `unavailable` (no connection) |
+| `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 409 `no_such_request`, 409 `not_supported` (answer it in the terminal, or a terminal row) |
+| `POST interrupt` | 200 `{"ok": true}` | 409 `not_supported` (a terminal row) |
+| `GET thread` | 200 `{"messages": [...]}` | 503 `unavailable` (no connection), 409 `not_supported` (a terminal row) |
+| `POST open-terminal` | 200 `{"ok": true, "verified"}` | 409 `unbound`, 503 `cmux_unavailable` (with `reason`), 409 `terminal_closed`, 502 `focus_failed` (with `reason`) |
+| `POST /api/sessions/refresh` | 200 `{"ok": true, "revision"}` | |
 
 `answers` maps a question's id (or its text) to a string or a list of
 strings; `decision` is `allow` or `deny`. `thread` reads the user and
 assistant messages of the last 20 turns from the app-server each time;
 nothing is cached to disk. There is no `send` and no `new-thread` for a
 session.
+
+`open-terminal` focuses the cmux surface in the row's `binding` and
+nothing else: it refuses `unbound` when the row has no recorded terminal,
+`cmux_unavailable` (with the snapshot's `cmux.reason`) while the inventory
+cannot be read, and `terminal_closed` when the bound surface was not in
+the last inventory; otherwise it asks the client to focus that exact
+workspace and surface, which lists the workspace again first, and answers
+`verified` true when cmux reports that surface focused afterwards, or
+`focus_failed` with the client's reason (`not_found`, `not_running`,
+`no_password`, `auth_failed`, `error`). No route ever picks a terminal by
+its working directory. `POST /api/sessions/refresh` refreshes the cmux
+inventory and the Codex catalogue now and answers the revision after
+that, as `/api/routines/refresh` does for routines.
 
 ### Logs
 
@@ -848,14 +900,16 @@ bodyless Focus controls. Focus request bodies are capped at
 as the limit is crossed, with `Connection: close`; the server then discards at
 most 2 MiB more of the upload, for at most 2 seconds, before cutting the
 connection. The event stream limits (`LIMITS.eventStreams`, 8;
-`TIMEOUTS.heartbeatMs`, 25 seconds; `TIMEOUTS.statusPollMs`, 30 seconds) are
+`TIMEOUTS.heartbeatMs`, 25 seconds; `TIMEOUTS.statusPollMs`, 30 seconds;
+`TIMEOUTS.sessionsPollMs`, 10 seconds) are
 constants in `lib/config.mjs`, not environment variables. Logs record method, route, status, and duration; a response that
 never completed is logged with status 0. They also carry the persona events:
 `persona_init`, `persona_usage`, `persona_turn_error` (with bounded error
 text and, for a failure before init, the CLI's last 2 KiB of stderr),
 `persona_api_key_refused`, `persona_start_error`, `persona_interrupt`,
 `persona_turn_aborted`, `persona_turn_timeout`, and `thread_resume_failed`,
-the Codex events listed under Codex sessions, and the cmux events
+the Codex events listed under Codex sessions, the hub's
+`sessions_refresh_error` (an error code), and the cmux events
 `cmux_auth_failed`, `cmux_inventory_error`, `cmux_frame_too_large`,
 `cmux_surface_list_shape`, `cmux_record_skipped`, `cmux_cli_missing`, and
 `cmux_focus` (workspace and surface ids with the outcome).
