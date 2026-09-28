@@ -201,6 +201,13 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   margin: 0 0 16px;
 }
 
+/* What is off: the Codex server, cmux. Nothing while both answer. */
+.availability {
+  margin-bottom: 16px;
+  color: var(--amber);
+}
+.availability p { margin: 0; }
+
 .routines-code {
   color: var(--muted);
   font-size: 13px;
@@ -409,6 +416,10 @@ a.agent-row[aria-current="true"] {
 }
 .agent-row-plain { color: var(--ink); }
 
+/* A coding session under its project row. */
+.agent-row-session { padding-left: 28px; }
+.agent-group-other .agent-row-session { padding-left: 12px; }
+
 .agent-row-head {
   display: flex;
   flex-wrap: wrap;
@@ -524,6 +535,14 @@ a.agent-row[aria-current="true"] {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* Why Open terminal is off, or why it was refused: a line under the buttons. */
+.thread-terminal-reason {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .thread-confirm {
@@ -730,6 +749,27 @@ a.agent-row[aria-current="true"] {
   font-size: 13px;
 }
 
+/* An approval's command, folder, files, or permissions. */
+.request-details {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.request-detail { margin: 0; }
+.request-detail-label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.request-detail .request-input { margin: 4px 0 0; }
+.request-detail ul {
+  margin: 0;
+  padding-left: 1.2em;
+  overflow-wrap: anywhere;
+}
+.request-detail-text { overflow-wrap: anywhere; }
+
 .request-actions {
   display: flex;
   flex-wrap: wrap;
@@ -775,13 +815,27 @@ a.agent-row[aria-current="true"] {
 }
 .composer-input:disabled { background: var(--bg); color: var(--muted); }
 
-.composer-reason,
-.composer-failure {
+.composer-reason {
   margin: 6px 0 0;
+  color: var(--muted);
   font-size: 13px;
 }
-.composer-reason { color: var(--muted); }
-.composer-failure { color: var(--red); }
+
+/* Under a session's messages, where a persona has its composer. */
+.thread-foot {
+  margin: 0;
+  padding: 12px 24px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+
+.thread-failure {
+  margin: 0;
+  padding: 0 24px 12px;
+  color: var(--red);
+  font-size: 13px;
+}
 
 @media (min-width: 720px) {
   .routine-row {
@@ -852,7 +906,9 @@ a.agent-row[aria-current="true"] {
   .thread-messages,
   .thread-status,
   .thread-request,
-  .composer {
+  .composer,
+  .thread-foot,
+  .thread-failure {
     padding-left: 16px;
     padding-right: 16px;
   }
