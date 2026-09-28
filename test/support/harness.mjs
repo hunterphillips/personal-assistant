@@ -97,10 +97,10 @@ export function fakeBindings(initial = new Map()) {
 // routines unless real ones are passed, and no persona adapters unless given.
 export function createTestHub({
   config, focus, brief, registry = fakeRegistry(), routines = fakeRoutines(), adapters = {}, store = null, bindings = null,
-  cmux = null, log = () => {},
+  cmux = null, home = '/invented', log = () => {},
 }) {
   return createHub({
-    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, log,
+    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, home, log,
   });
 }
 

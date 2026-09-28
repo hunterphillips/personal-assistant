@@ -107,19 +107,68 @@ test('the snapshot lists sessions with bindings, projected requests, and preview
   const { sessions } = app.hub.snapshot();
   assert.deepEqual(sessions, [
     {
-      id: 'codex:t1', provider: 'codex', threadId: 't1', cwd: '/invented/work', title: 'Thread t1', state: 'waiting',
+      id: 'codex:t1', provider: 'codex', threadId: 't1', cwd: '/invented/work', projectId: null, title: 'Thread t1', state: 'waiting',
       pending: { requestId: '0', kind: 'question', toolName: 'requestUserInput', input: QUESTION_INPUT, truncated: false },
       lastMessage: { role: 'assistant', text: 'x'.repeat(200), at: AT }, lastError: null, updatedAt: AT,
       binding: { workspaceId: 'ws-1', surfaceId: 'sf-1', live: false },
     },
     {
-      id: 'codex:t2', provider: 'codex', threadId: 't2', cwd: '/invented/work', title: 'Thread t2', state: 'idle',
+      id: 'codex:t2', provider: 'codex', threadId: 't2', cwd: '/invented/work', projectId: null, title: 'Thread t2', state: 'idle',
       pending: null, lastMessage: null, lastError: null, updatedAt: '2026-09-28T11:00:00.000Z', binding: null,
     },
   ]);
   assert.ok(Object.isFrozen(sessions[0]) && Object.isFrozen(sessions[0].pending));
   const state = await request(app, 'GET', '/api/state');
   assert.deepEqual(state.json.sessions.map((s) => s.id), ['codex:t1', 'codex:t2']);
+});
+
+// A registry held in memory that can be replaced, as an edited file would be.
+function editableRegistry(agents) {
+  const listeners = new Set();
+  const build = (list) => Object.freeze({ ok: true, agents: list, error: null, loadedAt: AT, path: '/invented/agents.json' });
+  let current = build(agents);
+  return {
+    current: () => current,
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    set(list) {
+      current = build(list);
+      for (const fn of listeners) fn(current);
+    },
+    start: async () => current,
+    stop() {},
+  };
+}
+
+const project = (id, cwd) => ({ id, name: id, role: 'Code', description: 'Invented.', group: 'work', kind: 'project', cwd, routines: [] });
+
+test('each session names the deepest registry project holding its cwd, and the snapshot carries the home directory', async (t) => {
+  const registry = editableRegistry([project('work', '/invented/work'), project('deep', '/invented/work/deep/'), { ...project('cfo', '/invented/work/deep'), kind: 'persona', provider: 'claude' }]);
+  const adapter = fakeCodexAdapter([
+    session('t1', { cwd: '/invented/work' }),
+    session('t2', { cwd: '/invented/work/deep/inner' }),
+    session('t3', { cwd: '/invented/workshop' }),
+    session('t4', { cwd: null }),
+  ]);
+  const cmux = fakeCmux(inventory({ agents: [{ sessionId: CLAUDE_IDLE, agent: 'claude', state: 'idle', cwd: '/invented/work/deep', workspaceId: WS, surfaceId: SF_OPEN, startedAt: AT, updatedAt: AT, live: true }] }));
+  const app = await startApp(t, { ...status, registry, adapters: { codex: adapter }, cmux });
+  await app.hub.refreshSessions();
+  const byId = (list) => Object.fromEntries(list.map((s) => [s.id, s.projectId]));
+  assert.deepEqual(byId(app.hub.snapshot().sessions), {
+    'codex:t1': 'work', 'codex:t2': 'deep', 'codex:t3': null, 'codex:t4': null, [`claude:${CLAUDE_IDLE}`]: 'deep',
+  });
+  assert.equal(app.hub.snapshot().home, '/invented');
+
+  // Dropping a project from the registry moves its sessions to the parent.
+  const deltas = [];
+  app.hub.subscribe((delta) => deltas.push(delta));
+  registry.set([project('work', '/invented/work')]);
+  assert.ok(deltas.some((delta) => 'sessions' in delta.patch));
+  assert.deepEqual(byId(app.hub.snapshot().sessions), {
+    'codex:t1': 'work', 'codex:t2': 'work', 'codex:t3': null, 'codex:t4': null, [`claude:${CLAUDE_IDLE}`]: 'work',
+  });
 });
 
 test('adapter events and binding changes rebuild sessions and bump only when they differ', async (t) => {
@@ -177,12 +226,12 @@ test('sessions are the union of Codex threads and cmux Claude terminals, newest 
   assert.deepEqual(sessions[1].binding, { workspaceId: WS, surfaceId: SF_OPEN.toLowerCase(), live: true });
   assert.deepEqual(sessions[3].binding, { workspaceId: WS, surfaceId: SF_GONE, live: false });
   assert.deepEqual(sessions[0], {
-    id: `claude:${CLAUDE_IDLE}`, provider: 'claude', kind: 'terminal', cwd: '/invented/claude', state: 'idle',
+    id: `claude:${CLAUDE_IDLE}`, provider: 'claude', kind: 'terminal', cwd: '/invented/claude', projectId: null, state: 'idle',
     updatedAt: '2026-09-28T13:00:00.000Z', binding: { workspaceId: WS, surfaceId: SF_OPEN, live: true },
   });
   assert.deepEqual([sessions[2].state, sessions[2].binding.live], ['busy', true]);
   assert.deepEqual(sessions[4], {
-    id: `claude:${CLAUDE_GONE}`, provider: 'claude', kind: 'terminal', cwd: null, state: 'unknown', updatedAt: null,
+    id: `claude:${CLAUDE_GONE}`, provider: 'claude', kind: 'terminal', cwd: null, projectId: null, state: 'unknown', updatedAt: null,
     binding: { workspaceId: WS, surfaceId: SF_GONE, live: false },
   });
   assert.ok(sessions.every((s) => s.provider !== 'codex' || !('kind' in s)), 'Codex rows keep their shape');
