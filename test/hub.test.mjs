@@ -74,6 +74,7 @@ function makeHub(overrides = {}) {
     limits: { requestInputBytes: 64, previewChars: 10 },
     adapters: overrides.adapters ?? {},
     store: overrides.store ?? null,
+    cmux: overrides.cmux ?? null,
     adaptersDisabled: overrides.adaptersDisabled ?? null,
     log: (entry) => logs.push(entry),
     now: () => new Date('2026-09-25T12:00:00.000Z'),
@@ -478,6 +479,58 @@ test('a turn over the wall clock is interrupted, logged, and marked turn_timeout
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.equal(adapter.calls.filter((call) => call[0] === 'interrupt').length, 1);
   hub.close();
+});
+
+test('without a cmux client the snapshot says so and refreshSessions still polls the Codex adapter', async () => {
+  let refreshes = 0;
+  const codex = {
+    kind: 'codex', sessions: () => [], status: () => ({ available: true }), subscribe: () => () => {},
+    start: () => Promise.reject(new RuntimeError('not_supported')), state: () => ({}), close: async () => {},
+    refresh: async () => { refreshes += 1; },
+  };
+  const { hub, deltas } = makeHub({ adapters: { codex } });
+  assert.deepEqual(hub.snapshot().cmux, { available: false, reason: 'no_client' });
+  await hub.refreshSessions();
+  assert.equal(refreshes, 1);
+  assert.deepEqual(deltas, []);
+});
+
+test('refreshSessions is single-flight, commits only what differs, and logs a refresh that throws', async () => {
+  const gate = deferred();
+  let inventory = null;
+  let refreshes = 0;
+  const cmux = {
+    current: () => inventory,
+    async refresh() {
+      refreshes += 1;
+      await gate.promise;
+      if (inventory === 'boom') throw Object.assign(new Error('boom'), { code: 'invented' });
+      return inventory;
+    },
+    close() {},
+  };
+  const { hub, deltas, logs } = makeHub({ cmux });
+  assert.deepEqual(hub.snapshot().cmux, { available: false, reason: 'not_refreshed' });
+
+  inventory = { available: false, reason: 'not_running', stale: false, workspaces: [], surfaces: [], agents: [] };
+  const first = hub.refreshSessions();
+  const second = hub.refreshSessions();
+  gate.resolve();
+  await Promise.all([first, second]);
+  assert.equal(refreshes, 1);
+  assert.deepEqual(deltas.map((d) => d.patch), [{ cmux: { available: false, reason: 'not_running' } }]);
+
+  await hub.refreshSessions();
+  assert.equal(deltas.length, 1, 'an unchanged inventory bumps nothing');
+
+  inventory = { available: true, stale: true, workspaces: [], surfaces: [], agents: [] };
+  await hub.refreshSessions();
+  assert.deepEqual(deltas.at(-1).patch, { cmux: { available: true, stale: true } });
+
+  inventory = 'boom';
+  await hub.refreshSessions();
+  assert.ok(logs.some((entry) => entry.event === 'sessions_refresh_error' && entry.error === 'invented'));
+  assert.equal(hub.snapshot().cmux.available, false);
 });
 
 test('close clears turn clocks and unsubscribes from the adapters without closing them', async () => {

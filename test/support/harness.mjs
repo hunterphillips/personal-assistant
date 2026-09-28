@@ -97,11 +97,41 @@ export function fakeBindings(initial = new Map()) {
 // routines unless real ones are passed, and no persona adapters unless given.
 export function createTestHub({
   config, focus, brief, registry = fakeRegistry(), routines = fakeRoutines(), adapters = {}, store = null, bindings = null,
-  log = () => {},
+  cmux = null, log = () => {},
 }) {
   return createHub({
-    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, log,
+    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, log,
   });
+}
+
+// A cmux client that never touches a socket: `inventory` is what the next
+// refresh() answers (set() replaces it), current() is the last refreshed
+// answer (null until the first refresh, as the real client's), `refreshes`
+// counts refresh calls, `focusCalls` records focus arguments, and
+// `focusResult` is what focus() answers.
+export function fakeCmux(inventory = null) {
+  const fake = {
+    inventory,
+    last: null,
+    refreshes: 0,
+    focusCalls: [],
+    focusResult: { ok: true, verified: true },
+    current: () => fake.last,
+    async refresh() {
+      fake.refreshes += 1;
+      fake.last = fake.inventory;
+      return fake.last;
+    },
+    async focus(target) {
+      fake.focusCalls.push(target);
+      return fake.focusResult;
+    },
+    set(next) {
+      fake.inventory = next;
+    },
+    close() {},
+  };
+  return fake;
 }
 
 // Starts the app on an ephemeral port. `focus` and `brief` default to the
@@ -110,7 +140,7 @@ export function createTestHub({
 // `adapters` and `store` fakes (default none), started before the app
 // listens. `configure` may adjust config.
 export async function startApp(t, {
-  env = {}, focus, brief, registry, routines, hub, adapters, store, bindings, configure = (c) => c,
+  env = {}, focus, brief, registry, routines, hub, adapters, store, bindings, cmux = null, configure = (c) => c,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
@@ -128,10 +158,10 @@ export async function startApp(t, {
   const briefRoutes = brief ?? createBriefRoutes(config);
   const routinesModule = routines ?? fakeRoutines();
   const stateHub = hub ?? createTestHub({
-    config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, adapters, store, bindings, log,
+    config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, adapters, store, bindings, cmux, log,
   });
   if (!hub) await stateHub.start();
-  const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, log });
+  const handler = createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, log });
   server.on('request', handler);
   t.after(() => {
     handler.closeStreams();
