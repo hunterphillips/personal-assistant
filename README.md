@@ -1,16 +1,17 @@
 # Dashboard app
 
-A local Node server that will become the single private entry point for Focus
-and the Daily Brief. It listens on `127.0.0.1:4243`; Tailscale serves it to the
-tailnet over HTTPS. The page is a shell with a rail of four views. Home is the
-Agents view at `/`, with the routines beside it; Reading is the Daily Brief;
-Focus and Goals are their own views. Focus runs in an iframe through a proxy
-to its own server. Briefs are read from `daily-brief/briefs/`, and feedback is
-saved beside them.
+The assistant daemon and the tailnet-only hub it serves. A local Node server
+on `127.0.0.1:4243`; Tailscale serves it to the tailnet over HTTPS. The page
+is a shell with a rail of four views. Home is the Agents view at `/`, with
+the routines beside it; Reading is the Daily Brief; Focus and Goals are their
+own views. Personas run on the Claude Agent SDK, Codex threads are observed
+on a shared app-server, and cmux terminals are listed with their state.
+Focus runs in an iframe through a proxy to its own server. Briefs are read
+from `daily-brief/briefs/`, and feedback is saved beside them.
 
 The plan is
-`thoughts/shared/plans/2026-09-22-dashboard-integrated-hub-implementation.md`
-in the umbrella directory.
+`thoughts/shared/plans/2026-09-25-dashboard-assistant-daemon-implementation.md`
+in the umbrella directory; Phases 1 to 3 shipped by 2026-09-28.
 
 ## Status
 
