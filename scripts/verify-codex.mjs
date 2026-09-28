@@ -1,15 +1,25 @@
-// npm run verify:codex -- --yes [--model NAME]
+// npm run verify:codex -- --yes [--model NAME] [--record FILE]
 //
 // Live check of the Codex adapter against the installed Codex CLI: starts a
 // disposable `codex app-server` on a socket under a short temporary
 // directory, points a Codex adapter at it through a temporary owner file,
-// creates one thread in an empty temporary directory, asks the model one
-// question through request_user_input, answers it through the adapter,
+// creates one thread in an empty temporary directory from a second client
+// (as bin/codex-new does), waits for the adapter to list it, asks the model
+// one question through request_user_input, answers it through the adapter,
 // confirms the resolution and the finished turn, archives the thread, stops
 // the server, and prints the versions. It runs one short model turn, which
 // bills the Codex subscription, so it refuses without --yes. It never
 // touches var/codex or the dashboard's own server, and it leaves nothing
 // behind but the archived thread in ~/.codex/sessions.
+//
+// The thread is started after the adapter has connected, so the run also
+// says how the adapter came to list it: through a `thread/started`
+// notification, through its `thread/loaded/list` poll, or both, and on how
+// many connections. The fresh thread has no rollout until its first turn,
+// so the adapter's first resume fails and is retried; the run shows the
+// question arriving through that retry. --record FILE writes the versions,
+// that answer, and every frame on the adapter's connections as JSON, also
+// when a step fails.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -29,6 +39,7 @@ const STEP_TIMEOUT_MS = 120_000;
 async function main() {
   const args = process.argv.slice(2);
   const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : null;
+  const record = args.includes('--record') ? args[args.indexOf('--record') + 1] : null;
   if (!args.includes('--yes')) {
     console.error('verify-codex: this runs one short model turn on your Codex subscription. Re-run with --yes to go ahead.');
     process.exitCode = 1;
@@ -44,18 +55,31 @@ async function main() {
   await mkdir(work);
   const ownerFile = path.join(root, 'owner.json');
 
+  // Its own process group, so the native binary under the npm wrapper can
+  // be killed too if SIGTERM does not end it (it did not while a turn was
+  // waiting on a question that nobody answered).
   const server = spawn('codex', [
     'app-server', '--listen', `unix://${socket}`,
     '-c', 'features.default_mode_request_user_input=true',
     '-c', 'features.request_permissions_tool=true',
-  ], { cwd: work, stdio: ['ignore', 'ignore', 'inherit'] });
+  ], { cwd: work, stdio: ['ignore', 'ignore', 'inherit'], detached: true });
   const stopServer = () => new Promise((resolve) => {
-    if (server.exitCode !== null) return resolve();
-    server.once('exit', resolve);
+    if (server.exitCode !== null || server.signalCode !== null) return resolve();
+    const hammer = setTimeout(() => {
+      console.log('verify-codex: app-server ignored SIGTERM for 5 seconds; killing its process group');
+      try { process.kill(-server.pid, 'SIGKILL'); } catch { /* already gone */ }
+    }, 5_000);
+    server.once('exit', () => {
+      clearTimeout(hammer);
+      resolve();
+    });
     server.kill('SIGTERM');
   });
   let adapter = null;
   let client = null;
+  const frames = []; // every frame on the adapter's connections, in order
+  const outcome = { at: new Date().toISOString(), node: process.version, ws: wsVersion(), codex: codexVersion };
+  let connections = 0;
   try {
     await writeFile(ownerFile, JSON.stringify({ socket, pid: server.pid, startedAt: new Date().toISOString(), codexVersion }));
     client = await connect(socket);
@@ -63,8 +87,12 @@ async function main() {
 
     const events = [];
     adapter = createCodexAdapter({
-      ownerFile, timeouts: { ...TIMEOUTS, codexPollMs: 500 }, limits: LIMITS,
+      ownerFile, timeouts: { ...TIMEOUTS, codexPollMs: 500, codexReconnectMaxMs: 2_000 }, limits: LIMITS,
       log: (entry) => { if (/error|dropped|invalid/.test(entry.event)) console.log(`verify-codex: log ${JSON.stringify(entry)}`); },
+      connect: (socketPath) => {
+        connections += 1;
+        return recorded(new WebSocket(`ws+unix://${socketPath}:/`, { perMessageDeflate: false }), connections, frames);
+      },
     });
     adapter.subscribe((event) => events.push(event));
     await until(() => events.some((event) => event.type === 'sessions'), 'adapter connection');
@@ -73,8 +101,14 @@ async function main() {
       cwd: work, sandbox: 'read-only', approvalPolicy: 'on-request', approvalsReviewer: 'user', ...(model ? { model } : {}),
     });
     const threadId = started.thread.id;
+    Object.assign(outcome, { threadId, model: started.model });
     console.log(`verify-codex: thread ${threadId} (${started.model})`);
     await until(() => adapter.sessions().some((session) => session.threadId === threadId), 'thread listed');
+    outcome.adoption = adoptionOf(frames, threadId, connections);
+    outcome.connections = connections;
+    console.log(`verify-codex: listed on connection ${connections} of ${connections}; ` +
+      `thread/started ${outcome.adoption.threadStarted ? 'arrived' : 'did not arrive'}, ` +
+      `thread/loaded/list ${outcome.adoption.loadedList ? 'returned it' : 'was not asked or did not return it'}`);
 
     await client.request('turn/start', { threadId, input: [{ type: 'text', text: PROMPT }] });
     const request = await until(() => events.find((event) => event.type === 'request' && event.agentId === `codex:${threadId}`), 'question');
@@ -83,20 +117,64 @@ async function main() {
     console.log(`verify-codex: question ${JSON.stringify(question.id)} received (request ${request.requestId})`);
     await adapter.answer(`codex:${threadId}`, request.requestId, { answers: { [question.id]: 'Blue' } });
     await until(() => events.some((event) => event.type === 'resolved' && event.requestId === request.requestId), 'resolved');
+    outcome.resumes = frames.filter((f) => f.direction === 'out' && f.message.method === 'thread/resume' && f.message.params?.threadId === threadId).length;
+    console.log(`verify-codex: the thread was resumed ${outcome.resumes} time(s) before the question arrived`);
     const completed = await client.waitFor((message) => message.method === 'turn/completed' && message.params?.threadId === threadId, 'turn/completed');
     const text = completed.params.turn.items.find((item) => item.type === 'agentMessage')?.text ?? '';
     console.log(`verify-codex: turn ${completed.params.turn.status}; final message ${JSON.stringify(text)}`);
     if (!/COLOUR=Blue/.test(text)) console.log('verify-codex: the model did not echo the answer; the transport still worked');
     await until(() => adapter.sessions().find((session) => session.threadId === threadId)?.state === 'idle', 'idle');
     await client.request('thread/archive', { threadId });
+    outcome.ok = true;
     console.log('verify-codex: thread archived');
+  } catch (error) {
+    outcome.ok = false;
+    outcome.error = error.message;
+    throw error;
   } finally {
     client?.close();
     await adapter?.close();
     await stopServer();
     await rm(root, { recursive: true, force: true });
+    if (record) {
+      await writeFile(record, `${JSON.stringify({ ...outcome, frames }, null, 2)}\n`);
+      console.log(`verify-codex: frames written to ${record}`);
+    }
   }
   console.log('verify-codex: ok');
+}
+
+// Wraps one adapter socket so every inbound and outbound frame lands in
+// `frames` as { connection, direction, at, message } (raw text when it is
+// not JSON).
+function recorded(ws, connection, frames) {
+  const push = (direction, data) => {
+    const text = typeof data === 'string' ? data : data.toString('utf8');
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      message = { raw: text };
+    }
+    frames.push({ connection, direction, at: new Date().toISOString(), message });
+  };
+  ws.on('message', (data) => push('in', data));
+  const send = ws.send.bind(ws);
+  ws.send = (data, ...rest) => {
+    push('out', data);
+    return send(data, ...rest);
+  };
+  return ws;
+}
+
+// How the adapter came to list `threadId`: whether a thread/started for it
+// arrived, and whether a thread/loaded/list response named it.
+function adoptionOf(frames, threadId, connection) {
+  const inbound = frames.filter((frame) => frame.connection === connection && frame.direction === 'in').map((frame) => frame.message);
+  const threadStarted = inbound.some((m) => m.method === 'thread/started' && m.params?.thread?.id === threadId);
+  const loadedIds = frames.filter((f) => f.direction === 'out' && f.message.method === 'thread/loaded/list').map((f) => f.message.id);
+  const loadedList = inbound.some((m) => loadedIds.includes(m.id) && Array.isArray(m.result?.data) && m.result.data.includes(threadId));
+  return { threadStarted, loadedList };
 }
 
 function version() {
