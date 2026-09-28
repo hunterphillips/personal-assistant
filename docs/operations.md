@@ -58,7 +58,7 @@ Run the install command again to reinstall. Before replacing an existing plist, 
 
 ### Update
 
-After pulling a new revision, run `npm ci` in `dashboard/app` before the installer. The app has two runtime dependencies (`@anthropic-ai/claude-agent-sdk` and `ws`), and the LaunchAgent does not install packages; a dashboard started without the SDK shows every persona as unavailable with `sdk_unavailable`, and one started without `ws` does not start at all.
+After pulling a new revision, run `npm ci` in `dashboard/app` before the installer. The app has two runtime dependencies (`@anthropic-ai/claude-agent-sdk` and `ws`), and the LaunchAgent does not install packages; a dashboard started without the SDK shows every persona as unavailable with `sdk_unavailable`, and one started without `ws` follows no Codex threads and reports `codex.reason` `ws_unavailable`.
 
 If the job is loaded, the installer first asks the running dashboard for `GET /api/state` on 127.0.0.1, at the port recorded in the installed plist (the new `--port` only when no previous plist can be read). If any persona is busy or waiting on an answer, it stops without unloading anything and names those personas. Wait for them to finish, or pass `--force` to unload anyway. If the dashboard does not answer, the installer goes on.
 
@@ -108,7 +108,9 @@ The dashboard follows Codex threads on one shared `codex app-server` that you ow
    ./bin/codex-serve
    ```
 
-   It prints the socket path and writes `var/codex/owner.json`; the dashboard notices the file within a few seconds and lists the 20 most recently updated threads under `sessions`. Stop it with Ctrl-C; the owner file is removed and the dashboard's session list empties until the next start. If it says a server is already running, another `codex-serve` owns the socket; use that one or stop it first.
+   It prints the socket path and writes `var/codex/owner.json`; the dashboard notices the file within a few seconds and lists, under `sessions`, the threads the server holds in memory plus the newest 20 that `codex-new` recorded. It never touches threads open elsewhere (the VS Code extension, the ChatGPT app), which the server refuses to share anyway. Stop it with Ctrl-C; the owner file is removed and the dashboard's session list empties until the next start, with `codex.reason` `no_server`.
+
+   If it says a server is already running, `owner.json` names a live pid. Usually that is another `codex-serve` in a terminal you still have open; use that one or stop it with Ctrl-C there. It can also be a server whose `codex-serve` was killed outright (a closed terminal, `kill -9`): the `codex app-server` child keeps running, holding the socket, and nothing removes the file. Confirm with `ps -p <pid>` from the message, then `kill <pid>` and start `codex-serve` again; it clears the stale file and socket itself once the pid is gone. Restarting `codex-serve` while the dashboard is connected is fine: it sees the new pid and socket and moves over.
 
 2. In each new cmux terminal where you want a Codex thread, start it through the helper so the dashboard can find the terminal again:
 
@@ -120,9 +122,11 @@ The dashboard follows Codex threads on one shared `codex app-server` that you ow
 
 The socket path must stay under 104 bytes, the macOS limit for a Unix socket; `codex-serve` refuses one over 100. If the checkout ever lives somewhere deep, pass `--socket` with a shorter path. The server is started with `features.default_mode_request_user_input=true` and `features.request_permissions_tool=true`; both are still marked under development in Codex 0.155.1, so each thread prints a warning about them, and both are required for questions and permission requests to reach the dashboard.
 
-Answering from the dashboard sends only once-only decisions: a question's answers, `accept` or `decline` for a command or file change, and a permission grant limited to the request and the turn. Anything broader, such as a session-wide grant, is answered in the terminal, and the dashboard marks such requests as terminal only. If the server goes away, the dashboard reconnects with backoff, lists and resumes the threads again, and any request still waiting is replayed to it.
+Answering from the dashboard sends only once-only decisions: a question's answers, `accept` or `decline` for a command or file change, and a permission grant limited to the request and the turn. Anything broader, such as a session-wide grant, is answered in the terminal, and the dashboard marks such requests as terminal only. If the socket drops while the server is up, the rows stay listed as `unavailable` and `codex.reason` is `disconnected` until the dashboard reconnects with backoff, lists and resumes the threads again, and any request still waiting is replayed to it.
 
-`npm run verify:codex -- --yes` runs a live check on a disposable server and bills one short turn; use it after a Codex upgrade.
+A thread started moments ago shows as `Untitled thread` until its first turn: the server has not written it to disk yet, so the dashboard's resume fails and is retried every few seconds (up to every 30 seconds). Its first question arrives with the resume that succeeds, so it can trail the terminal by up to half a minute. Each failed attempt prints an `ERROR ... no rollout found` line in the `codex-serve` terminal; that is expected for a fresh thread.
+
+`npm run verify:codex -- --yes` runs a live check on a disposable server and bills one short turn; use it after a Codex upgrade. `npm ci` must have been run: without `ws` the dashboard starts but reports `ws_unavailable` and follows nothing.
 
 ## Agent registry
 

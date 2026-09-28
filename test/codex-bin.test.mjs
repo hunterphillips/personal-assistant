@@ -14,8 +14,9 @@ const SERVE = path.join(APP_DIR, 'bin', 'codex-serve');
 const NEW = path.join(APP_DIR, 'bin', 'codex-new');
 
 // A stand-in for the Codex CLI: prints a version, records its arguments to
-// FAKE_CODEX_LOG, waits as app-server until told to stop, and otherwise exits
-// with FAKE_CODEX_EXIT.
+// FAKE_CODEX_LOG, waits as app-server until told to stop (or, with
+// FAKE_CODEX_SERVER_EXIT, exits with that status on its own after 300ms),
+// and otherwise exits with FAKE_CODEX_EXIT.
 const FAKE_CODEX = `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
@@ -25,6 +26,7 @@ if (args[0] === '--version') {
 } else if (args[0] === 'app-server') {
   setInterval(() => {}, 1000);
   process.on('SIGTERM', () => process.exit(0));
+  if (process.env.FAKE_CODEX_SERVER_EXIT) setTimeout(() => process.exit(Number(process.env.FAKE_CODEX_SERVER_EXIT)), 300);
 } else {
   process.exit(Number(process.env.FAKE_CODEX_EXIT ?? 0));
 }
@@ -118,6 +120,18 @@ test('codex-serve starts the app-server with the feature flags, writes owner.jso
   assert.match(result.stdout, new RegExp(`app-server starting on unix://${socket.replaceAll('.', '\\.')}; the dashboard will pick it up`));
   assert.equal(fs.existsSync(f.ownerFile), false);
   await until(() => { try { process.kill(owner.pid, 0); return false; } catch { return true; } }, 5_000, 'child exit');
+});
+
+test('codex-serve removes owner.json and reports the status when the app-server exits on its own', async (t) => {
+  const f = await fixture(t);
+  const { child, exit } = runAsync(SERVE, [], { ...f.env, FAKE_CODEX_SERVER_EXIT: '3' });
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
+  await until(() => fs.existsSync(f.ownerFile), 5_000, 'owner.json');
+  const result = await exit;
+  assert.equal(result.code, 3, result.stderr);
+  assert.match(result.stderr, /app-server exited with status 3/);
+  assert.equal(fs.existsSync(f.ownerFile), false);
+  assert.equal(fs.existsSync(path.join(f.codexDir, 'app.sock')), false);
 });
 
 test('codex-new refuses without a running owner', async (t) => {
