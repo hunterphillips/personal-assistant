@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 import { createCodexAdapter } from '../../lib/runtime/codex.mjs';
@@ -29,36 +30,45 @@ function thread(id, extra = {}) {
   return { id, cwd: WORK, name: null, preview: `Prompt for ${id}`, updatedAt: 1_790_596_000, status: { type: 'idle' }, ...extra };
 }
 
-async function setup(t, { threads = [], handlers, owner = true, timeouts = {}, limits = {} } = {}) {
-  const server = await startCodexServer(t, { threads, handlers });
+async function setup(t, {
+  threads = [], handlers, owner = true, timeouts = {}, limits = {}, loaded = null, pageSize = null, bound = () => [], connect,
+} = {}) {
+  const server = await startCodexServer(t, { threads, handlers, loaded, pageSize });
   if (owner) await server.writeOwner();
   const logs = [];
   const events = [];
   const adapter = createCodexAdapter({
     ownerFile: server.ownerFile,
+    bound,
     log: (entry) => logs.push(entry),
     timeouts: { ...TIMEOUTS, ...timeouts },
     limits: { ...LIMITS, ...limits },
     now: () => new Date(AT),
+    ...(connect ? { connect } : {}),
   });
   adapter.subscribe((event) => events.push(event));
   t.after(() => adapter.close());
   return { server, adapter, logs, events };
 }
 
-// Resolves once the catalogue has been listed and every thread resumed and
-// read: the adapter emits `sessions` once after listing and again after the
-// follows, so the second is the sign.
+// Resolves once `count` distinct threads have been resumed and their newest
+// turn read: the adapter emits `sessions` with the threadId after each.
 async function connected(server, adapter, events, count) {
-  await until(() => server.requests.filter((request) => request.method === 'thread/resume').length >= count, 2_000, 'resume');
-  await until(() => ofType(events, 'sessions').length >= 2, 2_000, 'follows');
+  if (count === 0) {
+    await until(() => adapter.status().available, 2_000, 'connected');
+    return;
+  }
+  await until(() => resumed(events).size >= count, 2_000, 'follows');
   await until(() => adapter.sessions().length >= count, 2_000, 'sessions');
 }
 
+const resumed = (events) => new Set(events.filter((event) => event.type === 'sessions' && event.threadId).map((event) => event.threadId));
+
 const ofType = (events, type) => events.filter((event) => event.type === type);
 const requestsFor = (server, method) => server.requests.filter((request) => request.method === method);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-test('connects, lists the catalogue newest first, resumes each thread, and replays a waiting request', async (t) => {
+test('connects, follows the loaded threads newest first, resumes each, and replays a waiting request', async (t) => {
   const { server, adapter, events } = await setup(t, {
     threads: [
       thread('older', { updatedAt: 100, name: 'Named thread' }),
@@ -71,14 +81,17 @@ test('connects, lists the catalogue newest first, resumes each thread, and repla
       }),
     ],
   });
+  assert.deepEqual(adapter.status(), { available: false, reason: 'no_server' });
   await connected(server, adapter, events, 3);
   await until(() => ofType(events, 'request').length === 1, 2_000, 'replayed request');
+  assert.deepEqual(adapter.status(), { available: true });
 
   const [initialize] = requestsFor(server, 'initialize');
   assert.deepEqual(initialize.params, { clientInfo: { name: 'personal-assistant-dashboard', version: '0.1.0' }, capabilities: { experimentalApi: true } });
   assert.deepEqual(server.notifications.map((n) => n.method), ['initialized']);
-  const [list] = requestsFor(server, 'thread/list');
-  assert.deepEqual(list.params, { limit: 20, sortKey: 'updated_at', sortDirection: 'desc' });
+  const [list] = requestsFor(server, 'thread/loaded/list');
+  assert.deepEqual(list.params, { limit: 50 });
+  assert.equal(requestsFor(server, 'thread/list').length, 0);
   assert.deepEqual(requestsFor(server, 'thread/resume').map((r) => r.params).sort((a, b) => a.threadId.localeCompare(b.threadId)), [
     { threadId: 'busy', excludeTurns: true }, { threadId: 'older', excludeTurns: true }, { threadId: 'waiting', excludeTurns: true },
   ]);
@@ -102,18 +115,94 @@ test('connects, lists the catalogue newest first, resumes each thread, and repla
     type: 'request', agentId: 'codex:waiting', at: AT, requestId: '2', kind: 'question', toolName: 'requestUserInput',
     input: { threadId: 'waiting', ...QUESTION }, native: false,
   });
-  assert.equal(ofType(events, 'sessions').length >= 1, true);
   assert.deepEqual(adapter.state('codex:waiting'), { state: 'waiting', pending: waiting.pending, lastError: null, sessionId: 'waiting', costUsd: null });
   assert.deepEqual(adapter.state('codex:none'), { state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null });
+
+  // Later polls list again but resume nothing twice.
+  await sleep(100);
+  assert.ok(requestsFor(server, 'thread/loaded/list').length > 1);
+  assert.equal(requestsFor(server, 'thread/resume').length, 3);
 });
 
-test('the catalogue is cut to the most recent codexThreads across pages', async (t) => {
+test('the loaded list is followed across pages', async (t) => {
   const threads = Array.from({ length: 7 }, (_, i) => thread(`t${i}`, { updatedAt: 1_000 + i }));
-  const { server, adapter, events } = await setup(t, { threads, limits: { codexThreads: 3 } });
-  await connected(server, adapter, events, 3);
-  assert.deepEqual(adapter.sessions().map((s) => s.threadId), ['t6', 't5', 't4']);
-  assert.deepEqual(requestsFor(server, 'thread/list').map((r) => r.params.limit), [3]);
-  assert.equal(requestsFor(server, 'thread/resume').length, 3);
+  const { server, adapter, events } = await setup(t, { threads, pageSize: 3 });
+  await connected(server, adapter, events, 7);
+  const pages = requestsFor(server, 'thread/loaded/list').slice(0, 3);
+  assert.deepEqual(pages.map((r) => r.params), [{ limit: 50 }, { limit: 50, cursor: '3' }, { limit: 50, cursor: '6' }]);
+  assert.deepEqual(adapter.sessions().map((s) => s.threadId), ['t6', 't5', 't4', 't3', 't2', 't1', 't0']);
+  assert.equal(requestsFor(server, 'thread/resume').length, 7);
+});
+
+test('rows are capped at codexThreads: the oldest idle unbound threads are evicted and not adopted again', async (t) => {
+  const threads = Array.from({ length: 7 }, (_, i) => thread(`t${i}`, { updatedAt: 1_000 + i }));
+  threads[0].status = { type: 'active', activeFlags: [] };
+  const { server, adapter, events, logs } = await setup(t, { threads, limits: { codexThreads: 3 }, bound: () => ['t1'] });
+  await until(() => resumed(events).size === 7, 2_000, 'follows');
+  await until(() => adapter.sessions().length === 3, 2_000, 'evicted');
+  // t0 is busy and t1 is bound, so the newest idle unbound thread stays.
+  assert.deepEqual(adapter.sessions().map((s) => s.threadId), ['t6', 't1', 't0']);
+  assert.deepEqual(logs.filter((entry) => entry.event === 'codex_catalogue_evicted'), [{ event: 'codex_catalogue_evicted', threads: 4 }]);
+  await sleep(100);
+  assert.equal(adapter.sessions().length, 3);
+  assert.equal(requestsFor(server, 'thread/resume').length, 7);
+});
+
+test('the catalogue is loaded or bound threads only, re-read on every poll', async (t) => {
+  const bound = new Set(['bound']);
+  const { server, adapter, events, logs } = await setup(t, {
+    threads: [thread('loaded', { updatedAt: 300 }), thread('listed', { updatedAt: 200 }), thread('bound', { updatedAt: 100 })],
+    loaded: ['loaded'],
+    bound: () => bound,
+  });
+  await connected(server, adapter, events, 2);
+  // 'listed' is in thread/list only: never resumed.
+  assert.deepEqual(adapter.sessions().map((s) => [s.threadId, s.title]), [['loaded', 'Prompt for loaded'], ['bound', 'Prompt for bound']]);
+  assert.deepEqual(requestsFor(server, 'thread/resume').map((r) => r.params.threadId).sort(), ['bound', 'loaded']);
+  assert.equal(requestsFor(server, 'thread/list').length, 0);
+  assert.deepEqual(logs.filter((entry) => entry.event === 'codex_catalogue'), [{ event: 'codex_catalogue', threads: 2, added: 2, dropped: 0 }]);
+
+  // A thread that becomes loaded later (the TUI or codex-new started it)
+  // is adopted on the next poll without any notification.
+  server.loaded.add('listed');
+  await until(() => adapter.sessions().some((s) => s.threadId === 'listed' && s.title === 'Prompt for listed'), 2_000, 'adopted');
+  assert.equal(requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'listed').length, 1);
+
+  // One that leaves both sets is dropped.
+  server.loaded.delete('listed');
+  await until(() => !adapter.sessions().some((s) => s.threadId === 'listed'), 2_000, 'dropped');
+  bound.delete('bound');
+  server.loaded.delete('bound');
+  await until(() => adapter.sessions().length === 1, 2_000, 'unbound dropped');
+  assert.deepEqual(logs.filter((entry) => entry.event === 'codex_catalogue').map((entry) => [entry.added, entry.dropped]), [[2, 0], [1, 0], [0, 1], [0, 1]]);
+});
+
+test('a loaded thread with no rollout keeps its row and is resumed once it has one; a bound-only one without a rollout, or any other failure, is dropped for good', async (t) => {
+  const { server, adapter, events, logs } = await setup(t, {
+    threads: [thread('ok', { updatedAt: 300 }), thread('fresh', { updatedAt: 200, unpersisted: true })],
+    bound: () => ['ghost'],
+  });
+  await connected(server, adapter, events, 1);
+  await until(() => logs.filter((entry) => entry.event === 'codex_resume_error').length === 2, 2_000, 'resume errors');
+  assert.deepEqual(logs.filter((entry) => entry.event === 'codex_resume_error').sort((a, b) => a.threadId.localeCompare(b.threadId)), [
+    { event: 'codex_resume_error', threadId: 'fresh', error: 'not_persisted', retry: true },
+    { event: 'codex_resume_error', threadId: 'ghost', error: 'not_persisted', retry: false },
+  ]);
+  assert.deepEqual(adapter.sessions().map((s) => [s.threadId, s.title, s.state]), [['ok', 'Prompt for ok', 'idle'], ['fresh', 'Untitled thread', 'idle']]);
+
+  // Retried with a growing wait, logged once.
+  await until(() => requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'fresh').length >= 3, 2_000, 'retries');
+  server.threads.get('fresh').unpersisted = false;
+  await until(() => adapter.sessions().some((s) => s.threadId === 'fresh' && s.title === 'Prompt for fresh'), 2_000, 'resumed');
+  assert.equal(logs.filter((entry) => entry.event === 'codex_resume_error' && entry.threadId === 'fresh').length, 1);
+
+  // The failed one is not tried again, not even after a reconnect.
+  await server.disconnectAll();
+  await until(() => server.connections.length === 2, 2_000, 'reconnect');
+  await until(() => requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'ok').length === 2, 2_000, 'second resume');
+  await sleep(60);
+  assert.equal(requestsFor(server, 'thread/resume').filter((r) => r.params.threadId === 'ghost').length, 1);
+  assert.equal(logs.filter((entry) => entry.event === 'codex_resume_error' && entry.threadId === 'ghost').length, 1);
 });
 
 test('a question is answered with the exact Codex reply shape, keyed by question id or text', async (t) => {
@@ -236,7 +325,7 @@ test('notifications drive state, messages, errors, usage, and membership', async
   server.notify('thread/status/changed', { threadId: 'n', status: { type: 'idle' } });
   server.notify('turn/completed', { threadId: 'n', turn: { id: 'turn-9', items: [], status: 'completed' } });
   await until(() => ofType(events, 'thread.state').length >= 2 && ofType(events, 'usage').length === 1, 2_000, 'turn');
-  const fresh = events.slice(before);
+  const fresh = events.slice(before).filter((e) => e.type !== 'sessions');
   assert.deepEqual(fresh.map((e) => e.type), ['thread.state', 'message', 'message', 'usage', 'thread.state']);
   assert.deepEqual(fresh[0], { type: 'thread.state', agentId: 'codex:n', at: AT, state: 'busy' });
   assert.deepEqual(fresh[1], { type: 'message', agentId: 'codex:n', at: AT, role: 'user', text: 'Do the thing' });
@@ -253,29 +342,75 @@ test('notifications drive state, messages, errors, usage, and membership', async
   assert.deepEqual(ofType(events, 'error').map((e) => [e.agentId, e.message]), [['codex:n', 'Rate limited'], ['codex:n', 'Rate limited']]);
   assert.equal(adapter.sessions()[0].lastError, 'Rate limited');
 
-  // A thread started by another client joins and is resumed; archiving drops it.
+  // A thread started by another client joins and is resumed at once;
+  // archiving drops it.
   server.threads.set('new', thread('new', { updatedAt: 1_790_600_000 }));
   server.notify('thread/started', { thread: thread('new', { updatedAt: 1_790_600_000 }) });
   await until(() => adapter.sessions().length === 2, 2_000, 'joined');
   await until(() => requestsFor(server, 'thread/resume').some((r) => r.params.threadId === 'new'), 2_000, 'resumed');
   assert.deepEqual(adapter.sessions().map((s) => s.threadId), ['new', 'n']);
+  server.loaded.delete('new');
   server.notify('thread/archived', { threadId: 'new' });
   await until(() => adapter.sessions().length === 1, 2_000, 'dropped');
+  await sleep(60);
+  assert.equal(adapter.sessions().length, 1);
   assert.equal(ofType(events, 'sessions').every((e) => e.agentId === 'codex'), true);
 });
 
-test('reconnects after the server closes the socket and resumes the threads again', async (t) => {
+test('a dropped socket keeps the rows unavailable until the reconnect lists and resumes them again', async (t) => {
   const { server, adapter, events, logs } = await setup(t, { threads: [thread('k')] });
   await connected(server, adapter, events, 1);
   await server.disconnectAll();
-  await until(() => adapter.sessions().length === 0, 2_000, 'catalogue emptied');
+  await until(() => adapter.sessions()[0]?.state === 'unavailable', 2_000, 'unavailable');
+  assert.deepEqual(adapter.sessions().map((s) => [s.threadId, s.state, s.lastError, s.pending]), [['k', 'unavailable', 'server_gone', null]]);
+  assert.deepEqual(adapter.status(), { available: false, reason: 'disconnected' });
   assert.ok(ofType(events, 'error').some((e) => e.agentId === 'codex' && /closed/.test(e.message)));
+  await assert.rejects(adapter.thread('codex:k'), { code: 'unavailable' });
   await until(() => server.connections.length === 2, 2_000, 'reconnect');
   await until(() => requestsFor(server, 'thread/resume').length === 2, 2_000, 'second resume');
-  await until(() => adapter.sessions().length === 1, 2_000, 'catalogue back');
+  await until(() => adapter.sessions()[0]?.state === 'idle', 2_000, 'catalogue back');
+  assert.deepEqual(adapter.status(), { available: true });
+  assert.equal(adapter.sessions()[0].lastError, null);
   assert.equal(requestsFor(server, 'initialize').length, 2);
   assert.ok(logs.some((entry) => entry.event === 'codex_disconnected'));
   assert.ok(logs.filter((entry) => entry.event === 'codex_connected').length === 2);
+});
+
+test('a request pending across a dropped socket is replayed on re-resume and answered with its original id', async (t) => {
+  const { server, adapter, events } = await setup(t, {
+    threads: [thread('w', {
+      status: { type: 'active', activeFlags: ['waitingOnUserInput'] },
+      waiting: { id: 2, method: 'item/tool/requestUserInput', params: QUESTION },
+    })],
+  });
+  await connected(server, adapter, events, 1);
+  await until(() => ofType(events, 'request').length === 1, 2_000, 'request');
+  await server.disconnectAll();
+  await until(() => adapter.sessions()[0]?.state === 'unavailable', 2_000, 'unavailable');
+  await assert.rejects(adapter.answer('codex:w', '2', { answers: { colour: 'Blue' } }), { code: 'no_such_request' });
+
+  await until(() => ofType(events, 'request').length === 2, 2_000, 'replayed');
+  assert.equal(ofType(events, 'request')[1].requestId, '2');
+  assert.equal(adapter.state('codex:w').state, 'waiting');
+  await adapter.answer('codex:w', '2', { answers: { colour: 'Blue' } });
+  await until(() => server.replies.length === 1, 2_000, 'reply');
+  assert.deepEqual(server.connections[0].replies, []);
+  assert.deepEqual(server.connections[1].replies, [{ jsonrpc: '2.0', id: 2, result: { answers: { colour: { answers: ['Blue'] } } } }]);
+});
+
+test('an owner file that names a new pid and socket while connected moves the adapter to the new server', async (t) => {
+  const { server, adapter, events } = await setup(t, { threads: [thread('old')] });
+  await connected(server, adapter, events, 1);
+  const next = await startCodexServer(t, { threads: [thread('fresh-server')] });
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  t.after(() => child.kill('SIGKILL'));
+  await writeFile(server.ownerFile, JSON.stringify({ socket: next.socket, pid: child.pid, startedAt: AT, codexVersion: 'y' }));
+  await until(() => next.connections.length === 1, 2_000, 'joined');
+  await until(() => adapter.sessions().some((s) => s.threadId === 'fresh-server' && s.state === 'idle'), 2_000, 'listed');
+  assert.deepEqual(adapter.sessions().map((s) => s.threadId), ['fresh-server']);
+  assert.equal(server.live().length, 0);
+  assert.deepEqual(adapter.status(), { available: true });
+  assert.equal(requestsFor(next, 'thread/resume').length, 1);
 });
 
 test('a frame over codexFrameBytes is dropped with an error event and the connection stays up', async (t) => {
@@ -291,13 +426,14 @@ test('a frame over codexFrameBytes is dropped with an error event and the connec
 
 test('no owner file means no server; one that appears is picked up, and a dead pid is ignored', async (t) => {
   const { server, adapter, events, logs } = await setup(t, { threads: [thread('o')], owner: false });
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await sleep(80);
   assert.deepEqual(adapter.sessions(), []);
+  assert.deepEqual(adapter.status(), { available: false, reason: 'no_server' });
   assert.equal(server.connections.length, 0);
 
   const dead = spawnSync(process.execPath, ['-e', '0']);
   await server.writeOwner({ pid: dead.pid });
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await sleep(80);
   assert.equal(server.connections.length, 0);
   assert.equal(logs.some((entry) => entry.event === 'codex_server_found'), false);
 
@@ -307,8 +443,22 @@ test('no owner file means no server; one that appears is picked up, and a dead p
 
   await server.removeOwner();
   await until(() => adapter.sessions().length === 0, 2_000, 'server gone');
+  assert.deepEqual(adapter.status(), { available: false, reason: 'no_server' });
   assert.ok(logs.some((entry) => entry.event === 'codex_server_gone'));
   await until(() => server.live().length === 0, 2_000, 'socket closed');
+});
+
+test('without the ws package the adapter reports ws_unavailable once and does not retry', async (t) => {
+  const { server, adapter, logs } = await setup(t, {
+    threads: [thread('o')],
+    connect: () => Promise.reject(Object.assign(new Error('Cannot find package ws'), { code: 'ws_unavailable' })),
+  });
+  await until(() => adapter.status().reason === 'ws_unavailable', 2_000, 'status');
+  await sleep(100);
+  assert.deepEqual(adapter.status(), { available: false, reason: 'ws_unavailable' });
+  assert.deepEqual(logs.filter((entry) => entry.event === 'codex_ws_unavailable'), [{ event: 'codex_ws_unavailable' }]);
+  assert.equal(server.connections.length, 0);
+  assert.deepEqual(adapter.sessions(), []);
 });
 
 test('send, start, and newThread are refused before any await; the message is plain', async (t) => {

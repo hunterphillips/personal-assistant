@@ -28,6 +28,8 @@ function fakeCodexAdapter(sessions = []) {
     behavior: {},
     list: sessions,
     sessions: () => adapter.list,
+    connection: { available: true },
+    status: () => adapter.connection,
     emit: (event) => { for (const fn of listeners) fn(event); },
     subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
     start: () => Promise.reject(new RuntimeError('not_supported', { message: 'Codex threads take messages in their own terminal.' })),
@@ -104,6 +106,26 @@ test('adapter events and binding changes rebuild sessions and bump only when the
   app.adapter.list = [session('t2', { state: 'busy', pending: { requestId: '9', kind: 'approval', toolName: 'mcpServer/elicitation/request', input: {}, at: AT, native: true } })];
   app.adapter.emit({ type: 'request', agentId: 'codex:t2', at: AT, requestId: '9' });
   assert.equal(deltas.at(-1).patch.sessions[0].pending.native, true);
+
+  // The server going away shows up as `codex` beside the unavailable rows.
+  assert.deepEqual(app.hub.snapshot().codex, { available: true });
+  app.adapter.list = [session('t2', { state: 'unavailable', lastError: 'server_gone' })];
+  app.adapter.connection = { available: false, reason: 'disconnected' };
+  app.adapter.emit({ type: 'sessions', agentId: 'codex', at: AT });
+  assert.deepEqual(Object.keys(deltas.at(-1).patch).sort(), ['codex', 'sessions']);
+  assert.deepEqual(deltas.at(-1).patch.codex, { available: false, reason: 'disconnected' });
+  assert.deepEqual([deltas.at(-1).patch.sessions[0].state, deltas.at(-1).patch.sessions[0].lastError], ['unavailable', 'server_gone']);
+  app.adapter.connection = { available: false, reason: 'Not A Word' };
+  app.adapter.emit({ type: 'sessions', agentId: 'codex', at: AT });
+  assert.deepEqual(deltas.at(-1).patch, { codex: { available: false, reason: 'unknown' } });
+  const state = await request(app, 'GET', '/api/state');
+  assert.deepEqual(state.json.codex, { available: false, reason: 'unknown' });
+});
+
+test('without a Codex adapter the snapshot says so', async (t) => {
+  const app = await startApp(t, { ...status, registry: fakeRegistry([]), adapters: {} });
+  assert.deepEqual(app.hub.snapshot().codex, { available: false, reason: 'no_adapter' });
+  assert.deepEqual(app.hub.snapshot().sessions, []);
 });
 
 test('a Codex persona in the registry is unavailable as provider_unavailable', async (t) => {

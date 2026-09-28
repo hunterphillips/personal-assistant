@@ -97,6 +97,7 @@ snapshot; concurrent requests share one check. It stays for one release.
                  "pending": { "requestId": "2", "kind": "question", "toolName": "requestUserInput", "input": { "...": "..." }, "truncated": false },
                  "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" }, "lastError": null, "updatedAt": "<ISO>",
                  "binding": { "workspaceId": "...", "surfaceId": "..." } }],
+  "codex": { "available": true },
   "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] } }
 ```
 
@@ -106,7 +107,12 @@ first check). Agents leave out `cwd` and `routines`. A persona also carries
 its runtime state (see Personas below); any other kind has `state: null`.
 `sessions` lists the Codex threads the
 dashboard follows but does not own (see Codex sessions below); it is empty
-while no app-server is reachable. `routines.items` is empty
+while no app-server is known. `codex` says whether the shared app-server
+is connected and, when not, why: `{ "available": false, "reason": ... }`
+with `no_server` (no `owner.json`, or its pid is gone), `disconnected`
+(a server is known but the socket is down; the rows are kept as
+`unavailable` meanwhile), `ws_unavailable` (the `ws` package is not
+installed), `no_adapter`, or `api_key_in_env`. `routines.items` is empty
 until the first refresh; a failed refresh keeps the previous items and sets
 `error` to `refresh_failed`. `GET /api/state` refreshes Focus and the brief
 the same way the status route does (one shared check, bounded by
@@ -535,7 +541,8 @@ are passed per launch by `bin/codex-serve`.
 ### Helpers
 
 - `bin/codex-serve` owns the server. Run it in a terminal you keep open: it
-  starts `codex app-server --listen unix://var/codex/app.sock` with both
+  starts `codex app-server --listen unix:///<absolute path>/var/codex/app.sock`
+  (the path is resolved to an absolute one first) with both
   feature flags, writes `var/codex/owner.json` (`socket`, `pid`,
   `startedAt`, `codexVersion`), and removes that file when the server
   stops. It refuses while `owner.json` names a running process, and it
@@ -558,24 +565,48 @@ Both read `DASHBOARD_CODEX_DIR` (default `var/codex`, created with mode
 
 `lib/runtime/codex.mjs` checks `owner.json` every 3 seconds
 (`TIMEOUTS.codexPollMs`). A missing file, or one whose `pid` is no longer
-running, means no server: the connection is dropped and `sessions` becomes
-empty. A file that appears starts a connection: `ws` over the Unix socket
-with compression off, `initialize` with `experimentalApi` on, then
-`initialized`. The catalogue is the 20 most recently updated threads
-(`LIMITS.codexThreads`) from paginated `thread/list`; each is resumed with
+running, means no server: the connection is dropped, `sessions` becomes
+empty, and `codex.reason` is `no_server`. A file that appears, or that
+names a new socket or pid (a `codex-serve` restart), starts a connection
+to it: `ws` over the Unix socket with compression off, `initialize` with
+`experimentalApi` on, then `initialized`. `ws` is loaded on first use, so
+a checkout without `npm ci` still starts and reports `ws_unavailable`.
+
+The catalogue is the union of two sets, re-read on every poll while
+connected: the threads in `thread/loaded/list` (what the server holds in
+memory for any client, including the TUI) and the newest 20 threads
+recorded in `bindings.json` by `bin/codex-new`. Nothing else is resumed:
+`thread/list` covers every thread in the local store, including ones open
+in other app-servers (the VS Code extension, the ChatGPT app), and
+resuming those fails with a thread-store conflict. A `thread/started`
+notification adopts a thread at once; the poll catches one whose
+notification was missed. Each followed thread is resumed with
 `excludeTurns: true`, which subscribes the connection to it and, for a
 thread still waiting on a question or approval, replays that request with
 its original id, and its newest turn is read through `thread/turns/list`
-for the last message and the running turn id. A thread another client
-starts joins the catalogue the same way; an archived one leaves it.
+for the last message and the running turn id. A thread that leaves both
+sets, or is archived, is dropped.
 
-Reconnect rule: when the socket closes, the catalogue is emptied and the
+A fresh thread has no rollout until its first turn, so its resume fails
+with "no rollout found"; while the thread is loaded the adapter keeps the
+row and retries with a doubling wait (6, 12, 24, then 30 seconds), and the
+question from its first turn arrives with the resume that succeeds. The
+same failure for a thread that is only bound means it does not exist on
+this server; that, like any other resume failure, drops the thread for
+good and is logged once, not retried on every reconnect. Rows are capped
+at 20 (`LIMITS.codexThreads`): past that, the oldest idle unbound thread
+with nothing pending is evicted and skipped until the next connection;
+busy, waiting, and bound threads are never evicted.
+
+Reconnect rule: when the socket closes, every row goes `unavailable` with
+`lastError` `server_gone` and `codex.reason` becomes `disconnected`; the
 adapter reconnects after 1 second, doubling up to 30 seconds
 (`TIMEOUTS.codexReconnectMs`, `codexReconnectMaxMs`), then lists and
-resumes again. Pending requests belong to the thread, not the connection,
-so the server replays them on resume; the adapter keys every reply by
-thread and request id and sends it on the current connection. A request
-the server has since resolved, from the terminal or otherwise, is
+resumes again, which restores the rows that are still loaded or bound and
+drops the rest. Pending requests belong to the thread, not the
+connection, so the server replays them on resume; the adapter keys every
+reply by thread and request id and sends it on the current connection. A
+request the server has since resolved, from the terminal or otherwise, is
 `no_such_request`. Writes are never retried. A frame over 1 MiB
 (`LIMITS.codexFrameBytes`) is dropped with an error and never parsed.
 
@@ -594,13 +625,15 @@ answering it here is refused as `not_supported`.
 
 Each entry in `sessions` carries `id` (`codex:<threadId>`), `provider`,
 `threadId`, `cwd`, `title` (the thread's name, else the first line of its
-preview), `state` (`idle`, `busy` while a turn runs, `waiting` on a
-question or approval, `error` after a failed turn), `pending` in the same
+preview, `Untitled thread` until the first resume), `state` (`idle`,
+`busy` while a turn runs, `waiting` on a question or approval, `error`
+after a failed turn, `unavailable` while the connection is down), `pending` in the same
 form as a persona's plus `native` when only the terminal can answer,
 `lastMessage` cut to 200 characters, `lastError`, `updatedAt`, and
 `binding` (`{ workspaceId, surfaceId }` from `bindings.json`, or null).
-Entries are newest first. The list is rebuilt on every adapter event and
-every bindings change, and a new revision is committed only when it differs.
+Entries are newest first. The list and `codex` are rebuilt on every
+adapter event and every bindings change, and a new revision is committed
+only when something differs.
 
 ### Session routes
 
@@ -622,14 +655,28 @@ session.
 
 ### Logs
 
-The Codex runtime logs `codex_server_found`, `codex_server_gone`,
-`codex_connected`, `codex_disconnected`, `codex_catalogue` (with the
-count), `codex_request` (method and whether it is native only),
-`codex_answer` (method and outcome), `codex_interrupt`,
-`codex_resume_error`, `codex_frame_dropped` (with the size),
-`codex_write_error`, and `codex_request_ignored` (a request for a thread
-it does not follow). None of them carries message text, question text,
-tool input, or file paths from a request.
+The Codex runtime logs, each with the fields named:
+
+- `codex_server_found` (socket, pid, codexVersion), `codex_server_gone`
+  (socket, pid), `codex_owner_unreadable` (error code),
+  `codex_owner_invalid` (reason: `oversized`, `json`, `shape`);
+- `codex_ws_unavailable` (once), `codex_connect_error` (error code),
+  `codex_socket_error` (error code), `codex_connected` (socket,
+  codexVersion), `codex_initialize_error` (error: `timeout`,
+  `rpc_error`, `connection_closed`), `codex_disconnected` (socket);
+- `codex_catalogue` (threads, added, dropped; only when the set changes),
+  `codex_catalogue_evicted` (threads), `codex_resume_error` (threadId,
+  error: `not_persisted`, `timeout`, `rpc_error`, or `connection_closed`,
+  and retry; logged once per thread), `codex_bound_error` (error code);
+- `codex_request` (threadId, method, native), `codex_request_ignored`
+  (method; a request for a thread it does not follow), `codex_answer`
+  (threadId, method, outcome), `codex_interrupt` (threadId);
+- `codex_frame_dropped` (bytes), `codex_frame_invalid`,
+  `codex_write_error` (method, error code), `codex_poll_error` (error
+  code), and `runtime_listener_error`.
+
+None of them carries message text, question text, tool input, file paths
+from a request, or a server's error message; errors are logged as codes.
 
 ## Commands
 
@@ -659,10 +706,13 @@ Requires Node 24 (`.nvmrc`).
 - `node scripts/spike-claude-sdk.mjs` re-runs the Phase 2 SDK spike under
   `SPIKE_ROOT`; it spends subscription usage. See the research note.
 - `npm run verify:codex -- --yes` starts a disposable real `codex app-server`
-  on a temporary socket, creates one thread, asks one question through the
-  adapter, answers it, archives the thread, stops the server, and prints the
-  Node, `ws`, and Codex versions. It runs one short model turn on the Codex
-  subscription and refuses without `--yes`. `--model NAME` picks the model.
+  on a temporary socket, connects an adapter, creates one thread from a
+  second client (as `codex-new` does) and reports how the adapter came to
+  list it, asks one question through the adapter, answers it, archives the
+  thread, stops the server, and prints the Node, `ws`, and Codex versions.
+  It runs one short model turn on the Codex subscription and refuses
+  without `--yes`. `--model NAME` picks the model; `--record FILE` writes
+  the versions, the outcome, and every frame on the adapter's connections.
 
 Still checked by hand: dragging to reorder in Focus, keyboard focus
 visibility, scrolling inside the frames, and a real phone after cutover.

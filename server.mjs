@@ -37,18 +37,22 @@ const API_KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 
 // The Codex adapter is always created: it watches for the owner file itself
 // and follows nothing until bin/codex-serve has written one.
-function defaultAdapters({ config, store, log }) {
+function defaultAdapters({ config, store, log, bindings }) {
   return {
     claude: createClaudeAdapter({ store, config, log }),
     codex: createCodexAdapter({
-      ownerFile: path.join(config.codexDir, 'owner.json'), log, timeouts: config.timeouts, limits: config.limits,
+      ownerFile: path.join(config.codexDir, 'owner.json'),
+      bound: () => bindings.current().keys(),
+      log,
+      timeouts: config.timeouts,
+      limits: config.limits,
     }),
   };
 }
 
 // Starts the dashboard and resolves once it is listening. Rejects on invalid
 // configuration or a port already in use; it never picks another port.
-// `createAdapters({ config, store, log })` returns the adapters by provider;
+// `createAdapters({ config, store, log, bindings })` returns the adapters by provider;
 // tests pass fakes. It is not called when an API key is in `env`.
 export async function startDashboard({ env = process.env, log, createAdapters = defaultAdapters } = {}) {
   const config = loadConfig(env);
@@ -70,7 +74,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   if (apiKeyInEnv) {
     logEntry({ event: 'adapters_disabled', reason: 'api_key_in_env' });
   } else {
-    adapters = createAdapters({ config, store, log: logEntry });
+    adapters = createAdapters({ config, store, log: logEntry, bindings });
   }
   const hub = createHub({
     registry,

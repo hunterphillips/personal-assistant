@@ -1,12 +1,17 @@
 // A scripted stand-in for `codex app-server`: a real ws server on a Unix
 // socket under a short temporary path that answers initialize, thread/list,
-// thread/resume, thread/turns/list, thread/start, thread/archive, and
-// turn/interrupt from an in-memory thread table, records every client
-// request, reply, and notification, and can push notifications and server
-// requests to its connections. `threads` entries follow the wire shape
-// ({ id, cwd, name, preview, updatedAt, status }) plus two test-only fields:
-// `turns` (what thread/turns/list returns) and `waiting` ({ id, method,
-// params }), a request replayed after each thread/resume.
+// thread/loaded/list, thread/resume, thread/turns/list, thread/start,
+// thread/archive, and turn/interrupt from an in-memory thread table,
+// records every client request, reply, and notification, and can push
+// notifications and server requests to its connections. `threads` entries
+// follow the wire shape ({ id, cwd, name, preview, updatedAt, status }) plus
+// three test-only fields: `turns` (what thread/turns/list returns),
+// `waiting` ({ id, method, params }), a request replayed after each
+// thread/resume, and `unpersisted`, which makes thread/resume fail the way
+// the real server does for a thread with no rollout yet. `loaded` is the
+// set of ids thread/loaded/list returns (default: every thread; tests
+// mutate `server.loaded`), paged `pageSize` at a time regardless of the
+// requested limit.
 
 import http from 'node:http';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -17,7 +22,7 @@ import { WebSocketServer } from 'ws';
 
 export const FAKE_VERSION = 'codex-cli 0.0.0-fake';
 
-export async function startCodexServer(t, { threads = [], handlers = {} } = {}) {
+export async function startCodexServer(t, { threads = [], handlers = {}, loaded = null, pageSize = null } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cx-'));
   const socket = path.join(dir, 'app.sock');
   if (Buffer.byteLength(socket) > 100) throw new Error(`temporary socket path too long: ${socket}`);
@@ -28,6 +33,7 @@ export async function startCodexServer(t, { threads = [], handlers = {} } = {}) 
     socket,
     ownerFile: path.join(dir, 'owner.json'),
     threads: new Map(threads.map((thread) => [thread.id, { ...thread }])),
+    loaded: new Set(loaded ?? threads.map((thread) => thread.id)),
     connections: [],
     requests: [], // client -> server requests, in order
     replies: [], // client responses to server requests
@@ -46,9 +52,19 @@ export async function startCodexServer(t, { threads = [], handlers = {} } = {}) 
       const next = start + limit < all.length ? String(start + limit) : null;
       return { data: page, nextCursor: next };
     },
+    'thread/loaded/list': (params) => {
+      const all = [...fake.loaded];
+      const start = params?.cursor ? Number(params.cursor) : 0;
+      const limit = Math.min(pageSize ?? all.length, params?.limit ?? all.length) || all.length;
+      const page = all.slice(start, start + limit);
+      const next = start + limit < all.length ? String(start + limit) : null;
+      return { data: page, nextCursor: next };
+    },
     'thread/resume': (params, conn) => {
       const thread = fake.threads.get(params?.threadId);
-      if (!thread) throw new Error('unknown thread');
+      if (!thread) throw new Error(`no rollout found for thread id ${params?.threadId}`);
+      if (thread.unpersisted) throw new Error(`no rollout found for thread id ${thread.id}`);
+      fake.loaded.add(thread.id);
       if (thread.waiting) {
         setImmediate(() => conn.ask(thread.waiting.method, thread.waiting.id, { threadId: thread.id, ...thread.waiting.params }));
       }
@@ -66,10 +82,12 @@ export async function startCodexServer(t, { threads = [], handlers = {} } = {}) 
       fake.nextThread += 1;
       const thread = { id, cwd: params?.cwd ?? dir, name: null, preview: '', updatedAt: 1_790_000_000 + fake.nextThread, status: { type: 'idle' } };
       fake.threads.set(id, thread);
+      fake.loaded.add(id);
       return { thread: publicThread(thread), cwd: thread.cwd, model: 'fake', modelProvider: 'fake' };
     },
     'thread/archive': (params) => {
       fake.threads.delete(params?.threadId);
+      fake.loaded.delete(params?.threadId);
       return {};
     },
     'turn/interrupt': () => ({}),
@@ -161,7 +179,7 @@ export async function startCodexServer(t, { threads = [], handlers = {} } = {}) 
 }
 
 function publicThread(thread) {
-  const { turns, waiting, ...wire } = thread;
+  const { turns, waiting, unpersisted, ...wire } = thread;
   return wire;
 }
 
