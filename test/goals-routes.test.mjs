@@ -46,10 +46,10 @@ function fakeAdapter() {
 // second-brain agent's provider (claude runs on the fake adapter; codex has
 // no adapter, so the persona is listed but never started), or false to leave
 // it out of the registry.
-async function startGoals(t, { persona = 'claude', goals } = {}) {
+async function startGoals(t, { persona = 'claude', kind = 'persona', goals } = {}) {
   const vault = path.join(await tempDir(t), 'vault');
   await cp(FIXTURE_VAULT, vault, { recursive: true });
-  const agents = persona ? [agent('second-brain', vault, { provider: persona })] : [agent('cfo', '/invented')];
+  const agents = persona ? [agent('second-brain', vault, { provider: persona, kind })] : [agent('cfo', '/invented')];
   const adapter = fakeAdapter();
   const app = await startApp(t, { ...status, registry: fakeRegistry(agents), adapters: { claude: adapter }, goals });
   t.after(() => adapter.release());
@@ -139,6 +139,8 @@ test('propose refuses blank and oversize text', async (t) => {
     const response = await post(app, { kind: 'add', text });
     assert.deepEqual([response.status, response.json], [400, { error: 'invalid_text' }], JSON.stringify(text));
   }
+  const blankEdit = await post(app, { kind: 'edit', target: 'goal:boat', text: '  \n ' });
+  assert.deepEqual([blankEdit.status, blankEdit.json], [400, { error: 'invalid_text' }]);
   const cap = app.config.limits.sendTextBytes;
   const tooLong = await post(app, { kind: 'add', text: 'a'.repeat(cap + 1) });
   assert.deepEqual([tooLong.status, tooLong.json], [413, { error: 'payload_too_large' }]);
@@ -166,6 +168,17 @@ test('a second-brain persona that is not started is 409 persona_unavailable', as
 
 test('no second-brain persona in the registry is 404 no_such_agent', async (t) => {
   const app = await startGoals(t, { persona: false });
+  const response = await post(app, { kind: 'add', text: 'x' });
+  assert.deepEqual([response.status, response.json], [404, { error: 'no_such_agent' }]);
+  assert.deepEqual(app.adapter.calls, []);
+});
+
+// The reader counts only a persona as the vault's agent, so a second-brain
+// project entry is absent to Goals, not a persona of the wrong kind.
+test('a second-brain entry that is not a persona is 404 no_such_agent', async (t) => {
+  const app = await startGoals(t, { kind: 'project' });
+  const read = await request(app, 'GET', '/api/goals');
+  assert.equal(read.json.agentId, null);
   const response = await post(app, { kind: 'add', text: 'x' });
   assert.deepEqual([response.status, response.json], [404, { error: 'no_such_agent' }]);
   assert.deepEqual(app.adapter.calls, []);

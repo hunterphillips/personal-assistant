@@ -197,10 +197,11 @@ date, with one write per date at a time.
 
 `GET /api/goals` reads three sources under the second-brain persona's cwd:
 `notes/current-priorities.md`, `notes/longterm-priorities.md`, and each
-`notes/goals/*.md`. `POST /api/goals/propose` takes `{"kind": "add", "text"}`
-or `{"kind": "edit", "target": "<item id>", "text"}`, sends the text to the
-second-brain persona as a new message, and the shell opens that persona's
-thread. The dashboard never writes the vault; the persona does, in its own
+`notes/goals/*.md`. `POST /api/goals/propose` takes
+`{"kind": "add", "text": "..."}` or
+`{"kind": "edit", "target": "goal:podcast", "text": "..."}`, sends the text
+to the second-brain persona as a new message, and the shell opens that
+persona's thread. The dashboard never writes the vault; the persona does, in its own
 turn.
 
 ### Focus proxy
@@ -253,12 +254,13 @@ when asked.
 ### Shell
 
 `public/index.html`, `public/shell.js`, `public/agents.js`,
-`public/routines.js`, `public/goals.js`, and `public/styles.css` make up the page served at
-`/`, `/agents`, `/routines`, `/focus`, and `/brief`. The Agents view is the
-page at `/`; `/agents` shows the same view, `/routines` shows it with the
-routines overview open, and `/goals` or any path the shell does not know
-lands there too. The navigation is Agents, Focus, and Daily Brief, as
-ordinary links; the script switches views with the History API and handles
+`public/routines.js`, `public/goals.js`, and `public/styles.css` make up the
+page served at `/`, `/agents`, `/routines`, `/reading`, `/brief`, `/focus`,
+and `/goals`. The Agents view is the page at `/`; `/agents` shows the same
+view and `/routines` shows it with the routines overview open. `/reading`
+and `/brief` show the Reading view, `/focus` Focus, and `/goals` Goals. The
+navigation is a rail of four icon links, Home, Reading, Focus, and Goals;
+the script switches views with the History API and handles
 Back and Forward, and a reload or bookmark opens the same view. Each frame
 is created the first time its view opens and stays in the page afterwards,
 hidden while another view is shown, so Focus keeps its state and the brief

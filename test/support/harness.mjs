@@ -140,7 +140,9 @@ export function fakeCmux(inventory = null) {
 // default to the fakes above, and `hub` to a hub over all four plus any
 // `adapters` and `store` fakes (default none), started before the app
 // listens. `goals` defaults to createGoals over the same registry; pass null
-// for an app without the Goals routes. `configure` may adjust config.
+// for an app without the Goals routes, and pass `registry` along with `hub`
+// when a test of Goals brings its own hub, so both read one registry.
+// `configure` may adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), routines, hub, adapters, store, bindings, cmux = null, goals,
   configure = (c) => c,
