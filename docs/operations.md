@@ -132,6 +132,25 @@ A thread started moments ago shows as `Untitled thread` until its first turn: th
 
 The Agents view and the persona runtime read the agent registry from `personal-assistant/registry/agents.json`, outside this repository. It is unversioned local configuration and holds absolute paths, so it is not committed anywhere. Set `DASHBOARD_REGISTRY_PATH` to use another file (default `../../registry/agents.json`, resolved from the app directory) and `DASHBOARD_LAUNCH_AGENTS_DIR` to read plists from another directory (default `~/Library/LaunchAgents`). The daemon checks the file every few seconds; if an edit leaves it unreadable or invalid, the daemon keeps the last good registry and reports the error in the state, and the Agents view shows it above the routines. Back up `registry/` with the rest of `personal-assistant/`.
 
+## cmux
+
+The dashboard reads cmux's terminals and agent sessions over cmux's own socket. cmux's default socket mode admits only processes cmux started, so the daemon cannot connect until this is done once. Verified on 2026-09-28 with cmux 0.64.25; the app was quit throughout.
+
+1. Back up `~/.config/cmux/cmux.json` beside itself (`cmux.json.bak-<date>`), then add one active key to it, keeping everything else:
+
+   ```json
+   "automation": { "socketControlMode": "password" },
+   ```
+
+   `cmux config doctor` should report the file valid with `automation` among its keys.
+2. Write a random password to `~/Library/Application Support/cmux/socket-control-password` with mode 600, for example `(umask 077; openssl rand -hex 32 > "$HOME/Library/Application Support/cmux/socket-control-password")`. Settings is not involved; nothing needs to be typed there.
+3. Launch cmux normally. On launch it moves that file to `~/.local/state/cmux/socket-control-password` (still mode 600) and keeps it there across quits. That is the file the daemon reads (`DASHBOARD_CMUX_PASSWORD_FILE`).
+4. From a terminal that is not inside cmux, `cmux ping` should print `PONG` with no password flag or variable; `cmux --password wrong ping` should print `Error: ERROR: Invalid password`. The shell needs `cmux` on `PATH` (`/opt/homebrew/bin/cmux`, the cask's link into the app bundle). The daemon does not use `PATH`: it runs the bundle binary at `DASHBOARD_CMUX_CLI`.
+
+The daemon never starts cmux. While cmux is not running, or before the steps above, the module reports why (`not_running`, `no_password`, or `auth_failed`) and lists nothing; a refused password is logged once as `cmux_auth_failed` and tried again on the next call, so fixing the file or the setting needs no dashboard restart. Set `DASHBOARD_CMUX_SOCKET_PATH_FILE`, `DASHBOARD_CMUX_PASSWORD_FILE`, or `DASHBOARD_CMUX_CLI` if cmux keeps a file or its binary elsewhere; a missing binary is logged once as `cmux_cli_missing`.
+
+Only agents started from a cmux terminal appear: cmux registers `claude` through a wrapper it puts on `PATH`, and the daemon reads that register with `cmux sessions list --json`. A Claude session started from another terminal has no row.
+
 ## Node path after upgrades
 
 The plist records the absolute Node executable selected during installation. After upgrading or removing that Node installation, reinstall with Node 24 or newer so the plist points at the current executable. Normally the installer uses the Node process running it; an explicit executable can be selected with `--node /absolute/path/to/node`.
