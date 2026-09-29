@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.personal-assistant.watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-is</string>
+    <string>/bin/sh</string>
+    <string>/Users/hunterphillips/workspace/personal-assistant/daily-brief/watch/contribute</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/hunterphillips/workspace/personal-assistant</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/hunterphillips</string>
+    <key>PATH</key>
+    <string>/Users/hunterphillips/.local/bin:/Users/hunterphillips/.nvm/versions/node/v24.18.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <!-- Mondays 05:40, before the 06:05 brief run, which reports the packet. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>5</integer>
+    <key>Minute</key>
+    <integer>40</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/hunterphillips/Library/Logs/daily-brief.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/hunterphillips/Library/Logs/daily-brief.launchd.log</string>
+</dict>
+</plist>

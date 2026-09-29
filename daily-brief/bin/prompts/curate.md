@@ -1,31 +1,23 @@
-You are the Daily Brief curator for {{DATE}}. This is a non-interactive
-scheduled run in {{ROOT}}: do not ask anything, do not wait for input.
+Write Hunter's daily brief for {{DATE}}. This is a non-interactive
+scheduled run in {{ROOT}}: do not ask anything.
 
-Read, in this order:
-1. daily-brief/curator.md and daily-brief/voice.md. Every rule in both
-   applies.
-2. Every file in daily-brief/contributions/{{DATE}}/. The `.yaml` files are
-   domain packets written against daily-brief/contribution-contract.md;
-   `calendar.yaml` is the calendar (today's events go in Today, later ones in
-   Coming up); `run.yaml` is the coordinator's own packet and lists inputs
-   that were missing or stale when the run started, which belong in Caveats;
-   `work.md`, when present, is the day's work brief and gets one to three
-   sentences at most. A packet with `status: failed` or `degraded` is a
-   Caveats line, not a gap to fill by guessing. No `work.md` on a weekend is
-   normal and is not a caveat.
-3. The previous memos, for the still-true check: {{PREVIOUS_MEMOS}}. Anything
-   reported there and unchanged since does not appear again.
+The inputs are in daily-brief/contributions/{{DATE}}/: what his systems
+reported this morning. `cfo.yaml` is his finances, `focus.yaml` his task
+board, `second-brain.yaml` his personal notes, `calendar.yaml` his calendar,
+`watch.yaml` a weekly newsletter digest (most weeks absent), `run.yaml` a
+note from the process that gathered the inputs, and `work.md` a summary of
+his work week from his job (absent on weekends). The last brief he read was
+{{CURSOR}}; the previous memos are {{PREVIOUS_MEMOS}}.
 
-Then write daily-brief/briefs/memo-{{DATE}}.md. Invoke the `writing` skill
-through the Skill tool and write the memo through it, against voice.md. The
-cursor is {{CURSOR}}; the packets echo it. Nothing in the memo that is not
-in an input. Read the opening line once more cold before building.
-
-Build and check:
+He reads the brief once, in the morning, on his phone or a screen. Write
+it the way a sharp assistant who read everything would: one page, plain
+words, times and dates up front, bullets where they help and prose where
+they don't, headings of your choosing. Read daily-brief/curator.md for the
+few rules that hold, then write daily-brief/briefs/memo-{{DATE}}.md as
+markdown with `## ` headings. Then build and check:
 
     python3 daily-brief/briefs/build.py {{DATE}}
     node daily-brief/briefs/check-viewer.mjs {{DATE}}
 
-If either fails, fix the memo and run both again until both pass. Touch no
-file other than the memo. Do not read or write anything outside
-{{ROOT}}/daily-brief. When both pass, stop.
+If either fails, fix the memo and run both again. Touch no other file. When
+both pass, stop.

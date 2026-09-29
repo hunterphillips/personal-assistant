@@ -12,13 +12,14 @@ The plan and its decisions:
 | 05:15 Mon-Fri | `com.hunter.catchup.daily`, the work brief | `~/workspace/work/nowgentic/.claude/bin/` |
 | 05:30 | `com.hunter.cfo.daily`, cfo's snapshot | `~/workspace/work/investing/cfo/launchd/` |
 | 05:50 | `com.focus.scan-notes`, `com.focus.scan-work` | `~/workspace/projects/AI/focus/launchd/` |
+| 05:40 Mon | `com.personal-assistant.watch`, the newsletter packet | `launchd/` here |
 | 06:05 | `com.personal-assistant.daily-brief` | `launchd/` here |
 
 A normal morning finishes around 06:45. The runner does not trust the
 clock: it waits up to 30 minutes for today's catchup file, cfo's snapshot
 log, and Focus's `last-notes.json` and `last-work.json`, then proceeds and
 lists whatever is still missing in `contributions/<date>/run.yaml`, which
-the memo reports under Caveats.
+the memo reports under "Things to note".
 
 If the Mac is asleep, launchd fires every missed job at wake, and the wait
 above puts them back in order. A Mac that is shut down does not catch up.
@@ -27,7 +28,7 @@ awake until it finishes. Waking a sleeping Mac on schedule is a separate,
 machine-wide power setting (root, one schedule for the whole machine). Apple
 documents it as working only when the Mac is plugged in. Set on 2026-09-28,
 not yet observed with the lid closed. You do not have to check: a run that
-starts more than 30 minutes after 06:05 on its own date adds a Caveats line
+starts more than 30 minutes after 06:05 on its own date adds a "Things to note" line
 to the memo saying when it was built. To check or change the wake:
 
 ```
@@ -45,14 +46,35 @@ daily-brief/bin/run-brief --date 2026-09-27 --stage curate   # rerun one stage
 
 Stages are `gather`, `curate`, `verify`. Without `--force` a date that
 already has a viewer exits without running. Models: opus for cfo, focus,
-second-brain, and the curator; sonnet for calendar.
+and second-brain; `claude-sonnet-5-5` at `--effort high` for the curator
+(Hunter's pick, 09-29; `DAILY_BRIEF_EFFORT_curator` overrides); sonnet for
+calendar.
 `DAILY_BRIEF_MODEL_<domain>=sonnet` overrides one for a run (hyphens become
 underscores: `DAILY_BRIEF_MODEL_second_brain`). Timeouts:
 `DAILY_BRIEF_WAIT_SECONDS`, `DAILY_BRIEF_GATHER_SECONDS`,
 `DAILY_BRIEF_CURATE_SECONDS`.
 
-The prompts each session receives are in `bin/prompts/`. The contract,
-curator rules, and voice they point at are the files beside this README.
+The prompts each session receives are in `bin/prompts/`. The contract and
+curator rules they point at are the files beside this README.
+
+## Watch
+
+`watch/contribute` reads the five newsletters in `watch/relevance.md` from
+Gmail (haiku lists the issues and extracts each one's stories, one session
+per issue; opus triages them against the criteria with no tools), then
+`watch/render.py` writes `watch/packets/<date>.yaml`, `watch/overflow/<date>.json`,
+appends `watch/seen.jsonl`, and sets `last_run` in `watch/state.json`. The
+next brief run copies the newest packet not in `state.json.reported` in as
+`watch.yaml` and marks it after a successful build. Hand run:
+
+```
+daily-brief/watch/contribute --dry-run
+daily-brief/watch/contribute                 # since last_run
+daily-brief/watch/contribute --since 2026-09-14
+```
+
+`WATCH_TRIAGE_MODEL`, `WATCH_EXTRACT_MODEL`, `WATCH_LIST_MODEL` override the
+models. Log lines start with `watch`.
 
 ## Where things land
 

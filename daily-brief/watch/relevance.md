@@ -18,16 +18,20 @@ Drafted 2026-09-24, rewritten 2026-09-25 after Hunter's read. He edits it.
 
 ## Sources
 
-Four, chosen by hand on 2026-09-24:
+Five: four chosen by hand on 2026-09-24, AINews added on trial 2026-09-28
+(Hunter: "include ainews as well"; after the first runs, judge whether it
+adds anything Latent Space and Simon Willison do not):
 
 | Source | Sender | Cadence |
 |---|---|---|
-| Latent Space | Substack, free tier | weekly essays |
+| Latent Space | `swyx@substack.com`, free tier | weekly essays |
+| AINews | `swyx+ainews@substack.com` | weekday digest, on trial |
 | Hacker Newsletter | `kale@hackernewsletter.com` | weekly |
 | Simon Willison's newsletter | `simonw@substack.com` | roughly weekly |
-| Axios Nashville | Axios | weekday, skimmed |
+| Axios Nashville | `nashville@axios.com` | weekday, skimmed |
 
-Nothing else counts, even if it arrives in the same inbox.
+Nothing else counts, even if it arrives under the same Gmail label. The
+sender list `watch/contribute` queries is the one above; change both.
 
 ## An item survives if
 

@@ -6,8 +6,9 @@
 Reads memo-<date>.md from the briefs directory (or --dir) and writes
 <date>.md and viewer-<date>.html beside it. Standard library only.
 
-The memo is markdown: an optional "# title" line, one opening paragraph with
-no heading, then "## <Label>" sections in the order curator.md gives. The
+The memo is markdown: an optional "# title" line, an optional opening
+paragraph with no heading, then "## <Heading>" sections in any order, each
+holding paragraphs and/or "- " bullet lists. The
 viewer keeps the envelope the dashboard parses (dashboard/app/lib/briefs.mjs):
 one plain <script> holding `const ITEMS` and `const KEY`, six controls, and
 the script immediately before </body></html>. One ITEMS entry per section, so
@@ -21,9 +22,15 @@ import os
 import re
 import sys
 
-LABELS = ["Today", "What changed", "Needs you", "Coming up", "Watch", "Caveats"]
-SLUGS = {label: re.sub(r"[^a-z]+", "-", label.lower()).strip("-") for label in LABELS}
-WORD_CAP = 500
+WORD_CAP = 550
+
+
+def slug_for(label, taken):
+    base = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "section"
+    slug, n = base, 2
+    while slug in taken or slug == "opening":
+        slug, n = f"{base}-{n}", n + 1
+    return slug
 
 
 class MemoError(Exception):
@@ -44,7 +51,18 @@ def parse_memo(text):
 
     def flush_para():
         if para:
-            current_paras.append(" ".join(line.strip() for line in para))
+            if para[0].lstrip().startswith(("- ", "* ", "+ ")):
+                # A list block keeps its lines; the viewer renders them as items.
+                items = []
+                for line in para:
+                    t = line.strip()
+                    if t.startswith(("- ", "* ", "+ ")):
+                        items.append("- " + t[2:].strip())
+                    elif items:
+                        items[-1] += " " + t
+                current_paras.append("\n".join(items))
+            else:
+                current_paras.append(" ".join(line.strip() for line in para))
             para.clear()
 
     for line in lines:
@@ -57,37 +75,41 @@ def parse_memo(text):
             flush_para()
         elif line.startswith("#"):
             raise MemoError(f"only '## ' headings are allowed: {line!r}")
+        elif para and (line.lstrip().startswith(("- ", "* ", "+ ")) != para[0].lstrip().startswith(("- ", "* ", "+ "))):
+            # a list directly after prose, or prose after a list: separate blocks
+            flush_para()
+            para.append(line)
         else:
             para.append(line)
     flush_para()
     blocks.append((current_label, current_paras))
 
     opening_paras = blocks[0][1]
-    if len(opening_paras) != 1:
+    if len(opening_paras) > 1:
         raise MemoError(
-            f"the memo opens with exactly one paragraph before the first heading; found {len(opening_paras)}"
+            f"at most one paragraph before the first heading; found {len(opening_paras)}"
         )
-    opening = opening_paras[0]
+    opening = opening_paras[0] if opening_paras else None
 
     sections = []
     seen = []
     for label, paras in blocks[1:]:
-        if label not in LABELS:
-            raise MemoError(f"unknown section {label!r}; allowed: {', '.join(LABELS)}")
+        if not label:
+            raise MemoError("a '## ' heading has no text")
         if label in seen:
             raise MemoError(f"section {label!r} appears twice")
-        if seen and LABELS.index(label) < LABELS.index(seen[-1]):
-            raise MemoError(f"section {label!r} is out of order; the order is {', '.join(LABELS)}")
         if not paras:
             raise MemoError(f"section {label!r} is empty; omit the heading instead")
         seen.append(label)
         sections.append((label, paras))
+    if not sections and not opening:
+        raise MemoError("the memo is empty")
 
     return title, opening, sections
 
 
 def word_count(opening, sections):
-    text = " ".join([opening] + [p for _, paras in sections for p in paras])
+    text = " ".join(([opening] if opening else []) + [p for _, paras in sections for p in paras])
     return len(re.findall(r"\S+", text))
 
 
@@ -97,7 +119,7 @@ def default_title(date):
 
 
 def render_markdown(title, opening, sections):
-    out = [f"# {title}", "", opening, ""]
+    out = [f"# {title}", ""] + ([opening, ""] if opening else [])
     for label, paras in sections:
         out.append(f"## {label}")
         out.append("")
@@ -108,9 +130,12 @@ def render_markdown(title, opening, sections):
 
 
 def items_for(opening, sections):
-    items = [{"sec": "Opening", "id": "opening", "text": opening}]
+    items = [{"sec": "Opening", "id": "opening", "text": opening}] if opening else []
+    taken = set()
     for label, paras in sections:
-        items.append({"sec": label, "id": SLUGS[label], "text": "\n\n".join(paras)})
+        slug = slug_for(label, taken)
+        taken.add(slug)
+        items.append({"sec": label, "id": slug, "text": "\n\n".join(paras)})
     return items
 
 
@@ -163,6 +188,8 @@ section.opening{font-size:21px}
 section.ok{border-left-color:var(--ok)}
 section.no{border-left-color:var(--no)}
 section p{margin:0 0 .8em} section p:last-of-type{margin-bottom:0}
+section strong{font-weight:600}
+section ul{margin:0 0 .8em;padding-left:1.15em} section li{margin:0 0 .45em} section li:last-child{margin-bottom:0}
 .ctl{position:absolute;left:14px;bottom:2px;opacity:0;pointer-events:none;
   display:flex;gap:14px;align-items:center;font-size:12.5px;line-height:1;transition:opacity .15s}
 section:hover .ctl, section.show .ctl, section.ok .ctl, section.no .ctl, section:focus-within .ctl{
@@ -220,6 +247,20 @@ textarea.hidden{display:none}
 <script>
 const ITEMS = {ITEMS};
 const KEY = 'db-items-{DATE}';
+// Inline markdown the models use: **bold** and *italic*. Text nodes only.
+function inline(el, text) {
+  const parts = text.split(/(\\*\\*[^*]+\\*\\*|\\*[^*\\s][^*]*\\*)/);
+  parts.forEach(part => {
+    if (!part) return;
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      const b = document.createElement('strong'); b.textContent = part.slice(2, -2); el.appendChild(b);
+    } else if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      const i = document.createElement('em'); i.textContent = part.slice(1, -1); el.appendChild(i);
+    } else {
+      el.appendChild(document.createTextNode(part));
+    }
+  });
+}
 let fb = {};
 // Reading preferences, remembered across days in this browser.
 const THEMES = ['system','light','dark'];
@@ -259,7 +300,12 @@ function render() {
     if (it.sec === 'Opening') sec.classList.add('opening');
     if (f.m==='a') sec.classList.add('ok'); if (f.m==='d') sec.classList.add('no');
     it.text.split('\\n\\n').forEach(t => {
-      const p = document.createElement('p'); p.textContent = t; sec.appendChild(p);
+      if (t.startsWith('- ')) {
+        const ul = document.createElement('ul');
+        t.split('\\n').forEach(l => { const li = document.createElement('li'); inline(li, l.replace(/^- /, '')); ul.appendChild(li); });
+        sec.appendChild(ul); return;
+      }
+      const p = document.createElement('p'); inline(p, t); sec.appendChild(p);
       p.onclick = () => sec.classList.toggle('show');
     });
     const c = document.createElement('div'); c.className='ctl sans';
@@ -364,7 +410,7 @@ def main(argv):
     viewer_path = os.path.join(args.dir, f"viewer-{args.date}.html")
     write_atomic(md_path, render_markdown(title, opening, sections))
     write_atomic(viewer_path, render_viewer(args.date, title, items, words))
-    print(f"built {args.date}: {words} words, {len(sections)} sections + opening")
+    print(f"built {args.date}: {words} words, {len(sections)} sections" + (" + opening" if opening else ""))
     print(f"  {md_path}")
     print(f"  {viewer_path}")
     return 0

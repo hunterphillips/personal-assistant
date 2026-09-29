@@ -1,84 +1,47 @@
 # Daily Brief — curator rules
 
-What the curator does with the packets. The curator is a session in this
-repo, started by `bin/run-brief` every morning with `bin/prompts/curate.md`,
-or by hand; these rules are what it follows.
+The curator is one session, started by `bin/run-brief` every morning with
+`bin/prompts/curate.md`, that reads the day's packets and writes
+`briefs/memo-<date>.md`. `briefs/build.py <date>` turns the memo into
+`<date>.md` and `viewer-<date>.html`, which the dashboard serves.
 
 ## Inputs
 
-- One packet per domain in `contributions/<date>/`, written against
-  `contribution-contract.md`. Validate each by reading it; a packet that
-  breaks the schema is reported in the lane handoff, not silently fixed.
-- The calendar: `contributions/<date>/calendar.yaml` in the scheduled run,
-  one `upcoming` item per event; in a hand run, Hunter's personal Google
-  calendars read directly: today, and the next seven days, every calendar
-  except the holiday feed, dropping events he has declined.
-- The day's work brief: `contributions/<date>/work.md`, copied by the run
-  from `~/workspace/work/nowgentic/.claude/catchup/`; absent on weekends.
-- `contributions/<date>/run.yaml`: the coordinator's caveats about inputs
-  that were missing or stale when the run started. They go in Caveats.
-- The cursor: the date of the last brief Hunter read. It goes into the run
-  prompt and every packet echoes it.
+One packet per domain in `contributions/<date>/`, written against
+`contribution-contract.md`: `cfo.yaml`, `focus.yaml`, `second-brain.yaml`,
+`calendar.yaml`, `watch.yaml` (weekly), `run.yaml` (the coordinator's own
+caveats about missing or stale inputs), and `work.md` (the work brief,
+weekdays). Plus the previous two memos.
 
 ## The memo
 
-One file, `briefs/memo-<date>.md`, written through the `writing` skill.
-`briefs/build.py <date>` turns it into `<date>.md` and `viewer-<date>.html`,
-which the dashboard serves.
+Markdown: an optional opening line, then `## ` headings of the curator's
+choosing, each with bullets or prose, whichever reads better. One page;
+the builder refuses more than 550 words. Empty sections are omitted.
 
-The first paragraph is one sentence with no heading: the day in a line. Then
-these sections, in this order, each a `##` heading followed by prose:
+## Rules that hold
 
-| Section | Contents |
-|---|---|
-| Today | The calendar read as a whole: appointments, the evening thing, the open stretch. |
-| What changed | Threads closed, cards done by the curator or resolved by others, cfo items settled, work merged. Things that resolved without him. |
-| Needs you | At most three lines. Points at Focus ("three cards open in Focus, the first is the zoom-out pass") plus any real deadline the board does not carry. Never restates a card. In the memo the board is always "Focus". |
-| Coming up | Dated things in the next seven days, from the calendar and from `upcoming` items. |
-| Watch | The newsletter digest, from the watch packet. Most weeks absent. |
-| Caveats | Where the brief's own inputs are unreliable today: a stale feed, a source that did not respond, a figure that could not be verified. |
-
-A section with nothing in it is omitted, heading and all. A quiet day is the
-opening sentence and two short paragraphs.
-
-## Rules
-
-- **500 words, hard.** No target below it. The builder refuses a longer memo.
-- **Headlines print; `why` never does.** Every consequence sentence Hunter
-  has flagged was a `why` field passed through.
-- **Items stand alone.** Read cold, never as a diff from yesterday. Change
-  decides whether something appears, not how the sentence reads.
-- **The board is pointed at, not copied.** If a packet hands over a card's
-  contents, drop it.
-- **Work is one to three sentences**, inside What changed or Needs you. It is
-  never its own section; individual work items do not appear unless one
-  spills into his personal life for a specific reason.
-- **Figures are restated only from `computed` or `recorded` items.** A
-  `summarized` claim is attributed to its source.
-- **Still true is not news.** An item reported in an earlier brief and
-  unchanged since does not appear again. Until the assembler keeps a
-  last-reported memory, the curator checks the previous memo by hand.
-- **Standing context is read, never printed.**
-- **A record catching up is not a change.** A domain settling a fact
-  Hunter already knows (his mortgage rate, a rollover he did) does not
-  appear. If the settlement moved a figure he acts on, the moved figure
-  appears; the bookkeeping never does.
-- **The memo is composed from the packets, not assembled from them.**
-  Headlines are the facts, not the sentences. Relate items that share a
-  cause or a date, and write calendar entries with Hunter as the subject.
-  `voice.md` has the shapes to avoid.
-- **Labels are the six above, exactly.** No others, and no label that
-  describes its own role.
-
-## Voice
-
-`voice.md`, every time. The opening line names a fact, never a scene.
-Nothing in the memo that is not in an input. Write, audit against the
-`writing` skill's humanizer checklist, then read the opening line once more
-cold before building.
+1. **Only what is in the inputs.** No invented color, no rounding a fact
+   into a nicer one, no inference about what an event is for.
+2. **Still true is not news.** Something the previous memo said and that
+   has not changed since does not appear again. Check the previous memos.
+3. **The board is not described.** No card counts, no tiers, no "on your
+   board." What needs his attention is stated as the ask: what, from
+   whom, by when. A Later card is not an ask today.
+4. **No advice.** Nothing he "should", "could", or would find "worth"
+   doing. State the fact; he decides. Nothing he already knows about his
+   own life (his mortgage rate, a rollover he did).
+5. **Work is one short block.** Its own brief reaches him at work; here it
+   is the picture in a few lines, and a single item only when it spills
+   into his personal life.
+6. **Figures from `computed` or `recorded` items only.** A `summarized`
+   claim names its source. Doubts about the inputs (a failed feed, a
+   stale scan, a figure that could not be verified) go in a short block
+   at the end headed **Things to note**, so he knows what to trust. Never
+   "Caveats"; Hunter retired that label on 09-29.
+7. **Headlines print; `why` never does.**
 
 ## After
 
-Tell Hunter the memo is up. Feedback arrives per section in
-`briefs/feedback-<date>.md`; each mark either changes the curator's ranking
-or goes back to a domain's contract, and the lane handoff records which.
+Feedback arrives per section in `briefs/feedback-<date>.md`. A mark
+changes one of the rules above, a domain's contract, or nothing.

@@ -275,8 +275,10 @@ receipts.
 **focus** — the board's movement, not its contents. Since the cursor: cards
 the curator opened, closed, or expired, and cards that resolved because
 someone else acted, as `change` items. Not cards Hunter moved himself. At most
-one `needs-you` item: the count of open cards and the title of the top one,
-so the brief can point at the board in a line. Never the cards themselves.
+one `needs-you` item, and only when a card is due today or went live
+since the cursor: the ask itself, stated as what, from whom, by when.
+Never a count of open cards, never a tier, never the cards as a list; the
+brief does not describe the board (Hunter, 09-29).
 Scanner and board freshness as `caveat`; determine it from current logs and
 git history rather than assuming. Do not trigger scans, run curate, or modify
 `focus.json`.
@@ -293,13 +295,18 @@ automatically stale; apply the note's own review cadence and evidence. Do not
 capture, distill, edit notes, or read across into `~/workspace/personal-context`.
 
 **watch** — the world outside his systems. `context` items only, at most five,
-once a week. Sources are the four Hunter chose: Latent Space, Hacker
-Newsletter, Simon Willison's newsletter, Axios Nashville. Every item is
+once a week. Sources are the five newsletters in `watch/relevance.md`
+(Latent Space, AINews on trial, Hacker Newsletter, Simon Willison's
+newsletter, Axios Nashville), read from Gmail by `watch/contribute` on
+Mondays: it lists the issues since the last run, extracts their stories,
+and triages them against the criteria in that file. Every item is
 `origin: external` and `basis: summarized`, names its source inside the
-headline, and passes the criteria in `watch/relevance.md`. A story seen in
-the last fourteen days is not new. A week with nothing that passes
-contributes an empty packet with `status: ok`; that is the expected outcome
-most weeks.
+headline, and carries the story's link as its receipt. A story seen in the
+last fourteen days is not new. A week with nothing that passes contributes
+an empty packet with `status: ok`; that is the expected outcome most weeks.
+Stories that pass but miss the cap go to `watch/overflow/`, for a later
+dashboard feed, never to the brief. The packet waits in `watch/packets/`
+and the next brief run reports it.
 
 **calendar** — Hunter's personal Google calendars, read-only, every calendar
 except the holiday feed, today and the next seven days. In the scheduled run

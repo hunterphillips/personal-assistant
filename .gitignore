@@ -21,3 +21,9 @@ __pycache__/
 *.log
 
 .DS_Store
+
+# Watch outputs: newsletter stories and run state, local only.
+daily-brief/watch/packets/
+daily-brief/watch/overflow/
+daily-brief/watch/seen.jsonl
+daily-brief/watch/state.json

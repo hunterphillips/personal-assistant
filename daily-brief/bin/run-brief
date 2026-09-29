@@ -42,7 +42,8 @@ focus|/Users/hunterphillips/workspace/projects/AI/focus|opus|repo
 second-brain|/Users/hunterphillips/workspace/second-brain|opus|repo
 calendar|'$root'|sonnet|connector'
 
-curator_model=${DAILY_BRIEF_MODEL_curator:-opus}
+curator_model=${DAILY_BRIEF_MODEL_curator:-claude-sonnet-5-5}
+curator_effort=${DAILY_BRIEF_EFFORT_curator:-high}
 
 # --- arguments --------------------------------------------------------------
 date=
@@ -164,7 +165,7 @@ STUB
 for f in "$claude" "$node" "$python3"; do
     [ -x "$f" ] || { log "exit=1 date=$date reason=missing-binary $f"; say "missing $f"; exit 1; }
 done
-for f in "$brief_dir/contribution-contract.md" "$brief_dir/curator.md" "$brief_dir/voice.md" \
+for f in "$brief_dir/contribution-contract.md" "$brief_dir/curator.md" \
          "$prompts/contribute.md" "$prompts/calendar.md" "$prompts/curate.md" \
          "$briefs/build.py" "$briefs/check-viewer.mjs"; do
     [ -f "$f" ] || { log "exit=1 date=$date reason=missing-file $f"; say "missing $f"; exit 1; }
@@ -213,8 +214,10 @@ if [ "$dry_run" = 1 ]; then
 $roster
 ROSTER
     say "  gather work: cp $catchup_dir/$date-catchup.md $contributions/$date/work.md (Mon-Fri)"
+    pending=$(ls "$brief_dir"/watch/packets/*.yaml 2>/dev/null | /usr/bin/xargs -n1 /usr/bin/basename 2>/dev/null | /usr/bin/sed 's/\.yaml$//' | /usr/bin/tr '\n' ' ')
+    say "  watch: copy the newest unreported packet in watch/packets/ (${pending:-none}) as watch.yaml; mark reported after verify"
     say "  write $contributions/$date/run.yaml"
-    say "  curate: (cd $root && $claude -p <prompts/curate.md> --model $curator_model --permission-mode auto --allowedTools Skill,Read,Glob,Grep,Edit(memo),Bash(build.py),Bash(check-viewer.mjs) --disallowedTools mcp__* --strict-mcp-config) timeout ${curate_seconds}s"
+    say "  curate: (cd $root && $claude -p <prompts/curate.md> --model $curator_model --effort $curator_effort --permission-mode auto --allowedTools Skill,Read,Glob,Grep,Edit(memo),Bash(build.py),Bash(check-viewer.mjs) --disallowedTools mcp__* --strict-mcp-config) timeout ${curate_seconds}s"
     say "  verify: $python3 $briefs/build.py $date && $node $briefs/check-viewer.mjs $date"
     exit 0
 fi
@@ -286,7 +289,7 @@ if [ "$stage" = all ] || [ "$stage" = gather ]; then
 fi
 
 # --- gather -------------------------------------------------------------------
-packets=; stubs=
+packets=; stubs=; watch_packet=
 if [ "$stage" = all ] || [ "$stage" = gather ]; then
     while IFS='|' read -r domain cwd model kind; do
         [ -n "$domain" ] || continue
@@ -343,6 +346,20 @@ ROSTER
         : # weekend: no work brief is expected, and the curator knows
     fi
 
+    # Watch: the weekly contributor leaves packets in watch/packets/; the newest
+    # one not yet reported rides into this brief and is marked after verify.
+    watch_packet=
+    for f in "$brief_dir"/watch/packets/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].yaml; do
+        [ -f "$f" ] || continue
+        d=$(/usr/bin/basename "$f" .yaml)
+        [ "$d" \> "$date" ] && continue
+        if [ -f "$brief_dir/watch/state.json" ] && /usr/bin/jq -e --arg d "$d" '.reported | index($d)' "$brief_dir/watch/state.json" >/dev/null 2>&1; then continue; fi
+        [ "$d" \> "${watch_packet:-}" ] && watch_packet=$d
+    done
+    if [ -n "$watch_packet" ]; then
+        /bin/cp "$brief_dir/watch/packets/$watch_packet.yaml" "$contributions/$date/watch.yaml" && /bin/chmod 600 "$contributions/$date/watch.yaml"
+    fi
+
     write_run_packet
     /bin/chmod 600 "$contributions/$date/run.yaml"
     packets=$(cd "$contributions/$date" && ls *.yaml *.md 2>/dev/null | /usr/bin/tr '\n' ',' | /usr/bin/sed 's/,$//')
@@ -354,7 +371,7 @@ if [ "$stage" = all ] || [ "$stage" = curate ]; then
     prompt=$(render curate.md)
     out=$transcripts/$date-curator.log
     run_limited "$curate_seconds" "$out" "$claude" -p "$prompt" \
-        --model "$curator_model" --permission-mode auto \
+        --model "$curator_model" --effort "$curator_effort" --permission-mode auto \
         --allowedTools "Skill,Read,Glob,Grep,Edit(/$briefs/memo-$date.md),Bash($python3 daily-brief/briefs/build.py:*),Bash(python3 daily-brief/briefs/build.py:*),Bash($node daily-brief/briefs/check-viewer.mjs:*),Bash(node daily-brief/briefs/check-viewer.mjs:*)" \
         --disallowedTools "mcp__*,Agent,NotebookEdit" --strict-mcp-config
     curate_exit=$?
@@ -368,6 +385,10 @@ if [ -f "$briefs/memo-$date.md" ]; then
        && "$node" "$briefs/check-viewer.mjs" "$date" >>"$transcripts/$date-verify.log" 2>&1 \
        && [ -f "$briefs/viewer-$date.html" ]; then
         viewer=written
+        if [ -n "${watch_packet:-}" ]; then
+            /usr/bin/jq --arg d "$watch_packet" '.reported = ((.reported // []) + [$d] | unique)' "$brief_dir/watch/state.json" >"$brief_dir/watch/state.json.tmp" \
+                && /bin/mv "$brief_dir/watch/state.json.tmp" "$brief_dir/watch/state.json"
+        fi
     else
         exit_code=1
     fi

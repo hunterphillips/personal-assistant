@@ -1,16 +1,16 @@
 #!/bin/sh
-# Install or refresh the Daily Brief LaunchAgent: copies the plist into
-# ~/Library/LaunchAgents and (re)loads it. Rerun after editing the plist.
+# Install or refresh every Daily Brief LaunchAgent in daily-brief/launchd/:
+# copies each plist into ~/Library/LaunchAgents and (re)loads it.
 set -eu
 root=/Users/hunterphillips/workspace/personal-assistant
-label=com.personal-assistant.daily-brief
-src=$root/daily-brief/launchd/$label.plist
-dst=$HOME/Library/LaunchAgents/$label.plist
 uid_n=$(id -u)
-
-plutil -lint "$src" >/dev/null
-cp "$src" "$dst"
-launchctl bootout "gui/$uid_n/$label" 2>/dev/null || true
-launchctl bootstrap "gui/$uid_n" "$dst"
-printf 'loaded %s\n' "$label"
-launchctl list | grep "$label"
+for src in "$root"/daily-brief/launchd/com.personal-assistant.*.plist; do
+    label=$(basename "$src" .plist)
+    dst=$HOME/Library/LaunchAgents/$label.plist
+    plutil -lint "$src" >/dev/null
+    cp "$src" "$dst"
+    launchctl bootout "gui/$uid_n/$label" 2>/dev/null || true
+    launchctl bootstrap "gui/$uid_n" "$dst"
+    printf 'loaded %s\n' "$label"
+done
+launchctl list | grep com.personal-assistant
