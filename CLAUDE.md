@@ -29,12 +29,14 @@ whether they generalize.
 Read in this order when picking up work:
 
 1. `thoughts/shared/lanes/daily-brief/handoff.md` — the brief: current state,
-   decisions, what's next. **Aligned 2026-09-24**: Hunter answered the five
-   brief-vs-Focus questions; the decisions are in §8 of
-   `thoughts/shared/research/2026-09-24-brief-vs-focus.md`. The contract,
-   schema, builder, and voice were rewritten against them on 09-25 and the
-   first memo-format brief is live; the plan is
-   `thoughts/shared/plans/2026-09-24-daily-brief-memo-format.md`.
+   decisions, what's next. The brief-vs-Focus split is §8 of
+   `thoughts/shared/research/2026-09-24-brief-vs-focus.md`. The run is
+   scheduled (`thoughts/shared/plans/2026-09-27-daily-brief-scheduled-run.md`),
+   the newsletter watch domain runs Mondays
+   (`thoughts/shared/plans/2026-09-28-watch-domain.md`), and on 2026-09-29
+   the writing rules were collapsed to seven content rules after Hunter
+   preferred a one-shot prompt's brief; do not add sentence-level prose
+   rules back.
    `thoughts/shared/lanes/architecture/handoff.md` — the project itself: what
    the assistant is (undefined), domain registry and tool-policy follow-ups.
    `thoughts/shared/lanes/dashboard/handoff.md` — dashboard state, decisions,
@@ -51,9 +53,8 @@ Read in this order when picking up work:
    there with reasons.
 3. `daily-brief/contribution-contract.md` — the instruction each domain reads;
    `daily-brief/contribution-schema.md` — the YAML shape it produces and why;
-   `daily-brief/curator.md` — the memo's sections and the curator's rules;
-   `daily-brief/voice.md` — how the memo sounds. Every memo is written
-   against it and audited with `writing` before it is built.
+   `daily-brief/curator.md` — the curator's seven content rules. The voice
+   file was retired on 2026-09-29; the memo's shape is the model's.
 
 ## Structure
 
@@ -77,11 +78,15 @@ One directory per use case; a later weekly review or decision prep sits beside
 - `dashboard/prototype/` — standalone static design study with illustrative data;
   its own Git repository and private Sites deployment. See its README for local preview.
 - `daily-brief/contribution-contract.md`, `contribution-schema.md`,
-  `run-prompts.md`, `curator.md`, `voice.md`, `watch/relevance.md` — tracked
+  `run-prompts.md`, `curator.md`, `watch/relevance.md` — tracked
 - `daily-brief/bin/run-brief` — the scheduled run (gather, curate, build,
-  verify), `bin/prompts/` the prompts it renders, `launchd/` its LaunchAgent
-  (06:05 daily). `daily-brief/README.md` has the schedule and the hand-run
-  flags.
+  verify), `bin/prompts/` the prompts it renders, `launchd/` the two
+  LaunchAgents (brief 06:05 daily, watch Mondays 05:40).
+  `daily-brief/README.md` has the schedule, models, hand-run flags, and logs.
+- `daily-brief/watch/` — the newsletter domain: `contribute` (Gmail via the
+  connector, haiku extraction, opus triage), `render.py`, `prompts/`,
+  `schemas/`, `relevance.md`; its `packets/`, `overflow/`, `seen.jsonl`,
+  `state.json` are outputs, gitignored.
 - `daily-brief/contributions/YYYY-MM-DD/<domain>.yaml` — gitignored
 - `daily-brief/briefs/` — gitignored; the curator writes `memo-<date>.md`,
   `build.py <date>` generates `<date>.md` and `viewer-<date>.html`, which

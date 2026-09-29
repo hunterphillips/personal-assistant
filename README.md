@@ -63,8 +63,9 @@ decision prep would sit beside it with its own contract and its own inputs.
 - `daily-brief/contribution-contract.md` — what a contribution is and what each item carries
 - `daily-brief/contribution-schema.md` — the YAML shape, derived from the first three runs
 - `daily-brief/run-prompts.md` — the one-line prompt pasted into each domain repo
-- `daily-brief/curator.md` — what the curator does with the packets: the memo's sections and rules
-- `daily-brief/watch/relevance.md` — the watch domain's sources and survival criteria
+- `daily-brief/curator.md` — the curator's seven content rules; headings and shape are the model's
+- `daily-brief/watch/` — the newsletter domain: `contribute` runs Mondays, `relevance.md` holds its sources and survival criteria
+- `daily-brief/bin/run-brief` — the scheduled morning run; `daily-brief/README.md` has the schedule and flags
 - `daily-brief/contributions/YYYY-MM-DD/<domain>.yaml` — a day's raw contributions
 - `daily-brief/briefs/` — `memo-<date>.md` written by the curator, `build.py` that turns it into `<date>.md` and the `viewer-<date>.html` the dashboard serves, and the feedback files saved beside them
 
@@ -99,12 +100,15 @@ evidence) fed the daemon plan; its Electron/TypeScript
 [plan](thoughts/shared/plans/2026-09-18-dashboard-control-tower-implementation.md)
 is superseded.
 
-The Daily Brief has run by hand since 2026-09-10, six briefs so far, with the
-contract and schema stable since 2026-09-13. On 2026-09-24 the briefs were
+The Daily Brief ran by hand from 2026-09-10 and has run itself every
+morning since 2026-09-27: `daily-brief/bin/run-brief` gathers one packet per
+domain, curates, builds, and publishes to the dashboard by about 06:45, after
+the catchup, cfo, and Focus jobs it depends on. On 2026-09-24 the briefs were
 found to overlap the Focus board, and Hunter decided the split: Focus is
-actions, the brief is orientation and never restates the board. The
-decisions, including a memo format and a newsletter `watch` domain, are in
-§8 of `thoughts/shared/research/2026-09-24-brief-vs-focus.md`. The contract,
-schema, builder, and a voice file were rewritten against them on 2026-09-25,
-and the first memo-format brief went up that day. Curation is still by hand.
+actions, the brief is orientation and never restates the board (§8 of
+`thoughts/shared/research/2026-09-24-brief-vs-focus.md`). A `watch` domain
+distills five newsletters weekly. On 2026-09-29 Hunter preferred a one-shot
+prompt's brief to the rule-stacked memo, so the voice file and fixed labels
+were retired; the curator now writes from a ten-line prompt and seven content
+rules on Sonnet 5.5.
 State and open threads live in `thoughts/shared/lanes/daily-brief/handoff.md`.
