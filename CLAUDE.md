@@ -12,9 +12,11 @@ from here.
 
 - **Interface**: `dashboard/app/`, a Node 24 daemon on 127.0.0.1:4243 behind
   Tailscale Serve, in Focus's theme since 2026-09-30. A rail of five views:
-  Home is the Agents view (agents on the Claude Agent SDK, Codex
-  threads on a shared app-server, Claude Code terminals in cmux; a gear
-  opens each agent's settings beside its thread), Reading holds the Daily
+  Home is the Agents view (the Assistant pinned above the groups the
+  registry lists, agents on the Claude Agent SDK, Codex threads on a
+  shared app-server, Claude Code terminals in cmux; a gear opens each
+  agent's settings beside its thread; on a desk the Assistant's thread
+  opens by default), Reading holds the Daily
   Brief and the Feed (what the producers found, with images, and Discuss
   opening the Watch agent), Focus is embedded through a proxy, Goals
   reads the vault's priorities with add and edit going through the
@@ -27,7 +29,9 @@ from here.
   setup.
 - **Registry**: `registry/agents.json`, the agents and project folders the
   daemon runs and lists: role, description, group, cwd, provider, launchd
-  labels. Absolute paths; the daemon keeps the last good copy on a bad edit.
+  labels, `pinned`; plus the `groups` list that sets group order and
+  labels. Absolute paths; the daemon keeps the last good copy on a bad
+  edit.
 - **Use cases**: `daily-brief/`, running every morning since 2026-09-27
   (gather one packet per domain, curate, build, verify), with the newsletter
   `watch` domain on Mondays; `feed/`, the store behind the Feed, which
