@@ -206,6 +206,30 @@ test.describe('with the fixture vault', () => {
     await expect(input).toHaveValue('Swim a mile.');
   });
 
+  test('a refetch keeps open rows and sections open and focus where it was', async ({ page, hub }) => {
+    await page.clock.install();
+    await openGoals(page, hub);
+    await openRow(page, 'Later', 'later:kayak-trip');
+    await openRow(page, 'Goal notes', 'goal:boat');
+    await row(page, 'goal:boat').focus();
+    await rm(path.join(hub.vaultDir, 'notes', 'goals', 'zine.md'));
+    await writeFile(path.join(hub.vaultDir, 'notes', 'goals', 'swim.md'), '# Swim a mile\n\n**What:** a mile in open water.\n');
+    const before = hub.requests('/api/goals').length;
+
+    await page.clock.runFor(60_000);
+    await expect.poll(() => hub.requests('/api/goals').length).toBe(before + 1);
+    await expect(row(page, 'goal:swim')).toBeVisible();
+    await expect(item(page, 'goal:zine')).toHaveCount(0);
+    await expect(page.locator('[data-goal-section="goals"] .goal-count')).toHaveText('4');
+    await expect(row(page, 'goal:swim')).toHaveAttribute('aria-expanded', 'false');
+    await expect(row(page, 'later:kayak-trip')).toHaveAttribute('aria-expanded', 'true');
+    await expect(row(page, 'goal:boat')).toHaveAttribute('aria-expanded', 'true');
+    await expect(item(page, 'goal:boat').locator('.role-chip')).toBeVisible();
+    await expect(row(page, 'later:pottery-class')).toBeVisible();
+    await expect(row(page, 'not-now:home-studio')).toBeHidden();
+    await expect(row(page, 'goal:boat')).toBeFocused();
+  });
+
   test('the view stops reading the vault once it is left', async ({ page, hub }) => {
     await page.clock.install();
     await openGoals(page, hub);

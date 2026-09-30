@@ -287,6 +287,20 @@
       }
     }
 
+    // The row, section, or Edit button for an id, when it is on screen.
+    function controlFor(action, id) {
+      return cards.querySelector('button[data-goal-action="' + action + '"][data-goal-id="' + CSS.escape(id) + '"]');
+    }
+
+    // The row, section, or Edit button that has focus, outside the composer,
+    // so a re-render can put focus on its replacement.
+    function controlFocus() {
+      var active = document.activeElement;
+      if (!active || !cards.contains(active) || (composer && composer.node.contains(active))) return null;
+      var id = active.getAttribute('data-goal-id');
+      return id ? { action: active.getAttribute('data-goal-action'), id: id } : null;
+    }
+
     // Puts the open composer under its item, or at the top of the cards.
     function placeComposer() {
       if (!composer) return;
@@ -320,12 +334,18 @@
       // not for a vault that could not be found.
       var empty = typeof data.agentId === 'string' && sections.every(sectionEmpty);
       setMessage(empty ? [EMPTY].concat(problems) : problems);
+      Object.keys(openRows).forEach(function (id) {
+        if (!Object.prototype.hasOwnProperty.call(found, id)) delete openRows[id];
+      });
       var saved = composerFocus();
+      var control = controlFocus();
       if (composer) composer.node.remove();
       cards.textContent = '';
       built.forEach(function (card) { cards.appendChild(card); });
       placeComposer();
       restoreFocus(saved);
+      var again = control ? controlFor(control.action, control.id) : null;
+      if (again) again.focus();
       rendered = JSON.stringify(data);
     }
 
@@ -352,9 +372,7 @@
       composer.node.remove();
       composer = null;
       if (!fromUser) return;
-      var button = opener
-        ? cards.querySelector('button[data-goal-action="edit"][data-goal-id="' + CSS.escape(opener) + '"]')
-        : document.getElementById('goals-add');
+      var button = opener ? controlFor('edit', opener) : document.getElementById('goals-add');
       if (button) button.focus();
     }
 
