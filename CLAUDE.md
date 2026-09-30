@@ -11,15 +11,20 @@ from here.
 ## The system
 
 - **Interface**: `dashboard/app/`, a Node 24 daemon on 127.0.0.1:4243 behind
-  Tailscale Serve. A rail of five views: Home is the Agents view (domain
-  personas on the Claude Agent SDK, Codex threads on a shared app-server,
-  Claude Code terminals in cmux), Reading holds the
-  Daily Brief and, since 2026-09-29, the Feed (what the producers found,
-  with Discuss opening the watch persona), Focus is embedded through a
-  proxy, Goals reads the vault's priorities with add and edit going through
-  the second-brain persona, and Health lists the launchd jobs (the code
-  still calls them routines). Next in line: an Ideas view. Its README and
-  `docs/operations.md` hold routes, snapshot shape, helpers, and setup.
+  Tailscale Serve, in Focus's theme since 2026-09-30. A rail of five views:
+  Home is the Agents view (domain personas on the Claude Agent SDK, Codex
+  threads on a shared app-server, Claude Code terminals in cmux; a gear
+  opens each agent's settings beside its thread), Reading holds the Daily
+  Brief and the Feed (what the producers found, with images, and Discuss
+  opening the watch persona), Focus is embedded through a proxy, Goals
+  reads the vault's priorities with add and edit going through the
+  second-brain persona, Health lists the launchd jobs and their state (the
+  code still calls them routines). The design for what comes next (an
+  Assistant persona, delegation between personas, routines as scheduled
+  prompts, Ideas) is
+  `thoughts/shared/plans/2026-09-30-assistant-system-design.md`. The app
+  README and `docs/operations.md` hold routes, snapshot shape, helpers, and
+  setup.
 - **Registry**: `registry/agents.json`, the personas and project folders the
   daemon runs and lists: role, description, group, cwd, provider, launchd
   labels. Absolute paths; the daemon keeps the last good copy on a bad edit.
@@ -49,8 +54,11 @@ from here.
 ## Orientation
 
 1. `thoughts/shared/lanes/assistant/handoff.md`: the system and its
-   interface. Current state, decisions, and what is next, including the
-   Feed and Ideas views.
+   interface. Current state, decisions, and what is next. The design it
+   builds toward is `thoughts/shared/plans/2026-09-30-assistant-system-design.md`;
+   its sixteen decisions are settled and its behaviors B1 to B18 are what
+   plans and issues cite. Routines there means scheduled prompts to an
+   agent; the launchd jobs are "jobs" and live in Health.
 2. `thoughts/shared/lanes/daily-brief/handoff.md`: the brief. Scheduled since
    09-27 (`thoughts/shared/plans/2026-09-27-daily-brief-scheduled-run.md`),
    watch on Mondays (`2026-09-28-watch-domain.md`). On 2026-09-29 the writing
@@ -116,5 +124,9 @@ picks one up and ends by updating it.
   and produce no scheduled sub-briefs.
 - **Dashboard copy** goes through `/writing`: plain nouns for labels,
   sentences for states, no interface metacommentary, no placeholders.
+- **Factory PRs are reviewed locally before merging**: worktree, the three
+  suites, screenshots on a throwaway port, then merge, pull, and reinstall.
+  Two PRs that touch the same files are merged through one local review
+  branch. Nothing watches PRs between sessions; pickup lists them.
 - Focus owns persistent task state. The brief may say Hunter owes someone a
   decision; it never becomes the store of record.

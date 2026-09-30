@@ -5,14 +5,17 @@ Umbrella project for Hunter's personal assistant surfaces. First use case is the
 ranks across domains and writes one short brief.
 
 The dashboard is the assistant daemon and the tailnet-only hub it serves.
-A rail of four icons: Home is the Agents view (domain personas Hunter
+A rail of five icons: Home is the Agents view (domain personas Hunter
 messages and answers inline, his coding sessions as Codex threads on a
-shared server and Claude Code terminals in cmux, and each agent's
-routines), Reading holds the Daily Brief, Focus is its own view, and Goals
-reads the vault's priorities and goal notes with add and edit going through
-the second-brain persona. The direction took Meta Muse and GrokBot as reference; a
-clickable design study lives in `dashboard/prototype/` as visual reference.
-Current state and decisions live in `thoughts/shared/lanes/assistant/handoff.md`.
+shared server and Claude Code terminals in cmux, and a settings panel per
+agent), Reading holds the Daily Brief and the Feed, Focus is its own view,
+Goals reads the vault's priorities and goal notes with add and edit going
+through the second-brain persona, and Health lists the launchd jobs. The
+direction took Meta Muse and GrokBot as reference; a clickable design
+study lives in `dashboard/prototype/` as visual reference. Current state
+lives in `thoughts/shared/lanes/assistant/handoff.md`; the design for the
+Assistant persona, delegation, routines, and Ideas is
+`thoughts/shared/plans/2026-09-30-assistant-system-design.md`.
 
 Deliberately thin. This holds the contract, the assembler, and the outputs. It
 does not hold shared libraries, and the domain systems keep their own repos.
