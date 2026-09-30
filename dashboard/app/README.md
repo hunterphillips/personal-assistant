@@ -103,10 +103,14 @@ snapshot; concurrent requests share one check. It stays for one release.
   "focus": { "available": true },
   "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>" },
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
+  "groups": [{ "id": "work", "name": "Work" }, { "id": "personal", "name": "Personal" }],
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
                "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
                "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
-               "lastError": null, "costUsd": 0.42 }],
+               "lastError": null, "costUsd": 0.42 },
+             { "id": "assistant", "name": "Assistant", "role": "Assistant", "description": "...", "group": "personal", "kind": "persona",
+               "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "provider": "claude", "pinned": true,
+               "state": "idle", "pending": null, "lastMessage": null, "lastError": null, "costUsd": null }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
                  "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
                  "pending": { "requestId": "2", "kind": "question", "toolName": "requestUserInput", "input": { "...": "..." }, "truncated": false },
@@ -388,17 +392,24 @@ child page does its own scrolling and keeps its fixed bar in view.
 ### Agents view
 
 The Agents view is the page at `/`. It lists every registry agent under
-Work and Personal, in registry order: name, role, provider (Claude or
-Codex), and for a persona its last message with a relative time, plus a
-line for its state: "Waiting for you" on a question or approval, "Working"
-during a turn, "The last turn failed", or "Unavailable". A project folder
-or system agent shows its description instead and opens nothing. Choosing
-a persona opens its thread and puts `?agent=<id>` in the URL (`/?agent=cfo`;
-`/agents?agent=cfo` opens the same thread), so a reload or a shared link
-lands on the same thread; Back and Forward move between threads. From
-720px the list and the pane beside it sit side by side, and the pane reads
-"Choose an agent to open its thread." until a persona is chosen. On a phone
-the list fills the width, and a thread takes the whole width with an "All
+the registry's groups (`groups` in the file, in that order, with those
+names; a group an agent names that the file leaves out follows them under
+its id with the first letter raised), in registry order within a group:
+name, role (left out when it only repeats the name), provider (Claude or
+Codex), and for a persona its last message
+with a relative time, plus a line for its state: "Waiting for you" on a
+question or approval, "Working" during a turn, "The last turn failed", or
+"Unavailable". A persona marked `pinned` in the registry sits above the
+groups under no heading. A project folder or system agent shows its
+description instead and opens nothing. Choosing a persona opens its thread
+and puts `?agent=<id>` in the URL (`/?agent=cfo`; `/agents?agent=cfo` opens
+the same thread), so a reload or a shared link lands on the same thread;
+Back and Forward move between threads. From 720px the list and the pane
+beside it sit side by side; with no agent in the URL the pane holds the
+first pinned persona's thread (the URL stays `/`, so Back leaves the page
+and a row click still adds its entry), or reads "Choose an agent to open
+its thread." when nothing is pinned. On a phone the list fills the width,
+nothing opens by itself, and a thread takes the whole width with an "All
 agents" link back. The launchd jobs, the registry error, and the lines for
 the Codex server and cmux are on the Health view; the Agents view says only
 what each row needs.
@@ -487,8 +498,8 @@ on the gear; on a phone, opening it puts the keyboard on the chevron. It
 stays open while other agents are chosen and is closed after a reload; the
 state is kept in memory only.
 
-Under "Settings" come the agent's name, then Role, Group ("Work" or
-"Personal"), Provider ("Claude" or "Codex"), and Folder (the snapshot's
+Under "Settings" come the agent's name, then Role, Group (the registry's
+name for it), Provider ("Claude" or "Codex"), and Folder (the snapshot's
 `cwd` with the home directory as `~`), each left out with its label when
 the registry has no value, then the registry description as written, and
 the jobs sentence (see Routines). Nothing in it is editable.
