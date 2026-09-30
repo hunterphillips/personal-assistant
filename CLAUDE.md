@@ -14,17 +14,19 @@ from here.
   Tailscale Serve. A rail of four views: Home is the Agents view (domain
   personas on the Claude Agent SDK, Codex threads on a shared app-server,
   Claude Code terminals in cmux, each agent's routines), Reading holds the
-  Daily Brief, Focus is embedded through a proxy, Goals reads the vault's
-  priorities with add and edit going through the second-brain persona. Next
-  in line: a Feed in Reading, then an Ideas view. Its README and
+  Daily Brief and, since 2026-09-29, the Feed (what the producers found,
+  with Discuss opening the watch persona), Focus is embedded through a
+  proxy, Goals reads the vault's priorities with add and edit going through
+  the second-brain persona. Next in line: an Ideas view. Its README and
   `docs/operations.md` hold routes, snapshot shape, helpers, and setup.
 - **Registry**: `registry/agents.json`, the personas and project folders the
   daemon runs and lists: role, description, group, cwd, provider, launchd
   labels. Absolute paths; the daemon keeps the last good copy on a bad edit.
 - **Use cases**: `daily-brief/`, running every morning since 2026-09-27
   (gather one packet per domain, curate, build, verify), with the newsletter
-  `watch` domain on Mondays. A later weekly review or decision prep sits
-  beside it with its own contract.
+  `watch` domain on Mondays; `feed/`, the store behind the Feed, which
+  watch writes and the dashboard reads. A later weekly review or decision
+  prep sits beside them with its own contract.
 - **Domain systems**, each its own repo with its own CLAUDE.md, launchd jobs,
   and state. Working under the link loads that repo's instructions, and git
   commands run there act on that repo.
@@ -73,6 +75,7 @@ picks one up and ends by updating it.
 - `daily-brief/`: contract, schema, curator rules, `bin/run-brief` and its
   prompts, `launchd/`, `watch/`. `contributions/` and `briefs/` are outputs,
   gitignored; `build.py` and `check-viewer.mjs` beside the briefs are code.
+- `feed/`: the feed store's README; `items/` is its output, gitignored.
 - `systems/`: symlinks to the domain repos.
 - `thoughts/shared/`: lanes, plans, research, tickets.
 

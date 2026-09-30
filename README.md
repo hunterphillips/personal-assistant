@@ -65,6 +65,7 @@ decision prep would sit beside it with its own contract and its own inputs.
 - `daily-brief/run-prompts.md` — the one-line prompt pasted into each domain repo
 - `daily-brief/curator.md` — the curator's seven content rules; headings and shape are the model's
 - `daily-brief/watch/` — the newsletter domain: `contribute` runs Mondays, `relevance.md` holds its sources and survival criteria
+- `feed/` — the feed store the dashboard's Feed reads; `items/` holds one JSON file per producer run, gitignored
 - `daily-brief/bin/run-brief` — the scheduled morning run; `daily-brief/README.md` has the schedule and flags
 - `daily-brief/contributions/YYYY-MM-DD/<domain>.yaml` — a day's raw contributions
 - `daily-brief/briefs/` — `memo-<date>.md` written by the curator, `build.py` that turns it into `<date>.md` and the `viewer-<date>.html` the dashboard serves, and the feedback files saved beside them
@@ -94,8 +95,10 @@ own interface and state, embedded through an internal proxy; the dashboard
 serves the Daily Brief and saves its feedback directly; the port 8765 viewer
 is retired. Operations, cmux setup, and the remaining live checks are in
 `dashboard/app/docs/operations.md` and the
-[assistant handoff](thoughts/shared/lanes/assistant/handoff.md). The next two
-views are a Feed in Reading and an Ideas view.
+[assistant handoff](thoughts/shared/lanes/assistant/handoff.md). On
+2026-09-29 Reading gained a Feed tab: the items the watch domain found,
+survivors and overflow, read from `feed/items/`, each with Discuss opening
+the watch persona's thread. The next view is Ideas.
 
 The September 18 Control Tower research (Codex, Claude, and cmux runtime
 evidence) fed the daemon plan; its Electron/TypeScript
