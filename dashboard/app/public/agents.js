@@ -1,7 +1,7 @@
 // Agents view, the page at `/`: the registry's agents as a list grouped
 // Work and Personal, and beside it either one persona's thread or, with no
-// agent open, the routines overview. The shell calls create({ requestState,
-// isStreaming }, routines) once, then update(state, keys) on every change
+// agent open, a sentence asking for one. The shell calls create({ requestState,
+// isStreaming }) once, then update(state, keys) on every change
 // (keys is null for a whole snapshot), show() when the view opens, and
 // hide() when it closes or the tab is hidden. The list is rebuilt only
 // while the view is shown; show() renders the latest state.
@@ -9,13 +9,10 @@
 // The open agent is `?agent=<id>` in the URL, so a reload lands on the same
 // thread and Back and Forward move between threads. Choosing a row pushes
 // that URL; the shell's popstate handler calls show(), which reads it back.
-// On a phone the list comes first and its Routines row opens the overview
-// at `/routines`, a view link the shell handles.
-//
-// `routines` (routines.js) renders the overview into its own pane and one
-// agent's routines under the thread header, behind a "Routines (n)" button
-// that appears only for agents with routines; this view says when each is
-// on screen.
+// On a phone the list comes first and fills the width until a row is chosen.
+// The launchd jobs, the registry error, and what is off (the Codex server,
+// cmux) are on the Health view (routines.js); this view says only what
+// each row needs.
 //
 // The thread is fetched from /api/agents/<id>/thread when a persona opens
 // and again whenever the snapshot shows its last message or its turn
@@ -43,7 +40,7 @@
 
   var GROUPS = [['work', 'Work'], ['personal', 'Personal']];
   var PROVIDERS = { claude: 'Claude', codex: 'Codex' };
-  var WATCHED = ['agents', 'registry', 'routines', 'sessions', 'codex', 'cmux'];
+  var WATCHED = ['agents', 'registry', 'sessions', 'codex', 'cmux'];
   var AGENT_ID = /^[a-z][a-z0-9-]{1,31}$/;
   var SESSION_ID = /^(?:codex|claude):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
   var NO_SESSIONS = 'No coding sessions. Start the Codex server or open a terminal in cmux.';
@@ -54,6 +51,7 @@
   var THREAD_TIMEOUT_MS = 8000;
   var SCROLL_END_PX = 80; // this close to the end counts as reading the newest message
   var NO_ANSWER = 'The dashboard did not respond.';
+  var CHOOSE = 'Choose an agent to open its thread.';
 
   function element(tag, className, text) {
     var node = document.createElement(tag);
@@ -229,14 +227,6 @@
     }
   }
 
-  // What the phone's Routines row says once routines have been read.
-  function routinesCount(state) {
-    var routines = state && state.routines;
-    if (!routines || !routines.refreshedAt) return '';
-    var n = (routines.items || []).length;
-    return n === 1 ? '1 routine' : n + ' routines';
-  }
-
   // The persona's or session's lastError as a sentence the reader can act
   // on. The Claude adapter's own messages are already sentences and pass
   // through; a Codex thread's lastError is the server's text, which stays
@@ -382,24 +372,19 @@
     return (isSession(entry) ? '/api/sessions/' : '/api/agents/') + entry.id;
   }
 
-  function create(shell, routines) {
+  function create(shell) {
     var view = document.getElementById('view-agents');
     var message = document.getElementById('agents-message');
-    var routinesRowCount = document.getElementById('agents-routines-count');
     var groupsNode = document.getElementById('agents-groups');
-    var overview = document.getElementById('routines-overview');
     var empty = document.getElementById('agent-empty');
     var panel = document.getElementById('agent-panel');
     var nameNode = document.getElementById('agent-name');
     var chips = document.getElementById('agent-chips');
     var cost = document.getElementById('agent-cost');
-    var routinesToggle = document.getElementById('agent-routines-toggle');
-    var routinesSection = document.getElementById('agent-routines');
     var newThread = document.getElementById('agent-new-thread');
     var openTerminal = document.getElementById('agent-open-terminal');
     var terminalLine = document.getElementById('agent-terminal-reason');
     var foot = document.getElementById('agent-foot');
-    var availability = document.getElementById('agents-availability');
     var confirmNode = document.getElementById('agent-confirm');
     var confirmText = document.getElementById('agent-confirm-text');
     var description = document.getElementById('agent-description');
@@ -418,9 +403,6 @@
     var state = null;
     var visible = false;
     var selectedId = null;
-    var overviewOpen = false; // the phone's Routines row was chosen (`/routines`)
-    var overviewTold = false; // what `routines` was last told: the overview is on screen
-    var routinesOpen = false; // the open agent's routines are expanded
     var wide = window.matchMedia('(min-width: 720px)');
     var thread = { id: null, messages: null, loading: false, error: false, fresh: true, version: 0 };
     var renderedVersion = -1;
@@ -487,14 +469,13 @@
       return node;
     }
 
-    // The sentence above the list. The overview says when the registry could
-    // not be read, so the list says it only while the overview is off screen.
+    // The sentence above the list. Health says when the registry could not
+    // be read, so an empty list then claims nothing.
     function renderMessage() {
       if (!state) return;
       var registry = state.registry;
       var text = '';
-      if (registry && registry.ok === false) text = overviewShown() ? '' : 'The registry could not be read.';
-      else if ((state.agents || []).length === 0) text = 'No agents are registered.';
+      if (!(registry && registry.ok === false) && (state.agents || []).length === 0) text = 'No agents are registered.';
       message.textContent = text;
       message.hidden = !text;
     }
@@ -506,7 +487,6 @@
       var focusedId = active && groupsNode.contains(active) && active.hasAttribute('data-agent') ? active.getAttribute('data-agent') : null;
       groupsNode.textContent = '';
       renderMessage();
-      routinesRowCount.textContent = routinesCount(state);
 
       var list = groups(state.agents, state.sessions);
       for (var i = 0; i < list.length; i += 1) {
@@ -769,48 +749,22 @@
       return answers;
     }
 
-    // Whether the overview is on screen: the pane shows it whenever no
-    // agent is open, and on a phone the pane itself shows only once the
-    // Routines row was chosen.
-    function overviewShown() {
-      return visible && !selectedId && (overviewOpen || wide.matches);
-    }
-
-    // Tells `routines` when the overview comes on or goes off screen, and
-    // only then: it rebuilds the overview itself on every state change.
-    function syncOverview() {
-      var shown = overviewShown();
-      if (!routines || shown === overviewTold) return;
-      overviewTold = shown;
-      if (shown) routines.show();
-      else routines.hide();
-    }
-
-    // What is off, above the overview's heading; nothing while both answer.
-    function renderAvailability() {
-      availability.textContent = '';
-      var lines = [codexSentence(state.codex), cmuxSentence(state.cmux)];
-      for (var i = 0; i < lines.length; i += 1) if (lines[i]) availability.appendChild(element('p', null, lines[i]));
-      availability.hidden = availability.childNodes.length === 0;
-    }
-
+    // With no agent open the pane asks for one; on a phone the pane is
+    // off screen until a row is chosen.
     function renderThread() {
       var agent = selectedAgent();
-      view.classList.toggle('agents-open', !!selectedId || overviewOpen);
-      overview.hidden = !!selectedId;
-      syncOverview();
+      view.classList.toggle('agents-open', !!selectedId);
       renderMessage();
       if (!selectedId) {
-        empty.hidden = true;
+        empty.textContent = CHOOSE;
+        empty.hidden = false;
         panel.hidden = true;
-        if (routines) routines.unmount();
         return;
       }
       if (!agent) {
         empty.textContent = SESSION_ID.test(selectedId) ? 'That session is not listed.' : 'No agent named ' + selectedId + ' is registered.';
         empty.hidden = false;
         panel.hidden = true;
-        if (routines) routines.unmount();
         return;
       }
       empty.hidden = true;
@@ -826,17 +780,6 @@
       cost.textContent = persona && typeof agent.costUsd === 'number' ? '$' + agent.costUsd.toFixed(2) + ' this session' : '';
       description.textContent = session ? shortPath(agent.cwd, state.home) : persona ? '' : agent.description || '';
       description.hidden = !description.textContent;
-
-      var jobs = routines && !session ? routines.count(agent.id) : 0;
-      var jobsOpen = routinesOpen && jobs > 0;
-      routinesToggle.hidden = jobs === 0;
-      routinesToggle.textContent = 'Routines (' + jobs + ')';
-      routinesToggle.setAttribute('aria-expanded', jobsOpen ? 'true' : 'false');
-      routinesSection.hidden = !jobsOpen;
-      if (routines) {
-        if (jobsOpen && visible) routines.mount(routinesSection, agent.id);
-        else routines.unmount();
-      }
 
       newThread.hidden = !persona;
       newThread.disabled = busy || !persona || agent.state === 'unavailable' || turnOpen(agent);
@@ -888,7 +831,6 @@
     function render() {
       if (!state) return;
       renderList();
-      renderAvailability();
       renderThread();
     }
 
@@ -948,16 +890,13 @@
       actionError = '';
       terminalError = '';
       confirming = false;
-      routinesOpen = false;
       resetThread(id);
     }
 
-    // A history entry is added only when the URL names a different agent
-    // (or the phone's overview), so choosing the open row from `/agents`
-    // or `/?agent=` adds nothing.
+    // A history entry is added only when the URL names a different agent,
+    // so choosing the open row from `/agents` or `/?agent=` adds nothing.
     function select(id, push) {
-      if (push && (agentFromUrl() !== id || overviewOpen)) history.pushState(null, '', agentUrl(id));
-      overviewOpen = false;
+      if (push && agentFromUrl() !== id) history.pushState(null, '', agentUrl(id));
       if (id === selectedId) return;
       setSelected(id);
       render();
@@ -1123,10 +1062,6 @@
         case 'retry-thread':
           syncThread(true);
           break;
-        case 'toggle-routines':
-          routinesOpen = !routinesOpen;
-          renderThread();
-          break;
         default:
           break;
       }
@@ -1144,12 +1079,6 @@
       }
     });
 
-    // Crossing 720px moves the overview on or off screen with no agent open;
-    // with one open, nothing here changes and nothing is rebuilt.
-    wide.addEventListener('change', function () {
-      if (visible) renderThread();
-    });
-
     return {
       update: function (next, keys) {
         state = next;
@@ -1162,7 +1091,6 @@
       show: function () {
         visible = true;
         var id = agentFromUrl();
-        overviewOpen = location.pathname === '/routines';
         if (id !== selectedId) setSelected(id);
         if (tick === null) tick = setInterval(function () { refreshTimes(view); }, TICK_MS);
         render();
@@ -1172,15 +1100,12 @@
         visible = false;
         if (tick !== null) clearInterval(tick);
         tick = null;
-        syncOverview();
-        if (routines) routines.unmount();
       },
     };
   }
 
   window.DashboardAgents = {
     create: create,
-    routinesCount: routinesCount,
     groups: groups,
     errorSentence: errorSentence,
     composerReason: composerReason,
