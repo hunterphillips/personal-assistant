@@ -16,7 +16,8 @@ from here.
   registry lists, agents on the Claude Agent SDK, Codex threads on a
   shared app-server, Claude Code terminals in cmux; a gear opens each
   agent's settings beside its thread; on a desk the Assistant's thread
-  opens by default), Reading holds the Daily
+  opens by default, and each morning's brief lands in it as one collapsed
+  line), Reading holds the Daily
   Brief and the Feed (what the producers found, with images, and Discuss
   opening the Watch agent), Focus is embedded through a proxy, Goals
   reads the vault's priorities with add and edit going through the

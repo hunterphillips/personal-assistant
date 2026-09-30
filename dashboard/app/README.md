@@ -588,7 +588,8 @@ events. Each persona in `agents` carries:
   16 KiB of that text, with `truncated: true`. A question's `input` is the
   object, never cut, so every question and option is there to answer.
 - `lastMessage`: null, or `{ role, text, at }` with the first 200
-  characters. At startup it comes from the thread cache.
+  characters (a brief notice's `summary` stands in for its text). At
+  startup it comes from the thread cache.
 - `lastError`: null, or why the last turn failed or why the persona is
   unavailable: `provider_unavailable` (its provider runs no personas; a
   `codex` persona stays unavailable, since Codex threads are followed as
@@ -673,6 +674,14 @@ seconds for it to exit; see [docs/operations.md](docs/operations.md).
   with the newest messages that fit under both. Message text is cut at
   8 KiB and marked `truncated`. A partial last line left by a crash is
   skipped on read. Losing this file only empties the thread view.
+- `brief-notices.json` records which morning notices `lib/notices.mjs` has
+  posted into the Assistant's thread, as `{ version: 1, posted: { "<date>":
+  ["ready", "failed"] } }`, replaced atomically. The brief run writes
+  `notice-<date>.json` beside each viewer; the daemon reads the newest two
+  on start, on each event stream connect, and once a minute while a stream
+  is open, and posts every date and state not recorded here as a system
+  message with `kind: 'brief'`, `date`, `state`, `summary`, and the memo
+  as `text`. Delete this file and the two newest notices post again.
 
 The agent id must match the registry's id pattern before any path is built.
 

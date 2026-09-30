@@ -80,11 +80,14 @@ models. Log lines start with `watch`.
 
 - `contributions/<date>/` — `cfo.yaml`, `focus.yaml`, `second-brain.yaml`,
   `calendar.yaml`, `run.yaml`, and `work.md` on weekdays. Gitignored.
-- `briefs/memo-<date>.md` — the curator's memo; `<date>.md` and
-  `viewer-<date>.html` built from it. The dashboard serves the newest viewer.
+- `briefs/memo-<date>.md` — the curator's memo; `<date>.md`,
+  `viewer-<date>.html`, and `notice-<date>.json` built from it. The
+  dashboard serves the newest viewer and posts the notice (the opening and
+  the memo, or `state: failed` when the run ended without a viewer) once
+  into the Assistant's thread.
   Feedback saves beside it as `feedback-<date>.md`. Gitignored.
 - `~/Library/Logs/daily-brief.log` — one line per run:
-  `exit= date= cursor= stage= packets= stubs= waited= took= viewer=`.
+  `exit= date= cursor= stage= packets= stubs= waited= took= viewer= notice=`.
 - `~/Library/Logs/daily-brief/<date>-<domain>.log` — each session's output,
   mode 600. `<date>-verify.log` is the builder's.
 

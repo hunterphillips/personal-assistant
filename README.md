@@ -71,7 +71,7 @@ decision prep would sit beside it with its own contract and its own inputs.
 - `feed/` — the feed store the dashboard's Feed reads; `items/` holds one JSON file per producer run, gitignored
 - `daily-brief/bin/run-brief` — the scheduled morning run; `daily-brief/README.md` has the schedule and flags
 - `daily-brief/contributions/YYYY-MM-DD/<domain>.yaml` — a day's raw contributions
-- `daily-brief/briefs/` — `memo-<date>.md` written by the curator, `build.py` that turns it into `<date>.md` and the `viewer-<date>.html` the dashboard serves, and the feedback files saved beside them
+- `daily-brief/briefs/` — `memo-<date>.md` written by the curator, `build.py` that turns it into `<date>.md`, the `viewer-<date>.html` the dashboard serves, and the `notice-<date>.json` it posts into the Assistant's thread, and the feedback files saved beside them
 - `systems/` — symlinks to the agents' repos (cfo, focus, second-brain, personal-context)
 
 ## Handling
