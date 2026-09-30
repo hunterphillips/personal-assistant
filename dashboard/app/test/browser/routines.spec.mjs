@@ -82,6 +82,10 @@ function row(page, name) {
   return page.locator('.routine-row').filter({ has: page.locator('.routine-name', { hasText: new RegExp(`^${name}$`) }) });
 }
 
+function agentRow(page, name) {
+  return page.locator('.agent-row').filter({ has: page.locator('.agent-row-name', { hasText: new RegExp(`^${name}$`) }) });
+}
+
 // The vertical gap from the bottom of `above` to the top of `below`, or null
 // while either is off the page (a rebuild replaces both mid-measure).
 async function gap(scope, above, below) {
