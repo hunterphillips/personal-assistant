@@ -461,6 +461,8 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .reading-feed > * {
   width: 100%;
   max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .feed-instructions {
@@ -632,7 +634,13 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   overflow: auto;
 }
 
-#view-goals > *,
+#view-goals > * {
+  width: 100%;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 #view-health > * {
   width: 100%;
   max-width: 720px;
