@@ -109,14 +109,6 @@ test('terminalState is a sentence for the terminal pane', () => {
   assert.equal(view.terminalState({ state: 'busy', binding: { live: false } }), 'The terminal is closed.');
 });
 
-test('routinesCount counts the routines once they have been read', () => {
-  assert.equal(view.routinesCount(null), '');
-  assert.equal(view.routinesCount({ routines: { refreshedAt: null, items: [{}] } }), '');
-  assert.equal(view.routinesCount({ routines: { refreshedAt: '2026-09-28T09:00:00.000Z', items: [] } }), '0 routines');
-  assert.equal(view.routinesCount({ routines: { refreshedAt: '2026-09-28T09:00:00.000Z', items: [{}] } }), '1 routine');
-  assert.equal(view.routinesCount({ routines: { refreshedAt: '2026-09-28T09:00:00.000Z', items: [{}, {}] } }), '2 routines');
-});
-
 test('errorSentence turns each code into a sentence and passes adapter sentences through', () => {
   assert.equal(view.errorSentence(persona({ lastError: 'api_key_in_env' })),
     'The dashboard started with an API key in its environment, so personas are off. Unset it and restart the dashboard.');

@@ -49,7 +49,7 @@ export function nav(page, name) {
 }
 
 // The Agents view is titled "Agents" but its nav link is "Home".
-const NAV_NAMES = { agents: 'Home', reading: 'Reading', focus: 'Focus', goals: 'Goals' };
+const NAV_NAMES = { agents: 'Home', reading: 'Reading', focus: 'Focus', goals: 'Goals', health: 'Health' };
 
 export async function expectView(page, view, title) {
   await expect(page.locator(`#view-${view}`)).toBeVisible();

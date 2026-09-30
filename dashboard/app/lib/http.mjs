@@ -88,8 +88,8 @@ export function sendJson(res, status, value, options = {}) {
   sendBody(res, status, 'application/json; charset=utf-8', JSON.stringify(value), options);
 }
 
-export function redirect(res, location) {
-  res.writeHead(308, { Location: location, 'Content-Length': 0 });
+export function redirect(res, location, status = 308) {
+  res.writeHead(status, { Location: location, 'Content-Length': 0 });
   res.end();
 }
 

@@ -1,7 +1,8 @@
 // Coding sessions in the Agents view, in real browsers against the fake
 // Codex adapter, cmux inventory, and bindings of
-// test/support/browser-server.mjs. Personas and the routines overview are
-// covered in agents.spec.mjs and routines.spec.mjs.
+// test/support/browser-server.mjs. Personas and the Health view are
+// covered in agents.spec.mjs and routines.spec.mjs; what is off shows on
+// Health, which is checked here.
 
 import { expect, expectView, test } from '../support/browser-test.mjs';
 
@@ -168,7 +169,9 @@ test.describe('with sessions', () => {
     await expect(page.locator('#agent-description')).toHaveText('~/work/catchup/sub');
     await expect(page.locator('#agent-cost')).toBeEmpty();
     await expect(page.locator('#agent-new-thread')).toBeHidden();
-    await expect(page.locator('#agent-routines-toggle')).toBeHidden();
+    await expect(pane(page).getByRole('button', { name: /Routines/ })).toHaveCount(0);
+    await expect(page.locator('#agent-details-toggle')).toBeHidden();
+    await expect(page.locator('#agent-details')).toBeHidden();
     await expect(page.locator('#agent-composer')).toBeHidden();
     await expect(page.locator('#agent-foot')).toHaveText('Type to this thread in its terminal.');
     await expect(messages(page)).toHaveText([/^Fix the flaky test\./, /^Which colour\?/]);
@@ -296,6 +299,20 @@ test.describe('with sessions', () => {
     await expect(page.locator('#agent-panel')).not.toContainText('Rate limited');
   });
 
+  test('a session opened with the settings open shows neither the gear nor the panel, and a project row shows both', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${hub.origin}/?agent=catchup`);
+    await page.locator('#agent-details-toggle').click();
+    const details = page.locator('#agent-details');
+    await expect(details.locator('.request-detail-text')).toHaveText(['Work', 'Work', 'Codex', '~/work/catchup']);
+
+    await row(page, 'Fix the flaky test').click();
+    await expect(pane(page).locator('#agent-name')).toHaveText('Fix the flaky test');
+    await expect(page.locator('#agent-details-toggle')).toBeHidden();
+    await expect(details).toBeHidden();
+    await expect(messages(page)).toHaveCount(2);
+  });
+
   test('a Claude terminal shows where it runs and its state, with no messages and no composer', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=claude:${C_BUSY}`);
     await expect(pane(page).locator('#agent-name')).toHaveText('catchup');
@@ -308,6 +325,7 @@ test.describe('with sessions', () => {
     await expect(page.locator('#agent-status')).toBeHidden();
     await expect(page.locator('#agent-request')).toBeHidden();
     await expect(page.locator('#agent-new-thread')).toBeHidden();
+    await expect(page.locator('#agent-details-toggle')).toBeHidden();
     await expect(openButton(page)).toBeEnabled();
     expect(hub.requests(`/api/sessions/claude:${C_BUSY}/thread`)).toEqual([]);
 
@@ -360,12 +378,10 @@ test.describe('with sessions', () => {
     expect(hub.cmux.focusCalls).toHaveLength(3);
   });
 
-  test('the overview says nothing about availability while both answer', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/`);
-    await expectView(page, 'agents', 'Agents');
-    if (phone(page)) await page.locator('#agents-routines').click();
-    await expect(page.locator('#routines-overview')).toBeVisible();
-    await expect(page.locator('#agents-availability')).toBeHidden();
+  test('Health says nothing about availability while both answer', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/health`);
+    await expectView(page, 'health', 'Health');
+    await expect(page.locator('#health-availability')).toBeHidden();
   });
 
   test('at phone width a session row opens its pane full width with a way back', async ({ page, hub }) => {
@@ -423,13 +439,14 @@ test.describe('with the Codex server gone', () => {
     }),
   });
 
-  test('the row says Server stopped, the pane says why, and the overview says the server disconnected', async ({ page, hub }) => {
+  test('the row says Server stopped, the pane says why, and Health says the server disconnected', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     await expect(row(page, 'Fix the flaky test').locator('.agent-row-state')).toHaveText('Server stopped');
     await expect(page.locator('.agents-sessions-message')).toHaveCount(0);
-    if (phone(page)) await page.locator('#agents-routines').click();
-    await expect(page.locator('#agents-availability p')).toHaveText(['The Codex server disconnected.']);
+    await expect(page.locator('#view-agents .availability')).toHaveCount(0);
+    await page.goto(`${hub.origin}/health`);
+    await expect(page.locator('#health-availability p')).toHaveText(['The Codex server disconnected.']);
 
     await page.goto(`${hub.origin}/?agent=codex:t1`);
     await expect(page.locator('#agent-notice')).toHaveText('The Codex server disconnected.');
@@ -443,7 +460,7 @@ test.describe('with the Codex server gone', () => {
 test.describe('with cmux not running', () => {
   test.use({ hubOptions: seeded({ cmux: CMUX_OFF }) });
 
-  test('Open terminal is off with the cmux sentence, terminal rows are gone, and the overview says it', async ({ page, hub }) => {
+  test('Open terminal is off with the cmux sentence, terminal rows are gone, and Health says it', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=codex:t1`);
     await expect(openButton(page)).toBeDisabled();
     await expect(terminalLine(page)).toHaveText('cmux is not running.');
@@ -451,9 +468,8 @@ test.describe('with cmux not running', () => {
     await expect(row(page, 'Closed one').locator('.agent-row-state')).toHaveText('Terminal closed');
     await expect(page.locator('.agents-sessions-message')).toHaveCount(0);
 
-    await page.goto(`${hub.origin}/`);
-    if (phone(page)) await page.locator('#agents-routines').click();
-    await expect(page.locator('#agents-availability p')).toHaveText(['cmux is not running.']);
+    await page.goto(`${hub.origin}/health`);
+    await expect(page.locator('#health-availability p')).toHaveText(['cmux is not running.']);
   });
 });
 
@@ -466,7 +482,7 @@ test.describe('with nothing to list and both sources off', () => {
     }),
   });
 
-  test('the list ends with one sentence and the overview lists both', async ({ page, hub }) => {
+  test('the list ends with one sentence and Health lists both', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     await expect(names(page)).toHaveText(['CFO', 'Catchup', 'Second brain', 'Focus']);
@@ -474,13 +490,19 @@ test.describe('with nothing to list and both sources off', () => {
     const sentence = page.locator('.agents-sessions-message');
     await expect(sentence).toHaveText('No coding sessions. Start the Codex server or open a terminal in cmux.');
     expect((await sentence.boundingBox()).y).toBeGreaterThan((await row(page, 'Focus').boundingBox()).y);
-    if (phone(page)) await page.locator('#agents-routines').click();
-    await expect(page.locator('#agents-availability p')).toHaveText(['The Codex server is not running.', 'cmux is not running.']);
+    await expect(page.locator('#view-agents .availability')).toHaveCount(0);
 
-    // With cmux back, the sentence goes: the pane says what is still off.
+    // With cmux back, the sentence goes.
     hub.cmux.set(inventory({ agents: [] }));
     await hub.state.refreshSessions();
     await expect(sentence).toHaveCount(0);
-    await expect(page.locator('#agents-availability p')).toHaveText(['The Codex server is not running.']);
+
+    // Health says what is still off, and follows the state.
+    await page.goto(`${hub.origin}/health`);
+    const lines = page.locator('#health-availability p');
+    await expect(lines).toHaveText(['The Codex server is not running.']);
+    hub.cmux.set(CMUX_OFF);
+    await hub.state.refreshSessions();
+    await expect(lines).toHaveText(['The Codex server is not running.', 'cmux is not running.']);
   });
 });
