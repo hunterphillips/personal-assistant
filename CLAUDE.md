@@ -11,13 +11,14 @@ from here.
 ## The system
 
 - **Interface**: `dashboard/app/`, a Node 24 daemon on 127.0.0.1:4243 behind
-  Tailscale Serve. A rail of four views: Home is the Agents view (domain
+  Tailscale Serve. A rail of five views: Home is the Agents view (domain
   personas on the Claude Agent SDK, Codex threads on a shared app-server,
-  Claude Code terminals in cmux, each agent's routines), Reading holds the
+  Claude Code terminals in cmux), Reading holds the
   Daily Brief and, since 2026-09-29, the Feed (what the producers found,
   with Discuss opening the watch persona), Focus is embedded through a
   proxy, Goals reads the vault's priorities with add and edit going through
-  the second-brain persona. Next in line: an Ideas view. Its README and
+  the second-brain persona, and Health lists the launchd jobs (the code
+  still calls them routines). Next in line: an Ideas view. Its README and
   `docs/operations.md` hold routes, snapshot shape, helpers, and setup.
 - **Registry**: `registry/agents.json`, the personas and project folders the
   daemon runs and lists: role, description, group, cwd, provider, launchd
