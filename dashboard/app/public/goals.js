@@ -1,13 +1,17 @@
 // Goals: the priorities and goal notes read from the vault (/api/goals), one
-// card per section, with a composer that sends a new goal or a change to one
-// to the second-brain persona (/api/goals/propose). The shell calls
+// row per goal under each section heading, with a composer that sends a new
+// goal or a change to one to the second-brain persona (/api/goals/propose).
+// A row opens and closes its details; a section heading opens and folds its
+// rows, and only Now is open on load. The shell calls
 // create(shellApi) once, then update(state, keys) on every state change, and
 // show() and hide() as the view comes on and off screen.
 //
 // While shown, the view fetches /api/goals on show(), every 60 seconds, and
 // at once when the second-brain persona leaves busy or waiting (its turn may
 // have written the vault). A refetch keeps an open composer, its text, and its
-// focus, and an answer identical to the last one rendered changes nothing.
+// focus, keeps open rows and sections open (by item and section id) and focus
+// on the row, heading, or Edit button that had it, and an answer identical to
+// the last one rendered changes nothing.
 // A body that is not the expected shape shows the no-answer sentence.
 // Buttons carry data-goal-action, never data-action, which the shell's own
 // click handler owns. Every text node is set with textContent.
@@ -373,6 +377,8 @@
       composer = null;
       if (!fromUser) return;
       var button = opener ? controlFor('edit', opener) : document.getElementById('goals-add');
+      // An Edit button inside a closed row gives focus to the row instead.
+      if (opener && button && button.closest('[hidden]')) button = controlFor('toggle', opener);
       if (button) button.focus();
     }
 

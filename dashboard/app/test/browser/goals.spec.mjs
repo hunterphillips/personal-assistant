@@ -79,6 +79,42 @@ test.describe('with the fixture vault', () => {
     await expect(cello).toBeFocused();
   });
 
+  test('the status line is clamped to two lines while its row is closed', async ({ page, hub }) => {
+    await page.route('**/api/goals', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.sections[0].items[0].now = 'sketch the three beds and order seeds before the frost date. '.repeat(12);
+      await route.fulfill({ response, json: body });
+    });
+    await openGoals(page, hub);
+    const garden = row(page, 'now:ship-the-garden-planner');
+    const status = garden.locator('.goal-status');
+    const lines = () => status.evaluate((node) => Math.round(node.getBoundingClientRect().height
+      / parseFloat(getComputedStyle(node).lineHeight)));
+    expect(await lines()).toBe(2);
+    await garden.click();
+    await expect.poll(lines).toBeGreaterThan(2);
+    await garden.click();
+    await expect.poll(lines).toBe(2);
+  });
+
+  test('rows and headers are one column and at least 44 px tall', async ({ page, hub }) => {
+    await openGoals(page, hub);
+    await page.getByRole('button', { name: /^Goal notes/ }).click();
+    const heights = await page.locator('#goals-cards .goal-row:visible, #goals-cards .goal-section-toggle')
+      .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
+    expect(heights.length).toBeGreaterThan(5);
+    for (const height of heights) expect(height).toBeGreaterThanOrEqual(44);
+    const lefts = await page.locator('#goals-cards [data-goal-section="goals"] .goal-row')
+      .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().left));
+    expect(new Set(lefts).size).toBe(1);
+    const count = page.locator('[data-goal-section="goals"] .goal-count');
+    await expect(count).toBeVisible();
+    await expect(count).toBeInViewport();
+    expect(await count.evaluate((node) => getComputedStyle(node).color))
+      .toBe(await page.locator('.card-note').first().evaluate((node) => getComputedStyle(node).color));
+  });
+
   test('the other sections are folded headers with counts that open to their rows', async ({ page, hub }) => {
     await openGoals(page, hub);
     const toggles = page.locator('#goals-cards .goal-section-toggle');
@@ -170,6 +206,12 @@ test.describe('with the fixture vault', () => {
     await composer(page).getByRole('button', { name: 'Cancel' }).click();
     await expect(composer(page)).toHaveCount(0);
     await expect(kayak).toBeFocused();
+
+    await kayak.click();
+    await row(page, 'later:kayak-trip').click();
+    await expect(composer(page)).toBeVisible();
+    await composer(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(row(page, 'later:kayak-trip')).toBeFocused();
 
     await page.getByRole('button', { name: 'Add goal' }).click();
     await composer(page).getByLabel('What do you want to work toward?').press('Escape');
