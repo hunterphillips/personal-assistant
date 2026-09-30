@@ -12,15 +12,15 @@ routines), Reading holds the Daily Brief, Focus is its own view, and Goals
 reads the vault's priorities and goal notes with add and edit going through
 the second-brain persona. The direction took Meta Muse and GrokBot as reference; a
 clickable design study lives in `dashboard/prototype/` as visual reference.
-Current state and decisions live in `thoughts/shared/lanes/dashboard/handoff.md`.
+Current state and decisions live in `thoughts/shared/lanes/assistant/handoff.md`.
 
 Deliberately thin. This holds the contract, the assembler, and the outputs. It
 does not hold shared libraries, and the domain systems keep their own repos.
 
-**The umbrella is undefined.** What the assistant is, how it is invoked, which
-use cases it hosts and in what order, and whether there is a shared runtime are
-all open. The daily brief is the first concrete piece, not a template for the
-rest.
+Since 2026-09-29 this repo is the one working root for the whole system. The
+domain systems keep their own repos and are linked under `systems/`, so a
+session here works in any of them. Hunter's direction: build the system and
+its interface until it is his daily driver, and let use sharpen the rest.
 
 ## Surfaces and their boundaries
 
@@ -68,6 +68,7 @@ decision prep would sit beside it with its own contract and its own inputs.
 - `daily-brief/bin/run-brief` — the scheduled morning run; `daily-brief/README.md` has the schedule and flags
 - `daily-brief/contributions/YYYY-MM-DD/<domain>.yaml` — a day's raw contributions
 - `daily-brief/briefs/` — `memo-<date>.md` written by the curator, `build.py` that turns it into `<date>.md` and the `viewer-<date>.html` the dashboard serves, and the feedback files saved beside them
+- `systems/` — symlinks to the domain repos (cfo, focus, second-brain, personal-context)
 
 ## Handling
 
@@ -93,7 +94,8 @@ own interface and state, embedded through an internal proxy; the dashboard
 serves the Daily Brief and saves its feedback directly; the port 8765 viewer
 is retired. Operations, cmux setup, and the remaining live checks are in
 `dashboard/app/docs/operations.md` and the
-[dashboard handoff](thoughts/shared/lanes/dashboard/handoff.md).
+[assistant handoff](thoughts/shared/lanes/assistant/handoff.md). The next two
+views are a Feed in Reading and an Ideas view.
 
 The September 18 Control Tower research (Codex, Claude, and cmux runtime
 evidence) fed the daemon plan; its Electron/TypeScript
