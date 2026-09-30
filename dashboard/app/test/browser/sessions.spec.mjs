@@ -170,6 +170,8 @@ test.describe('with sessions', () => {
     await expect(page.locator('#agent-cost')).toBeEmpty();
     await expect(page.locator('#agent-new-thread')).toBeHidden();
     await expect(pane(page).getByRole('button', { name: /Routines/ })).toHaveCount(0);
+    await expect(page.locator('#agent-details-toggle')).toBeHidden();
+    await expect(page.locator('#agent-details')).toBeHidden();
     await expect(page.locator('#agent-composer')).toBeHidden();
     await expect(page.locator('#agent-foot')).toHaveText('Type to this thread in its terminal.');
     await expect(messages(page)).toHaveText([/^Fix the flaky test\./, /^Which colour\?/]);
@@ -297,6 +299,20 @@ test.describe('with sessions', () => {
     await expect(page.locator('#agent-panel')).not.toContainText('Rate limited');
   });
 
+  test('a session opened with the settings open shows neither the gear nor the panel, and a project row shows both', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${hub.origin}/?agent=catchup`);
+    await page.locator('#agent-details-toggle').click();
+    const details = page.locator('#agent-details');
+    await expect(details.locator('.request-detail-text')).toHaveText(['Work', 'Work', 'Codex', '~/work/catchup']);
+
+    await row(page, 'Fix the flaky test').click();
+    await expect(pane(page).locator('#agent-name')).toHaveText('Fix the flaky test');
+    await expect(page.locator('#agent-details-toggle')).toBeHidden();
+    await expect(details).toBeHidden();
+    await expect(messages(page)).toHaveCount(2);
+  });
+
   test('a Claude terminal shows where it runs and its state, with no messages and no composer', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=claude:${C_BUSY}`);
     await expect(pane(page).locator('#agent-name')).toHaveText('catchup');
@@ -309,6 +325,7 @@ test.describe('with sessions', () => {
     await expect(page.locator('#agent-status')).toBeHidden();
     await expect(page.locator('#agent-request')).toBeHidden();
     await expect(page.locator('#agent-new-thread')).toBeHidden();
+    await expect(page.locator('#agent-details-toggle')).toBeHidden();
     await expect(openButton(page)).toBeEnabled();
     expect(hub.requests(`/api/sessions/claude:${C_BUSY}/thread`)).toEqual([]);
 

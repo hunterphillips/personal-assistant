@@ -1,7 +1,8 @@
-// The Health view's jobs (the code's routines), and the shell's event
-// stream client, in real browsers against the in-memory registry and
-// routines of test/support/browser-server.mjs. Pause and Resume reach the
-// isolated Focus copy, whose launchd stubs refuse.
+// The Health view's jobs (the code's routines), the settings panel beside a
+// thread with its jobs line, and the shell's event stream client, in real
+// browsers against the in-memory registry and routines of
+// test/support/browser-server.mjs. Pause and Resume reach the isolated
+// Focus copy, whose launchd stubs refuse.
 
 import { expect, expectView, nav, needsFocus, test } from '../support/browser-test.mjs';
 
@@ -11,10 +12,20 @@ const HOUR = 60 * MINUTE;
 const ago = (ms) => new Date(Date.now() - ms).toISOString();
 
 const AGENTS = [
-  { id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented.', group: 'personal', kind: 'system' },
-  { id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented.', group: 'personal', kind: 'persona' },
-  { id: 'scribe', name: 'Scribe', role: 'Drafts', description: 'Invented, with no routines.', group: 'work', kind: 'persona' },
-  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona' },
+  {
+    id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented.', group: 'personal', kind: 'system',
+    routines: ['gmail', 'git', 'notes', 'work', 'calendar', 'drive'].map((name) => `com.focus.scan-${name}`),
+  },
+  {
+    id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented notes that keep themselves.', group: 'personal',
+    kind: 'persona', provider: 'claude', cwd: '/invented/second-brain',
+    routines: ['com.hunter.brain-drain', 'com.hunter.brain-audit', 'com.hunter.brain-refresh'],
+  },
+  {
+    id: 'scribe', name: 'Scribe', role: 'Drafts', description: 'Invented, with no routines.', group: 'work', kind: 'persona',
+    provider: 'codex', cwd: '/elsewhere/scribe',
+  },
+  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', routines: ['com.hunter.cfo.daily'] },
 ];
 
 function routine(agent, label, fields) {
@@ -165,6 +176,151 @@ test.describe('with seeded routines', () => {
     expect(hub.routines.calls).toBe(0);
   });
 
+  test('the gear opens the agent\'s settings and a jobs line pointing at Health', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await expect(page.locator('#agent-name')).toHaveText('Second brain');
+    const gear = page.getByRole('button', { name: 'Details', exact: true });
+    await expect(gear).toBeVisible();
+    await expect(gear).toHaveAttribute('title', 'Details');
+    await expect(gear).toHaveAttribute('aria-expanded', 'false');
+    await expect(gear).toHaveAttribute('aria-controls', 'agent-details');
+    await expect(page.getByRole('button', { name: /^Routines/ })).toHaveCount(0);
+    const details = page.locator('#agent-details');
+    await expect(details).toBeHidden();
+    expect((await gear.boundingBox()).height).toBeGreaterThanOrEqual(44);
+
+    await gear.click();
+    await expect(gear).toHaveAttribute('aria-expanded', 'true');
+    await expect(details).toBeVisible();
+    await expect(details.getByRole('heading', { name: 'Settings' })).toBeVisible();
+    await expect(details.locator('.details-name')).toHaveText('Second brain');
+    await expect(details.locator('.request-detail-label')).toHaveText(['Role', 'Group', 'Provider', 'Folder']);
+    await expect(details.locator('.request-detail-text')).toHaveText(['Notes', 'Personal', 'Claude', '~/second-brain']);
+    await expect(details.locator('.details-description')).toHaveText('Invented notes that keep themselves.');
+    await expect(details.locator('.details-jobs')).toHaveText('Second brain runs 3 jobs.');
+    await expect(details.getByRole('link', { name: '3 jobs' })).toHaveAttribute('href', '/health');
+
+    // Nothing about the jobs themselves renders here.
+    await expect(details.locator('.routine-row, .badge')).toHaveCount(0);
+    await expect(details.getByRole('button')).toHaveCount(1);
+    await expect(details.getByRole('button', { name: 'Close details' })).toBeVisible();
+    expect(hub.routines.calls).toBe(0);
+  });
+
+  test('the chevron and Escape close the panel and return the keyboard to the gear', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=brain`);
+    const gear = page.locator('#agent-details-toggle');
+    const details = page.locator('#agent-details');
+    await gear.click();
+    const chevron = details.getByRole('button', { name: 'Close details' });
+    await expect(chevron).toHaveAttribute('title', 'Close details');
+    expect((await chevron.boundingBox()).height).toBeGreaterThanOrEqual(44);
+    await chevron.click();
+    await expect(details).toBeHidden();
+    await expect(gear).toHaveAttribute('aria-expanded', 'false');
+    await expect(gear).toBeFocused();
+
+    await gear.click();
+    const link = details.getByRole('link', { name: '3 jobs' });
+    await link.focus();
+    // A state change that leaves the settings as they were keeps the keyboard where it is.
+    const revision = await page.evaluate(() => fetch('/api/state').then((r) => r.json()).then((s) => s.revision));
+    await hub.state.refreshRoutines();
+    await expect.poll(() => page.evaluate(() => fetch('/api/state').then((r) => r.json()).then((s) => s.revision))).toBeGreaterThan(revision);
+    await page.waitForTimeout(200);
+    await expect(link).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(details).toBeHidden();
+    await expect(gear).toBeFocused();
+  });
+
+  test('the panel stays open as another agent opens and starts closed after a reload', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(`${hub.origin}/?agent=brain`);
+    const gear = page.locator('#agent-details-toggle');
+    const details = page.locator('#agent-details');
+    await gear.click();
+    await expect(details.locator('.details-jobs')).toHaveText('Second brain runs 3 jobs.');
+
+    await agentRow(page, 'CFO').click();
+    await expect(page.locator('#agent-name')).toHaveText('CFO');
+    await expect(details).toBeVisible();
+    await expect(gear).toHaveAttribute('aria-expanded', 'true');
+    await expect(details.locator('.details-name')).toHaveText('CFO');
+    await expect(details.locator('.details-jobs')).toHaveText('CFO runs 1 job.');
+    await expect(details.getByRole('link', { name: '1 job' })).toHaveAttribute('href', '/health');
+
+    // Scribe has no jobs and a folder outside home.
+    await agentRow(page, 'Scribe').click();
+    await expect(details.locator('.details-name')).toHaveText('Scribe');
+    await expect(details.locator('.request-detail-text')).toHaveText(['Drafts', 'Work', 'Codex', '/elsewhere/scribe']);
+    await expect(details.locator('.details-description')).toHaveText('Invented, with no routines.');
+    await expect(details.locator('.details-jobs')).toBeHidden();
+    await expect(details.getByRole('link')).toHaveCount(0);
+
+    await page.reload();
+    await expect(page.locator('#agent-name')).toHaveText('Scribe');
+    await expect(gear).toHaveAttribute('aria-expanded', 'false');
+    await expect(details).toBeHidden();
+  });
+
+  test('a value the registry does not have is left out with its label', async ({ page, hub }) => {
+    // Focus is a system entry: no provider and, here, no folder.
+    await page.goto(`${hub.origin}/?agent=focus`);
+    await page.locator('#agent-details-toggle').click();
+    const details = page.locator('#agent-details');
+    await expect(details.locator('.request-detail-label')).toHaveText(['Role', 'Group']);
+    await expect(details.locator('.request-detail-text')).toHaveText(['Tasks', 'Personal']);
+    await expect(details.locator('.details-jobs')).toHaveText('Focus runs 6 jobs.');
+  });
+
+  test('from 720px the panel sits beside the messages; at 390px it covers the thread', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${hub.origin}/?agent=brain`);
+    const list = page.locator('#agents-list');
+    const messages = page.locator('#agent-messages');
+    const details = page.locator('#agent-details');
+    const listWidth = (await list.boundingBox()).width;
+    const before = (await messages.boundingBox()).width;
+    await page.locator('#agent-details-toggle').click();
+    await expect(details).toBeVisible();
+    const box = await details.boundingBox();
+    expect(Math.round(box.width)).toBe(300);
+    await expect.poll(async () => (await messages.boundingBox()).width).toBeLessThan(before);
+    const after = await messages.boundingBox();
+    expect(after.x + after.width).toBeLessThanOrEqual(box.x + 1);
+    expect((await list.boundingBox()).width).toBe(listWidth);
+    expect(await details.evaluate((node) => getComputedStyle(node).borderLeftWidth)).toBe('1px');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(async () => (await details.boundingBox()).width).toBe(390);
+    const sheet = await details.boundingBox();
+    const thread = await page.locator('#agent-panel').boundingBox();
+    expect(sheet.x).toBe(thread.x);
+    expect(sheet.y).toBe(thread.y);
+    expect(sheet.height).toBe(thread.height);
+    await expect(details.getByRole('button', { name: 'Close details' })).toBeInViewport();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    // The way back is under the sheet until the chevron closes it.
+    const back = await page.locator('#agent-back').boundingBox();
+    const covered = await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('#agent-details'),
+      { x: back.x + back.width / 2, y: back.y + back.height / 2 });
+    expect(covered).toBe(true);
+    await details.getByRole('button', { name: 'Close details' }).click();
+    await expect(details).toBeHidden();
+    await page.locator('#agent-back').click();
+    await expect(page).toHaveURL(`${hub.origin}/`);
+  });
+
+  test('on a phone the gear hands the keyboard to the chevron', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await page.locator('#agent-details-toggle').click();
+    await expect(page.getByRole('button', { name: 'Close details' })).toBeFocused();
+  });
+
   test('Refresh posts the control and reads Refreshing… until the refresh finishes', async ({ page, hub }) => {
     await openHealth(page, hub);
     const refresh = page.locator('#routines-refresh');
@@ -282,6 +438,19 @@ test.describe('with stale routines', () => {
     await expect(page.locator('#routines-updated')).toHaveText('Updated just now');
     await page.waitForTimeout(300);
     expect(hub.routines.calls).toBe(1);
+  });
+
+});
+
+test.describe('with routines never refreshed', () => {
+  test.use({ hubOptions: { build: () => ({ agents: AGENTS }) } });
+
+  test('the jobs line counts the registry\'s jobs without a refresh', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await page.locator('#agent-details-toggle').click();
+    await expect(page.locator('#agent-details .details-jobs')).toHaveText('Second brain runs 3 jobs.');
+    await page.waitForTimeout(300);
+    expect(hub.routines.calls).toBe(0);
   });
 });
 

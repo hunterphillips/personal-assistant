@@ -46,40 +46,57 @@
         <div class="agent-thread" id="agent-thread">
           <p class="thread-empty" id="agent-empty" hidden></p>
           <div class="thread-panel" id="agent-panel" hidden>
-            <div class="thread-header">
-              <a class="thread-back" id="agent-back" href="/">All agents</a>
-              <div class="thread-title">
-                <h2 class="thread-name" id="agent-name"></h2>
-                <span class="thread-chips" id="agent-chips"></span>
-                <span class="thread-cost" id="agent-cost"></span>
+            <div class="thread-main">
+              <div class="thread-header">
+                <a class="thread-back" id="agent-back" href="/">All agents</a>
+                <div class="thread-title">
+                  <h2 class="thread-name" id="agent-name"></h2>
+                  <span class="thread-chips" id="agent-chips"></span>
+                  <span class="thread-cost" id="agent-cost"></span>
+                </div>
+                <button type="button" class="button thread-new" id="agent-new-thread" data-agent-action="new-thread">New thread</button>
+                <button type="button" class="button" id="agent-open-terminal" data-agent-action="open-terminal" hidden>Open terminal</button>
+                <button type="button" class="button icon-button" id="agent-details-toggle" data-agent-action="toggle-details" aria-label="Details" title="Details" aria-expanded="false" aria-controls="agent-details" hidden>
+                  <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                </button>
+                <p class="thread-terminal-reason" id="agent-terminal-reason" role="status" hidden></p>
               </div>
-              <button type="button" class="button thread-new" id="agent-new-thread" data-agent-action="new-thread">New thread</button>
-              <button type="button" class="button" id="agent-open-terminal" data-agent-action="open-terminal" hidden>Open terminal</button>
-              <p class="thread-terminal-reason" id="agent-terminal-reason" role="status" hidden></p>
-            </div>
-            <div class="thread-confirm" id="agent-confirm" role="group" aria-label="New thread" hidden>
-              <span id="agent-confirm-text">Start a new thread? The persona will not remember this one.</span>
-              <button type="button" class="button button-primary" data-agent-action="confirm-new-thread">Start new thread</button>
-              <button type="button" class="button" data-agent-action="cancel-new-thread">Cancel</button>
-            </div>
-            <p class="thread-description" id="agent-description" hidden></p>
-            <p class="thread-notice" id="agent-notice" role="status" hidden></p>
-            <div class="thread-messages" id="agent-messages" aria-live="polite"></div>
-            <div class="thread-status" id="agent-status" role="status" tabindex="-1" hidden>
-              <span id="agent-status-text"></span>
-              <button type="button" class="button" data-agent-action="interrupt">Interrupt</button>
-            </div>
-            <div class="thread-request" id="agent-request" hidden></div>
-            <form class="composer" id="agent-composer" hidden>
-              <label class="composer-label" id="agent-input-label" for="agent-input"></label>
-              <div class="composer-row">
-                <textarea class="composer-input" id="agent-input" rows="2"></textarea>
-                <button type="submit" class="button button-primary" id="agent-send">Send</button>
+              <div class="thread-confirm" id="agent-confirm" role="group" aria-label="New thread" hidden>
+                <span id="agent-confirm-text">Start a new thread? The persona will not remember this one.</span>
+                <button type="button" class="button button-primary" data-agent-action="confirm-new-thread">Start new thread</button>
+                <button type="button" class="button" data-agent-action="cancel-new-thread">Cancel</button>
               </div>
-              <p class="composer-reason" id="agent-composer-reason" hidden></p>
-            </form>
-            <p class="thread-foot" id="agent-foot" hidden></p>
-            <p class="thread-failure" id="agent-failure" role="status" hidden></p>
+              <p class="thread-description" id="agent-description" hidden></p>
+              <p class="thread-notice" id="agent-notice" role="status" hidden></p>
+              <div class="thread-messages" id="agent-messages" aria-live="polite"></div>
+              <div class="thread-status" id="agent-status" role="status" tabindex="-1" hidden>
+                <span id="agent-status-text"></span>
+                <button type="button" class="button" data-agent-action="interrupt">Interrupt</button>
+              </div>
+              <div class="thread-request" id="agent-request" hidden></div>
+              <form class="composer" id="agent-composer" hidden>
+                <label class="composer-label" id="agent-input-label" for="agent-input"></label>
+                <div class="composer-row">
+                  <textarea class="composer-input" id="agent-input" rows="2"></textarea>
+                  <button type="submit" class="button button-primary" id="agent-send">Send</button>
+                </div>
+                <p class="composer-reason" id="agent-composer-reason" hidden></p>
+              </form>
+              <p class="thread-foot" id="agent-foot" hidden></p>
+              <p class="thread-failure" id="agent-failure" role="status" hidden></p>
+            </div>
+            <aside class="thread-details" id="agent-details" aria-labelledby="agent-details-heading" hidden>
+              <div class="details-top">
+                <h3 class="card-name" id="agent-details-heading">Settings</h3>
+                <button type="button" class="button icon-button" data-agent-action="close-details" aria-label="Close details" title="Close details">
+                  <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
+                </button>
+              </div>
+              <p class="details-name" id="agent-details-name"></p>
+              <div class="request-details" id="agent-details-fields"></div>
+              <p class="details-description" id="agent-details-description" hidden></p>
+              <p class="details-jobs" id="agent-details-jobs" hidden></p>
+            </aside>
           </div>
         </div>
       </section>

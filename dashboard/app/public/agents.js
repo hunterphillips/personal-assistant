@@ -14,6 +14,12 @@
 // cmux) are on the Health view (routines.js); this view says only what
 // each row needs.
 //
+// A gear in the thread header, for every agent but a coding session, opens
+// the agent's settings from the registry in a panel beside the thread (a
+// sheet over it on a phone), with one line counting the agent's jobs and
+// linking to Health. The panel's open state lasts for the page's life: it
+// stays open as other agents are chosen, and a reload starts closed.
+//
 // The thread is fetched from /api/agents/<id>/thread when a persona opens
 // and again whenever the snapshot shows its last message or its turn
 // changed, so the pane follows the turn without rebuilding it from deltas.
@@ -88,6 +94,11 @@
     var provider = agent && agent.provider;
     if (!provider) return '';
     return Object.prototype.hasOwnProperty.call(PROVIDERS, provider) ? PROVIDERS[provider] : provider;
+  }
+
+  function groupName(key) {
+    for (var i = 0; i < GROUPS.length; i += 1) if (GROUPS[i][0] === key) return GROUPS[i][1];
+    return '';
   }
 
   function isPersona(agent) {
@@ -381,6 +392,12 @@
     var nameNode = document.getElementById('agent-name');
     var chips = document.getElementById('agent-chips');
     var cost = document.getElementById('agent-cost');
+    var detailsToggle = document.getElementById('agent-details-toggle');
+    var details = document.getElementById('agent-details');
+    var detailsName = document.getElementById('agent-details-name');
+    var detailsFields = document.getElementById('agent-details-fields');
+    var detailsDescription = document.getElementById('agent-details-description');
+    var detailsJobs = document.getElementById('agent-details-jobs');
     var newThread = document.getElementById('agent-new-thread');
     var openTerminal = document.getElementById('agent-open-terminal');
     var terminalLine = document.getElementById('agent-terminal-reason');
@@ -403,6 +420,8 @@
     var state = null;
     var visible = false;
     var selectedId = null;
+    var detailsOpen = false; // the settings panel is open, whichever agent is chosen
+    var detailsKey = null; // what the panel was last built from
     var wide = window.matchMedia('(min-width: 720px)');
     var thread = { id: null, messages: null, loading: false, error: false, fresh: true, version: 0 };
     var renderedVersion = -1;
@@ -751,6 +770,39 @@
 
     // With no agent open the pane asks for one; on a phone the pane is
     // off screen until a row is chosen.
+    // The agent's registry entry as label and value pairs, each left out
+    // when the registry has no value, then its description and, when it has
+    // jobs, how many with a link to Health. Rebuilt only when one of them
+    // changed, so the keyboard stays on the link across other state.
+    function renderDetails(agent) {
+      var pairs = [
+        ['Role', agent.role],
+        ['Group', groupName(agent.group)],
+        ['Provider', providerName(agent)],
+        ['Folder', shortPath(agent.cwd, state.home)],
+      ];
+      var key = JSON.stringify([agent.name, pairs, agent.description, agent.jobs]);
+      if (key === detailsKey) return;
+      detailsKey = key;
+      detailsName.textContent = agent.name;
+      detailsFields.textContent = '';
+      for (var i = 0; i < pairs.length; i += 1) {
+        if (pairs[i][1]) detailsFields.appendChild(detail(pairs[i][0], element('span', 'request-detail-text', pairs[i][1])));
+      }
+      detailsDescription.textContent = agent.description || '';
+      detailsDescription.hidden = !detailsDescription.textContent;
+
+      var jobs = typeof agent.jobs === 'number' ? agent.jobs : 0;
+      detailsJobs.textContent = '';
+      detailsJobs.hidden = jobs === 0;
+      if (jobs === 0) return;
+      var link = element('a', null, jobs === 1 ? '1 job' : jobs + ' jobs');
+      link.href = '/health';
+      detailsJobs.appendChild(document.createTextNode(agent.name + ' runs '));
+      detailsJobs.appendChild(link);
+      detailsJobs.appendChild(document.createTextNode('.'));
+    }
+
     function renderThread() {
       var agent = selectedAgent();
       view.classList.toggle('agents-open', !!selectedId);
@@ -780,6 +832,11 @@
       cost.textContent = persona && typeof agent.costUsd === 'number' ? '$' + agent.costUsd.toFixed(2) + ' this session' : '';
       description.textContent = session ? shortPath(agent.cwd, state.home) : persona ? '' : agent.description || '';
       description.hidden = !description.textContent;
+
+      detailsToggle.hidden = session;
+      detailsToggle.setAttribute('aria-expanded', detailsOpen && !session ? 'true' : 'false');
+      details.hidden = !detailsOpen || session;
+      if (!details.hidden) renderDetails(agent);
 
       newThread.hidden = !persona;
       newThread.disabled = busy || !persona || agent.state === 'unavailable' || turnOpen(agent);
@@ -1062,9 +1119,30 @@
         case 'retry-thread':
           syncThread(true);
           break;
+        case 'toggle-details':
+          detailsOpen = !detailsOpen;
+          renderThread();
+          // On a phone the panel covers the gear, so the keyboard goes to its chevron.
+          if (detailsOpen && !wide.matches) details.querySelector('button').focus();
+          break;
+        case 'close-details':
+          closeDetails();
+          break;
         default:
           break;
       }
+    });
+
+    function closeDetails() {
+      detailsOpen = false;
+      renderThread();
+      detailsToggle.focus();
+    }
+
+    details.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeDetails();
     });
 
     composer.addEventListener('submit', function (event) {

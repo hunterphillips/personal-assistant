@@ -101,7 +101,8 @@ snapshot; concurrent requests share one check. It stays for one release.
   "focus": { "available": true },
   "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>" },
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
-  "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona", "provider": "claude",
+  "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
+               "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
                "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
                "lastError": null, "costUsd": 0.42 }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
@@ -120,8 +121,11 @@ snapshot; concurrent requests share one check. It stays for one release.
 `revision` goes up by one on every change. `home` is the home directory,
 which the Agents view shortens to `~` in the paths it shows. `focus` and
 `brief` hold what the status route reports (`available` is null and
-`state` is `unknown` before the first check). Agents leave out `cwd` and
-`routines`. A persona also carries
+`state` is `unknown` before the first check). Every agent carries its
+registry `cwd` (a string, or null when the registry has none), which the
+Agents view shows as the agent's folder, and `jobs`, how many launchd
+labels its registry `routines` name; agents leave out `routines` itself. A
+persona also carries
 its runtime state (see Personas below); any other kind has `state: null`.
 `sessions` lists the coding sessions the dashboard follows but does not
 own: the Codex threads on the shared app-server and the Claude terminals
@@ -442,6 +446,28 @@ button until the next attempt or another session is chosen (`unbound`,
 "That terminal is closed." for `not_found`, the cmux sentence for
 `not_running`, `no_password`, or `auth_failed`, else "cmux could not open
 that terminal.").
+
+#### Settings
+
+A gear, named "Details", sits in the thread header of every agent (not a
+coding session) and opens the agent's settings in a panel: from 720px a
+300px column at the right of the thread, which narrows to make room, and
+under 720px a sheet over the whole thread. The panel's chevron ("Close
+details") or Escape inside it closes the panel and puts the keyboard back
+on the gear; on a phone, opening it puts the keyboard on the chevron. It
+stays open while other agents are chosen and is closed after a reload; the
+state is kept in memory only.
+
+Under "Settings" come the agent's name, then Role, Group ("Work" or
+"Personal"), Provider ("Claude" or "Codex"), and Folder (the snapshot's
+`cwd` with the home directory as `~`), each left out with its label when
+the registry has no value, then the registry description as written, and
+the jobs sentence (see Routines). Nothing in it is editable.
+
+A thread shows no job rows. Under the description the panel counts the
+agent's launchd jobs in one sentence, "CFO runs 1 job.", linking to
+`/health` (see Health view), from the agent's `jobs` in the snapshot, so it
+needs no refresh; an agent with none has no sentence.
 
 The thread is read from `GET /api/agents/<id>/thread` when it opens and
 again whenever the state shows a new last message or a turn that started or

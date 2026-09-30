@@ -9,7 +9,8 @@ const MINUTE = 60_000;
 const ago = (ms) => new Date(Date.now() - ms).toISOString();
 
 const AGENTS = [
-  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude' },
+  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude', cwd: '/invented/cfo',
+    routines: ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'] },
   { id: 'catchup', name: 'Catchup', role: 'Work', description: 'Invented work folder.', group: 'work', kind: 'project', provider: 'codex' },
   { id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'claude' },
   { id: 'dev', name: 'Dev', role: 'Code', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'codex' },
@@ -74,20 +75,21 @@ const pane = (page) => page.locator('#agent-panel');
 const messages = (page) => page.locator('#agent-messages .thread-message');
 const phone = (page) => page.viewportSize().width < 720;
 
-// Counts rebuilds of the element's children from now on (a rebuild clears
-// them first: one mutation record with removed nodes) and follows the 720px
-// query. Its listener was added after the view's, so by the time it has
-// seen a crossing the view has handled it.
-async function watchRebuilds(page, selector) {
-  await page.evaluate((sel) => {
+// Counts rebuilds of the element's children (or, with `subtree`, of any
+// element's children under it) from now on (a rebuild clears them first:
+// one mutation record with removed nodes) and follows the 720px query. Its
+// listener was added after the view's, so by the time it has seen a
+// crossing the view has handled it.
+async function watchRebuilds(page, selector, { subtree = false } = {}) {
+  await page.evaluate(({ sel, deep }) => {
     window.__rebuilds = 0;
     new MutationObserver((records) => {
       for (const record of records) if (record.removedNodes.length > 0) window.__rebuilds += 1;
-    }).observe(document.querySelector(sel), { childList: true });
+    }).observe(document.querySelector(sel), { childList: true, subtree: deep });
     const wide = window.matchMedia('(min-width: 720px)');
     window.__wide = wide.matches;
     wide.addEventListener('change', (event) => { window.__wide = event.matches; });
-  }, selector);
+  }, { sel: selector, deep: subtree });
 }
 const rebuilds = (page) => page.evaluate(() => window.__rebuilds);
 const crossed = (page, wide) => expect.poll(() => page.evaluate(() => window.__wide)).toBe(wide);
@@ -159,6 +161,30 @@ test.describe('with seeded agents', () => {
     await expect(pane(page).locator('#agent-name')).toHaveText('CFO');
     await expect(messages(page)).toHaveCount(2);
     await expect(page.locator('#agent-empty')).toBeHidden();
+  });
+
+  test('the gear opens the settings beside the thread, whose messages stay', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    const gear = pane(page).getByRole('button', { name: 'Details', exact: true });
+    await expect(gear).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#agent-details')).toBeHidden();
+    await expect(messages(page)).toHaveCount(2);
+
+    await gear.click();
+    const details = page.locator('#agent-details');
+    await expect(details.locator('.request-detail-text')).toHaveText(['Money', 'Work', 'Claude', '~/cfo']);
+    await expect(details.locator('.details-description')).toHaveText('Invented.');
+    await expect(details.locator('.details-jobs')).toHaveText('CFO runs 2 jobs.');
+    await expect(details.locator('.routine-row, .badge')).toHaveCount(0);
+    await expect(messages(page)).toHaveCount(2);
+  });
+
+  test('a persona without jobs has no jobs line', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await expect(pane(page).locator('#agent-name')).toHaveText('Second brain');
+    await page.locator('#agent-details-toggle').click();
+    await expect(page.locator('#agent-details .details-name')).toHaveText('Second brain');
+    await expect(page.locator('#agent-details .details-jobs')).toBeHidden();
   });
 
   test('opening a persona shows its thread, and a reload lands on it', async ({ page, hub }) => {
@@ -481,6 +507,28 @@ test.describe('with seeded agents', () => {
     expect(await rebuilds(page)).toBe(0);
   });
 
+  test('crossing 720px with an agent open keeps the settings open', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await page.locator('#agent-details-toggle').click();
+    const details = page.locator('#agent-details');
+    await expect(details.locator('.details-jobs')).toHaveText('CFO runs 2 jobs.');
+    await watchRebuilds(page, '#agent-details', { subtree: true });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await crossed(page, false);
+    await expect(page.locator('#agents-list')).toBeHidden();
+    await expect(page.locator('#agent-thread')).toBeVisible();
+    await expect(details).toBeVisible();
+    await expect(details.locator('.details-jobs')).toHaveText('CFO runs 2 jobs.');
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await crossed(page, true);
+    await expect(page.locator('#agents-list')).toBeVisible();
+    await expect(details).toBeVisible();
+    expect(await rebuilds(page)).toBe(0);
+  });
+
   test('an unavailable persona shows why and a disabled composer', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=dev`);
     await expect(pane(page).locator('#agent-name')).toHaveText('Dev');
@@ -552,6 +600,7 @@ test.describe('with seeded agents', () => {
     expect(overflow).toBeLessThanOrEqual(0);
 
     await expect(page.locator('#agent-panel').getByRole('button', { name: /Routines/ })).toHaveCount(0);
+    await expect(page.locator('#agent-details-toggle')).toBeVisible();
 
     await back.click();
     await expect(page).toHaveURL(`${hub.origin}/`);
