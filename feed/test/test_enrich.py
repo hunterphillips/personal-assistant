@@ -149,7 +149,7 @@ class EnrichTest(unittest.TestCase):
 
     def test_a_rewrite_keeps_every_other_field_and_the_order_with_mode_600(self):
         PAGES["/a"] = html('<meta property="og:image" content="https://cdn.example.com/a.jpg">')
-        items = [self.item(1, "/nothing", extra={"x": [1, "é"]}), self.item(2, "/a", image=None), self.item(3, "/a")]
+        items = [self.item(1, "/nothing", x=[1, "é"]), self.item(2, "/a", image=None), self.item(3, "/a")]
         path = self.feed(items)
         with open(path, encoding="utf-8") as f:
             before = json.load(f)

@@ -80,7 +80,7 @@ class Skip(Exception):
 def fetch(url):
     """The page's text, read to at most MAX_BYTES within TIMEOUT seconds."""
     deadline = time.monotonic() + TIMEOUT
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"})
     with OPENER.open(request, timeout=TIMEOUT) as response:
         kind = response.headers.get_content_type()
         if kind not in HTML_TYPES:
