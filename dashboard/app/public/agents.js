@@ -587,12 +587,13 @@
     // that did not build is the sentence alone.
     function briefNode(entry) {
       var text = typeof entry.text === 'string' ? entry.text : '';
-      var node = element('div', 'thread-message thread-message-system thread-message-brief');
       if (entry.state === 'failed') {
-        node.appendChild(element('div', 'thread-message-text', text));
-        node.appendChild(messageMeta(entry));
-        return node;
+        var line = element('div', 'thread-message thread-message-system thread-message-brief-failed');
+        line.appendChild(element('div', 'thread-message-text', text));
+        line.appendChild(messageMeta(entry));
+        return line;
       }
+      var node = element('div', 'thread-message thread-message-system thread-message-brief');
       var details = element('details', 'thread-brief');
       var line = typeof entry.summary === 'string' && entry.summary ? entry.summary : text;
       var day = briefDay(entry.date);

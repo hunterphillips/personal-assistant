@@ -869,7 +869,8 @@ test.describe('with a brief notice in the Assistant thread', () => {
   test('a failed notice renders as one line without a disclosure', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=assistant`);
     const failed = messages(page).nth(0);
-    await expect(failed).toHaveClass(/thread-message-brief/);
+    await expect(failed).toHaveClass(/thread-message-brief-failed/);
+    await expect(failed).toHaveClass(/thread-message-system/);
     await expect(failed.locator('details')).toHaveCount(0);
     await expect(failed.locator('.thread-message-text')).toHaveText('The morning brief did not build.');
   });
