@@ -27,3 +27,6 @@ daily-brief/watch/packets/
 daily-brief/watch/overflow/
 daily-brief/watch/seen.jsonl
 daily-brief/watch/state.json
+
+# Feed store: what the producers found and judged, local only.
+feed/items/

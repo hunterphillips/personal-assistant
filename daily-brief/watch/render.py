@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Turn a triage envelope into the watch packet, the overflow file, the
-seen-store lines, and the state update. Standard library only.
+feed file the dashboard reads, the seen-store lines, and the state update.
+Standard library only.
 
     render.py --date D --since S --envelope triage.json --threads N
+
+The feed file, ../../feed/items/<date>-watch.json, holds every item the
+run judged worth keeping, survivors first: see feed/README.md at the repo
+root for the shape. The feed store is append-only and its ids are
+positional, so a file that already exists for the date is left as it is.
 """
 import argparse, datetime as dt, json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+FEED_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "feed", "items"))
 
 
 def q(s):
@@ -81,6 +88,8 @@ def main():
     with open(os.path.join(ov_dir, f"{a.date}.json"), "w", encoding="utf-8") as f:
         json.dump({"date": a.date, "since": a.since, "overflow": overflow}, f, ensure_ascii=False, indent=1)
 
+    feed_path, feed_written = write_feed(a.date, a.since, now, items, overflow)
+
     with open(os.path.join(HERE, "seen.jsonl"), "a", encoding="utf-8") as f:
         for it in items:
             f.write(json.dumps({"date": a.date, "verdict": "kept", "source": it["source"], "title": it["title"], "url": it["url"]}, ensure_ascii=False) + "\n")
@@ -97,8 +106,39 @@ def main():
     with open(state_path, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=1)
 
-    print(f"watch {a.date}: {len(items)} items, {len(overflow)} overflow, {considered} considered -> {packet}")
+    feed_note = f"{feed_path}" if feed_written else f"{feed_path} (already there, kept)"
+    print(f"watch {a.date}: {len(items)} items, {len(overflow)} overflow, {considered} considered -> {packet}, {feed_note}")
     return 0
+
+
+def write_feed(date, since, now, items, overflow):
+    """Write the feed file for the run unless one exists. Returns (path, written)."""
+    os.makedirs(FEED_DIR, exist_ok=True)
+    feed_path = os.path.join(FEED_DIR, f"{date}-watch.json")
+    if os.path.exists(feed_path):
+        return feed_path, False
+    entries = []
+    n = 0
+    for it in items:
+        n += 1
+        entries.append({
+            "id": f"watch/{date}/{n}", "title": it["title"], "source": it["source"], "url": it["url"],
+            "test": it.get("test"), "summary": it["headline"], "kept": True,
+        })
+    for it in overflow:
+        n += 1
+        entries.append({
+            "id": f"watch/{date}/{n}", "title": it["title"], "source": it["source"], "url": it["url"],
+            "test": it.get("test"), "summary": it["summary"], "kept": False,
+        })
+    doc = {"producer": "watch", "date": date, "since": since, "generated_at": now, "items": entries}
+    tmp = feed_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, feed_path)
+    return feed_path, True
 
 
 if __name__ == "__main__":

@@ -87,7 +87,7 @@ if [ "$dry_run" = 1 ]; then
     printf '  list: %s -p --model %s --allowedTools mcp__claude_ai_Gmail__search_threads --output-format json --json-schema schemas/threads.json < prompts/list.md\n' "$claude" "$list_model"
     printf '  extract: one %s session per thread with mcp__claude_ai_Gmail__get_thread, schemas/stories.json, %s at a time, %ss each, one retry\n' "$extract_model" "$parallel" "$stage_seconds"
     printf '  triage: %s, no tools, prompts/triage.md with relevance.md, the two vault priority notes, seen.jsonl (14d), the stories; schemas/triage.json\n' "$triage_model"
-    printf '  render: %s render.py --date %s --since %s -> packets/%s.yaml, overflow/%s.json, seen.jsonl, state.json\n' "$python3" "$date" "$since" "$date" "$date"
+    printf '  render: %s render.py --date %s --since %s -> packets/%s.yaml, overflow/%s.json, feed/items/%s-watch.json (kept if present), seen.jsonl, state.json\n' "$python3" "$date" "$since" "$date" "$date" "$date"
     exit 0
 fi
 
