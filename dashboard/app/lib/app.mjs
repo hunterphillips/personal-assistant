@@ -1,6 +1,7 @@
 // Request router and policy: Host/Origin checks, common headers, method
 // handling, body limits, request logging, and the dashboard's own routes
-// (shell, assets, health, status and state, routines refresh). Route bodies
+// (shell, assets, health, status and state, routines refresh). The reader
+// sees launchd jobs on the Health view; the code still calls them routines. Route bodies
 // for Focus and the Daily Brief live in the injected `focus` and `brief`
 // objects (see focus-proxy.mjs and brief-adapter.mjs for their contracts);
 // dashboard state comes from the injected `hub` (hub.mjs). The persona
@@ -52,10 +53,13 @@ const READ = ['GET', 'HEAD'];
 // Exact-path routes. `methods` lists what is allowed; anything else is 405.
 const EXACT_ROUTES = new Map([
   ['/', { name: 'shell', methods: READ }],
-  ...['/focus', '/reading', '/brief', '/feed', '/routines', '/agents', '/goals'].flatMap((view) => [
+  ...['/focus', '/reading', '/brief', '/feed', '/agents', '/goals', '/health'].flatMap((view) => [
     [view, { name: 'shell', methods: READ }],
     [`${view}/`, { name: 'slash-redirect', methods: READ }],
   ]),
+  // Kept for one release while the jobs move from Agents to Health.
+  ['/routines', { name: 'health-redirect', methods: READ }],
+  ['/routines/', { name: 'health-redirect', methods: READ }],
   ['/healthz', { name: 'healthz', methods: READ }],
   // Kept for one release while the shell moves to /api/events.
   ['/api/dashboard/status', { name: 'status', methods: ['GET'] }],
@@ -190,6 +194,8 @@ export function createApp({ config, focus, brief, hub, store = null, cmux = null
         return serveShell(req, res);
       case 'slash-redirect':
         return redirect(res, route.label.slice(0, -1) + search);
+      case 'health-redirect':
+        return redirect(res, '/health' + search, 302);
       case 'healthz':
         return sendJson(res, 200, { ok: true }, { head });
       case 'status':
