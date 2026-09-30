@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { LIMITS } from '../lib/config.mjs';
 import { createFeed } from '../lib/feed.mjs';
+import { createFeedInstructions } from '../lib/feed-instructions.mjs';
 import { tempDir } from './support/harness.mjs';
 
 const FIXTURE_FEED = fileURLToPath(new URL('./fixtures/feed/', import.meta.url));
@@ -210,4 +211,71 @@ test('a removed run drops out of the next read', async (t) => {
   const result = await feed.read();
   assert.deepEqual(result.runs.map((entry) => entry.id), ['2026-09-21-watch']);
   assert.equal(await feed.find('watch/2026-09-28/1'), null);
+});
+
+const FIXTURE_INSTRUCTIONS = fileURLToPath(new URL('./fixtures/feed-instructions/relevance.md', import.meta.url));
+
+async function instructionsCopy(t) {
+  const file = path.join(await tempDir(t), 'relevance.md');
+  await cp(FIXTURE_INSTRUCTIONS, file);
+  return file;
+}
+
+test('the instructions read as the path, the file time, and prose blocks', async (t) => {
+  const file = await instructionsCopy(t);
+  const mtime = new Date('2026-09-25T12:00:00Z');
+  await utimes(file, mtime, mtime);
+  const result = await createFeedInstructions({ file, limits: LIMITS }).read();
+  assert.deepEqual(result, {
+    path: 'daily-brief/watch/relevance.md',
+    updated: '2026-09-25T12:00:00.000Z',
+    problem: null,
+    blocks: [
+      { type: 'h', text: 'Invented watch criteria' },
+      { type: 'p', text: 'What the invented feed keeps. Written as tests, not as topics.' },
+      { type: 'h', text: 'Sources' },
+      { type: 'list', items: ['Invented Gazette', 'Invented Letters, weekly'] },
+      { type: 'h', text: 'An item survives if' },
+      { type: 'list', items: ['It changes how the garden is planted.', 'It names a trail opening nearby.'] },
+    ],
+  });
+  assert.ok(Object.isFrozen(result));
+  assert.ok(Object.isFrozen(result.blocks[3].items));
+});
+
+test('unchanged instructions return the same object; a changed file reads again', async (t) => {
+  const file = await instructionsCopy(t);
+  const instructions = createFeedInstructions({ file, limits: LIMITS });
+  const first = await instructions.read();
+  assert.equal(await instructions.read(), first);
+  await writeFile(file, 'Only one paragraph now.\n');
+  await utimes(file, new Date(), new Date(Date.now() + 5000));
+  const second = await instructions.read();
+  assert.notEqual(second, first);
+  assert.deepEqual(second.blocks, [{ type: 'p', text: 'Only one paragraph now.' }]);
+});
+
+test('missing, oversized, and non-regular instructions are empty blocks and one sentence', async (t) => {
+  const dir = await tempDir(t);
+  const file = path.join(dir, 'relevance.md');
+  const instructions = createFeedInstructions({ file, limits: LIMITS });
+  const missing = await instructions.read();
+  assert.deepEqual(missing, {
+    path: 'daily-brief/watch/relevance.md', updated: null, problem: 'The feed instructions file is missing.', blocks: [],
+  });
+
+  await writeFile(file, 'x'.repeat(64 * 1024 + 1));
+  const large = await instructions.read();
+  assert.deepEqual([large.problem, large.blocks], ['The feed instructions file is larger than 64 KiB.', []]);
+  assert.equal(typeof large.updated, 'string');
+
+  await rm(file);
+  await mkdir(file);
+  assert.equal((await instructions.read()).problem, 'The feed instructions file is not a regular file.');
+
+  await rm(file, { recursive: true });
+  await cp(FIXTURE_INSTRUCTIONS, path.join(dir, 'real.md'));
+  await symlink(path.join(dir, 'real.md'), file);
+  const linked = await instructions.read();
+  assert.deepEqual([linked.problem, linked.blocks], ['The feed instructions file is not a regular file.', []]);
 });

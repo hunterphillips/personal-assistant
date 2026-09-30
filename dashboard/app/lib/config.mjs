@@ -55,6 +55,7 @@ export const LIMITS = Object.freeze({
   goalsNotes: 50, // files read from the vault's notes/goals/
   feedFileBytes: 256 * 1024, // one feed run file read by the Feed view
   feedFiles: 30, // newest feed run files read
+  feedInstructionsBytes: 64 * 1024, // the feed's criteria file read by the Feed view
 });
 
 export const TIMEOUTS = Object.freeze({
