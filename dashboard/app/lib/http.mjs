@@ -16,7 +16,8 @@ export const SHELL_CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data:",
+  // Feed images come from story sites; the shell is only served on the tailnet.
+  "img-src 'self' data: https: http:",
   "font-src 'self'",
   "connect-src 'self'",
   "frame-src 'self'",

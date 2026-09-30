@@ -217,14 +217,18 @@ turn.
   "runs": [{ "id": "2026-09-28-watch", "producer": "watch", "date": "2026-09-28", "since": "2026-09-14",
              "generatedAt": "<ISO>",
              "items": [{ "id": "watch/2026-09-28/1", "title": "...", "source": "...", "url": "https://...",
-                         "summary": "...", "test": 5, "kept": true }] }] }
+                         "summary": "...", "test": 5, "kept": true, "image": "https://..." }] }] }
 ```
 
 Runs are the newest 30 files by name, regular files only. A file that is
 over 256 KiB, not JSON, or not a run is left out with one problem sentence;
 an item without its five text fields, with a URL that is not `http` or
 `https`, or with an id already used is left out and counted in one sentence
-per run. A missing directory is one problem and no runs. Reads are cached by
+per run. `image` is the story's picture when it is an `http` or `https`
+URL and null otherwise; it never gets an item left out. The Feed shows it
+under the summary, loaded from the story's own host with no referrer, which
+is why the shell CSP allows `http:` and `https:` images. A missing directory
+is one problem and no runs. Reads are cached by
 the files' lstat and happen only on request.
 
 `POST /api/feed/discuss` takes `{"id": "watch/2026-09-28/1"}`, sends the

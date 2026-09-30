@@ -5,7 +5,9 @@
 #
 #   contribute [--date YYYY-MM-DD] [--since YYYY-MM-DD] [--dry-run]
 #
-# Read-only toward Gmail. Writes only under daily-brief/watch/ and the logs.
+# Read-only toward Gmail. Writes only under daily-brief/watch/, the run's
+# feed file (feed/items/<date>-watch.json, filled in by feed/bin/enrich), and
+# the logs.
 set -u
 unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 
@@ -26,6 +28,7 @@ triage_model=${WATCH_TRIAGE_MODEL:-opus}
 stage_seconds=${WATCH_STAGE_SECONDS:-480}
 parallel=${WATCH_PARALLEL:-4}
 triage_seconds=${WATCH_TRIAGE_SECONDS:-600}
+enrich_seconds=${WATCH_ENRICH_SECONDS:-180}
 
 # The five senders. relevance.md is the human-readable list; this is the query.
 senders="swyx@substack.com swyx+ainews@substack.com nashville@axios.com kale@hackernewsletter.com simonw@substack.com"
@@ -88,6 +91,7 @@ if [ "$dry_run" = 1 ]; then
     printf '  extract: one %s session per thread with mcp__claude_ai_Gmail__get_thread, schemas/stories.json, %s at a time, %ss each, one retry\n' "$extract_model" "$parallel" "$stage_seconds"
     printf '  triage: %s, no tools, prompts/triage.md with relevance.md, the two vault priority notes, seen.jsonl (14d), the stories; schemas/triage.json\n' "$triage_model"
     printf '  render: %s render.py --date %s --since %s -> packets/%s.yaml, overflow/%s.json, feed/items/%s-watch.json (kept if present), seen.jsonl, state.json\n' "$python3" "$date" "$since" "$date" "$date" "$date"
+    printf '  enrich: %s feed/bin/enrich feed/items/%s-watch.json (image from each story page, 4 at a time, 6s each, %ss in all)\n' "$python3" "$date" "$enrich_seconds"
     exit 0
 fi
 
@@ -172,7 +176,14 @@ status=ok; note=
 [ "$failed" -gt 0 ] && { status=degraded; note="$ok of $n_threads issues since $since were read; $failed could not be extracted. "; }
 "$python3" "$watch/render.py" --date "$date" --since "$since" --envelope "$work/triage.json" --threads "$n_threads" --status "$status" ${note:+--note "$note$($jq -r '.structured_output | "\(.considered) distinct stories judged; \(.items|length) survived, \(.overflow|length) kept for the feed."' "$work/triage.json")"}
 rc=$?
+# Pictures for the feed: fills each item's image from its story page. Its
+# failures stay in the transcript and never change the run's exit.
+feed_file=$root/feed/items/$date-watch.json
+enrich=skipped
+if [ "$rc" = 0 ] && [ -f "$feed_file" ]; then
+    run_limited "$enrich_seconds" "$python3" "$root/feed/bin/enrich" "$feed_file" 2>"$work/enrich.err"; enrich=$?
+fi
 /bin/chmod -R go-rwx "$work"
 n_items=$($jq '.structured_output.items | length' "$work/triage.json")
-log "exit=$rc date=$date since=$since threads=$n_threads extracted=$ok failed=$failed stories=$n_stories items=$n_items"
+log "exit=$rc date=$date since=$since threads=$n_threads extracted=$ok failed=$failed stories=$n_stories items=$n_items enrich=$enrich"
 exit "$rc"

@@ -2,8 +2,11 @@
 // test/fixtures/feed, read by the real Feed routes, with the watch persona on
 // the fake Claude adapter of test/support/browser-server.mjs.
 
+import { writeFile } from 'node:fs/promises';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { crc32, deflateSync } from 'node:zlib';
 
 import { WATCH } from '../support/browser-server.mjs';
 import { expect, expectView, nav, needsFocus, test } from '../support/browser-test.mjs';
@@ -11,6 +14,27 @@ import { expect, expectView, nav, needsFocus, test } from '../support/browser-te
 const FEED = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'feed');
 const DATE = '2026-09-15';
 const BUSY = 'Watch is in the middle of a turn. Try again when it is idle.';
+const PNG = png(400, 600);
+
+// A solid grey PNG, taller than the post is allowed to show.
+function png(width, height) {
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 0, 0, 0, 0], 8); // 8-bit greyscale
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width, 0x99)]);
+  const pixels = deflateSync(Buffer.concat(Array.from({ length: height }, () => row)));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header), chunk('IDAT', pixels), chunk('IEND', Buffer.alloc(0))]);
+}
 
 const runs = (page) => page.locator('#feed-runs .feed-run');
 const item = (page, id) => page.locator(`[data-feed-item="${id}"]`);
@@ -86,6 +110,61 @@ test.describe('with the fixture store', () => {
       feed: document.getElementById('reading-feed').scrollWidth - document.getElementById('reading-feed').clientWidth,
     }));
     expect(overflow).toEqual({ page: 0, feed: 0 });
+  });
+
+  test('a post with an image shows it under the summary; one without or with a broken image has none', async ({ page, hub }) => {
+    // The image comes from another origin over http, as a story's would.
+    const pictures = http.createServer((req, res) => {
+      if (req.url !== '/story.png') {
+        res.writeHead(404).end();
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' }).end(PNG);
+    });
+    await new Promise((resolve) => pictures.listen(0, '127.0.0.1', resolve));
+    try {
+      const origin = `http://localhost:${pictures.address().port}`;
+      const post = (n, extra) => ({
+        id: `watch/2026-10-05/${n}`, title: `Story ${n}`, source: 'Invented Gazette',
+        url: `https://example.com/${n}`, summary: `Summary of story ${n}.`, ...extra,
+      });
+      await writeFile(path.join(hub.feedDir, '2026-10-05-watch.json'), JSON.stringify({
+        producer: 'watch', date: '2026-10-05', since: '2026-09-28', items: [
+          post(1, { image: `${origin}/story.png` }), post(2), post(3, { image: `${origin}/missing.png` }),
+        ],
+      }));
+      await page.goto(`${hub.origin}/feed`);
+      await expectView(page, 'reading', 'Feed');
+      await expect(runs(page)).toHaveCount(3);
+
+      const withImage = item(page, 'watch/2026-10-05/1');
+      const image = withImage.locator('img');
+      await expect(image).toHaveCount(1);
+      await expect(image).toHaveAttribute('src', `${origin}/story.png`);
+      await expect(image).toHaveAttribute('loading', 'lazy');
+      await expect(image).toHaveAttribute('referrerpolicy', 'no-referrer');
+      await expect(image).toHaveAttribute('alt', '');
+      await expect.poll(() => image.evaluate((node) => node.complete && node.naturalWidth)).toBe(400);
+      await expect(image).toHaveCSS('object-fit', 'cover');
+      await expect(image).toHaveCSS('border-top-left-radius', '10px');
+      const summary = await withImage.locator('.feed-summary').boundingBox();
+      const box = await image.boundingBox();
+      const actions = await withImage.locator('.feed-actions').boundingBox();
+      const body = await withImage.locator('.feed-body').boundingBox();
+      expect(Math.round(box.y - (summary.y + summary.height))).toBe(10);
+      expect(Math.round(actions.y - (box.y + box.height))).toBe(10);
+      expect(Math.round(box.height)).toBe(220);
+      expect(box.width).toBeLessThanOrEqual(body.width);
+      expect(Math.round(box.x)).toBe(Math.round(body.x));
+
+      await expect(item(page, 'watch/2026-10-05/2').locator('img')).toHaveCount(0);
+      await expect(item(page, 'watch/2026-10-05/2').locator('.feed-summary + .feed-actions')).toHaveCount(1);
+      await expect(item(page, 'watch/2026-10-05/3').locator('img')).toHaveCount(0);
+      await expect(item(page, 'watch/2026-10-05/3').locator('.feed-summary + .feed-actions')).toHaveCount(1);
+      await expect(runs(page).nth(1).locator('img')).toHaveCount(0);
+    } finally {
+      await new Promise((resolve) => pictures.close(resolve));
+    }
   });
 
   test('Discuss sends the item to the watch persona and opens its thread', async ({ page, hub }) => {

@@ -1,5 +1,6 @@
 // Feed: the runs in the feed store (/api/feed), one group per run with its
-// items as posts, each with a Discuss button that sends the item to the watch persona
+// items as posts (with the story's image under the summary when it has one),
+// each with a Discuss button that sends the item to the watch persona
 // (/api/feed/discuss) and opens its thread. The shell calls
 // create(shellApi) once, then show() and hide() as the Feed tab of the
 // Reading view comes on and off screen.
@@ -96,6 +97,18 @@
     return svg;
   }
 
+  // The story's picture. The title already names the story, so the alt text
+  // is empty; an image that fails to load is removed rather than shown broken.
+  function storyImage(src) {
+    var image = element('img', 'feed-image');
+    image.alt = '';
+    image.loading = 'lazy';
+    image.referrerPolicy = 'no-referrer';
+    image.addEventListener('error', function () { image.remove(); });
+    image.src = src;
+    return image;
+  }
+
   // Resolves with { status, body } or null when there was no answer in time.
   function request(path, init) {
     var controller = new AbortController();
@@ -169,6 +182,7 @@
       title.appendChild(link);
       body.appendChild(title);
       body.appendChild(element('p', 'feed-summary', item.summary));
+      if (typeof item.image === 'string' && /^https?:\/\//i.test(item.image)) body.appendChild(storyImage(item.image));
       var actions = element('div', 'feed-actions');
       actions.appendChild(discussButton(item));
       body.appendChild(actions);

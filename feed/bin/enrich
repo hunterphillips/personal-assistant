@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""Fill each feed item's `image` from its story page's Open Graph metadata.
+
+    enrich [--dry-run] <feed-file> [<feed-file>...]
+
+For every item with no `image`, fetch its `url` and take the first absolute
+http(s) URL from the head's og:image, then twitter:image, then image_src.
+An item with none, or whose fetch fails, is left exactly as it was. See
+feed/README.md for the store. Standard library only.
+"""
+
+import concurrent.futures
+import html.parser
+import json
+import os
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+TIMEOUT = 6
+MAX_BYTES = 512 * 1024
+MAX_REDIRECTS = 5
+PARALLEL = 4
+HTML_TYPES = ("text/html", "application/xhtml+xml")
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+
+
+class HeadImages(html.parser.HTMLParser):
+    """Collects the image candidates in a document's head, by kind."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.found = {"og": [], "twitter": [], "src": []}
+        self.done = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "body":
+            self.done = True
+        if self.done:
+            return
+        a = {k: (v or "").strip() for k, v in attrs}
+        if tag == "meta" and a.get("property", "").lower() == "og:image":
+            self.found["og"].append(a.get("content", ""))
+        elif tag == "meta" and a.get("name", "").lower() == "twitter:image":
+            self.found["twitter"].append(a.get("content", ""))
+        elif tag == "link" and "image_src" in a.get("rel", "").lower().split():
+            self.found["src"].append(a.get("href", ""))
+
+    def handle_endtag(self, tag):
+        if tag == "head":
+            self.done = True
+
+    def image(self):
+        """The first absolute http(s) URL, og:image first, or None."""
+        for kind in ("og", "twitter", "src"):
+            for url in self.found[kind]:
+                if url.lower().startswith(("http://", "https://")):
+                    return url
+        return None
+
+
+class Redirects(urllib.request.HTTPRedirectHandler):
+    max_redirections = MAX_REDIRECTS
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.lower().startswith(("http://", "https://")):
+            raise urllib.error.HTTPError(newurl, code, "redirect to a non-http URL", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+OPENER = urllib.request.build_opener(Redirects)
+
+
+class Skip(Exception):
+    """A page that is not worth reading, with the reason."""
+
+
+def fetch(url):
+    """The page's text, read to at most MAX_BYTES within TIMEOUT seconds."""
+    deadline = time.monotonic() + TIMEOUT
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"})
+    with OPENER.open(request, timeout=TIMEOUT) as response:
+        kind = response.headers.get_content_type()
+        if kind not in HTML_TYPES:
+            raise Skip(f"content type {kind}")
+        body = b""
+        while len(body) < MAX_BYTES:
+            if time.monotonic() > deadline:
+                raise Skip("timed out")
+            chunk = response.read(min(65536, MAX_BYTES - len(body)))
+            if not chunk:
+                break
+            body += chunk
+        charset = response.headers.get_content_charset() or "utf-8"
+    try:
+        return body.decode(charset, errors="replace")
+    except LookupError:
+        return body.decode("utf-8", errors="replace")
+
+
+def page_image(url):
+    """The page's image URL, or None."""
+    parser = HeadImages()
+    parser.feed(fetch(url))
+    return parser.image()
+
+
+def lookup(item):
+    """(image or None, error line or None) for one item."""
+    try:
+        return page_image(item["url"]), None
+    except urllib.error.HTTPError as error:
+        reason = f"HTTP {error.code}"
+    except Skip as error:
+        reason = str(error)
+    except Exception as error:  # one item's failure never stops the others
+        reason = str(getattr(error, "reason", None) or error) or type(error).__name__
+    return None, f"{item['id']}: {item['url']}: {reason}"
+
+
+def wanted(item):
+    """An item with no image and a url to fetch it from."""
+    return (isinstance(item, dict) and item.get("image") is None and isinstance(item.get("id"), str)
+            and isinstance(item.get("url"), str) and item["url"].lower().startswith(("http://", "https://")))
+
+
+def enrich_file(path, dry_run):
+    """True unless the file could not be read or written."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+        if not isinstance(doc, dict) or not isinstance(doc.get("items"), list):
+            raise ValueError("not a feed run")
+    except (OSError, ValueError) as error:
+        print(f"enrich: {path}: could not be read: {error}", file=sys.stderr)
+        return False
+    items = [item for item in doc["items"] if wanted(item)]
+    if dry_run:
+        for item in items:
+            print(f"would fetch {item['id']} {item['url']}")
+        return True
+    with concurrent.futures.ThreadPoolExecutor(max_workers=PARALLEL) as pool:
+        results = list(pool.map(lookup, items))
+    changed = False
+    for item, (image, error) in zip(items, results):
+        if error:
+            print(f"enrich: {path}: {error}", file=sys.stderr)
+        elif image:
+            item["image"] = image
+            changed = True
+    if not changed:
+        return True
+    try:
+        write(path, doc)
+    except OSError as error:
+        print(f"enrich: {path}: could not be written: {error}", file=sys.stderr)
+        return False
+    return True
+
+
+def write(path, doc):
+    """Replace the file atomically: a mode 600 temporary file beside it, then a rename."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".enrich-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(doc, f, ensure_ascii=False, indent=1)
+            f.write("\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def main(argv):
+    dry_run = "--dry-run" in argv
+    paths = [arg for arg in argv if arg != "--dry-run"]
+    if not paths:
+        print("usage: enrich [--dry-run] <feed-file> [<feed-file>...]", file=sys.stderr)
+        return 2
+    ok = True
+    for path in paths:
+        ok = enrich_file(path, dry_run) and ok
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
