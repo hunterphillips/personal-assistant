@@ -90,7 +90,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-test('the initial snapshot is frozen and omits agent cwd and routines', () => {
+test('the initial snapshot is frozen, carries agent cwd, and omits routines', () => {
   const { hub } = makeHub();
   const snapshot = hub.snapshot();
   assert.equal(snapshot.revision, 1);
@@ -100,8 +100,8 @@ test('the initial snapshot is frozen and omits agent cwd and routines', () => {
   assert.deepEqual(snapshot.registry, { ok: true, error: null, loadedAt: '2026-09-25T12:00:00.000Z' });
   assert.deepEqual(snapshot.agents, [
     {
-      id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude',
-      state: 'unavailable', pending: null, lastMessage: null, lastError: null, costUsd: null,
+      id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented',
+      provider: 'claude', state: 'unavailable', pending: null, lastMessage: null, lastError: null, costUsd: null,
     },
   ]);
   assert.deepEqual(snapshot.routines, { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] });
@@ -116,6 +116,8 @@ test('a registry change bumps the revision with a registry and agents patch', ()
   assert.deepEqual(deltas.map((d) => [d.revision, Object.keys(d.patch).sort()]), [[2, ['agents', 'registry']]]);
   assert.deepEqual(deltas[0].patch.agents.map((a) => a.id), ['cfo', 'ops']);
   assert.equal('provider' in deltas[0].patch.agents[1], false);
+  assert.equal(deltas[0].patch.agents[1].cwd, '/invented');
+  assert.equal('routines' in deltas[0].patch.agents[1], false);
 
   registry.emit(registryState([agent('cfo')], { ok: false, error: 'registry_invalid_json' }));
   assert.deepEqual(hub.snapshot().registry, { ok: false, error: 'registry_invalid_json', loadedAt: null });
@@ -303,8 +305,8 @@ test('start seeds a persona from its adapter and the last cached message', async
   await hub.start();
   assert.deepEqual(adapter.calls, [['start', 'cfo']]);
   assert.deepEqual(persona(hub), {
-    id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude',
-    state: 'error', pending: null, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
+    id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented',
+    provider: 'claude', state: 'error', pending: null, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
     lastError: 'Invented failure', costUsd: 0.5,
   });
   assert.equal(persona(hub, 'ops').state, null);

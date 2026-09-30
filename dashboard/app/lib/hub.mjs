@@ -17,8 +17,8 @@
 //                                 // { state, date?, revision? }, or
 //                                 // { state: 'unknown' } before the first check
 //       registry: { ok, error, loadedAt },
-//       agents: [{ id, name, role, description, group, kind, provider?, model?,
-//                  state, pending?, lastMessage?, lastError?, costUsd? }],
+//       agents: [{ id, name, role, description, group, kind, cwd, provider?,
+//                  model?, state, pending?, lastMessage?, lastError?, costUsd? }],
 //       sessions: [{ id, provider, threadId, cwd, projectId, title, state,
 //                    pending, lastMessage, lastError, updatedAt, binding }
 //                  | { id, provider: 'claude', kind: 'terminal', cwd, projectId,
@@ -26,7 +26,8 @@
 //       codex: { available } | { available: false, reason },
 //       cmux: { available, stale? } | { available: false, reason },
 //       routines: { refreshedAt, focusAvailable, refreshing, error, items } }
-//     Agents never carry cwd or routines. Each object in it is frozen.
+//     An agent's cwd is the registry's, or null; agents never carry
+//     routines. Each object in it is frozen.
 //     `home` is the `home` option, os.homedir() by default.
 //     A non-persona agent has state null and no other runtime fields. A
 //     persona (kind 'persona') has:
@@ -527,6 +528,7 @@ function agentViews(current, personas) {
       description: agent.description,
       group: agent.group,
       kind: agent.kind,
+      cwd: typeof agent.cwd === 'string' ? agent.cwd : null,
     };
     if (agent.provider !== undefined) view.provider = agent.provider;
     if (agent.model !== undefined) view.model = agent.model;

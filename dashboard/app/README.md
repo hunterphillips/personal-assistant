@@ -100,8 +100,8 @@ snapshot; concurrent requests share one check. It stays for one release.
   "focus": { "available": true },
   "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>" },
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
-  "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona", "provider": "claude",
-               "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
+  "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
+               "cwd": "/Users/hunter/workspace/work/investing/cfo", "provider": "claude", "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
                "lastError": null, "costUsd": 0.42 }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
                  "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
@@ -119,8 +119,10 @@ snapshot; concurrent requests share one check. It stays for one release.
 `revision` goes up by one on every change. `home` is the home directory,
 which the Agents view shortens to `~` in the paths it shows. `focus` and
 `brief` hold what the status route reports (`available` is null and
-`state` is `unknown` before the first check). Agents leave out `cwd` and
-`routines`. A persona also carries
+`state` is `unknown` before the first check). Every agent carries its
+registry `cwd` (a string, or null when the registry has none), which the
+Agents view shows as the agent's folder; agents leave out `routines`. A
+persona also carries
 its runtime state (see Personas below); any other kind has `state: null`.
 `sessions` lists the coding sessions the dashboard follows but does not
 own: the Codex threads on the shared app-server and the Claude terminals
