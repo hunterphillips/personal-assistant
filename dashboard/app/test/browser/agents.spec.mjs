@@ -243,6 +243,35 @@ test.describe('with seeded agents', () => {
     expect(hub.personas.calls).toEqual([['send', 'cfo', 'What about next month?']]);
   });
 
+  test('Enter sends the composer, Shift+Enter adds a newline, and an empty composer sends nothing', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(messages(page)).toHaveCount(2);
+    const input = page.locator('#agent-input');
+
+    await input.fill('   ');
+    await input.press('Enter');
+    await expect(messages(page)).toHaveCount(2);
+    expect(hub.personas.calls).toEqual([]);
+
+    await input.fill('');
+    await input.press('Enter');
+    await expect(messages(page)).toHaveCount(2);
+    expect(hub.personas.calls).toEqual([]);
+
+    await input.fill('Next line');
+    await input.press('Shift+Enter');
+    await expect(input).toHaveValue('Next line\n');
+    await expect(messages(page)).toHaveCount(2);
+    expect(hub.personas.calls).toEqual([]);
+
+    await input.fill('What about next month?');
+    await input.press('Enter');
+    await expect(messages(page)).toHaveCount(3);
+    await expect(messages(page).nth(2)).toHaveText(/^What about next month\?/);
+    await expect(input).toHaveValue('');
+    expect(hub.personas.calls).toEqual([['send', 'cfo', 'What about next month?']]);
+  });
+
   test('Interrupt ends the turn', async ({ page, hub }) => {
     hub.personas.hold('cfo');
     await page.goto(`${hub.origin}/?agent=cfo`);

@@ -1196,10 +1196,10 @@
     });
 
     input.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        sendMessage();
-      }
+      if (event.key !== 'Enter' || event.isComposing) return;
+      if (event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      sendMessage();
     });
 
     // Turning a phone into a desk with nothing chosen opens the pinned
