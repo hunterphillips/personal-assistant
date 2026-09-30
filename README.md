@@ -1,27 +1,27 @@
 # personal-assistant
 
 Umbrella project for Hunter's personal assistant surfaces. First use case is the
-**Daily Brief**: domain systems each contribute what became relevant, a curator
-ranks across domains and writes one short brief.
+**Daily Brief**: each agent contributes what became relevant, a curator
+ranks across them and writes one short brief.
 
 The dashboard is the assistant daemon and the tailnet-only hub it serves.
-A rail of five icons: Home is the Agents view (domain personas Hunter
+A rail of five icons: Home is the Agents view (agents Hunter
 messages and answers inline, his coding sessions as Codex threads on a
 shared server and Claude Code terminals in cmux, and a settings panel per
 agent), Reading holds the Daily Brief and the Feed, Focus is its own view,
 Goals reads the vault's priorities and goal notes with add and edit going
-through the second-brain persona, and Health lists the launchd jobs. The
+through the Second brain agent, and Health lists the launchd jobs. The
 direction took Meta Muse and GrokBot as reference; a clickable design
 study lives in `dashboard/prototype/` as visual reference. Current state
 lives in `thoughts/shared/lanes/assistant/handoff.md`; the design for the
-Assistant persona, delegation, routines, and Ideas is
+Assistant agent, delegation, routines, models, and Ideas is
 `thoughts/shared/plans/2026-09-30-assistant-system-design.md`.
 
 Deliberately thin. This holds the contract, the assembler, and the outputs. It
-does not hold shared libraries, and the domain systems keep their own repos.
+does not hold shared libraries, and the agents keep their own repos.
 
 Since 2026-09-29 this repo is the one working root for the whole system. The
-domain systems keep their own repos and are linked under `systems/`, so a
+agents keep their own repos and are linked under `systems/`, so a
 session here works in any of them. Hunter's direction: build the system and
 its interface until it is his daily driver, and let use sharpen the rest.
 
@@ -72,7 +72,7 @@ decision prep would sit beside it with its own contract and its own inputs.
 - `daily-brief/bin/run-brief` — the scheduled morning run; `daily-brief/README.md` has the schedule and flags
 - `daily-brief/contributions/YYYY-MM-DD/<domain>.yaml` — a day's raw contributions
 - `daily-brief/briefs/` — `memo-<date>.md` written by the curator, `build.py` that turns it into `<date>.md` and the `viewer-<date>.html` the dashboard serves, and the feedback files saved beside them
-- `systems/` — symlinks to the domain repos (cfo, focus, second-brain, personal-context)
+- `systems/` — symlinks to the agents' repos (cfo, focus, second-brain, personal-context)
 
 ## Handling
 
@@ -87,21 +87,23 @@ The dashboard in `dashboard/app/` is installed as a
 user LaunchAgent and is what the tailnet URL serves since 2026-09-23. Phases
 1 to 3 of the
 [daemon plan](thoughts/shared/plans/2026-09-25-dashboard-assistant-daemon-implementation.md)
-shipped by 2026-09-28: the agent registry and routines, persona threads on
+shipped by 2026-09-28: the agent registry and routines, agent threads on
 the Claude Agent SDK, the Agents home screen, Codex threads on a shared
 app-server started with `bin/codex-serve` and bound to cmux terminals with
 `bin/codex-new`, and cmux inventory with "Open terminal". Phase 4 shipped
 the same day: the icon rail and the Goals view, a read-only view over the
-vault's priority notes whose add and edit send the second-brain persona a
+vault's priority notes whose add and edit send the Second brain agent a
 message. Focus keeps its
 own interface and state, embedded through an internal proxy; the dashboard
 serves the Daily Brief and saves its feedback directly; the port 8765 viewer
 is retired. Operations, cmux setup, and the remaining live checks are in
 `dashboard/app/docs/operations.md` and the
 [assistant handoff](thoughts/shared/lanes/assistant/handoff.md). On
-2026-09-29 Reading gained a Feed tab: the items the watch domain found,
+2026-09-29 Reading gained a Feed tab: the items the Watch agent found,
 survivors and overflow, read from `feed/items/`, each with Discuss opening
-the watch persona's thread. The next view is Ideas.
+the Watch agent's thread. Since 2026-09-30: story images, an instructions
+panel that proposes edits to Watch, the Health view, agent settings behind
+a gear, and Focus's theme. Next: the Assistant agent, per the design.
 
 The September 18 Control Tower research (Codex, Claude, and cmux runtime
 evidence) fed the daemon plan; its Electron/TypeScript
