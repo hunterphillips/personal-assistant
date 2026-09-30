@@ -9,6 +9,7 @@ import path from 'node:path';
 import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { createFeed } from '../../lib/feed.mjs';
+import { createFeedInstructions } from '../../lib/feed-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
@@ -146,6 +147,8 @@ export function fakeCmux(inventory = null) {
 // `feed` defaults to createFeed over the feed directory, which is a missing
 // path in a temporary directory unless `env` names DASHBOARD_FEED_DIR, so no
 // test reads the real store; pass null for an app without the Feed routes.
+// The feed instructions reader reads DASHBOARD_FEED_INSTRUCTIONS, which is
+// likewise a missing path in a temporary directory unless `env` names it.
 // `configure` may adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), routines, hub, adapters, store, bindings, cmux = null, goals, feed,
@@ -155,12 +158,14 @@ export async function startApp(t, {
   const port = await listen(server);
   const briefsDir = env.DASHBOARD_BRIEFS_DIR ?? path.join(await tempDir(t), 'briefs-missing');
   const feedDir = env.DASHBOARD_FEED_DIR ?? path.join(await tempDir(t), 'feed-missing');
+  const feedInstructions = env.DASHBOARD_FEED_INSTRUCTIONS ?? path.join(await tempDir(t), 'relevance-missing.md');
   const focusOrigin = env.DASHBOARD_FOCUS_ORIGIN ?? `http://127.0.0.1:${await freePort()}`;
   const config = configure(loadConfig({
     ...env,
     DASHBOARD_PORT: String(port),
     DASHBOARD_BRIEFS_DIR: briefsDir,
     DASHBOARD_FEED_DIR: feedDir,
+    DASHBOARD_FEED_INSTRUCTIONS: feedInstructions,
     DASHBOARD_FOCUS_ORIGIN: focusOrigin,
   }));
   const logs = [];
@@ -174,8 +179,10 @@ export async function startApp(t, {
   if (!hub) await stateHub.start();
   const goalsReader = goals === undefined ? createGoals({ registry, limits: config.limits, log }) : goals;
   const feedReader = feed === undefined ? createFeed({ dir: config.feedDir, limits: config.limits, log }) : feed;
+  const instructionsReader = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log });
   const handler = createApp({
-    config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader, log,
+    config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader,
+    feedInstructions: instructionsReader, log,
   });
   server.on('request', handler);
   t.after(() => {

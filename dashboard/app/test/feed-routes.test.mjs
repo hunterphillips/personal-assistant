@@ -4,11 +4,12 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { discussMessage } from '../lib/feed-routes.mjs';
+import { discussMessage, instructionsMessage } from '../lib/feed-routes.mjs';
 import { RuntimeError } from '../lib/runtime/adapter.mjs';
 import { fakeRegistry, request, startApp, tempDir } from './support/harness.mjs';
 
 const FIXTURE_FEED = fileURLToPath(new URL('./fixtures/feed/', import.meta.url));
+const FIXTURE_INSTRUCTIONS = fileURLToPath(new URL('./fixtures/feed-instructions/relevance.md', import.meta.url));
 
 const status = {
   focus: { checkHealth: async () => ({ available: true }) },
@@ -46,16 +47,25 @@ function fakeAdapter() {
 // The app over a fresh copy of the fixture store. `persona` sets the watch
 // agent's provider (claude runs on the fake adapter; codex has no adapter,
 // so the persona is listed but never started), or false to leave it out.
-async function startFeed(t, { persona = 'claude', kind = 'persona', feed, store = true } = {}) {
-  const dir = path.join(await tempDir(t), 'feed');
+// The criteria file is a fresh copy of the fixture unless `instructions` is
+// false.
+async function startFeed(t, { persona = 'claude', kind = 'persona', feed, store = true, instructions = true } = {}) {
+  const root = await tempDir(t);
+  const dir = path.join(root, 'feed');
   if (store) await cp(FIXTURE_FEED, dir, { recursive: true });
+  const instructionsFile = path.join(root, 'relevance.md');
+  if (instructions) await cp(FIXTURE_INSTRUCTIONS, instructionsFile);
   const agents = persona ? [agent('watch', { provider: persona, kind })] : [agent('cfo')];
   const adapter = fakeAdapter();
   const app = await startApp(t, {
-    ...status, env: { DASHBOARD_FEED_DIR: dir }, registry: fakeRegistry(agents), adapters: { claude: adapter }, feed,
+    ...status,
+    env: { DASHBOARD_FEED_DIR: dir, DASHBOARD_FEED_INSTRUCTIONS: instructionsFile },
+    registry: fakeRegistry(agents),
+    adapters: { claude: adapter },
+    feed,
   });
   t.after(() => adapter.release());
-  return { ...app, adapter, dir };
+  return { ...app, adapter, dir, instructionsFile };
 }
 
 function post(app, body, headers = {}, pathname = '/api/feed/discuss') {
@@ -169,12 +179,16 @@ test('discuss after closeStreams answers 503 without reaching the adapter', asyn
   assert.deepEqual(app.adapter.calls, []);
 });
 
-test('without feed both routes are 404', async (t) => {
+test('without feed every feed route is 404', async (t) => {
   const app = await startFeed(t, { feed: null });
   const read = await request(app, 'GET', '/api/feed');
   assert.deepEqual([read.status, read.json], [404, { error: 'not_found' }]);
   const discuss = await post(app, { id: 'watch/2026-09-28/1' });
   assert.deepEqual([discuss.status, discuss.json], [404, { error: 'not_found' }]);
+  const instructions = await request(app, 'GET', '/api/feed/instructions');
+  assert.deepEqual([instructions.status, instructions.json], [404, { error: 'not_found' }]);
+  const propose = await post(app, { text: 'Drop AINews.' }, {}, PROPOSE);
+  assert.deepEqual([propose.status, propose.json], [404, { error: 'not_found' }]);
   assert.deepEqual(app.adapter.calls, []);
 });
 
@@ -185,4 +199,100 @@ test('/feed serves the shell and /feed/ redirects to it', async (t) => {
   assert.match(shell.headers['content-type'], /text\/html/);
   const slash = await request(app, 'GET', '/feed/');
   assert.deepEqual([slash.status, slash.headers.location], [308, '/feed']);
+});
+
+const PROPOSE = '/api/feed/instructions/propose';
+
+test('GET /api/feed/instructions returns the path, the file time, and the prose', async (t) => {
+  const app = await startFeed(t);
+  const response = await request(app, 'GET', '/api/feed/instructions');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['cache-control'], 'no-store');
+  assert.equal(response.json.path, 'daily-brief/watch/relevance.md');
+  assert.equal(response.json.problem, null);
+  assert.ok(!Number.isNaN(Date.parse(response.json.updated)));
+  assert.deepEqual(response.json.blocks.map((block) => block.type), ['h', 'p', 'h', 'list', 'h', 'list']);
+  assert.deepEqual(response.json.blocks[3], { type: 'list', items: ['Invented Gazette', 'Invented Letters, weekly'] });
+});
+
+test('GET /api/feed/instructions with no file is 200 with no blocks and one sentence', async (t) => {
+  const app = await startFeed(t, { instructions: false });
+  const response = await request(app, 'GET', '/api/feed/instructions');
+  assert.deepEqual([response.status, response.json.blocks, response.json.problem],
+    [200, [], 'The feed instructions file is missing.']);
+});
+
+test('propose sends the change to the watch persona and answers 202 with its id', async (t) => {
+  const app = await startFeed(t);
+  const response = await post(app, { text: 'Drop AINews; it repeats Latent Space.' }, {}, PROPOSE);
+  assert.deepEqual([response.status, response.json], [202, { ok: true, agentId: 'watch' }]);
+  assert.deepEqual(app.adapter.calls, [[
+    'watch',
+    "Change the feed's criteria.\n\n" +
+      'The criteria are in daily-brief/watch/relevance.md, which you read every run.\n\n' +
+      'What I want changed:\nDrop AINews; it repeats Latent Space.\n\n' +
+      'Ask me what you need, then edit the file under its own rules, keep the\n' +
+      'sender list in daily-brief/watch/contribute in step with the sources table,\n' +
+      'and tell me what changed.',
+  ]]);
+  assert.equal(app.adapter.calls[0][1], instructionsMessage('Drop AINews; it repeats Latent Space.'));
+});
+
+test('propose validates the body, the text, and its size', async (t) => {
+  const app = await startFeed(t);
+  for (const body of [[], 'x', {}, { text: 7 }, { text: null }, { text: 'x', extra: 1 }, { change: 'x' }]) {
+    const response = await post(app, body, {}, PROPOSE);
+    assert.deepEqual([response.status, response.json], [400, { error: 'invalid_body' }], JSON.stringify(body));
+  }
+  for (const text of ['', '   \n ']) {
+    const response = await post(app, { text }, {}, PROPOSE);
+    assert.deepEqual([response.status, response.json], [400, { error: 'invalid_text' }], JSON.stringify(text));
+  }
+  const limit = app.config.limits.sendTextBytes;
+  const over = await post(app, { text: 'a'.repeat(limit + 1) }, {}, PROPOSE);
+  assert.deepEqual([over.status, over.json], [413, { error: 'payload_too_large' }]);
+  assert.deepEqual(app.adapter.calls, []);
+  assert.equal((await post(app, { text: 'a'.repeat(limit) }, {}, PROPOSE)).status, 202);
+});
+
+test('propose refuses without a started watch persona', async (t) => {
+  for (const [options, expected] of [
+    [{ persona: false }, [404, 'no_such_agent']],
+    [{ kind: 'project' }, [404, 'no_such_agent']],
+    [{ persona: 'codex' }, [409, 'persona_unavailable']],
+  ]) {
+    const app = await startFeed(t, options);
+    const response = await post(app, { text: 'Drop AINews.' }, {}, PROPOSE);
+    assert.deepEqual([response.status, response.json], [expected[0], { error: expected[1] }], JSON.stringify(options));
+    assert.deepEqual(app.adapter.calls, []);
+  }
+});
+
+test('propose maps adapter refusals as Discuss does', async (t) => {
+  const app = await startFeed(t);
+  for (const [code, expected] of [['busy', 409], ['unavailable', 503], ['shutting_down', 503], ['invalid_text', 400]]) {
+    app.adapter.behavior.send = code;
+    const response = await post(app, { text: 'Drop AINews.' }, {}, PROPOSE);
+    assert.deepEqual([response.status, response.json], [expected, { error: code }], code);
+  }
+});
+
+test('propose after closeStreams answers 503 without reaching the adapter', async (t) => {
+  const app = await startFeed(t);
+  app.handler.closeStreams();
+  const response = await post(app, { text: 'Drop AINews.' }, {}, PROPOSE);
+  assert.deepEqual([response.status, response.json], [503, { error: 'shutting_down' }]);
+  assert.deepEqual(app.adapter.calls, []);
+});
+
+test('the instructions routes need their methods, JSON, and an exact Origin', async (t) => {
+  const app = await startFeed(t);
+  const body = { text: 'Drop AINews.' };
+  assert.equal((await post(app, body, { 'content-type': 'text/plain' }, PROPOSE)).status, 415);
+  assert.equal((await post(app, body, { origin: 'http://evil.example' }, PROPOSE)).status, 403);
+  const get = await request(app, 'GET', PROPOSE);
+  assert.deepEqual([get.status, get.headers.allow], [405, 'POST']);
+  const postRead = await post(app, body, {}, '/api/feed/instructions');
+  assert.deepEqual([postRead.status, postRead.headers.allow], [405, 'GET']);
+  assert.deepEqual(app.adapter.calls, []);
 });
