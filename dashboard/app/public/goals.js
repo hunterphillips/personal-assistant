@@ -112,6 +112,28 @@
     return parts;
   }
 
+  // A row's title and status line: a Now item's now, a goal note's what,
+  // else the first paragraph of its prose. An item with no title takes that
+  // paragraph as its title instead. used is the prose block the row shows,
+  // which the details leave out.
+  function summaryOf(item) {
+    var first = objectsIn(item.prose).filter(function (block) { return block.type === 'p'; })[0] || null;
+    var title = item.title || null;
+    var status = item.now || item.what || null;
+    var used = null;
+    if (first && (!title || !status)) {
+      used = first;
+      if (!title) title = first.text;
+      else status = first.text;
+    }
+    return { title: title || '', status: status, used: used };
+  }
+
+  function setExpanded(button, panel, open) {
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    panel.hidden = !open;
+  }
+
   function sectionEmpty(section) {
     return objectsIn(section.items).length === 0 && !section.principle && objectsIn(section.horizons).length === 0;
   }
@@ -130,6 +152,7 @@
     var composer = null;
     var items = {}; // id -> item, from the last render
     var rendered = null; // the JSON text of the answer on screen
+    var openRows = {}; // item id -> true for each open row
 
     function editButton(item) {
       var button = element('button', 'button button-small', 'Edit');
@@ -145,48 +168,38 @@
       return button;
     }
 
-    // An item's title row: its title (when it has one) and its Edit button.
-    function head(item, extra) {
-      var node = element('div', 'goal-item-head');
-      if (item.title) node.appendChild(element('h3', 'goal-title', item.title));
-      if (extra) node.appendChild(extra);
+    // One goal: a row button with its title and status line, which opens the
+    // details under it (the Why line, the rest of its prose, a horizon chip,
+    // and Edit). tag is the item's element, 'li' inside the Long term list.
+    function renderItem(item, tag) {
+      var node = element(tag || 'div', 'goal-item');
+      var summary = summaryOf(item);
+      var button = element('button', 'goal-row');
+      button.type = 'button';
+      button.setAttribute('data-goal-action', 'toggle');
+      button.appendChild(element('span', 'goal-title', summary.title));
+      if (summary.status) button.appendChild(element('span', 'goal-status', summary.status));
+      node.appendChild(button);
+      var details = element('div', 'goal-details');
+      if (item.id) {
+        button.setAttribute('data-goal-id', item.id);
+        details.id = 'goal-details-' + item.id;
+        button.setAttribute('aria-controls', details.id);
+      }
+      setExpanded(button, details, Boolean(item.id && openRows[item.id]));
+      if (item.why) details.appendChild(line('Why', item.why));
+      var rest = objectsIn(item.prose).filter(function (block) { return block !== summary.used; });
+      if (rest.length > 0) details.appendChild(prose(rest));
+      var foot = element('div', 'goal-details-foot');
+      if (item.horizon) foot.appendChild(element('span', 'role-chip', item.horizon));
       if (item.id) {
         items[item.id] = item;
-        node.appendChild(editButton(item));
+        node.setAttribute('data-goal-item', item.id);
+        foot.appendChild(editButton(item));
       }
+      if (foot.firstChild) details.appendChild(foot);
+      node.appendChild(details);
       return node;
-    }
-
-    function itemNode(item, fill) {
-      var node = element('div', 'goal-item');
-      if (item.id) node.setAttribute('data-goal-item', item.id);
-      fill(node);
-      return node;
-    }
-
-    function renderNow(item) {
-      return itemNode(item, function (node) {
-        node.appendChild(head(item));
-        if (item.now) node.appendChild(line('Now', item.now));
-        if (item.why) node.appendChild(line('Why', item.why));
-        node.appendChild(prose(item.prose));
-      });
-    }
-
-    function renderListed(item) {
-      return itemNode(item, function (node) {
-        node.appendChild(head(item));
-        node.appendChild(prose(item.prose));
-      });
-    }
-
-    function renderNote(item) {
-      return itemNode(item, function (node) {
-        node.appendChild(head(item, item.horizon ? element('span', 'role-chip', item.horizon) : null));
-        if (item.what) node.appendChild(line('What', item.what));
-        if (item.why) node.appendChild(line('Why', item.why));
-        node.appendChild(prose(item.prose));
-      });
     }
 
     function renderLongTerm(section, card) {
@@ -194,12 +207,7 @@
       var top = objectsIn(section.items);
       if (top.length > 0) {
         var list = element('ol', 'goal-top');
-        top.forEach(function (item) {
-          var li = element('li', 'goal-item');
-          if (item.id) li.setAttribute('data-goal-item', item.id);
-          li.appendChild(head(item));
-          list.appendChild(li);
-        });
+        top.forEach(function (item) { list.appendChild(renderItem(item, 'li')); });
         card.appendChild(list);
       }
       var spans = objectsIn(section.horizons);
@@ -225,10 +233,7 @@
       if (section.updated) header.appendChild(element('span', 'card-note', 'Updated ' + section.updated));
       card.appendChild(header);
       if (section.id === 'long-term') renderLongTerm(section, card);
-      else {
-        var fill = section.id === 'now' ? renderNow : section.id === 'goals' ? renderNote : renderListed;
-        objectsIn(section.items).forEach(function (item) { card.appendChild(fill(item)); });
-      }
+      else objectsIn(section.items).forEach(function (item) { card.appendChild(renderItem(item)); });
       return card;
     }
 
@@ -448,6 +453,17 @@
       });
     }
 
+    // Opens or closes a row or section, and remembers it by id for re-renders.
+    function toggle(button, state) {
+      var id = button.getAttribute('data-goal-id');
+      var panel = document.getElementById(button.getAttribute('aria-controls'));
+      if (!id || !panel) return;
+      var open = button.getAttribute('aria-expanded') !== 'true';
+      setExpanded(button, panel, open);
+      if (open) state[id] = true;
+      else delete state[id];
+    }
+
     document.getElementById('goals-add').addEventListener('click', function () {
       openComposer('add', null);
     });
@@ -457,6 +473,7 @@
       var action = button.getAttribute('data-goal-action');
       if (action === 'edit') openComposer('edit', button.getAttribute('data-goal-id'));
       else if (action === 'cancel') closeComposer(true);
+      else if (action === 'toggle') toggle(button, openRows);
     });
 
     function brainStateIn(state) {

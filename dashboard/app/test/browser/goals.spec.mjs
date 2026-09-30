@@ -14,6 +14,7 @@ const NO_ANSWER = 'The dashboard did not respond.';
 
 const cards = (page) => page.locator('#goals-cards .goal-card');
 const item = (page, id) => page.locator(`[data-goal-item="${id}"]`);
+const row = (page, id) => item(page, id).locator('.goal-row');
 const composer = (page) => page.locator('#goals-cards form.goal-composer');
 const messages = (page) => page.locator('#agent-messages .thread-message');
 
@@ -25,6 +26,40 @@ async function openGoals(page, hub) {
 
 test.describe('with the fixture vault', () => {
   test.use({ hubOptions: { vault: VAULT } });
+
+  test('Now shows one row per goal with its status line and nothing else', async ({ page, hub }) => {
+    await openGoals(page, hub);
+    const now = page.locator('[data-goal-section="now"]');
+    await expect(now.locator('.goal-row')).toHaveCount(2);
+    const garden = row(page, 'now:ship-the-garden-planner');
+    await expect(garden.locator('.goal-title')).toHaveText('Ship the garden planner');
+    await expect(garden.locator('.goal-status')).toHaveText('sketch the three beds and order seeds before the frost date.');
+    await expect(garden).toHaveAttribute('aria-expanded', 'false');
+    await expect(item(page, 'now:ship-the-garden-planner').getByText(/^Why:/)).toBeHidden();
+    await expect(item(page, 'now:ship-the-garden-planner').locator('.goal-prose')).toBeHidden();
+    await expect(item(page, 'now:ship-the-garden-planner').getByRole('button', { name: /^Edit/ })).toBeHidden();
+  });
+
+  test('opening a row shows its details, closing hides them, and several stay open', async ({ page, hub }) => {
+    await openGoals(page, hub);
+    const garden = item(page, 'now:ship-the-garden-planner');
+    await row(page, 'now:ship-the-garden-planner').click();
+    await expect(row(page, 'now:ship-the-garden-planner')).toHaveAttribute('aria-expanded', 'true');
+    await expect(garden.locator('.goal-line')).toHaveText(['Why: fresh food from the yard by early summer.']);
+    await expect(garden.locator('.goal-prose p')).toContainText('https://example.com/beds');
+    await expect(garden.locator('.goal-prose li')).toHaveText(['A nested thought: folded into its parent', 'Keep the compost bin level.']);
+    await expect(garden.locator('.goal-prose a')).toHaveCount(0);
+    await expect(garden.getByRole('button', { name: 'Edit Ship the garden planner' })).toBeVisible();
+
+    await row(page, 'now:learn-the-cello').click();
+    await expect(row(page, 'now:ship-the-garden-planner')).toHaveAttribute('aria-expanded', 'true');
+    await expect(item(page, 'now:learn-the-cello').getByRole('button', { name: 'Edit Learn the cello' })).toBeVisible();
+
+    await row(page, 'now:ship-the-garden-planner').click();
+    await expect(row(page, 'now:ship-the-garden-planner')).toHaveAttribute('aria-expanded', 'false');
+    await expect(garden.locator('.goal-prose')).toBeHidden();
+    await expect(row(page, 'now:learn-the-cello')).toHaveAttribute('aria-expanded', 'true');
+  });
 
   test('renders each section as a card with its items', async ({ page, hub }) => {
     await openGoals(page, hub);
