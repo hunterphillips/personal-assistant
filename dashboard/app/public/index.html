@@ -108,15 +108,25 @@
       </section>
 
       <section class="view" id="view-reading" data-view="reading" aria-label="Reading" hidden>
-        <div class="notice" id="brief-newer" role="status" hidden>
-          <span>A newer brief is available.</span>
-          <button type="button" data-action="load-newer">Load newer brief</button>
+        <nav class="reading-tabs" aria-label="Reading">
+          <a href="/reading" data-tab="brief">Brief</a>
+          <a href="/feed" data-tab="feed">Feed</a>
+        </nav>
+        <div class="reading-brief" id="reading-brief">
+          <div class="notice" id="brief-newer" role="status" hidden>
+            <span>A newer brief is available.</span>
+            <button type="button" data-action="load-newer">Load newer brief</button>
+          </div>
+          <div class="notice" id="brief-notice" role="status" hidden>
+            <span id="brief-notice-text"></span>
+            <button type="button" data-action="retry">Retry</button>
+          </div>
+          <div class="frame-slot" id="brief-slot"></div>
         </div>
-        <div class="notice" id="brief-notice" role="status" hidden>
-          <span id="brief-notice-text"></span>
-          <button type="button" data-action="retry">Retry</button>
+        <div class="reading-feed" id="reading-feed" hidden>
+          <p class="routines-message" id="feed-message" role="status" hidden></p>
+          <div class="routines-cards" id="feed-runs"></div>
         </div>
-        <div class="frame-slot" id="brief-slot"></div>
       </section>
 
       <section class="view" id="view-goals" data-view="goals" aria-label="Goals" hidden>
@@ -132,6 +142,7 @@
   <script src="/assets/routines.js"></script>
   <script src="/assets/agents.js"></script>
   <script src="/assets/goals.js"></script>
+  <script src="/assets/feed.js"></script>
   <script src="/assets/shell.js"></script>
 </body>
 </html>

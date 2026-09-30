@@ -48,7 +48,10 @@ the number of the criterion it passed; `why` is one line for the audit,
 never printed.
 
 `overflow`: stories that pass a test but not the cap, or that pass
-narrowly. Kept for a later feed, never printed.
+narrowly. They are shown in the dashboard's feed, so `summary` is written
+the way a headline is: for a reader who has not seen the story, naming the
+source, in the story's own terms, with no advice and no "you". Never a note
+about how narrowly it passed; `test` carries that.
 
 `considered`: how many distinct stories you judged after collapsing
 duplicates. `duplicates_collapsed`: how many were merged into another.

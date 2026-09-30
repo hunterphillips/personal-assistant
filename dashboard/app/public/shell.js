@@ -1,9 +1,12 @@
 // Dashboard shell: switches between Agents (Home, agents.js), Reading (the
-// Daily Brief), Focus, and Goals (goals.js) with the History API, creates
-// each child frame the first time its view is shown and keeps it afterwards,
-// and keeps one copy of the server's state, which it hands to the Agents and
-// Goals views. Agents is the page at `/`; `/agents` and `/routines` show it
-// too, `/brief` shows Reading, and any unknown path lands on Agents.
+// Daily Brief on its Brief tab, feed.js on its Feed tab), Focus, and Goals
+// (goals.js) with the History API, creates each child frame the first time
+// its view is shown and keeps it afterwards, and keeps one copy of the
+// server's state, which it hands to the Agents and Goals views. Agents is
+// the page at `/`; `/agents` and `/routines` show it too, `/reading` and
+// `/brief` show Reading on the Brief tab, `/feed` shows it on the Feed tab,
+// and any unknown path lands on Agents. The brief frame is created only on
+// the Brief tab and kept while the Feed tab is shown.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
 // `snapshot` replaces it, `delta` applies a patch when its revision is the
@@ -26,9 +29,9 @@
 
   var ROUTES = {
     '/': 'agents', '/agents': 'agents', '/routines': 'agents', '/focus': 'focus',
-    '/reading': 'reading', '/brief': 'reading', '/goals': 'goals',
+    '/reading': 'reading', '/brief': 'reading', '/feed': 'reading', '/goals': 'goals',
   };
-  var TITLES = { agents: 'Agents', reading: 'Reading', focus: 'Focus', goals: 'Goals' };
+  var TITLES = { agents: 'Agents', reading: 'Reading', focus: 'Focus', goals: 'Goals', feed: 'Feed' };
   var FALLBACK_POLL_MS = 30000;
   var STATE_TIMEOUT_MS = 5000;
   var BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
@@ -38,6 +41,7 @@
   var FAILED = 'data-failed';
 
   var current = null;
+  var tab = 'brief'; // the Reading tab: 'brief' or 'feed'
   var state = null; // latest snapshot, or null before the first one
   var applied = 0; // counts snapshots and deltas applied, to order fetches
   var sequence = 0;
@@ -68,11 +72,20 @@
   var routines = window.DashboardRoutines ? window.DashboardRoutines.create(shellApi) : null;
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi, routines) : null;
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
+  var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
 
   function $(id) { return document.getElementById(id); }
 
   function viewFor(pathname) {
     return Object.prototype.hasOwnProperty.call(ROUTES, pathname) ? ROUTES[pathname] : 'agents';
+  }
+
+  function tabFor(pathname) {
+    return pathname === '/feed' ? 'feed' : 'brief';
+  }
+
+  function onFeed() {
+    return current === 'reading' && tab === 'feed';
   }
 
   function briefUrl(brief) {
@@ -157,8 +170,8 @@
     if (fresh && current === 'focus' && !frames.focus && focusAvailable()) mountFocus();
     $('focus-notice').hidden = !(focusDown() || failed(frames.focus));
 
-    // Daily Brief
-    if (fresh && current === 'reading' && !frames.brief && isReady(brief)) mountBrief(brief);
+    // Daily Brief, mounted only while its tab is the one shown.
+    if (fresh && current === 'reading' && tab === 'brief' && !frames.brief && isReady(brief)) mountBrief(brief);
     var newer = !!frames.brief && isReady(brief) &&
       (brief.date !== mountedBrief.date || brief.revision !== mountedBrief.revision);
     $('brief-newer').hidden = !newer;
@@ -334,6 +347,7 @@
 
   function show(view) {
     current = view;
+    tab = tabFor(location.pathname);
     var views = document.querySelectorAll('section.view');
     for (var i = 0; i < views.length; i += 1) views[i].hidden = views[i].getAttribute('data-view') !== view;
     var links = document.querySelectorAll('.nav a');
@@ -341,9 +355,16 @@
       if (links[j].getAttribute('data-view') === view) links[j].setAttribute('aria-current', 'page');
       else links[j].removeAttribute('aria-current');
     }
-    document.title = TITLES[view] + ' · Dashboard';
+    $('reading-brief').hidden = tab !== 'brief';
+    $('reading-feed').hidden = tab !== 'feed';
+    var tabs = document.querySelectorAll('.reading-tabs a');
+    for (var k = 0; k < tabs.length; k += 1) {
+      if (tabs[k].getAttribute('data-tab') === tab) tabs[k].setAttribute('aria-current', 'page');
+      else tabs[k].removeAttribute('aria-current');
+    }
+    document.title = TITLES[onFeed() ? 'feed' : view] + ' · Dashboard';
     // The Agents view shows and hides the routines it holds; Goals fetches
-    // the vault while shown.
+    // the vault while shown, and the Feed its store.
     if (agents) {
       if (view === 'agents') agents.show();
       else agents.hide();
@@ -351,6 +372,10 @@
     if (goals) {
       if (view === 'goals') goals.show();
       else goals.hide();
+    }
+    if (feed) {
+      if (onFeed()) feed.show();
+      else feed.hide();
     }
     render(false);
     fetchState();
@@ -389,10 +414,12 @@
       disconnect();
       if (agents) agents.hide();
       if (goals) goals.hide();
+      if (feed) feed.hide();
     } else {
       connect();
       if (agents && current === 'agents') agents.show();
       if (goals && current === 'goals') goals.show();
+      if (feed && onFeed()) feed.show();
     }
   });
 

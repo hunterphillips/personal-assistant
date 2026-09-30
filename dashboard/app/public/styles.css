@@ -405,6 +405,77 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 
 .agents-message { margin: 0 0 12px; }
 
+/* Reading: the Brief and Feed tabs. The brief keeps its frame; the feed
+   scrolls its cards. */
+
+.reading-tabs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding: 0 20px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+.reading-tabs a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+.reading-tabs a:hover { color: var(--ink); }
+.reading-tabs a[aria-current="page"] {
+  border-bottom-color: var(--green);
+  color: var(--ink);
+}
+
+.reading-brief {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.reading-feed {
+  flex: 1;
+  min-height: 0;
+  padding: 24px 34px 40px;
+  overflow: auto;
+}
+
+.reading-feed > * {
+  width: 100%;
+  max-width: 720px;
+}
+
+.feed-item { padding: 12px 0 14px; }
+.feed-item + .feed-item { border-top: 1px solid var(--line); }
+
+.feed-title {
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.feed-title a { color: inherit; }
+
+.feed-summary {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.feed-actions { margin-top: 8px; }
+
+.feed-reason {
+  margin: 6px 0 0;
+  color: var(--red);
+  font-size: 13px;
+}
+
 /* Goals: the vault's priorities and goal notes, one card per section. */
 
 #view-goals {
@@ -1006,6 +1077,9 @@ a.agent-row[aria-current="true"] {
   .routines { padding: 4px 16px 20px; }
 
   #view-goals { padding: 20px 16px; }
+
+  .reading-tabs { padding: 0 8px; }
+  .reading-feed { padding: 16px 16px 24px; }
 
   .agents { grid-template-columns: minmax(0, 1fr); }
 
