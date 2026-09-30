@@ -192,6 +192,23 @@ test('trailing slashes on shell routes redirect to canonical paths', async (t) =
   assert.equal(brief.status, 308);
   assert.equal(brief.headers.location, '/brief?a=1');
   assert.equal((await request(app, 'GET', '/healthz/')).status, 404);
+  const health = await request(app, 'GET', '/health/?a=1');
+  assert.equal(health.status, 308);
+  assert.equal(health.headers.location, '/health?a=1');
+});
+
+test('/health serves the shell, and /routines moves to it for one release', async (t) => {
+  const app = await startApp(t);
+  const health = await request(app, 'GET', '/health');
+  assert.equal(health.status, 200);
+  assert.match(health.headers['content-type'], /^text\/html/);
+  assert.ok(health.text.includes('id="view-health"'));
+  for (const [path, location] of [['/routines', '/health'], ['/routines/', '/health'], ['/routines?a=1', '/health?a=1'], ['/routines/?a=1', '/health?a=1']]) {
+    const response = await request(app, 'GET', path);
+    assert.equal(response.status, 302, path);
+    assert.equal(response.headers.location, location, path);
+  }
+  assert.equal((await request(app, 'HEAD', '/routines')).status, 302);
 });
 
 test('HEAD returns headers without a body for shell and health routes', async (t) => {
@@ -343,7 +360,7 @@ test('configured public host is accepted', async (t) => {
 test('unsupported methods return 405 with Allow', async (t) => {
   const app = await startApp(t);
   const cases = [
-    ['POST', '/'], ['DELETE', '/healthz'], ['OPTIONS', '/focus'],
+    ['POST', '/'], ['DELETE', '/healthz'], ['OPTIONS', '/focus'], ['POST', '/health'], ['POST', '/routines'],
     ['PUT', '/api/dashboard/status'], ['HEAD', '/api/dashboard/status'], ['PUT', '/api/status'], ['HEAD', '/api/status'],
     ['GET', '/api/pause'], ['PUT', '/api/resume'], ['DELETE', '/api/refresh'],
     ['POST', '/api/focus'], ['DELETE', '/api/focus'], ['GET', '/api/brief/feedback'], ['PUT', '/api/brief/feedback'],

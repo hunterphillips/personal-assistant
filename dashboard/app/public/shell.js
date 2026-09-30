@@ -1,11 +1,13 @@
 // Dashboard shell: switches between Agents (Home, agents.js), Reading (the
-// Daily Brief on its Brief tab, feed.js on its Feed tab), Focus, and Goals
-// (goals.js) with the History API, creates each child frame the first time
-// its view is shown and keeps it afterwards, and keeps one copy of the
-// server's state, which it hands to the Agents and Goals views. Agents is
-// the page at `/`; `/agents` and `/routines` show it too, `/reading` and
-// `/brief` show Reading on the Brief tab, `/feed` shows it on the Feed tab,
-// and any unknown path lands on Agents. The brief frame is created only on
+// Daily Brief on its Brief tab, feed.js on its Feed tab), Focus, Goals
+// (goals.js), and Health (routines.js, the launchd jobs) with the History
+// API, creates each child frame the first time its view is shown and keeps
+// it afterwards, and keeps one copy of the server's state, which it hands
+// to the Health, Agents, and Goals views. Agents is the page at `/`;
+// `/agents` shows it too, `/reading` and `/brief` show Reading on the Brief
+// tab, `/feed` shows it on the Feed tab, `/health` shows Health (the server
+// redirects the old `/routines` there), and any unknown path lands on
+// Agents. The brief frame is created only on
 // the Brief tab and kept while the Feed tab is shown.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
@@ -28,10 +30,10 @@
   'use strict';
 
   var ROUTES = {
-    '/': 'agents', '/agents': 'agents', '/routines': 'agents', '/focus': 'focus',
-    '/reading': 'reading', '/brief': 'reading', '/feed': 'reading', '/goals': 'goals',
+    '/': 'agents', '/agents': 'agents', '/focus': 'focus',
+    '/reading': 'reading', '/brief': 'reading', '/feed': 'reading', '/goals': 'goals', '/health': 'health',
   };
-  var TITLES = { agents: 'Agents', reading: 'Reading', focus: 'Focus', goals: 'Goals', feed: 'Feed' };
+  var TITLES = { agents: 'Agents', reading: 'Reading', focus: 'Focus', goals: 'Goals', health: 'Health', feed: 'Feed' };
   var FALLBACK_POLL_MS = 30000;
   var STATE_TIMEOUT_MS = 5000;
   var BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
@@ -70,7 +72,7 @@
     },
   };
   var routines = window.DashboardRoutines ? window.DashboardRoutines.create(shellApi) : null;
-  var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi, routines) : null;
+  var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
   var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
 
@@ -363,8 +365,12 @@
       else tabs[k].removeAttribute('aria-current');
     }
     document.title = TITLES[onFeed() ? 'feed' : view] + ' · Dashboard';
-    // The Agents view shows and hides the routines it holds; Goals fetches
-    // the vault while shown, and the Feed its store.
+    // Goals fetches the vault while shown, the Feed its store, and Health
+    // refreshes stale jobs when it opens.
+    if (routines) {
+      if (view === 'health') routines.show();
+      else routines.hide();
+    }
     if (agents) {
       if (view === 'agents') agents.show();
       else agents.hide();
@@ -400,7 +406,7 @@
     if (!Object.prototype.hasOwnProperty.call(ROUTES, url.pathname)) return;
     event.preventDefault();
     // A view link drops any query, so Agents from an open thread returns
-    // to the list; the routines row and its way back are view links too.
+    // to the list.
     if (url.pathname !== location.pathname || location.search) history.pushState(null, '', url.pathname);
     show(viewFor(url.pathname));
   });
@@ -412,11 +418,13 @@
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
       disconnect();
+      if (routines) routines.hide();
       if (agents) agents.hide();
       if (goals) goals.hide();
       if (feed) feed.hide();
     } else {
       connect();
+      if (routines && current === 'health') routines.show();
       if (agents && current === 'agents') agents.show();
       if (goals && current === 'goals') goals.show();
       if (feed && onFeed()) feed.show();

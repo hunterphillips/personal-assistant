@@ -173,21 +173,9 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 .notice button:hover { background: var(--green-dark); }
 
-/* Routines: the overview beside the agents list, and one agent's rows
-   under its thread header. */
-
-.routines {
-  flex: 1;
-  min-height: 0;
-  padding: 40px 34px;
-  overflow: auto;
-  background: var(--bg);
-}
-
-.routines > * {
-  width: 100%;
-  max-width: 720px;
-}
+/* Health: the launchd jobs (the code's routines), one card per agent.
+   Its column is Goals's, below; the header and card rules are shared with
+   Goals and the Feed. */
 
 .routines-header {
   display: flex;
@@ -196,14 +184,6 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   justify-content: space-between;
   gap: 12px 16px;
   margin-bottom: 16px;
-}
-
-.routines-heading {
-  margin: 0;
-  font-family: var(--serif);
-  font-size: 24px;
-  font-weight: 400;
-  line-height: 1.2;
 }
 
 .routines-updated {
@@ -255,17 +235,6 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   display: grid;
   gap: 12px;
 }
-
-.thread-routines {
-  max-height: 50%;
-  padding: 4px 24px 12px;
-  overflow: auto;
-  border-bottom: 1px solid var(--line);
-}
-
-/* With no Focus controls above them, the rows start right under the header. */
-.thread-routines-list > .routine-list:first-child { margin-top: 0; }
-.thread-routines-list > .routine-list:first-child > .routine-row:first-child { border-top: 0; }
 
 .routine-card {
   min-width: 0;
@@ -415,7 +384,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   border-right: 1px solid var(--line);
 }
 
-.agents-heading, .goals-heading {
+.agents-heading, .goals-heading, .health-heading {
   margin: 0 0 12px;
   font-family: var(--serif);
   font-size: 24px;
@@ -581,18 +550,21 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 /* Goals: the vault's priorities and goal notes, one row per goal under each
    section heading, the details only when a row is open. */
 
-#view-goals {
+#view-goals,
+#view-health {
   min-height: 0;
   padding: 40px 34px;
   overflow: auto;
 }
 
-#view-goals > * {
+#view-goals > *,
+#view-health > * {
   width: 100%;
   max-width: 720px;
 }
 
-#view-goals .goals-heading { margin: 0; }
+#view-goals .goals-heading,
+#view-health .health-heading { margin: 0; }
 
 .goal-section-toggle,
 .goal-row {
@@ -778,9 +750,6 @@ a.agent-row[aria-current="true"] {
   text-overflow: ellipsis;
 }
 .agent-row-preview:empty { display: none; }
-
-/* The overview sits beside the list from 720px; the row is for phones. */
-.agents-routines { display: none; }
 
 .agent-row-state {
   font-size: 13px;
@@ -1216,9 +1185,8 @@ a.agent-row[aria-current="true"] {
 
   .notice { padding: 8px 14px; }
 
-  .routines { padding: 4px 16px 20px; }
-
-  #view-goals { padding: 20px 16px; }
+  #view-goals,
+  #view-health { padding: 20px 16px; }
 
   .reading-tabs { padding: 0 8px; }
   .reading-feed { padding: 16px 16px 24px; }
@@ -1226,11 +1194,6 @@ a.agent-row[aria-current="true"] {
   .feed-badge { width: 24px; height: 24px; }
 
   .agents { grid-template-columns: minmax(0, 1fr); }
-
-  .agents-routines {
-    display: flex;
-    margin-bottom: 20px;
-  }
 
   .agents-list {
     padding: 20px 16px;
@@ -1252,7 +1215,6 @@ a.agent-row[aria-current="true"] {
 
   .thread-header,
   .thread-confirm,
-  .thread-routines,
   .thread-notice,
   .thread-description,
   .thread-messages,

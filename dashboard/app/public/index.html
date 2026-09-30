@@ -26,6 +26,10 @@
         <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4.5L17 13H5"/></svg>
         <span class="nav-label">Goals</span>
       </a>
+      <a href="/health" data-view="health" title="Health">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 12h4l2.5-6 5 12 2.5-6H21"/></svg>
+        <span class="nav-label">Health</span>
+      </a>
     </nav>
     <main id="content" class="content" tabindex="-1">
       <div class="notice" id="shell-notice" role="status" hidden>
@@ -37,26 +41,9 @@
         <div class="agents-list" id="agents-list">
           <h1 class="agents-heading">Agents</h1>
           <p class="agents-message" id="agents-message" hidden></p>
-          <a class="agent-row agents-routines" id="agents-routines" href="/routines">
-            <span class="agent-row-head"><span class="agent-row-name">Routines</span></span>
-            <span class="agent-row-preview" id="agents-routines-count"></span>
-          </a>
           <div id="agents-groups"></div>
         </div>
         <div class="agent-thread" id="agent-thread">
-          <section class="routines" id="routines-overview" aria-labelledby="routines-heading">
-            <div class="availability" id="agents-availability" role="status" hidden></div>
-            <div class="routines-header">
-              <a class="thread-back" id="routines-back" href="/">All agents</a>
-              <div class="routines-title">
-                <h2 class="routines-heading" id="routines-heading">Routines</h2>
-                <p class="routines-updated" id="routines-updated"></p>
-              </div>
-              <button type="button" class="button" id="routines-refresh">Refresh</button>
-            </div>
-            <p class="routines-message" id="routines-message" hidden></p>
-            <div class="routines-cards" id="routines-cards"></div>
-          </section>
           <p class="thread-empty" id="agent-empty" hidden></p>
           <div class="thread-panel" id="agent-panel" hidden>
             <div class="thread-header">
@@ -66,7 +53,6 @@
                 <span class="thread-chips" id="agent-chips"></span>
                 <span class="thread-cost" id="agent-cost"></span>
               </div>
-              <button type="button" class="button" id="agent-routines-toggle" data-agent-action="toggle-routines" aria-expanded="false" aria-controls="agent-routines" hidden>Routines</button>
               <button type="button" class="button thread-new" id="agent-new-thread" data-agent-action="new-thread">New thread</button>
               <button type="button" class="button" id="agent-open-terminal" data-agent-action="open-terminal" hidden>Open terminal</button>
               <p class="thread-terminal-reason" id="agent-terminal-reason" role="status" hidden></p>
@@ -76,7 +62,6 @@
               <button type="button" class="button button-primary" data-agent-action="confirm-new-thread">Start new thread</button>
               <button type="button" class="button" data-agent-action="cancel-new-thread">Cancel</button>
             </div>
-            <div class="thread-routines" id="agent-routines" hidden></div>
             <p class="thread-description" id="agent-description" hidden></p>
             <p class="thread-notice" id="agent-notice" role="status" hidden></p>
             <div class="thread-messages" id="agent-messages" aria-live="polite"></div>
@@ -136,6 +121,19 @@
         </div>
         <p class="routines-message" id="goals-message" role="status" hidden></p>
         <div class="routines-cards" id="goals-cards"></div>
+      </section>
+
+      <section class="view" id="view-health" data-view="health" aria-label="Health" hidden>
+        <div class="availability" id="health-availability" role="status" hidden></div>
+        <div class="routines-header">
+          <div class="routines-title">
+            <h1 class="health-heading">Jobs</h1>
+            <p class="routines-updated" id="routines-updated"></p>
+          </div>
+          <button type="button" class="button" id="routines-refresh">Refresh</button>
+        </div>
+        <p class="routines-message" id="routines-message" hidden></p>
+        <div class="routines-cards" id="routines-cards"></div>
       </section>
     </main>
   </div>

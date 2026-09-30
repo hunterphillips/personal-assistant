@@ -1,6 +1,6 @@
 // The Agents view, the page at `/`, in real browsers against the in-memory
 // registry, routines, and fake persona adapter of
-// test/support/browser-server.mjs. The routines overview itself is covered
+// test/support/browser-server.mjs. The jobs are on the Health view, covered
 // in routines.spec.mjs.
 
 import { expect, expectView, nav, test } from '../support/browser-test.mjs';
@@ -127,23 +127,25 @@ test.describe('with seeded agents', () => {
     expect(hub.personas.calls).toEqual([]);
   });
 
-  test('the page at / is the list beside the routines overview', async ({ page, hub }) => {
-    test.skip(phone(page), 'the phone puts the overview behind a row; see below');
+  test('the page at / is the list beside a sentence that asks for an agent', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     await expect(page.locator('#agents-list')).toBeVisible();
-    await expect(page.locator('#agents-routines')).toBeHidden();
-    const overview = page.locator('#routines-overview');
-    await expect(overview).toBeVisible();
-    await expect(overview.getByRole('heading', { name: 'Routines', level: 2 })).toBeVisible();
-    await expect(overview.locator('#routines-back')).toBeHidden();
-    await expect(overview.locator('.routine-card .card-name')).toHaveText(['CFO']);
-    await expect(overview.locator('.routine-name')).toHaveText(['cfo.daily', 'cfo.weekly']);
     await expect(page.locator('#agent-panel')).toBeHidden();
-    await expect(page.locator('#agent-empty')).toBeHidden();
-    const list = await page.locator('#agents-list').boundingBox();
-    const pane = await overview.boundingBox();
-    expect(pane.x).toBeGreaterThanOrEqual(list.x + list.width);
+    // Nothing sits above the groups.
+    await expect(page.locator('#agents-list > :visible')).toHaveText(['Agents', /^Work/]);
+    await expect(page.locator('#agents-list .agent-row').first()).toHaveAttribute('data-agent', 'cfo');
+    await expect(page.locator('#view-agents .routine-card')).toHaveCount(0);
+    if (phone(page)) {
+      await expect(page.locator('#agent-empty')).toBeHidden();
+      expect((await page.locator('#agents-list').boundingBox()).width).toBe(page.viewportSize().width);
+    } else {
+      const empty = page.locator('#agent-empty');
+      await expect(empty).toHaveText('Choose an agent to open its thread.');
+      await expect(empty).toBeVisible();
+      const list = await page.locator('#agents-list').boundingBox();
+      expect((await empty.boundingBox()).x).toBeGreaterThanOrEqual(list.x + list.width);
+    }
     expect(hub.routines.calls).toBe(0);
   });
 
@@ -156,38 +158,7 @@ test.describe('with seeded agents', () => {
     await expectView(page, 'agents', 'Agents');
     await expect(pane(page).locator('#agent-name')).toHaveText('CFO');
     await expect(messages(page)).toHaveCount(2);
-    await expect(page.locator('#routines-overview')).toBeHidden();
-  });
-
-  test('a persona with routines lists them behind a toggle in the thread header', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/?agent=cfo`);
-    const toggle = pane(page).locator('#agent-routines-toggle');
-    await expect(toggle).toHaveText('Routines (2)');
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    const section = page.locator('#agent-routines');
-    await expect(section).toBeHidden();
-    await expect(messages(page)).toHaveCount(2);
-    expect((await toggle.boundingBox()).height).toBeGreaterThanOrEqual(44);
-
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(section).toBeVisible();
-    await expect(section.locator('.routine-name')).toHaveText(['cfo.daily', 'cfo.weekly']);
-    await expect(section.locator('.badge')).toHaveText(['OK', 'Failed (exit 1)']);
-    await expect(section.locator('.routine-run')).toHaveText(['30 minutes ago', '1 hour ago']);
-    await expect(section.getByRole('button')).toHaveCount(0);
-    await expect(messages(page)).toHaveCount(2);
-
-    await toggle.click();
-    await expect(section).toBeHidden();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  });
-
-  test('a persona without routines shows no toggle', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/?agent=brain`);
-    await expect(pane(page).locator('#agent-name')).toHaveText('Second brain');
-    await expect(page.locator('#agent-routines-toggle')).toBeHidden();
-    await expect(page.locator('#agent-routines')).toBeHidden();
+    await expect(page.locator('#agent-empty')).toBeHidden();
   });
 
   test('opening a persona shows its thread, and a reload lands on it', async ({ page, hub }) => {
@@ -447,16 +418,17 @@ test.describe('with seeded agents', () => {
   test('Back from a thread returns to the list, and choosing the open row adds no history', async ({ page, hub }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto(`${hub.origin}/`);
-    await expect(page.locator('#routines-overview')).toBeVisible();
+    const empty = page.locator('#agent-empty');
+    await expect(empty).toHaveText('Choose an agent to open its thread.');
     await row(page, 'CFO').click();
     await expect(page).toHaveURL(`${hub.origin}/?agent=cfo`);
     await expect(pane(page)).toBeVisible();
-    await expect(page.locator('#routines-overview')).toBeHidden();
+    await expect(empty).toBeHidden();
     await row(page, 'CFO').click();
     await page.goBack();
     await expect(page).toHaveURL(`${hub.origin}/`);
     await expect(pane(page)).toBeHidden();
-    await expect(page.locator('#routines-overview')).toBeVisible();
+    await expect(empty).toHaveText('Choose an agent to open its thread.');
   });
 
   test('choosing the open row from /agents?agent= adds no history entry', async ({ page, hub }) => {
@@ -476,10 +448,9 @@ test.describe('with seeded agents', () => {
     await expect(pane(page).locator('#agent-name')).toHaveText('CFO');
   });
 
-  test('a server refresh rebuilds the overview once per state change', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/`);
-    await expectView(page, 'agents', 'Agents');
-    if (phone(page)) await page.locator('#agents-routines').click();
+  test('a server refresh rebuilds the Health cards once per state change', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/health`);
+    await expectView(page, 'health', 'Health');
     await expect(page.locator('.routine-card .card-name')).toHaveText(['CFO']);
     await watchRebuilds(page, '#routines-cards');
 
@@ -490,54 +461,23 @@ test.describe('with seeded agents', () => {
     expect(await rebuilds(page)).toBe(2);
   });
 
-  test('crossing 720px with no agent open swaps the overview for the list without rebuilding it', async ({ page, hub }) => {
+  test('crossing 720px with no agent open swaps the sentence for the list alone', async ({ page, hub }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${hub.origin}/`);
-    await expect(page.locator('#routines-overview')).toBeVisible();
-    await expect(page.locator('.routine-card .card-name')).toHaveText(['CFO']);
-    await watchRebuilds(page, '#routines-cards');
+    const empty = page.locator('#agent-empty');
+    await expect(empty).toBeVisible();
+    await watchRebuilds(page, '#agents-groups');
 
     await page.setViewportSize({ width: 390, height: 844 });
     await crossed(page, false);
     await expect(page.locator('#agents-list')).toBeVisible();
-    await expect(page.locator('#agents-routines')).toBeVisible();
-    await expect(page.locator('#routines-overview')).toBeHidden();
-    expect(await rebuilds(page)).toBe(0);
-
-    // Coming back on screen renders the overview once.
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await crossed(page, true);
-    await expect(page.locator('#routines-overview')).toBeVisible();
-    await expect(page.locator('#agents-list')).toBeVisible();
-    await expect(page.locator('.routine-card .card-name')).toHaveText(['CFO']);
-    expect(await rebuilds(page)).toBe(1);
-  });
-
-  test('crossing 720px with an agent open keeps the overview hidden and its routines mounted', async ({ page, hub }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`${hub.origin}/?agent=cfo`);
-    await page.locator('#agent-routines-toggle').click();
-    const section = page.locator('#agent-routines');
-    await expect(section.locator('.routine-name')).toHaveText(['cfo.daily', 'cfo.weekly']);
-    const mounted = await section.locator('.thread-routines-list').elementHandle();
-    await watchRebuilds(page, '#agent-routines');
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    await crossed(page, false);
-    await expect(page.locator('#agents-list')).toBeHidden();
-    await expect(page.locator('#agent-thread')).toBeVisible();
-    await expect(page.locator('#routines-overview')).toBeHidden();
-    await expect(section).toBeVisible();
-    await expect(section.locator('.routine-name')).toHaveText(['cfo.daily', 'cfo.weekly']);
-    expect(await mounted.evaluate((node) => node.isConnected)).toBe(true);
-    expect(await rebuilds(page)).toBe(0);
+    await expect(page.locator('#agent-thread')).toBeHidden();
 
     await page.setViewportSize({ width: 1280, height: 800 });
     await crossed(page, true);
     await expect(page.locator('#agents-list')).toBeVisible();
-    await expect(page.locator('#routines-overview')).toBeHidden();
-    await expect(section).toBeVisible();
-    expect(await mounted.evaluate((node) => node.isConnected)).toBe(true);
+    await expect(empty).toHaveText('Choose an agent to open its thread.');
+    await expect(empty).toBeVisible();
     expect(await rebuilds(page)).toBe(0);
   });
 
@@ -591,27 +531,13 @@ test.describe('with seeded agents', () => {
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#agent-thread')).toBeHidden();
 
-    // The Routines row leads the list and opens the overview full width.
-    const routinesRow = page.locator('#agents-routines');
-    await expect(routinesRow).toBeVisible();
-    await expect(routinesRow.locator('.agent-row-name')).toHaveText('Routines');
-    await expect(routinesRow.locator('.agent-row-preview')).toHaveText('2 routines');
-    expect((await routinesRow.boundingBox()).height).toBeGreaterThanOrEqual(44);
-    expect((await routinesRow.boundingBox()).y).toBeLessThan((await page.locator('.agent-group-heading').first().boundingBox()).y);
-    await routinesRow.click();
-    await expect(page).toHaveURL(`${hub.origin}/routines`);
-    await expect(page.locator('#agents-list')).toBeHidden();
-    const overview = page.locator('#routines-overview');
-    await expect(overview).toBeVisible();
-    expect((await overview.boundingBox()).width).toBe(390);
-    await expect(overview.locator('.routine-card .card-name')).toHaveText(['CFO']);
-    const overviewBack = page.locator('#routines-back');
-    await expect(overviewBack).toHaveText('All agents');
-    expect((await overviewBack.boundingBox()).height).toBeGreaterThanOrEqual(44);
-    await overviewBack.click();
-    await expect(page).toHaveURL(`${hub.origin}/`);
-    await expect(page.locator('#agents-list')).toBeVisible();
-    await expect(page.locator('#agent-thread')).toBeHidden();
+    // No Routines row: the first thing under the heading is a group.
+    await expect(page.locator('#view-agents').getByText('Routines')).toHaveCount(0);
+    const heading = await page.locator('.agents-heading').boundingBox();
+    const firstGroup = await page.locator('.agent-group-heading').first().boundingBox();
+    const between = await page.locator('#agents-list > :visible').evaluateAll((nodes) => nodes.map((n) => n.className));
+    expect(between).toEqual(['agents-heading', '']);
+    expect(firstGroup.y).toBeGreaterThan(heading.y);
 
     await row(page, 'CFO').click();
     await expect(page.locator('#agents-list')).toBeHidden();
@@ -625,7 +551,7 @@ test.describe('with seeded agents', () => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
 
-    await expect(page.locator('#agent-routines-toggle')).toHaveText('Routines (2)');
+    await expect(page.locator('#agent-panel').getByRole('button', { name: /Routines/ })).toHaveCount(0);
 
     await back.click();
     await expect(page).toHaveURL(`${hub.origin}/`);
@@ -654,30 +580,20 @@ test.describe('with an unreadable registry', () => {
   // come from the routines' own agent names.
   test.use({ hubOptions: { build: () => ({ ...seeded().build(), registry: { ok: false, error: 'registry_invalid_json' } }) } });
 
-  test('the list says the registry could not be read only while the overview is off screen', async ({ page, hub }) => {
+  test('Health says the registry could not be read, and the list claims nothing', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     const listMessage = page.locator('#agents-message');
-    const overviewMessage = page.locator('#routines-message');
-    if (phone(page)) {
-      await expect(listMessage).toHaveText('The registry could not be read.');
-      await page.locator('#agents-routines').click();
-    } else {
-      await expect(listMessage).toBeHidden();
-    }
-    await expect(overviewMessage).toHaveText('The registry could not be read. registry_invalid_json');
-    await expect(page.locator('.routine-card .card-name')).toHaveText(['CFO']);
+    await expect(listMessage).toBeHidden();
 
-    // With an agent open the overview is off screen, so the list says it.
     await page.goto(`${hub.origin}/?agent=cfo`);
     await expect(page.locator('#agent-empty')).toHaveText('No agent named cfo is registered.');
-    await expect(listMessage).toHaveText('The registry could not be read.');
-    await expect(overviewMessage).toBeHidden();
+    await expect(listMessage).toBeHidden();
 
-    await nav(page, 'Home').click();
-    await expect(page.locator('#agent-empty')).toBeHidden();
-    if (phone(page)) await expect(listMessage).toHaveText('The registry could not be read.');
-    else await expect(listMessage).toBeHidden();
+    await nav(page, 'Health').click();
+    await expectView(page, 'health', 'Health');
+    await expect(page.locator('#routines-message')).toHaveText('The registry could not be read. registry_invalid_json');
+    await expect(page.locator('.routine-card .card-name')).toHaveText(['CFO']);
   });
 });
 

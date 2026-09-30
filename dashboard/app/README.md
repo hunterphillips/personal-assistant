@@ -2,9 +2,9 @@
 
 The assistant daemon and the tailnet-only hub it serves. A local Node server
 on `127.0.0.1:4243`; Tailscale serves it to the tailnet over HTTPS. The page
-is a shell with a rail of four views. Home is the Agents view at `/`, with
-the routines beside it; Reading is the Daily Brief; Focus and Goals are their
-own views. Personas run on the Claude Agent SDK, Codex threads are observed
+is a shell with a rail of five views. Home is the Agents view at `/`;
+Reading is the Daily Brief; Focus and Goals are their own views; Health
+lists the launchd jobs. Personas run on the Claude Agent SDK, Codex threads are observed
 on a shared app-server, and cmux terminals are listed with their state.
 Focus runs in an iframe through a proxy to its own server. Briefs are read
 from `daily-brief/briefs/`, and feedback is saved beside them.
@@ -23,7 +23,8 @@ Operations are in [docs/operations.md](docs/operations.md).
 
 | Route | Purpose |
 | --- | --- |
-| `GET /`, `/agents`, `/routines`, `/focus`, `/reading`, `/brief`, `/feed`, `/goals` | The shell. `/`, `/agents`, and `/routines` show the Agents view; `/reading` and `/brief` show Reading on its Brief tab and `/feed` on its Feed tab. |
+| `GET /`, `/agents`, `/focus`, `/reading`, `/brief`, `/feed`, `/goals`, `/health` | The shell. `/` and `/agents` show the Agents view; `/reading` and `/brief` show Reading on its Brief tab and `/feed` on its Feed tab; `/health` shows Health. |
+| `GET /routines`, `/routines/` | 302 to `/health`, keeping the query. Kept for one release while the jobs move from Agents to Health. |
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
 | `GET /api/state` | Checks Focus and the brief, then returns the state hub's snapshot (below). |
 | `GET /api/events` | Server-Sent Events: the snapshot, then each change (below). |
@@ -49,7 +50,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/feed` | The feed store's runs, newest first (below). |
 | `POST /api/feed/discuss` | Sends one feed item to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
 
-`/focus/`, `/reading/`, `/brief/`, `/feed/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
+`/focus/`, `/reading/`, `/brief/`, `/feed/`, `/agents/`, `/goals/`, and `/health/` redirect to the
 paths without the slash. A known path
 with the wrong method is 405, and anything else is 404. Errors are JSON bodies of the form
 `{"error": "<code>"}`. The comment at the top of each route module describes
@@ -287,16 +288,22 @@ the log file's modification time as the last run. Focus scans
 module only reads: it never loads, starts, or stops a job, and it runs only
 when asked.
 
+The reader-facing word is "jobs": the Health view heads them "Jobs" and
+every sentence it shows says job. The code word is still "routines": this
+module, `public/routines.js`, the snapshot's `routines` key, and
+`POST /api/routines/refresh` keep their names for now.
+
 ### Shell
 
 `public/index.html`, `public/shell.js`, `public/agents.js`,
 `public/routines.js`, `public/goals.js`, and `public/styles.css` make up the
-page served at `/`, `/agents`, `/routines`, `/reading`, `/brief`, `/focus`,
-and `/goals`. The Agents view is the page at `/`; `/agents` shows the same
-view and `/routines` shows it with the routines overview open. `/reading`
-and `/brief` show the Reading view, `/focus` Focus, and `/goals` Goals. The
-navigation is a rail of four icon links, Home, Reading, Focus, and Goals;
-a path the shell does not know lands on Agents. The script switches views
+page served at `/`, `/agents`, `/reading`, `/brief`, `/focus`, `/goals`,
+and `/health`. The Agents view is the page at `/`; `/agents` shows the same
+view. `/reading` and `/brief` show the Reading view, `/focus` Focus,
+`/goals` Goals, and `/health` Health. The server redirects the old
+`/routines` to `/health`. The navigation is a rail of five icon links,
+Home, Reading, Focus, Goals, and Health; a path the shell does not know
+lands on Agents. The script switches views
 with the History API and handles
 Back and Forward, and a reload or bookmark opens the same view. Each frame
 is created the first time its view opens and stays in the page afterwards,
@@ -356,11 +363,12 @@ or system agent shows its description instead and opens nothing. Choosing
 a persona opens its thread and puts `?agent=<id>` in the URL (`/?agent=cfo`;
 `/agents?agent=cfo` opens the same thread), so a reload or a shared link
 lands on the same thread; Back and Forward move between threads. From
-720px the list and the pane beside it sit side by side, and the pane shows
-the routines overview until a persona is chosen. On a phone the list comes
-first, a Routines row at its top (with the number of routines once they
-have been read) opens the overview at `/routines`, and a thread or the
-overview takes the whole width with an "All agents" link back.
+720px the list and the pane beside it sit side by side, and the pane reads
+"Choose an agent to open its thread." until a persona is chosen. On a phone
+the list fills the width, and a thread takes the whole width with an "All
+agents" link back. The launchd jobs, the registry error, and the lines for
+the Codex server and cmux are on the Health view; the Agents view says only
+what each row needs.
 
 #### Sessions
 
@@ -378,7 +386,7 @@ says the turn, since it can still be answered here; a Claude terminal
 that has closed says only that. When there are no sessions and both the
 Codex server and cmux are off, one sentence ends the list: "No coding
 sessions. Start the Codex server or open a terminal in cmux." With only
-one of them off the list says nothing; the routines overview carries one
+one of them off the list says nothing; the Health view carries one
 line per source that is off, above its heading ("The Codex server is not
 running.", "The Codex server disconnected.", "Codex sessions are off
 until npm ci runs.", "cmux is not running.", "cmux refused the
@@ -396,8 +404,8 @@ Interrupt (`POST /api/sessions/<id>/interrupt`), and a question or
 approval card that posts to `POST /api/sessions/<id>/answer`; a Codex
 question's answers are keyed by its question ids; a question whose
 `isOther` is false has no Other field, and one whose `isSecret` is true
-takes its Other answer in a password field. There is no New thread,
-no cost line, and no routines toggle, and in place of the composer one
+takes its Other answer in a password field. There is no New thread
+and no cost line, and in place of the composer one
 sentence: "Type to this thread in its terminal." An approval
 shows what it asks as parts when the input carries them, in place of the
 JSON: the command and its folder, the files of a change, the permissions
@@ -435,36 +443,6 @@ button until the next attempt or another session is chosen (`unbound`,
 `not_running`, `no_password`, or `auth_failed`, else "cmux could not open
 that terminal.").
 
-#### Routines
-
-The overview has one card for each agent that has routines, in registry
-order, with the agent's name and role. Each routine is a row with its name,
-schedule, last run, and outcome, and Focus scans with failures in the last
-24 hours also show how many. Times under a day are relative ("12 minutes
-ago"); older ones read "Yesterday 21:00" or "Sep 3 21:00". The header shows
-when the routines were last refreshed and has a Refresh button, which reads
-"Refreshing…" while a refresh runs.
-
-A persona's own routines also sit under its thread header, behind a
-"Routines (n)" button that expands them above the messages; an agent with
-no routines has no button. The rows and the Focus controls are the same,
-without the card heading.
-
-Routines are refreshed only on demand: when the overview or a thread's
-routines open and the last refresh is missing or more than 60 seconds old,
-and when Refresh is chosen. The Focus card shows "Paused" when any scan is
-paused, and a Pause or Resume button that posts to the forwarded
-`/api/pause` or `/api/resume`; the server then refreshes the routines, and
-the card follows the state. If the request gets no answer, or the proxy
-answers 502 or 504 because Focus gave none, the card says "Focus did not
-respond."; any other error status is Focus's own and shows "Focus reported
-an error." The message clears on the next attempt or when the state shows
-the scans paused or resumed. A registry that cannot be read (followed by
-the registry's error), a failed refresh, and an empty list each get one
-plain sentence, and when Focus did not answer during the refresh the Focus
-card says its rows come from launchd. While the overview is off screen its
-cards are not rebuilt; opening it renders the latest state.
-
 The thread is read from `GET /api/agents/<id>/thread` when it opens and
 again whenever the state shows a new last message or a turn that started or
 ended, so it follows the turn without reconstructing it from deltas. Your
@@ -488,6 +466,36 @@ or New thread is reported under the composer until the next attempt; a
 cannot be read again after a change, the messages already shown stay, with
 a Retry line above them. A draft typed for one persona is kept while another
 thread is open.
+
+### Health view
+
+The Health view, at `/health` and the last entry on the rail, lists the
+launchd jobs of every registry entry under the heading "Jobs". It scrolls
+on its own, in a 720px column. There is one card for each agent that has
+jobs, in registry order, with the agent's name and role. Each job is a row
+with its name, schedule, last run, and outcome, and Focus scans with
+failures in the last 24 hours also show how many. Times under a day are
+relative ("12 minutes ago"); older ones read "Yesterday 21:00" or "Sep 3
+21:00". The header shows when the jobs were last refreshed and has a
+Refresh button, which reads "Refreshing…" while a refresh runs. Above the
+heading is one line per source that is off (see Sessions under the Agents
+view), and nothing while both answer.
+
+Jobs are refreshed only on demand: when the view opens and the last
+refresh is missing or more than 60 seconds old, and when Refresh is chosen.
+The Focus card shows "Paused" when any scan is paused, and a Pause or
+Resume button that posts to the forwarded `/api/pause` or `/api/resume`;
+the server then refreshes the jobs, and the card follows the state. If the
+request gets no answer, or the proxy answers 502 or 504 because Focus gave
+none, the card says "Focus did not respond."; any other error status is
+Focus's own and shows "Focus reported an error." The message clears on the
+next attempt or when the state shows the scans paused or resumed. A
+registry that cannot be read ("The registry could not be read." followed
+by the registry's error), a failed refresh ("Jobs could not be
+refreshed."), and an empty list ("No jobs are registered.") each get one
+plain sentence, and when Focus did not answer during the refresh the Focus
+card says its rows come from launchd. While the view is off screen its
+cards are not rebuilt; opening it renders the latest state.
 
 ## Personas
 
