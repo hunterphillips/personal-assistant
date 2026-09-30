@@ -26,25 +26,34 @@ async function openFeed(page, hub) {
 test.describe('with the fixture store', () => {
   test.use({ hubOptions: { feed: FEED, agents: [WATCH] } });
 
-  test('renders each run as a card with its items, newest first', async ({ page, hub }) => {
+  test('renders each run as a group of posts, newest first', async ({ page, hub }) => {
     await openFeed(page, hub);
     await expect(tabs(page).getByRole('link', { name: 'Feed' })).toHaveAttribute('aria-current', 'page');
     await expect(tabs(page).getByRole('link', { name: 'Brief' })).not.toHaveAttribute('aria-current', 'page');
-    await expect(runs(page).locator('.card-name')).toHaveText(['Monday, September 28', 'Monday, September 21']);
-    await expect(runs(page).first().locator('.card-note')).toHaveText('Since September 14');
+    await expect(runs(page).locator('.feed-date')).toHaveText(['Monday, September 28', 'Monday, September 21']);
+    await expect(runs(page).first().locator('.feed-since')).toHaveText('Since September 14');
     await expect(runs(page).first().locator('.feed-item')).toHaveCount(8);
+    await expect(page.locator('#feed-runs .routine-card')).toHaveCount(0);
+    await expect(runs(page).first()).toHaveCSS('border-top-width', '0px');
     await expect(page.locator('#feed-message')).toBeHidden();
     await expect(page.locator('#brief-frame')).toHaveCount(0);
 
     const robots = item(page, 'watch/2026-09-28/1');
-    await expect(robots.locator('.role-chip')).toHaveText('Invented Gazette');
+    const badge = robots.locator('.feed-badge');
+    await expect(badge).toHaveText('IG');
+    await expect(badge).toHaveCSS('border-radius', '50%');
     const link = robots.locator('.feed-title a');
     await expect(link).toHaveText('Town council adopts a rule for delivery robots');
     await expect(link).toHaveAttribute('href', 'https://example.com/robots');
     await expect(link).toHaveAttribute('target', '_blank');
     await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     await expect(robots.locator('.feed-summary')).toHaveText('The Invented Gazette reports the town adopted a rule for delivery robots on sidewalks.');
-    await expect(robots.getByRole('button', { name: 'Discuss Town council adopts a rule for delivery robots' })).toBeVisible();
+    const discuss = robots.getByRole('button', { name: 'Discuss Town council adopts a rule for delivery robots' });
+    await expect(discuss).toBeVisible();
+    await expect(discuss).toHaveText('Discuss');
+    await expect(discuss.locator('svg')).toHaveCount(1);
+    await expect(discuss).toHaveCSS('border-top-width', '0px');
+    await expect(discuss).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(page.locator('#view-reading [data-action]')).toHaveCount(2);
   });
 

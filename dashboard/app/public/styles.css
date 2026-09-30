@@ -14,6 +14,12 @@
   --red-bg: #f6e3df;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --serif: Georgia, "Times New Roman", serif;
+  --badge-0: #426e52;
+  --badge-1: #2f6558;
+  --badge-2: #8b6022;
+  --badge-3: #9a5528;
+  --badge-4: #4d5d6c;
+  --badge-5: #6f4a66;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -406,7 +412,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .agents-message { margin: 0 0 12px; }
 
 /* Reading: the Brief and Feed tabs. The brief keeps its frame; the feed
-   scrolls its cards. */
+   scrolls its posts. */
 
 .reading-tabs {
   display: flex;
@@ -449,26 +455,98 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 
 .reading-feed > * {
   width: 100%;
-  max-width: 720px;
+  max-width: 680px;
 }
 
-.feed-item { padding: 12px 0 14px; }
-.feed-item + .feed-item { border-top: 1px solid var(--line); }
+.feed-run + .feed-run { margin-top: 32px; }
+
+.feed-run-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 16px;
+}
+
+.feed-date {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.feed-since {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.feed-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: start;
+}
+.feed-item + .feed-item { margin-top: 24px; }
+
+.feed-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+.feed-badge-0 { background: var(--badge-0); }
+.feed-badge-1 { background: var(--badge-1); }
+.feed-badge-2 { background: var(--badge-2); }
+.feed-badge-3 { background: var(--badge-3); }
+.feed-badge-4 { background: var(--badge-4); }
+.feed-badge-5 { background: var(--badge-5); }
 
 .feed-title {
-  margin: 6px 0 0;
-  font-size: 16px;
+  margin: 0;
+  font-size: 17px;
   font-weight: 600;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
-.feed-title a { color: inherit; }
+.feed-title a {
+  color: var(--ink);
+  text-decoration: none;
+}
+.feed-title a:hover { text-decoration: underline; }
 
 .feed-summary {
   margin: 6px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 .feed-actions { margin-top: 8px; }
+
+.feed-discuss {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.feed-discuss:hover, .feed-discuss:focus-visible { color: var(--ink); }
+.feed-discuss:disabled { cursor: default; }
+.feed-discuss:disabled:hover { color: var(--muted); }
+
+.feed-icon { flex: none; }
 
 .feed-reason {
   margin: 6px 0 0;
@@ -1080,6 +1158,8 @@ a.agent-row[aria-current="true"] {
 
   .reading-tabs { padding: 0 8px; }
   .reading-feed { padding: 16px 16px 24px; }
+  .feed-item { grid-template-columns: 24px minmax(0, 1fr); }
+  .feed-badge { width: 24px; height: 24px; }
 
   .agents { grid-template-columns: minmax(0, 1fr); }
 
