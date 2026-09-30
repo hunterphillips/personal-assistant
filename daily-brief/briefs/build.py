@@ -4,7 +4,11 @@
     python3 build.py 2026-09-25 [--dir PATH]
 
 Reads memo-<date>.md from the briefs directory (or --dir) and writes
-<date>.md and viewer-<date>.html beside it. Standard library only.
+<date>.md, viewer-<date>.html, and notice-<date>.json beside it. Standard
+library only. The notice is what the dashboard posts into the Assistant's
+thread: {date, state: "ready", opening, memo}, where opening is the memo's
+opening paragraph (the title when it has none) and memo is the memo without
+its title line, cut to NOTICE_MEMO_BYTES.
 
 The memo is markdown: an optional "# title" line, an optional opening
 paragraph with no heading, then "## <Heading>" sections in any order, each
@@ -23,6 +27,7 @@ import re
 import sys
 
 WORD_CAP = 550
+NOTICE_MEMO_BYTES = 6 * 1024
 
 
 def slug_for(label, taken):
@@ -408,21 +413,45 @@ def main(argv):
     items = items_for(opening, sections)
     md_path = os.path.join(args.dir, f"{args.date}.md")
     viewer_path = os.path.join(args.dir, f"viewer-{args.date}.html")
+    notice_path = os.path.join(args.dir, f"notice-{args.date}.json")
     write_atomic(md_path, render_markdown(title, opening, sections))
     write_atomic(viewer_path, render_viewer(args.date, title, items, words))
+    write_atomic(notice_path, render_notice(args.date, title, opening, text), mode=0o600)
     print(f"built {args.date}: {words} words, {len(sections)} sections" + (" + opening" if opening else ""))
     print(f"  {md_path}")
     print(f"  {viewer_path}")
+    print(f"  {notice_path}")
     return 0
 
 
-def write_atomic(path, text):
+def memo_body(text):
+    """The memo markdown without its title line, cut to NOTICE_MEMO_BYTES of
+    UTF-8 on a character boundary."""
+    lines = text.splitlines()
+    if lines and lines[0].startswith("# "):
+        lines = lines[1:]
+    body = "\n".join(lines).strip() + "\n"
+    encoded = body.encode("utf-8")
+    if len(encoded) > NOTICE_MEMO_BYTES:
+        body = encoded[:NOTICE_MEMO_BYTES].decode("utf-8", errors="ignore")
+    return body
+
+
+def render_notice(date, title, opening, text):
+    notice = {"date": date, "state": "ready", "opening": opening or title, "memo": memo_body(text)}
+    return json.dumps(notice, ensure_ascii=False, indent=2) + "\n"
+
+
+def write_atomic(path, text, mode=None):
     """Write to a dotfile beside the target, then rename. The dashboard lists
-    viewer-<date>.html by name, so it never sees a half-written viewer."""
+    viewer-<date>.html and notice-<date>.json by name, so it never sees a
+    half-written file. `mode` sets the file's permissions before the rename."""
     directory, name = os.path.split(path)
     tmp = os.path.join(directory, f".{name}.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
+    if mode is not None:
+        os.chmod(tmp, mode)
     os.replace(tmp, path)
 
 

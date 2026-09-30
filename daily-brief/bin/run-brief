@@ -6,7 +6,8 @@
 #   run-brief [--date YYYY-MM-DD] [--dry-run] [--force] [--stage gather|curate|verify]
 #
 # Read-only toward every domain repo. The only writes are under
-# daily-brief/contributions/<date>/, daily-brief/briefs/, and the logs.
+# daily-brief/contributions/<date>/, daily-brief/briefs/ (the brief, its
+# viewer, and notice-<date>.json for the dashboard), and the logs.
 # The plan: thoughts/shared/plans/2026-09-27-daily-brief-scheduled-run.md.
 
 set -u
@@ -378,8 +379,18 @@ if [ "$stage" = all ] || [ "$stage" = curate ]; then
     printf 'exit=%s\n' "$curate_exit" >>"$out"; /bin/chmod 600 "$out"
 fi
 
+# The notice the dashboard posts into the Assistant's thread. build.py writes
+# the ready one beside the viewer; a run that ends without a viewer writes a
+# failed one over it, and the dashboard posts whichever states it has not
+# posted yet. Never changes the exit code.
+write_failed_notice() {
+    tmp=$briefs/.notice-$date.json.tmp
+    printf '{"date": "%s", "state": "failed", "opening": "The morning brief did not build."}\n' "$date" >"$tmp" \
+        && /bin/chmod 600 "$tmp" && /bin/mv "$tmp" "$briefs/notice-$date.json"
+}
+
 # --- verify -------------------------------------------------------------------
-viewer=MISSING; exit_code=0
+viewer=MISSING; exit_code=0; notice=none
 if [ -f "$briefs/memo-$date.md" ]; then
     if "$python3" "$briefs/build.py" "$date" >>"$transcripts/$date-verify.log" 2>&1 \
        && "$node" "$briefs/check-viewer.mjs" "$date" >>"$transcripts/$date-verify.log" 2>&1 \
@@ -396,8 +407,13 @@ else
     exit_code=1
 fi
 [ -f "$transcripts/$date-verify.log" ] && /bin/chmod 600 "$transcripts/$date-verify.log"
+if [ "$viewer" = written ]; then
+    notice=ready
+elif [ "$stage" = all ] || [ "$stage" = verify ]; then
+    write_failed_notice && notice=failed
+fi
 
 took=$(( $(/bin/date +%s) - started ))
-log "exit=$exit_code date=$date cursor=$cursor stage=$stage packets=${packets:--} stubs=${stubs:--} waited=${waited}s took=${took}s viewer=$viewer"
+log "exit=$exit_code date=$date cursor=$cursor stage=$stage packets=${packets:--} stubs=${stubs:--} waited=${waited}s took=${took}s viewer=$viewer notice=$notice"
 say "$date: viewer=$viewer stubs=${stubs:-none} waited=${waited}s took=${took}s (log: $log_file)"
 exit "$exit_code"
