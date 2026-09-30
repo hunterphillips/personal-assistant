@@ -9,7 +9,8 @@ const MINUTE = 60_000;
 const ago = (ms) => new Date(Date.now() - ms).toISOString();
 
 const AGENTS = [
-  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude', cwd: '/invented/cfo' },
+  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude', cwd: '/invented/cfo',
+    routines: ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'] },
   { id: 'catchup', name: 'Catchup', role: 'Work', description: 'Invented work folder.', group: 'work', kind: 'project', provider: 'codex' },
   { id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'claude' },
   { id: 'dev', name: 'Dev', role: 'Code', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'codex' },
@@ -74,20 +75,21 @@ const pane = (page) => page.locator('#agent-panel');
 const messages = (page) => page.locator('#agent-messages .thread-message');
 const phone = (page) => page.viewportSize().width < 720;
 
-// Counts rebuilds of the element's children from now on (a rebuild clears
-// them first: one mutation record with removed nodes) and follows the 720px
-// query. Its listener was added after the view's, so by the time it has
-// seen a crossing the view has handled it.
-async function watchRebuilds(page, selector) {
-  await page.evaluate((sel) => {
+// Counts rebuilds of the element's children (or, with `subtree`, of any
+// element's children under it) from now on (a rebuild clears them first:
+// one mutation record with removed nodes) and follows the 720px query. Its
+// listener was added after the view's, so by the time it has seen a
+// crossing the view has handled it.
+async function watchRebuilds(page, selector, { subtree = false } = {}) {
+  await page.evaluate(({ sel, deep }) => {
     window.__rebuilds = 0;
     new MutationObserver((records) => {
       for (const record of records) if (record.removedNodes.length > 0) window.__rebuilds += 1;
-    }).observe(document.querySelector(sel), { childList: true });
+    }).observe(document.querySelector(sel), { childList: true, subtree: deep });
     const wide = window.matchMedia('(min-width: 720px)');
     window.__wide = wide.matches;
     wide.addEventListener('change', (event) => { window.__wide = event.matches; });
-  }, selector);
+  }, { sel: selector, deep: subtree });
 }
 const rebuilds = (page) => page.evaluate(() => window.__rebuilds);
 const crossed = (page, wide) => expect.poll(() => page.evaluate(() => window.__wide)).toBe(wide);
@@ -512,7 +514,7 @@ test.describe('with seeded agents', () => {
     await page.locator('#agent-details-toggle').click();
     const details = page.locator('#agent-details');
     await expect(details.locator('.details-jobs')).toHaveText('CFO runs 2 jobs.');
-    await watchRebuilds(page, '#agent-details');
+    await watchRebuilds(page, '#agent-details', { subtree: true });
 
     await page.setViewportSize({ width: 390, height: 844 });
     await crossed(page, false);

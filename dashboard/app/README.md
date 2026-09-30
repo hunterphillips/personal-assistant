@@ -101,7 +101,8 @@ snapshot; concurrent requests share one check. It stays for one release.
   "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>" },
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
-               "cwd": "/Users/hunter/workspace/work/investing/cfo", "provider": "claude", "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
+               "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
+               "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
                "lastError": null, "costUsd": 0.42 }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
                  "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
@@ -121,7 +122,8 @@ which the Agents view shortens to `~` in the paths it shows. `focus` and
 `brief` hold what the status route reports (`available` is null and
 `state` is `unknown` before the first check). Every agent carries its
 registry `cwd` (a string, or null when the registry has none), which the
-Agents view shows as the agent's folder; agents leave out `routines`. A
+Agents view shows as the agent's folder, and `jobs`, how many launchd
+labels its registry `routines` name; agents leave out `routines` itself. A
 persona also carries
 its runtime state (see Personas below); any other kind has `state: null`.
 `sessions` lists the coding sessions the dashboard follows but does not
@@ -460,9 +462,10 @@ ago"); older ones read "Yesterday 21:00" or "Sep 3 21:00". The header shows
 when the routines were last refreshed and has a Refresh button, which reads
 "Refreshing…" while a refresh runs.
 
-A thread shows no routine rows. Its settings panel (below) counts the
-agent's jobs in one sentence, "CFO runs 1 job.", linking to `/health`, from
-the same routines state; an agent with none has no sentence.
+A thread shows no routine rows. Its settings panel (see Settings) counts
+the agent's jobs in one sentence, "CFO runs 1 job.", linking to `/health`,
+from the agent's `jobs` in the snapshot, so it needs no refresh; an agent
+with none has no sentence.
 
 Routines are refreshed only on demand: when the overview opens and the
 last refresh is missing or more than 60 seconds old,

@@ -434,6 +434,7 @@
     var overviewOpen = false; // the phone's Routines row was chosen (`/routines`)
     var overviewTold = false; // what `routines` was last told: the overview is on screen
     var detailsOpen = false; // the settings panel is open, whichever agent is chosen
+    var detailsKey = null; // what the panel was last built from
     var wide = window.matchMedia('(min-width: 720px)');
     var thread = { id: null, messages: null, loading: false, error: false, fresh: true, version: 0 };
     var renderedVersion = -1;
@@ -809,23 +810,27 @@
 
     // The agent's registry entry as label and value pairs, each left out
     // when the registry has no value, then its description and, when it has
-    // jobs, how many with a link to Health.
+    // jobs, how many with a link to Health. Rebuilt only when one of them
+    // changed, so the keyboard stays on the link across other state.
     function renderDetails(agent) {
-      detailsName.textContent = agent.name;
-      detailsFields.textContent = '';
       var pairs = [
         ['Role', agent.role],
         ['Group', groupName(agent.group)],
         ['Provider', providerName(agent)],
         ['Folder', shortPath(agent.cwd, state.home)],
       ];
+      var key = JSON.stringify([agent.name, pairs, agent.description, agent.jobs]);
+      if (key === detailsKey) return;
+      detailsKey = key;
+      detailsName.textContent = agent.name;
+      detailsFields.textContent = '';
       for (var i = 0; i < pairs.length; i += 1) {
         if (pairs[i][1]) detailsFields.appendChild(detail(pairs[i][0], element('span', 'request-detail-text', pairs[i][1])));
       }
       detailsDescription.textContent = agent.description || '';
       detailsDescription.hidden = !detailsDescription.textContent;
 
-      var jobs = routines ? routines.count(agent.id) : 0;
+      var jobs = typeof agent.jobs === 'number' ? agent.jobs : 0;
       detailsJobs.textContent = '';
       detailsJobs.hidden = jobs === 0;
       if (jobs === 0) return;

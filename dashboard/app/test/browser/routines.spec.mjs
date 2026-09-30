@@ -12,16 +12,20 @@ const HOUR = 60 * MINUTE;
 const ago = (ms) => new Date(Date.now() - ms).toISOString();
 
 const AGENTS = [
-  { id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented.', group: 'personal', kind: 'system' },
+  {
+    id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented.', group: 'personal', kind: 'system',
+    routines: ['gmail', 'git', 'notes', 'work', 'calendar', 'drive'].map((name) => `com.focus.scan-${name}`),
+  },
   {
     id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented notes that keep themselves.', group: 'personal',
     kind: 'persona', provider: 'claude', cwd: '/invented/second-brain',
+    routines: ['com.hunter.brain-drain', 'com.hunter.brain-audit', 'com.hunter.brain-refresh'],
   },
   {
     id: 'scribe', name: 'Scribe', role: 'Drafts', description: 'Invented, with no routines.', group: 'work', kind: 'persona',
     provider: 'codex', cwd: '/elsewhere/scribe',
   },
-  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona' },
+  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', routines: ['com.hunter.cfo.daily'] },
 ];
 
 function routine(agent, label, fields) {
@@ -225,7 +229,14 @@ test.describe('with seeded routines', () => {
     await expect(gear).toBeFocused();
 
     await gear.click();
-    await details.getByRole('link', { name: '3 jobs' }).focus();
+    const link = details.getByRole('link', { name: '3 jobs' });
+    await link.focus();
+    // A state change that leaves the settings as they were keeps the keyboard where it is.
+    const revision = await page.evaluate(() => fetch('/api/state').then((r) => r.json()).then((s) => s.revision));
+    await hub.state.refreshRoutines();
+    await expect.poll(() => page.evaluate(() => fetch('/api/state').then((r) => r.json()).then((s) => s.revision))).toBeGreaterThan(revision);
+    await page.waitForTimeout(200);
+    await expect(link).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(details).toBeHidden();
     await expect(gear).toBeFocused();
@@ -247,7 +258,7 @@ test.describe('with seeded routines', () => {
     await expect(details.locator('.details-jobs')).toHaveText('CFO runs 1 job.');
     await expect(details.getByRole('link', { name: '1 job' })).toHaveAttribute('href', '/health');
 
-    // Scribe has no jobs, no group entry left out, and a folder outside home.
+    // Scribe has no jobs and a folder outside home.
     await agentRow(page, 'Scribe').click();
     await expect(details.locator('.details-name')).toHaveText('Scribe');
     await expect(details.locator('.request-detail-text')).toHaveText(['Drafts', 'Work', 'Codex', '/elsewhere/scribe']);
@@ -436,6 +447,18 @@ test.describe('with stale routines', () => {
     expect(hub.routines.calls).toBe(1);
   });
 
+});
+
+test.describe('with routines never refreshed', () => {
+  test.use({ hubOptions: { build: () => ({ agents: AGENTS }) } });
+
+  test('the jobs line counts the registry\'s jobs without a refresh', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await page.locator('#agent-details-toggle').click();
+    await expect(page.locator('#agent-details .details-jobs')).toHaveText('Second brain runs 3 jobs.');
+    await page.waitForTimeout(300);
+    expect(hub.routines.calls).toBe(0);
+  });
 });
 
 test.describe('with Focus unreachable during the refresh', () => {
