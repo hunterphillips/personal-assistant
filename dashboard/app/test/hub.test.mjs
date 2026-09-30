@@ -113,7 +113,8 @@ test('a registry change bumps the revision with a registry and agents patch', ()
   const { hub, deltas } = makeHub({ registry });
   registry.emit(registryState([agent('cfo'), agent('ops', { kind: 'system', provider: undefined })]));
   assert.equal(hub.snapshot().revision, 2);
-  assert.deepEqual(deltas.map((d) => [d.revision, Object.keys(d.patch).sort()]), [[2, ['agents', 'registry']]]);
+  assert.deepEqual(deltas.map((d) => [d.revision, Object.keys(d.patch).sort()]), [[2, ['agents', 'groups', 'registry']]]);
+  assert.deepEqual(deltas[0].patch.groups, []);
   assert.deepEqual(deltas[0].patch.agents.map((a) => a.id), ['cfo', 'ops']);
   assert.equal('provider' in deltas[0].patch.agents[1], false);
   assert.equal(deltas[0].patch.agents[1].cwd, '/invented');
@@ -128,6 +129,18 @@ test('a registry change bumps the revision with a registry and agents patch', ()
   registry.emit(registryState([agent('cfo')], { ok: false, error: 'registry_invalid_json' }));
   assert.deepEqual(hub.snapshot().registry, { ok: false, error: 'registry_invalid_json', loadedAt: null });
   assert.equal(hub.snapshot().revision, 4);
+});
+
+test('the snapshot carries the registry group list and a pinned persona', () => {
+  const registry = fakeRegistry();
+  const { hub } = makeHub({ registry });
+  const groups = Object.freeze([Object.freeze({ id: 'work', name: 'Work' }), Object.freeze({ id: 'family', name: 'Family' })]);
+  registry.emit(Object.freeze({ ...registryState([agent('assistant', { pinned: true }), agent('cfo')]), groups }));
+  const snapshot = hub.snapshot();
+  assert.deepEqual(snapshot.groups, [{ id: 'work', name: 'Work' }, { id: 'family', name: 'Family' }]);
+  assert.equal(snapshot.agents[0].pinned, true);
+  assert.equal('pinned' in snapshot.agents[1], false);
+  assert.ok(Object.isFrozen(snapshot.groups));
 });
 
 test('a status change bumps once with focus and brief in the patch', async () => {

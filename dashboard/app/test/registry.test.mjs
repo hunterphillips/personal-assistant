@@ -172,6 +172,94 @@ test('a system agent with a provider is rejected', async (t) => {
   assert.match(state.error, /provider/);
 });
 
+test('group is any slug; the groups list loads in order and rejects bad entries', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, {
+    version: 1,
+    groups: [{ id: 'work', name: 'Work' }, { id: 'family', name: 'Family' }],
+    agents: [baseAgent(dir, { group: 'family' }), baseAgent(dir, { id: 'ops', group: 'side-projects' })],
+  });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  const state = registry.current();
+  assert.equal(state.ok, true);
+  assert.deepEqual(state.groups, [{ id: 'work', name: 'Work' }, { id: 'family', name: 'Family' }]);
+  assert.ok(Object.isFrozen(state.groups) && Object.isFrozen(state.groups[0]));
+  assert.deepEqual(state.agents.map((agent) => agent.group), ['family', 'side-projects']);
+
+  const cases = [
+    [{ groups: 'work' }, /groups must be an array/],
+    [{ groups: [{ id: 'Work', name: 'Work' }] }, /group 0: id must match/],
+    [{ groups: [{ id: 'work', name: '' }] }, /group 0: name must be/],
+    [{ groups: [{ id: 'work', name: 'Work' }, { id: 'work', name: 'Again' }] }, /group 1: id duplicates group 0/],
+    [{ groups: [{ id: 'work', name: 'Work', extra: 1 }] }, /group 0: unknown key "extra"/],
+    [{ groups: Array.from({ length: 21 }, (_, i) => ({ id: `g${i}`, name: `G${i}` })) }, /at most 20/],
+    [{ agents: [baseAgent(dir, { group: 'Not a slug' })] }, /group must match/],
+  ];
+  for (const [fields, pattern] of cases) {
+    const bad = path.join(dir, `bad-${cases.indexOf(cases.find((c) => c[0] === fields))}.json`);
+    await writeFile(bad, JSON.stringify({ version: 1, agents: [baseAgent(dir)], ...fields }));
+    const badRegistry = createRegistry({ path: bad, pollMs: 10_000 });
+    await badRegistry.start();
+    t.after(() => badRegistry.stop());
+    assert.equal(badRegistry.current().ok, false, JSON.stringify(fields));
+    assert.match(badRegistry.current().error, pattern);
+  }
+});
+
+test('a file without groups loads with an empty list, and a bad read keeps the last good groups', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir)] });
+  const registry = createRegistry({ path: file, pollMs: 10 });
+  await registry.start();
+  t.after(() => registry.stop());
+  assert.deepEqual(registry.current().groups, []);
+
+  await writeAtomic(file, { version: 1, groups: [{ id: 'work', name: 'Work' }], agents: [baseAgent(dir)] });
+  await waitUntil(() => registry.current().groups.length === 1);
+  await writeFile(file, '{ not json');
+  await waitUntil(() => registry.current().ok === false);
+  assert.deepEqual(registry.current().groups, [{ id: 'work', name: 'Work' }]);
+});
+
+test('pinned is kept on a persona, dropped when false, and rejected on other kinds or non-booleans', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, {
+    version: 1,
+    agents: [
+      baseAgent(dir, { id: 'assistant', pinned: true, routines: ['com.invented.dashboard'] }),
+      baseAgent(dir, { id: 'cfo', pinned: false }),
+      baseAgent(dir, { id: 'plain' }),
+    ],
+  });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  const state = registry.current();
+  assert.equal(state.ok, true, state.error);
+  assert.equal(state.agents[0].pinned, true);
+  assert.deepEqual(state.agents[0].routines, ['com.invented.dashboard']);
+  assert.equal('pinned' in state.agents[1], false);
+  assert.equal('pinned' in state.agents[2], false);
+
+  for (const [name, entry, pattern] of [
+    ['project', baseAgent(dir, { kind: 'project', pinned: true }), /pinned is only for a persona/],
+    ['system', { ...baseAgent(dir, { kind: 'system', pinned: true }), provider: undefined }, /pinned is only for a persona/],
+    ['string', baseAgent(dir, { pinned: 'yes' }), /pinned must be true or false/],
+  ]) {
+    const bad = path.join(dir, `${name}.json`);
+    await writeFile(bad, JSON.stringify({ version: 1, agents: [entry] }));
+    const badRegistry = createRegistry({ path: bad, pollMs: 10_000 });
+    await badRegistry.start();
+    t.after(() => badRegistry.stop());
+    assert.equal(badRegistry.current().ok, false, name);
+    assert.match(badRegistry.current().error, pattern);
+  }
+});
+
 test('an unknown key on an agent is rejected', async (t) => {
   const dir = await tempDir(t);
   const file = await write(dir, {

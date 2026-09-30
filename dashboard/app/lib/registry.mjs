@@ -1,19 +1,26 @@
-// Agent registry: loads and validates the JSON file naming the domain
-// personas and project folders the daemon knows about, and polls it for
-// changes so the state hub (hub.mjs) stays current without a restart.
+// Agent registry: loads and validates the JSON file naming the agents and
+// project folders the daemon knows about, and polls it for changes so the
+// state hub (hub.mjs) stays current without a restart.
 // server.mjs starts it; this module only loads and validates.
 //
 // Schema (config.registryPath):
 //
 //   {
 //     "version": 1,
+//     "groups": [                     // optional, default []; the headings
+//       { "id": "work", "name": "Work" } // agents are listed under, in this
+//     ],                              // order; id /^[a-z][a-z0-9-]{1,31}$/
+//                                    // unique, name non-empty <= 40 chars,
+//                                    // at most 20; a group an agent names
+//                                    // that is not listed still works
 //     "agents": [
 //       {
 //         "id": "cfo",              // /^[a-z][a-z0-9-]{1,31}$/, unique
 //         "name": "CFO",             // non-empty, <= 40 chars
 //         "role": "Money",           // non-empty, <= 24 chars
 //         "description": "...",      // non-empty, <= 300 chars
-//         "group": "work",           // "work" | "personal"
+//         "group": "work",           // /^[a-z][a-z0-9-]{1,31}$/; the
+//                                    // heading it sits under (see groups)
 //         "kind": "persona",         // "persona" | "project" | "system"
 //         "cwd": "/absolute/path",   // must exist and be a directory
 //         "provider": "claude",      // "claude" | "codex"; required for
@@ -21,9 +28,11 @@
 //         "model": "claude-sonnet",  // optional, non-empty, <= 64 chars;
 //                                    // allowed for persona/project, a
 //                                    // problem when given for system
-//         "routines": ["com.hunter.cfo.daily"] // optional, default [];
+//         "routines": ["com.hunter.cfo.daily"], // optional, default [];
 //                                    // each /^[A-Za-z0-9][A-Za-z0-9.-]*$/,
 //                                    // unique across the whole registry
+//         "pinned": true             // optional; a persona listed above
+//                                    // the groups; a problem on other kinds
 //       }
 //     ],
 //     "...": "unknown top-level keys are ignored"
@@ -43,9 +52,10 @@
 // createRegistry({ path, pollMs = 5_000, log = () => {} }) returns:
 //
 //   current()
-//     Object.freeze({ ok, agents, error, loadedAt, path }). `agents` is the
-//     last successfully loaded, frozen list (each agent object frozen too);
-//     it never reverts to empty just because a later read failed. `ok` is
+//     Object.freeze({ ok, agents, groups, error, loadedAt, path }). `agents`
+//     is the last successfully loaded, frozen list (each agent object frozen
+//     too) and `groups` the frozen group list loaded with it; neither
+//     reverts to empty just because a later read failed. `ok` is
 //     true only when the most recent read succeeded. `error` is null on
 //     success, otherwise a one-line message (validation problems joined with
 //     "; "). `loadedAt` is the ISO timestamp of the last successful load, or
@@ -92,15 +102,16 @@ const MAX_AGENTS = 100;
 const ID = /^[a-z][a-z0-9-]{1,31}$/;
 export { ID as AGENT_ID };
 const ROUTINE_LABEL = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
-const GROUPS = new Set(['work', 'personal']);
+const MAX_GROUPS = 20;
 const KINDS = new Set(['persona', 'project', 'system']);
 const PROVIDERS = new Set(['claude', 'codex']);
 const AGENT_KEYS = new Set([
-  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'routines',
+  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'routines', 'pinned',
 ]);
+const GROUP_KEYS = new Set(['id', 'name']);
 
 export function createRegistry({ path: registryPath, pollMs = 5_000, log = () => {} }) {
-  let state = freezeState({ ok: false, agents: [], error: null, loadedAt: null, path: registryPath });
+  let state = freezeState({ ok: false, agents: [], groups: [], error: null, loadedAt: null, path: registryPath });
   let lastErrorLogged = null;
   let lastSeen = null; // { mtimeMs, size } or { missing: true }, at the last read attempt
   let timer = null;
@@ -114,6 +125,7 @@ export function createRegistry({ path: registryPath, pollMs = 5_000, log = () =>
       state = freezeState({
         ok: true,
         agents: result.agents,
+        groups: result.groups,
         error: null,
         loadedAt: new Date().toISOString(),
         path: registryPath,
@@ -122,6 +134,7 @@ export function createRegistry({ path: registryPath, pollMs = 5_000, log = () =>
       state = freezeState({
         ok: false,
         agents: state.agents,
+        groups: state.groups,
         error: result.error,
         loadedAt: state.loadedAt,
         path: registryPath,
@@ -223,9 +236,55 @@ async function readAndValidate(registryPath) {
   }
 
   const problems = [];
+  const groups = validateGroups(parsed, problems);
   const agents = validateRegistry(parsed, problems);
   if (problems.length > 0) return { ok: false, error: problems.join('; ') };
-  return { ok: true, agents };
+  return { ok: true, agents, groups };
+}
+
+// The optional top-level "groups" list. Missing means []; anything else
+// must be an array of { id, name } with unique ids.
+function validateGroups(value, problems) {
+  if (!isRecord(value) || value.groups === undefined) return [];
+  if (!Array.isArray(value.groups)) {
+    problems.push('registry: groups must be an array');
+    return [];
+  }
+  if (value.groups.length > MAX_GROUPS) {
+    problems.push(`registry: groups must have at most ${MAX_GROUPS} entries`);
+    return [];
+  }
+  const ids = new Map();
+  const groups = [];
+  value.groups.forEach((entry, index) => {
+    const fail = (message) => problems.push(`group ${index}: ${message}`);
+    if (!isRecord(entry)) {
+      fail('must be an object');
+      return;
+    }
+    let ok = true;
+    for (const key of Object.keys(entry)) {
+      if (!GROUP_KEYS.has(key)) {
+        fail(`unknown key "${key}"`);
+        ok = false;
+      }
+    }
+    if (typeof entry.id !== 'string' || !ID.test(entry.id)) {
+      fail('id must match /^[a-z][a-z0-9-]{1,31}$/');
+      ok = false;
+    } else if (ids.has(entry.id)) {
+      fail(`id duplicates group ${ids.get(entry.id)}`);
+      ok = false;
+    } else {
+      ids.set(entry.id, index);
+    }
+    if (typeof entry.name !== 'string' || entry.name.length === 0 || entry.name.length > 40) {
+      fail('name must be a non-empty string of at most 40 characters');
+      ok = false;
+    }
+    if (ok) groups.push(Object.freeze({ id: entry.id, name: entry.name }));
+  });
+  return groups;
 }
 
 function validateRegistry(value, problems) {
@@ -298,8 +357,8 @@ function validateAgent(entry, index, problems) {
   if (typeof entry.description !== 'string' || entry.description.length === 0 || entry.description.length > 300) {
     fail('description must be a non-empty string of at most 300 characters');
   }
-  if (!GROUPS.has(entry.group)) {
-    fail('group must be "work" or "personal"');
+  if (typeof entry.group !== 'string' || !ID.test(entry.group)) {
+    fail('group must match /^[a-z][a-z0-9-]{1,31}$/');
   }
   if (!KINDS.has(entry.kind)) {
     fail('kind must be "persona", "project", or "system"');
@@ -321,6 +380,14 @@ function validateAgent(entry, index, problems) {
       fail('model must be absent when kind is "system"');
     } else if (typeof entry.model !== 'string' || entry.model.length === 0 || entry.model.length > 64) {
       fail('model must be a non-empty string of at most 64 characters');
+    }
+  }
+
+  if (entry.pinned !== undefined) {
+    if (typeof entry.pinned !== 'boolean') {
+      fail('pinned must be true or false');
+    } else if (entry.pinned && entry.kind !== 'persona') {
+      fail('pinned is only for a persona');
     }
   }
 
@@ -346,6 +413,7 @@ function validateAgent(entry, index, problems) {
     cwd: entry.cwd,
     ...(entry.kind === 'system' ? {} : { provider: entry.provider }),
     ...(entry.model !== undefined ? { model: entry.model } : {}),
+    ...(entry.pinned === true ? { pinned: true } : {}),
     routines,
   };
 }
@@ -363,5 +431,5 @@ function isRecord(value) {
 }
 
 function freezeState(state) {
-  return Object.freeze({ ...state, agents: Object.freeze([...state.agents]) });
+  return Object.freeze({ ...state, agents: Object.freeze([...state.agents]), groups: Object.freeze([...(state.groups ?? [])]) });
 }

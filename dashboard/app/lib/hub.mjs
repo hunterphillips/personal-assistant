@@ -17,8 +17,9 @@
 //                                 // { state, date?, revision? }, or
 //                                 // { state: 'unknown' } before the first check
 //       registry: { ok, error, loadedAt },
+//       groups: [{ id, name }],    // the registry's group list, in order
 //       agents: [{ id, name, role, description, group, kind, cwd, jobs,
-//                  provider?, model?, state, pending?, lastMessage?,
+//                  provider?, model?, pinned?, state, pending?, lastMessage?,
 //                  lastError?, costUsd? }],
 //       sessions: [{ id, provider, threadId, cwd, projectId, title, state,
 //                    pending, lastMessage, lastError, updatedAt, binding }
@@ -517,6 +518,7 @@ function personaEntry(agent, adapter) {
 function registryFields(current, personas) {
   return {
     registry: { ok: current?.ok === true, error: current?.error ?? null, loadedAt: current?.loadedAt ?? null },
+    groups: (current?.groups ?? []).map((group) => ({ id: group.id, name: group.name })),
     agents: agentViews(current, personas),
   };
 }
@@ -535,6 +537,7 @@ function agentViews(current, personas) {
     };
     if (agent.provider !== undefined) view.provider = agent.provider;
     if (agent.model !== undefined) view.model = agent.model;
+    if (agent.pinned === true) view.pinned = true;
     if (agent.kind !== 'persona') {
       view.state = null;
       return view;

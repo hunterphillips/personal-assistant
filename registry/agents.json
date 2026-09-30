@@ -1,5 +1,9 @@
 {
   "version": 1,
+  "groups": [
+    { "id": "work", "name": "Work" },
+    { "id": "personal", "name": "Personal" }
+  ],
   "agents": [
     {
       "id": "cfo",
@@ -70,11 +74,13 @@
     {
       "id": "assistant",
       "name": "Assistant",
-      "role": "System",
-      "description": "The dashboard itself.",
+      "role": "Assistant",
+      "description": "I am the way in. I read anything of Hunter's, hand judgment to the agent that owns it, and keep the morning brief.",
       "group": "personal",
-      "kind": "system",
+      "kind": "persona",
       "cwd": "/Users/hunterphillips/workspace/personal-assistant",
+      "provider": "claude",
+      "pinned": true,
       "routines": ["com.personal-assistant.dashboard"]
     }
   ]
