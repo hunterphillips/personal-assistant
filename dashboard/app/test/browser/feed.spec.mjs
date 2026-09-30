@@ -12,6 +12,7 @@ import { WATCH } from '../support/browser-server.mjs';
 import { expect, expectView, nav, needsFocus, test } from '../support/browser-test.mjs';
 
 const FEED = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'feed');
+const INSTRUCTIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'feed-instructions', 'relevance.md');
 const DATE = '2026-09-15';
 const BUSY = 'Watch is in the middle of a turn. Try again when it is idle.';
 const PNG = png(400, 600);
@@ -242,5 +243,165 @@ test.describe('with an empty store', () => {
     await expectView(page, 'reading', 'Feed');
     await expect(page.locator('#feed-message')).toHaveText(/^Nothing in the feed yet\./);
     await expect(runs(page)).toHaveCount(0);
+  });
+});
+
+test.describe('with the feed instructions', () => {
+  test.use({ hubOptions: { feed: FEED, instructions: INSTRUCTIONS, agents: [WATCH] } });
+
+  const toggle = (page) => page.getByRole('button', { name: 'Feed instructions' });
+  const panel = (page) => page.locator('#feed-instructions');
+  const input = (page) => panel(page).getByLabel('What should change?');
+
+  async function openPanel(page, hub) {
+    await openFeed(page, hub);
+    await toggle(page).click();
+    await expect(panel(page)).toBeVisible();
+    await expect(panel(page).locator('.goal-prose li')).toHaveCount(4);
+  }
+
+  test('the button opens the criteria as prose above the posts', async ({ page, hub }) => {
+    await openFeed(page, hub);
+    await expect(toggle(page)).toBeVisible();
+    await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle(page).locator('svg')).toHaveCount(1);
+    if (page.viewportSize().width >= 720) await expect(toggle(page)).toHaveText('Feed instructions');
+    await expect(panel(page)).toBeHidden();
+    await toggle(page).click();
+    await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(panel(page).getByRole('heading', { name: 'Feed instructions' })).toBeVisible();
+    await expect(panel(page).locator('.feed-instructions-intro'))
+      .toHaveText('The feed keeps what passes these tests. A change goes to Watch, which edits the file.');
+    await expect(panel(page).locator('.goal-prose h4')).toHaveText(['Invented watch criteria', 'Sources', 'An item survives if']);
+    await expect(panel(page).locator('.goal-prose p')).toHaveText(['What the invented feed keeps. Written as tests, not as topics.']);
+    await expect(panel(page).locator('.goal-prose ul li')).toHaveText(['Invented Gazette', 'Invented Letters, weekly']);
+    await expect(panel(page).locator('.goal-prose ol li'))
+      .toHaveText(['It changes how the garden is planted.', 'It names a trail opening nearby.']);
+    const table = panel(page).locator('.goal-prose table');
+    await expect(table.locator('th')).toHaveText(['Source', 'Sender', 'Cadence']);
+    await expect(table.locator('tbody tr')).toHaveCount(2);
+    await expect(table.locator('tbody tr').nth(1).locator('td'))
+      .toHaveText(['Invented Letters', 'letters@example.com, free', 'weekly']);
+    await expect(input(page)).toBeFocused();
+    await expect(panel(page).getByRole('button', { name: 'Send' })).toBeVisible();
+    const box = await panel(page).boundingBox();
+    const posts = await runs(page).first().boundingBox();
+    expect(box.y + box.height).toBeLessThanOrEqual(posts.y);
+    await expect(page.locator('#feed-instructions')).toHaveCount(1);
+    expect(hub.requests('/api/feed/instructions')).toEqual([{ method: 'GET', status: 200 }]);
+  });
+
+  test('the button is only on the Feed tab', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/reading`);
+    await expectView(page, 'reading', 'Reading');
+    await expect(toggle(page)).toHaveCount(0);
+    await tabs(page).getByRole('link', { name: 'Feed' }).click();
+    await expect(toggle(page)).toBeVisible();
+    await tabs(page).getByRole('link', { name: 'Brief' }).click();
+    await expect(toggle(page)).toBeHidden();
+  });
+
+  test('Send asks Watch for the change and opens its thread', async ({ page, hub }) => {
+    await openPanel(page, hub);
+    await input(page).fill('Drop the Invented Gazette.');
+    const posted = page.waitForRequest('**/api/feed/instructions/propose');
+    await panel(page).getByRole('button', { name: 'Send' }).click();
+    expect((await posted).postDataJSON()).toEqual({ text: 'Drop the Invented Gazette.' });
+    await expectView(page, 'agents', 'Agents');
+    await expect(page).toHaveURL(`${hub.origin}/?agent=watch`);
+    await expect(messages(page).first()).toHaveText(/^Change the feed's criteria\./);
+    await expect(messages(page).first()).toContainText('Drop the Invented Gazette.');
+    expect(hub.requests('/api/feed/instructions/propose')).toEqual([{ method: 'POST', status: 202 }]);
+  });
+
+  test('Control+Enter sends', async ({ page, hub }) => {
+    await openPanel(page, hub);
+    await input(page).fill('Add the Invented Almanac.');
+    await input(page).press('Control+Enter');
+    await expect(page).toHaveURL(`${hub.origin}/?agent=watch`);
+    expect(hub.requests('/api/feed/instructions/propose')).toEqual([{ method: 'POST', status: 202 }]);
+  });
+
+  test('Cancel, Escape, and the button close the panel and focus the button', async ({ page, hub }) => {
+    await openPanel(page, hub);
+    await panel(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(panel(page)).toBeHidden();
+    await expect(toggle(page)).toBeFocused();
+    await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
+
+    await toggle(page).click();
+    await expect(input(page)).toBeFocused();
+    await input(page).press('Escape');
+    await expect(panel(page)).toBeHidden();
+    await expect(toggle(page)).toBeFocused();
+
+    await toggle(page).click();
+    await expect(panel(page)).toBeVisible();
+    await toggle(page).click();
+    await expect(panel(page)).toBeHidden();
+    await expect(toggle(page)).toBeFocused();
+    expect(hub.requests('/api/feed/instructions/propose')).toEqual([]);
+  });
+
+  test('a busy Watch says so under the composer', async ({ page, hub }) => {
+    hub.personas.hold('watch');
+    await openFeed(page, hub);
+    await item(page, 'watch/2026-09-28/3').getByRole('button', { name: /^Discuss/ }).click();
+    await expectView(page, 'agents', 'Agents');
+    await nav(page, 'Reading').click();
+    await tabs(page).getByRole('link', { name: 'Feed' }).click();
+    await toggle(page).click();
+    await input(page).fill('Drop the Invented Gazette.');
+    await panel(page).getByRole('button', { name: 'Send' }).click();
+    await expect(panel(page).locator('.composer-reason')).toHaveText(BUSY);
+    await expect(page).toHaveURL(`${hub.origin}/feed`);
+    await expect(input(page)).toHaveValue('Drop the Invented Gazette.');
+    expect(hub.requests('/api/feed/instructions/propose')).toEqual([{ method: 'POST', status: 409 }]);
+  });
+
+  test('the panel keeps its text through the refetch', async ({ page, hub }) => {
+    await page.clock.install();
+    await openPanel(page, hub);
+    await input(page).pressSequentially('Drop the Gazette');
+    await writeFile(path.join(hub.feedDir, '2026-10-05-watch.json'), JSON.stringify({
+      producer: 'watch', date: '2026-10-05', items: [{
+        id: 'watch/2026-10-05/1', title: 'A new story', source: 'Invented Gazette', url: 'https://example.com/new', summary: 'New.',
+      }],
+    }));
+    await page.clock.runFor(60_000);
+    await expect(runs(page)).toHaveCount(3);
+    await expect(panel(page)).toBeVisible();
+    await expect(input(page)).toBeFocused();
+    await expect(input(page)).toHaveValue('Drop the Gazette');
+  });
+
+  test('on a phone the button is the icon alone and the panel fits', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPanel(page, hub);
+    await expect(toggle(page).locator('.feed-instructions-label')).toBeHidden();
+    const button = await toggle(page).boundingBox();
+    expect(button.x + button.width).toBeLessThanOrEqual(390);
+    expect(button.height).toBeGreaterThanOrEqual(44);
+    const overflow = await page.evaluate(() => ({
+      page: document.documentElement.scrollWidth - window.innerWidth,
+      feed: document.getElementById('reading-feed').scrollWidth - document.getElementById('reading-feed').clientWidth,
+    }));
+    expect(overflow).toEqual({ page: 0, feed: 0 });
+  });
+});
+
+test.describe('with no feed instructions file', () => {
+  test.use({ hubOptions: { feed: FEED, agents: [WATCH] } });
+
+  test('the panel says the file is missing and does not show an old copy on reopen', async ({ page, hub }) => {
+    await openFeed(page, hub);
+    await page.getByRole('button', { name: 'Feed instructions' }).click();
+    await expect(page.locator('#feed-instructions .feed-instructions-problem')).toHaveText('The feed instructions file is missing.');
+    await page.getByRole('button', { name: 'Feed instructions' }).click();
+    // The next read is held, so only what openPanel leaves in place shows.
+    await page.route('**/api/feed/instructions', () => {});
+    await page.getByRole('button', { name: 'Feed instructions' }).click();
+    await expect(page.locator('#feed-instructions')).toBeVisible();
+    await expect(page.locator('#feed-instructions .feed-instructions-problem')).toHaveCount(0);
   });
 });

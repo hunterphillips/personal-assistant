@@ -1,12 +1,17 @@
 // Feed: the runs in the feed store (/api/feed), one group per run with its
 // items as posts (with the story's image under the summary when it has one),
 // each with a Discuss button that sends the item to the watch persona
-// (/api/feed/discuss) and opens its thread. The shell calls
+// (/api/feed/discuss) and opens its thread. A Feed instructions button in
+// the tab row opens a panel above the posts with the feed's criteria as
+// prose (/api/feed/instructions, read each time it opens) and a composer
+// that sends a change to the watch persona
+// (/api/feed/instructions/propose) and opens its thread. The shell calls
 // create(shellApi) once, then show() and hide() as the Feed tab of the
 // Reading view comes on and off screen.
 //
 // While shown, the view fetches /api/feed on show() and every 60 seconds. An
-// answer identical to the last one rendered changes nothing. A body that is
+// answer identical to the last one rendered changes nothing; the panel is
+// outside what it renders, so it keeps its text. A body that is
 // not the expected shape shows the no-answer sentence. Buttons carry
 // data-feed-action, never data-action, which the shell's own click handler
 // owns. Every text node is set with textContent.
@@ -21,6 +26,7 @@
   var BUSY = 'Watch is in the middle of a turn. Try again when it is idle.';
   var NOT_RUNNING = 'Watch is not running.';
   var GONE = 'That item is no longer in the feed.';
+  var TOO_LONG = 'That is too long for one message.';
   var LABEL_MAX = 60;
   var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -39,6 +45,7 @@
     if (status === 503 || (status === 409 && code === 'persona_unavailable') ||
         (status === 404 && code === 'no_such_agent')) return NOT_RUNNING;
     if (status === 404 && code === 'no_such_item') return GONE;
+    if (status === 413) return TOO_LONG;
     return NO_ANSWER;
   }
 
@@ -289,6 +296,138 @@
       });
     }
 
+    // The Feed instructions panel. Its heading, sentence, and composer are
+    // in the page; the criteria go in `body` each time it opens.
+    var toggle = document.getElementById('feed-instructions-toggle');
+    var panel = document.getElementById('feed-instructions');
+    var panelBody = document.getElementById('feed-instructions-body');
+    var form = document.getElementById('feed-instructions-form');
+    var input = document.getElementById('feed-instructions-input');
+    var send = form.querySelector('button[type="submit"]');
+    var panelReason = document.getElementById('feed-instructions-reason');
+    var instructionsSequence = 0;
+    var proposing = false;
+
+    function prose(blocks) {
+      var node = element('div', 'goal-prose');
+      objectsIn(blocks).forEach(function (block) {
+        if (block.type === 'p') node.appendChild(element('p', null, block.text));
+        else if (block.type === 'h') node.appendChild(element('h4', null, block.text));
+        else if (block.type === 'list') {
+          var list = element(block.ordered === true ? 'ol' : 'ul');
+          arrayOf(block.items).forEach(function (text) { list.appendChild(element('li', null, text)); });
+          node.appendChild(list);
+        } else if (block.type === 'table') node.appendChild(table(block));
+      });
+      return node;
+    }
+
+    function table(block) {
+      var node = element('table', 'feed-instructions-table');
+      var head = element('thead');
+      var headRow = element('tr');
+      arrayOf(block.head).forEach(function (text) { headRow.appendChild(element('th', null, text)); });
+      head.appendChild(headRow);
+      node.appendChild(head);
+      var body = element('tbody');
+      arrayOf(block.rows).forEach(function (cells) {
+        var row = element('tr');
+        arrayOf(cells).forEach(function (text) { row.appendChild(element('td', null, text)); });
+        body.appendChild(row);
+      });
+      node.appendChild(body);
+      return node;
+    }
+
+    function showInstructions(lines, blocks) {
+      panelBody.textContent = '';
+      lines.forEach(function (text) { panelBody.appendChild(element('p', 'feed-instructions-problem', text)); });
+      if (blocks) panelBody.appendChild(prose(blocks));
+    }
+
+    function loadInstructions() {
+      var id = ++instructionsSequence;
+      request('/api/feed/instructions', { method: 'GET' }).then(function (result) {
+        if (id !== instructionsSequence) return;
+        var body = result && result.status === 200 ? result.body : null;
+        if (!body || !Array.isArray(body.blocks)) {
+          showInstructions([NO_ANSWER], null);
+          return;
+        }
+        showInstructions(typeof body.problem === 'string' ? [body.problem] : [], body.blocks);
+      });
+    }
+
+    function openPanel() {
+      panel.hidden = false;
+      toggle.setAttribute('aria-expanded', 'true');
+      panelReason.hidden = true;
+      panelBody.textContent = '';
+      loadInstructions();
+      input.focus();
+    }
+
+    // fromUser: a Cancel, Escape, or second press, which puts focus back on
+    // the button. A sent change also clears the text.
+    function closePanel(fromUser) {
+      panel.hidden = true;
+      toggle.setAttribute('aria-expanded', 'false');
+      if (fromUser) toggle.focus();
+    }
+
+    function propose() {
+      if (proposing) return;
+      var text = input.value.trim();
+      if (!text) {
+        input.focus();
+        return;
+      }
+      proposing = true;
+      send.disabled = true;
+      panelReason.hidden = true;
+      request('/api/feed/instructions/propose', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: text }),
+      }).then(function (result) {
+        proposing = false;
+        send.disabled = false;
+        if (result && result.status === 202) {
+          input.value = '';
+          closePanel(false);
+          if (visible) shellApi.openAgent(result.body && typeof result.body.agentId === 'string' ? result.body.agentId : AGENT_ID);
+          return;
+        }
+        var code = result && result.body && typeof result.body.error === 'string' ? result.body.error : null;
+        panelReason.textContent = result ? refusalSentence(result.status, code) : NO_ANSWER;
+        panelReason.hidden = false;
+      });
+    }
+
+    toggle.addEventListener('click', function () {
+      if (panel.hidden) openPanel();
+      else closePanel(true);
+    });
+    document.getElementById('feed-instructions-cancel').addEventListener('click', function () {
+      closePanel(true);
+    });
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      propose();
+    });
+    panel.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closePanel(true);
+      }
+    });
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        propose();
+      }
+    });
+
     runs.addEventListener('click', function (event) {
       var button = event.target.closest && event.target.closest('button[data-feed-action="discuss"]');
       if (!button) return;
@@ -299,12 +438,14 @@
       show: function () {
         if (visible) return;
         visible = true;
+        toggle.hidden = false;
         if (data) render();
         load();
         poll = setInterval(load, POLL_MS);
       },
       hide: function () {
         visible = false;
+        toggle.hidden = true;
         if (poll !== null) clearInterval(poll);
         poll = null;
       },

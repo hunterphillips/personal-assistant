@@ -49,6 +49,8 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/goals/propose` | Sends a new goal or a change to one to the second-brain persona; 202 `{"ok": true, "agentId": "second-brain"}` once the turn has started (below). |
 | `GET /api/feed` | The feed store's runs, newest first (below). |
 | `POST /api/feed/discuss` | Sends one feed item to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
+| `GET /api/feed/instructions` | The feed's criteria file, read as prose (below). |
+| `POST /api/feed/instructions/propose` | Sends a change to the criteria to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
 
 `/focus/`, `/reading/`, `/brief/`, `/feed/`, `/agents/`, `/goals/`, and `/health/` redirect to the
 paths without the slash. A known path
@@ -61,7 +63,7 @@ what `lib/app.mjs` expects from it.
 - `lib/app.mjs` routes requests, checks Host and Origin, logs, and serves the shell, assets, health, status, state, and routines refresh.
 - `lib/agent-routes.mjs` serves the persona routes under `/api/agents/` and the session routes under `/api/sessions/`.
 - `lib/goals-routes.mjs` serves the Goals routes over `lib/goals.mjs`, which reads the vault.
-- `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store.
+- `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store, and `lib/feed-instructions.mjs`, which reads the criteria file.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
 - `lib/focus-proxy.mjs` forwards the Focus routes.
@@ -244,6 +246,33 @@ opens that persona's thread. It refuses with 400 `invalid_body`, 503
 409 `persona_unavailable`, 404 `no_such_item`, then the persona send
 refusals (409 `busy` and the rest). The dashboard never writes the store;
 the producers do.
+
+`GET /api/feed/instructions` reads the criteria the watch job applies,
+`daily-brief/watch/relevance.md` (`DASHBOARD_FEED_INSTRUCTIONS`), and answers
+
+```json
+{ "path": "daily-brief/watch/relevance.md", "updated": "<ISO or null>", "problem": null,
+  "blocks": [{ "type": "h", "text": "..." }, { "type": "p", "text": "..." },
+             { "type": "list", "ordered": true, "items": ["..."] },
+             { "type": "table", "head": ["..."], "rows": [["..."]] }] }
+```
+
+`updated` is the file's modification time. The blocks come from the Goals
+markdown reader, with inline markup flattened; a paragraph of `|` rows under
+a delimiter row, such as the sources table, becomes a table. A file that is missing, not
+a regular file, or over 64 KiB gives no blocks and one `problem` sentence.
+Reads are cached by the file's lstat and happen only on request.
+
+`POST /api/feed/instructions/propose` takes `{"text": "..."}` and sends the
+watch persona one message asking it to change the criteria, keep the sender
+list in `daily-brief/watch/contribute` in step with the sources table, and
+say what changed; the shell then opens its thread. It refuses with 400
+`invalid_body`, 400 `invalid_text` (blank), 413 `payload_too_large` (over
+the send limit), then as Discuss does from 503 `shutting_down` on. The
+dashboard never writes the file; the persona does.
+
+On the Feed tab, the Feed instructions button at the end of the tab row
+opens these criteria above the posts with a box for the change.
 
 ### Focus proxy
 
@@ -1115,6 +1144,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_PUBLIC_ORIGIN` | unset | The tailnet `https://` origin. When set, its host is accepted as a Host header and it is accepted as an Origin. When unset, only `127.0.0.1:<port>` and `localhost:<port>` are accepted. |
 | `DASHBOARD_BRIEFS_DIR` | `../../daily-brief/briefs` | Resolved from this directory, not the working directory. |
 | `DASHBOARD_FEED_DIR` | `../../feed/items` | The feed store the producers write. Resolved from this directory; does not need to exist at startup. |
+| `DASHBOARD_FEED_INSTRUCTIONS` | `../../daily-brief/watch/relevance.md` | The criteria file the watch job reads, shown on the Feed tab. Resolved from this directory; does not need to exist at startup. |
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
 | `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |

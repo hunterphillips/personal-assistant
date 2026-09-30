@@ -18,7 +18,9 @@
 // terminal bindings from `bindings`; none is present unless seeded. Goals
 // reads a temporary copy of the `vault` option's notes, when given, and the
 // Feed a temporary copy of the `feed` option's run files; without it the
-// feed directory is a missing path in the temporary directory.
+// feed directory is a missing path in the temporary directory. The feed
+// instructions are a temporary copy of the `instructions` option's file,
+// or a missing path in the temporary directory.
 // stopStreams() ends every event stream with `bye` and
 // leaves the app refusing new ones (503 shutting_down), as during shutdown;
 // restartApp() then puts a new app handler over the same hub, as after a
@@ -38,6 +40,7 @@ import path from 'node:path';
 import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { createFeed } from '../../lib/feed.mjs';
+import { createFeedInstructions } from '../../lib/feed-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
@@ -77,10 +80,14 @@ export { focusSourceAvailable };
 //              copied into a temporary feed directory. It adds nothing to
 //              `agents`; a test that discusses an item adds the WATCH persona
 //              itself. `feedDir` is the copy's path.
+//   instructions  a criteria file (such as
+//              test/fixtures/feed-instructions/relevance.md) copied into the
+//              temporary directory as DASHBOARD_FEED_INSTRUCTIONS.
+//              `instructionsFile` is the copy's path.
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, routines: routinesSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
-  vault = null, feed = null,
+  vault = null, feed = null, instructions = null,
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
     throw new Error('startHub: the vault option adds second-brain; remove it from agents.');
@@ -106,6 +113,8 @@ export async function startHub({
     if (vaultDir) agents = [...agents, { ...SECOND_BRAIN, cwd: vaultDir }];
     const feedDir = path.join(root, feed ? 'feed' : 'feed-missing');
     if (feed) await cp(feed, feedDir, { recursive: true });
+    const instructionsFile = path.join(root, instructions ? 'relevance.md' : 'relevance-missing.md');
+    if (instructions) await cp(instructions, instructionsFile);
 
     const focus = withFocus && focusSourceAvailable() ? await startIsolatedFocus(context) : null;
     const focusOrigin = focus?.origin ?? `http://127.0.0.1:${await freePort()}`;
@@ -126,6 +135,7 @@ export async function startHub({
       DASHBOARD_PUBLIC_ORIGIN: `https://localhost:${securePort}`,
       DASHBOARD_BRIEFS_DIR: briefsDir,
       DASHBOARD_FEED_DIR: feedDir,
+      DASHBOARD_FEED_INSTRUCTIONS: instructionsFile,
       DASHBOARD_FOCUS_ORIGIN: focusOrigin,
     });
     const focusRoutes = createFocusProxy(config);
@@ -167,8 +177,10 @@ export async function startHub({
     };
     const goals = createGoals({ registry, limits: config.limits });
     const feedReader = createFeed({ dir: feedDir, limits: config.limits });
+    const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits });
     const newHandler = () => createApp({
-      config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, log: () => {},
+      config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, feedInstructions,
+      log: () => {},
     });
     let handler = newHandler();
     cleanups.push(async () => {
@@ -189,6 +201,7 @@ export async function startHub({
       briefsDir,
       vaultDir,
       feedDir,
+      instructionsFile,
       focus,
       writeBrief: (date, options) => writeFile(path.join(briefsDir, `viewer-${date}.html`), inventedViewer({ date, ...options })),
       writeRawBrief: (date, html) => writeFile(path.join(briefsDir, `viewer-${date}.html`), html),
