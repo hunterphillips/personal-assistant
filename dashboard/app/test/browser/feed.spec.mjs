@@ -35,6 +35,12 @@ test.describe('with the fixture store', () => {
     await expect(runs(page).first().locator('.feed-item')).toHaveCount(8);
     await expect(page.locator('#feed-runs .routine-card')).toHaveCount(0);
     await expect(runs(page).first()).toHaveCSS('border-top-width', '0px');
+    const first = await runs(page).first().boundingBox();
+    const second = await runs(page).nth(1).boundingBox();
+    expect(Math.round(second.y - (first.y + first.height))).toBe(32);
+    const post = await item(page, 'watch/2026-09-28/1').boundingBox();
+    const next = await item(page, 'watch/2026-09-28/2').boundingBox();
+    expect(Math.round(next.y - (post.y + post.height))).toBe(24);
     await expect(page.locator('#feed-message')).toBeHidden();
     await expect(page.locator('#brief-frame')).toHaveCount(0);
 
@@ -55,6 +61,31 @@ test.describe('with the fixture store', () => {
     await expect(discuss).toHaveCSS('border-top-width', '0px');
     await expect(discuss).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(page.locator('#view-reading [data-action]')).toHaveCount(2);
+  });
+
+  test('a source keeps its badge colour across posts', async ({ page, hub }) => {
+    await openFeed(page, hub);
+    const colour = (id) => item(page, id).locator('.feed-badge').evaluate((node) => getComputedStyle(node).backgroundColor);
+    await expect(item(page, 'watch/2026-09-28/4').locator('.feed-badge')).toHaveText('IG');
+    expect(await colour('watch/2026-09-28/4')).toBe(await colour('watch/2026-09-28/1'));
+    expect(await colour('watch/2026-09-28/8')).toBe(await colour('watch/2026-09-28/1'));
+    expect(await colour('watch/2026-09-28/1')).not.toBe('rgba(0, 0, 0, 0)');
+  });
+
+  test('on a phone the posts stay in one column without horizontal scroll', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openFeed(page, hub);
+    const robots = item(page, 'watch/2026-09-28/1');
+    await expect(robots.locator('.feed-badge')).toHaveCSS('width', '24px');
+    const badge = await robots.locator('.feed-badge').boundingBox();
+    const title = await robots.locator('.feed-title').boundingBox();
+    expect(title.x).toBeGreaterThan(badge.x + badge.width);
+    expect(title.x + title.width).toBeLessThanOrEqual(390);
+    const overflow = await page.evaluate(() => ({
+      page: document.documentElement.scrollWidth - window.innerWidth,
+      feed: document.getElementById('reading-feed').scrollWidth - document.getElementById('reading-feed').clientWidth,
+    }));
+    expect(overflow).toEqual({ page: 0, feed: 0 });
   });
 
   test('Discuss sends the item to the watch persona and opens its thread', async ({ page, hub }) => {
