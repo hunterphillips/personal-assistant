@@ -448,6 +448,28 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   text-decoration: none;
 }
 .reading-tabs a:hover { color: var(--ink); }
+
+/* The Feed instructions button sits at the right end of the tab row. */
+.feed-instructions-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.feed-instructions-toggle:hover,
+.feed-instructions-toggle:focus-visible,
+.feed-instructions-toggle[aria-expanded="true"] { color: var(--ink); }
+.feed-instructions-toggle svg { flex: none; }
+.feed-instructions-toggle circle { fill: var(--paper); }
 .reading-tabs a[aria-current="page"] {
   border-bottom-color: var(--green);
   color: var(--ink);
@@ -471,6 +493,39 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   width: 100%;
   max-width: 680px;
 }
+
+.feed-instructions {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.feed-instructions-heading {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.feed-instructions-intro,
+.feed-instructions-problem {
+  margin: 6px 0 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.composer.feed-instructions-composer {
+  margin: 16px 0 0;
+  padding: 0;
+  border-top: 0;
+}
+
+.feed-instructions-composer .composer-input {
+  display: block;
+  width: 100%;
+}
+
+.feed-instructions-actions { margin-top: 8px; }
 
 .feed-run + .feed-run { margin-top: 32px; }
 
@@ -1221,6 +1276,8 @@ a.agent-row[aria-current="true"] {
   #view-goals { padding: 20px 16px; }
 
   .reading-tabs { padding: 0 8px; }
+  .feed-instructions-toggle { min-width: 44px; justify-content: center; }
+  .feed-instructions-label { display: none; }
   .reading-feed { padding: 16px 16px 24px; }
   .feed-item { grid-template-columns: 24px minmax(0, 1fr); }
   .feed-badge { width: 24px; height: 24px; }

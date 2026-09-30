@@ -111,6 +111,17 @@
         <nav class="reading-tabs" aria-label="Reading">
           <a href="/reading" data-tab="brief">Brief</a>
           <a href="/feed" data-tab="feed">Feed</a>
+          <button type="button" class="feed-instructions-toggle" id="feed-instructions-toggle" aria-label="Feed instructions"
+                  aria-expanded="false" aria-controls="feed-instructions" hidden>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M2 4h12M2 8h12M2 12h12"/>
+              <circle cx="5" cy="4" r="1.5"/>
+              <circle cx="10.5" cy="8" r="1.5"/>
+              <circle cx="7" cy="12" r="1.5"/>
+            </svg>
+            <span class="feed-instructions-label">Feed instructions</span>
+          </button>
         </nav>
         <div class="reading-brief" id="reading-brief">
           <div class="notice" id="brief-newer" role="status" hidden>
@@ -124,6 +135,20 @@
           <div class="frame-slot" id="brief-slot"></div>
         </div>
         <div class="reading-feed" id="reading-feed" hidden>
+          <section class="feed-instructions" id="feed-instructions" aria-labelledby="feed-instructions-heading" hidden>
+            <h2 class="feed-instructions-heading" id="feed-instructions-heading">Feed instructions</h2>
+            <p class="feed-instructions-intro">The feed keeps what passes these tests. A change goes to Watch, which edits the file.</p>
+            <div id="feed-instructions-body"></div>
+            <form class="composer feed-instructions-composer" id="feed-instructions-form">
+              <label class="composer-label" for="feed-instructions-input">What should change?</label>
+              <textarea class="composer-input" id="feed-instructions-input" rows="3"></textarea>
+              <div class="composer-row feed-instructions-actions">
+                <button type="submit" class="button button-primary">Send</button>
+                <button type="button" class="button" id="feed-instructions-cancel">Cancel</button>
+              </div>
+              <p class="composer-reason" id="feed-instructions-reason" role="status" hidden></p>
+            </form>
+          </section>
           <p class="routines-message" id="feed-message" role="status" hidden></p>
           <div id="feed-runs"></div>
         </div>
