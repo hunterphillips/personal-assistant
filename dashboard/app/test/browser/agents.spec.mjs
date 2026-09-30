@@ -9,7 +9,7 @@ const MINUTE = 60_000;
 const ago = (ms) => new Date(Date.now() - ms).toISOString();
 
 const AGENTS = [
-  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude' },
+  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude', cwd: '/invented/cfo' },
   { id: 'catchup', name: 'Catchup', role: 'Work', description: 'Invented work folder.', group: 'work', kind: 'project', provider: 'codex' },
   { id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'claude' },
   { id: 'dev', name: 'Dev', role: 'Code', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'codex' },
@@ -159,35 +159,28 @@ test.describe('with seeded agents', () => {
     await expect(page.locator('#routines-overview')).toBeHidden();
   });
 
-  test('a persona with routines lists them behind a toggle in the thread header', async ({ page, hub }) => {
+  test('the gear opens the settings beside the thread, whose messages stay', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=cfo`);
-    const toggle = pane(page).locator('#agent-routines-toggle');
-    await expect(toggle).toHaveText('Routines (2)');
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    const section = page.locator('#agent-routines');
-    await expect(section).toBeHidden();
-    await expect(messages(page)).toHaveCount(2);
-    expect((await toggle.boundingBox()).height).toBeGreaterThanOrEqual(44);
-
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(section).toBeVisible();
-    await expect(section.locator('.routine-name')).toHaveText(['cfo.daily', 'cfo.weekly']);
-    await expect(section.locator('.badge')).toHaveText(['OK', 'Failed (exit 1)']);
-    await expect(section.locator('.routine-run')).toHaveText(['30 minutes ago', '1 hour ago']);
-    await expect(section.getByRole('button')).toHaveCount(0);
+    const gear = pane(page).getByRole('button', { name: 'Details', exact: true });
+    await expect(gear).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#agent-details')).toBeHidden();
     await expect(messages(page)).toHaveCount(2);
 
-    await toggle.click();
-    await expect(section).toBeHidden();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await gear.click();
+    const details = page.locator('#agent-details');
+    await expect(details.locator('.request-detail-text')).toHaveText(['Money', 'Work', 'Claude', '~/cfo']);
+    await expect(details.locator('.details-description')).toHaveText('Invented.');
+    await expect(details.locator('.details-jobs')).toHaveText('CFO runs 2 jobs.');
+    await expect(details.locator('.routine-row, .badge')).toHaveCount(0);
+    await expect(messages(page)).toHaveCount(2);
   });
 
-  test('a persona without routines shows no toggle', async ({ page, hub }) => {
+  test('a persona without jobs has no jobs line', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=brain`);
     await expect(pane(page).locator('#agent-name')).toHaveText('Second brain');
-    await expect(page.locator('#agent-routines-toggle')).toBeHidden();
-    await expect(page.locator('#agent-routines')).toBeHidden();
+    await page.locator('#agent-details-toggle').click();
+    await expect(page.locator('#agent-details .details-name')).toHaveText('Second brain');
+    await expect(page.locator('#agent-details .details-jobs')).toBeHidden();
   });
 
   test('opening a persona shows its thread, and a reload lands on it', async ({ page, hub }) => {
@@ -513,31 +506,27 @@ test.describe('with seeded agents', () => {
     expect(await rebuilds(page)).toBe(1);
   });
 
-  test('crossing 720px with an agent open keeps the overview hidden and its routines mounted', async ({ page, hub }) => {
+  test('crossing 720px with an agent open keeps the overview hidden and the settings open', async ({ page, hub }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${hub.origin}/?agent=cfo`);
-    await page.locator('#agent-routines-toggle').click();
-    const section = page.locator('#agent-routines');
-    await expect(section.locator('.routine-name')).toHaveText(['cfo.daily', 'cfo.weekly']);
-    const mounted = await section.locator('.thread-routines-list').elementHandle();
-    await watchRebuilds(page, '#agent-routines');
+    await page.locator('#agent-details-toggle').click();
+    const details = page.locator('#agent-details');
+    await expect(details.locator('.details-jobs')).toHaveText('CFO runs 2 jobs.');
+    await watchRebuilds(page, '#agent-details');
 
     await page.setViewportSize({ width: 390, height: 844 });
     await crossed(page, false);
     await expect(page.locator('#agents-list')).toBeHidden();
     await expect(page.locator('#agent-thread')).toBeVisible();
     await expect(page.locator('#routines-overview')).toBeHidden();
-    await expect(section).toBeVisible();
-    await expect(section.locator('.routine-name')).toHaveText(['cfo.daily', 'cfo.weekly']);
-    expect(await mounted.evaluate((node) => node.isConnected)).toBe(true);
-    expect(await rebuilds(page)).toBe(0);
+    await expect(details).toBeVisible();
+    await expect(details.locator('.details-jobs')).toHaveText('CFO runs 2 jobs.');
 
     await page.setViewportSize({ width: 1280, height: 800 });
     await crossed(page, true);
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#routines-overview')).toBeHidden();
-    await expect(section).toBeVisible();
-    expect(await mounted.evaluate((node) => node.isConnected)).toBe(true);
+    await expect(details).toBeVisible();
     expect(await rebuilds(page)).toBe(0);
   });
 
@@ -625,7 +614,7 @@ test.describe('with seeded agents', () => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
 
-    await expect(page.locator('#agent-routines-toggle')).toHaveText('Routines (2)');
+    await expect(page.locator('#agent-details-toggle')).toBeVisible();
 
     await back.click();
     await expect(page).toHaveURL(`${hub.origin}/`);

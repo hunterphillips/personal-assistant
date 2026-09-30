@@ -433,6 +433,23 @@ button until the next attempt or another session is chosen (`unbound`,
 `not_running`, `no_password`, or `auth_failed`, else "cmux could not open
 that terminal.").
 
+#### Settings
+
+A gear, named "Details", sits in the thread header of every agent (not a
+coding session) and opens the agent's settings in a panel: from 720px a
+300px column at the right of the thread, which narrows to make room, and
+under 720px a sheet over the whole thread. The panel's chevron ("Close
+details") or Escape inside it closes the panel and puts the keyboard back
+on the gear; on a phone, opening it puts the keyboard on the chevron. It
+stays open while other agents are chosen and is closed after a reload; the
+state is kept in memory only.
+
+Under "Settings" come the agent's name, then Role, Group ("Work" or
+"Personal"), Provider ("Claude" or "Codex"), and Folder (the snapshot's
+`cwd` with the home directory as `~`), each left out with its label when
+the registry has no value, then the registry description as written, and
+the jobs sentence (see Routines). Nothing in it is editable.
+
 #### Routines
 
 The overview has one card for each agent that has routines, in registry
@@ -443,13 +460,12 @@ ago"); older ones read "Yesterday 21:00" or "Sep 3 21:00". The header shows
 when the routines were last refreshed and has a Refresh button, which reads
 "Refreshing…" while a refresh runs.
 
-A persona's own routines also sit under its thread header, behind a
-"Routines (n)" button that expands them above the messages; an agent with
-no routines has no button. The rows and the Focus controls are the same,
-without the card heading.
+A thread shows no routine rows. Its settings panel (below) counts the
+agent's jobs in one sentence, "CFO runs 1 job.", linking to `/health`, from
+the same routines state; an agent with none has no sentence.
 
-Routines are refreshed only on demand: when the overview or a thread's
-routines open and the last refresh is missing or more than 60 seconds old,
+Routines are refreshed only on demand: when the overview opens and the
+last refresh is missing or more than 60 seconds old,
 and when Refresh is chosen. The Focus card shows "Paused" when any scan is
 paused, and a Pause or Resume button that posts to the forwarded
 `/api/pause` or `/api/resume`; the server then refreshes the routines, and
