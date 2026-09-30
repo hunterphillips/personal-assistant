@@ -340,7 +340,8 @@
     if (!isPersona(agent)) return agent.description || '';
     var message = agent.lastMessage;
     if (!message || typeof message.text !== 'string') return '';
-    var text = message.text.replace(/\s+/g, ' ').trim();
+    var source = typeof message.summary === 'string' && message.summary ? message.summary : message.text;
+    var text = source.replace(/\s+/g, ' ').trim();
     return message.role === 'user' ? 'You: ' + text : text;
   }
 
@@ -566,15 +567,67 @@
       }
     }
 
-    function messageNode(entry) {
-      var role = entry.role === 'user' || entry.role === 'system' ? entry.role : 'assistant';
-      var node = element('div', 'thread-message thread-message-' + role);
-      node.appendChild(element('div', 'thread-message-text', typeof entry.text === 'string' ? entry.text : ''));
+    function messageMeta(entry) {
       var meta = element('div', 'thread-message-meta');
       if (entry.truncated) meta.appendChild(element('span', null, 'Cut short. '));
       meta.appendChild(timeSpan(null, entry.at));
-      node.appendChild(meta);
+      return meta;
+    }
+
+    function messageNode(entry) {
+      if (entry.role === 'system' && entry.kind === 'brief') return briefNode(entry);
+      var role = entry.role === 'user' || entry.role === 'system' ? entry.role : 'assistant';
+      var node = element('div', 'thread-message thread-message-' + role);
+      node.appendChild(element('div', 'thread-message-text', typeof entry.text === 'string' ? entry.text : ''));
+      node.appendChild(messageMeta(entry));
       return node;
+    }
+
+    // The morning brief's notice: one line that opens to the memo. A brief
+    // that did not build is the sentence alone.
+    function briefNode(entry) {
+      var text = typeof entry.text === 'string' ? entry.text : '';
+      var node = element('div', 'thread-message thread-message-system thread-message-brief');
+      if (entry.state === 'failed') {
+        node.appendChild(element('div', 'thread-message-text', text));
+        node.appendChild(messageMeta(entry));
+        return node;
+      }
+      var details = element('details', 'thread-brief');
+      var line = typeof entry.summary === 'string' && entry.summary ? entry.summary : text;
+      var day = briefDay(entry.date);
+      details.appendChild(element('summary', 'thread-brief-summary', 'Brief' + (day ? ', ' + day : '') + ': ' + line));
+      details.appendChild(element('div', 'thread-brief-body', text));
+      node.appendChild(details);
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // "Tuesday, September 30" for a notice's YYYY-MM-DD, or ''.
+    function briefDay(date) {
+      var match = typeof date === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(date) : null;
+      if (!match) return '';
+      return dayLabel(new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    }
+
+    function dayLabel(date) {
+      var options = { weekday: 'long', month: 'long', day: 'numeric' };
+      if (date.getFullYear() !== new Date().getFullYear()) options.year = 'numeric';
+      return date.toLocaleDateString('en-US', options);
+    }
+
+    // The local calendar day a message was posted on, or null.
+    function dayKey(entry) {
+      var time = typeof entry.at === 'string' ? Date.parse(entry.at) : NaN;
+      if (isNaN(time)) return null;
+      var date = new Date(time);
+      return [date.getFullYear(), date.getMonth(), date.getDate()].join('-');
+    }
+
+    // A date line between messages posted on different local days, and one
+    // before the first message when the thread spans more than one day.
+    function dayLine(entry) {
+      return element('p', 'thread-day', dayLabel(new Date(Date.parse(entry.at))));
     }
 
     // The pane scrolls to the newest message when a thread first shows and
@@ -607,7 +660,21 @@
         messagesNode.appendChild(element('p', 'thread-line', 'No messages yet.'));
         return;
       }
-      for (var i = 0; i < thread.messages.length; i += 1) messagesNode.appendChild(messageNode(thread.messages[i]));
+      var days = 0;
+      var previousDay = null;
+      for (var d = 0; d < thread.messages.length; d += 1) {
+        var key = dayKey(thread.messages[d]);
+        if (key !== null && key !== previousDay) days += 1;
+        if (key !== null) previousDay = key;
+      }
+      previousDay = null;
+      for (var i = 0; i < thread.messages.length; i += 1) {
+        var entry = thread.messages[i];
+        var entryDay = dayKey(entry);
+        if (days > 1 && entryDay !== null && entryDay !== previousDay) messagesNode.appendChild(dayLine(entry));
+        if (entryDay !== null) previousDay = entryDay;
+        messagesNode.appendChild(messageNode(entry));
+      }
       if (follow) messagesNode.scrollTop = messagesNode.scrollHeight;
     }
 

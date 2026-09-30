@@ -803,3 +803,100 @@ test.describe('with no agents', () => {
     await expect(page.locator('#agent-panel')).toBeHidden();
   });
 });
+
+// The morning brief's notice in the Assistant's thread, and date lines
+// between days. Times at 18:00 UTC are early afternoon in America/Chicago
+// (the suite's zone), so consecutive UTC dates are consecutive local days.
+const ASSISTANT = {
+  id: 'assistant', name: 'Assistant', role: 'Assistant', description: 'The way in.', group: 'personal', kind: 'persona',
+  provider: 'claude', cwd: '/invented', pinned: true,
+};
+const DAY = 24 * 60 * MINUTE;
+const utcAfternoon = (daysAgo) => {
+  const date = new Date();
+  date.setUTCHours(18, 0, 0, 0);
+  return new Date(date.getTime() - daysAgo * DAY).toISOString();
+};
+const BRIEF_NOTICE = {
+  role: 'system', kind: 'brief', date: '2026-09-30', state: 'ready',
+  summary: 'Cash is fine and nothing is due before Thursday.',
+  text: 'Cash is fine and nothing is due before Thursday. Two threads wait on other people.\n\n## Money\n\n- Drift is under a point.',
+  at: ago(30 * MINUTE),
+};
+const FAILED_NOTICE = {
+  role: 'system', kind: 'brief', date: '2026-09-29', state: 'failed',
+  summary: 'The morning brief did not build.', text: 'The morning brief did not build.', at: ago(25 * MINUTE),
+};
+
+test.describe('with a brief notice in the Assistant thread', () => {
+  test.use({
+    hubOptions: {
+      build: () => ({
+        agents: [ASSISTANT, ...AGENTS],
+        personas: {
+          assistant: { messages: [FAILED_NOTICE, BRIEF_NOTICE] },
+          cfo: { messages: [
+            { role: 'user', text: 'Yesterday afternoon.', at: utcAfternoon(1) },
+            { role: 'assistant', text: 'Today afternoon.', at: utcAfternoon(0) },
+          ] },
+        },
+      }),
+    },
+  });
+
+  test('the notice renders collapsed, expands to the memo, and the row preview shows the opening', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText('Cash is fine and nothing is due before Thursday.');
+
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await expect(messages(page)).toHaveCount(2);
+    const brief = messages(page).nth(1).locator('details.thread-brief');
+    await expect(brief).toBeVisible();
+    await expect(brief).not.toHaveAttribute('open', /.*/);
+    await expect(brief.locator('summary')).toHaveText('Brief, Wednesday, September 30: Cash is fine and nothing is due before Thursday.');
+    await expect(brief.locator('.thread-brief-body')).toBeHidden();
+    const summary = await brief.locator('summary').boundingBox();
+    expect(summary.height).toBeGreaterThanOrEqual(44);
+
+    await brief.locator('summary').click();
+    await expect(brief).toHaveAttribute('open', '');
+    await expect(brief.locator('.thread-brief-body')).toBeVisible();
+    await expect(brief.locator('.thread-brief-body')).toContainText('## Money');
+    await expect(brief.locator('.thread-brief-body')).toContainText('Two threads wait on other people.');
+    await expect(page.locator('#agent-messages .thread-day')).toHaveCount(0);
+  });
+
+  test('a failed notice renders as one line without a disclosure', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    const failed = messages(page).nth(0);
+    await expect(failed).toHaveClass(/thread-message-brief/);
+    await expect(failed.locator('details')).toHaveCount(0);
+    await expect(failed.locator('.thread-message-text')).toHaveText('The morning brief did not build.');
+  });
+
+  test('messages on different days get a date line before each day', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(messages(page)).toHaveCount(2);
+    const lines = page.locator('#agent-messages .thread-day');
+    await expect(lines).toHaveCount(2);
+    const order = await page.locator('#agent-messages > *').evaluateAll((nodes) => nodes.map((node) => node.className.split(' ')[0]));
+    expect(order).toEqual(['thread-day', 'thread-message', 'thread-day', 'thread-message']);
+    const labels = await lines.allTextContents();
+    expect(labels[0]).not.toEqual(labels[1]);
+    expect(labels[1]).toMatch(/^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), [A-Z][a-z]+ \d{1,2}(, \d{4})?$/);
+  });
+
+  test('a notice file the run writes is posted once when the page connects, and a reload adds nothing', async ({ page, hub }) => {
+    await hub.writeNotice('2026-10-01', { opening: 'A fresh brief. Details follow.', memo: '## Work\n\nOne thread.' });
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await expect(messages(page)).toHaveCount(3);
+    await expect(messages(page).nth(2).locator('summary')).toHaveText('Brief, Thursday, October 1: A fresh brief.');
+    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText('A fresh brief.');
+
+    await page.reload();
+    await expect(messages(page)).toHaveCount(3);
+    await hub.notices.reconcile();
+    await page.reload();
+    await expect(messages(page)).toHaveCount(3);
+  });
+});

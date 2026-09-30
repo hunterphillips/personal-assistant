@@ -19,6 +19,9 @@ export default defineConfig({
   use: {
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // Date lines in threads come from local calendar days; one zone keeps
+    // them deterministic wherever the suite runs.
+    timezoneId: 'America/Chicago',
   },
   projects: [
     {

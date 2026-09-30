@@ -1049,6 +1049,54 @@ a.agent-row[aria-current="true"] {
   font-size: 12px;
 }
 
+/* A date line between days in a thread. */
+.thread-day {
+  align-self: center;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+/* The morning brief's notice: one line that opens to the memo. */
+.thread-message-brief {
+  align-self: stretch;
+  align-items: stretch;
+  max-width: none;
+}
+.thread-message-brief .thread-message-meta { text-align: center; }
+.thread-brief {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.thread-brief-summary {
+  display: list-item;
+  min-height: 44px;
+  padding: 11px 14px;
+  box-sizing: border-box;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 22px;
+  list-style: disclosure-closed inside;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.thread-brief[open] .thread-brief-summary {
+  border-bottom: 1px solid var(--line);
+  list-style-type: disclosure-open;
+}
+.thread-brief-summary::marker { color: var(--green); }
+.thread-brief-body {
+  padding: 12px 14px 14px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .thread-status {
   display: flex;
   flex-wrap: wrap;
