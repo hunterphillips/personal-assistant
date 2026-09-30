@@ -1,5 +1,5 @@
-// Feed: the runs in the feed store (/api/feed), one card per run with its
-// items, each with a Discuss button that sends the item to the watch persona
+// Feed: the runs in the feed store (/api/feed), one group per run with its
+// items as posts, each with a Discuss button that sends the item to the watch persona
 // (/api/feed/discuss) and opens its thread. The shell calls
 // create(shellApi) once, then show() and hide() as the Feed tab of the
 // Reading view comes on and off screen.
@@ -23,6 +23,8 @@
   var LABEL_MAX = 60;
   var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var BADGE_COLOURS = 6;
+  var SVG_NS = 'http://www.w3.org/2000/svg';
 
   function element(tag, className, text) {
     var node = document.createElement(tag);
@@ -59,6 +61,39 @@
     var date = parseDate(text);
     if (!date) return null;
     return 'Since ' + MONTHS[date.getMonth()] + ' ' + date.getDate();
+  }
+
+  // "AN" for "Axios Nashville": the first letter of each of the first two
+  // words, upper case.
+  function initials(source) {
+    var words = String(source).split(/\s+/).filter(Boolean).slice(0, 2);
+    return words.map(function (word) { return Array.from(word)[0]; }).join('').toUpperCase();
+  }
+
+  // One of the badge colours, the same for a source every time.
+  function colourIndex(source) {
+    var hash = 0;
+    var text = String(source);
+    for (var i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+    return hash % BADGE_COLOURS;
+  }
+
+  function speechBubble() {
+    var svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'feed-icon');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    var path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', 'M2.5 3.5h11v7.5h-6.5l-3 2.5v-2.5h-1.5z');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    return svg;
   }
 
   // Resolves with { status, body } or null when there was no answer in time.
@@ -104,13 +139,15 @@
     var pending = null; // the id being discussed, while the request is out
 
     function discussButton(item) {
-      var button = element('button', 'button button-small', 'Discuss');
+      var button = element('button', 'feed-discuss');
       button.type = 'button';
       button.setAttribute('data-feed-action', 'discuss');
       button.setAttribute('data-feed-id', item.id);
       var label = 'Discuss ' + item.title;
       if (label.length > LABEL_MAX) label = label.slice(0, LABEL_MAX - 1) + '…';
       button.setAttribute('aria-label', label);
+      button.appendChild(speechBubble());
+      button.appendChild(document.createTextNode('Discuss'));
       button.disabled = pending === item.id;
       return button;
     }
@@ -118,39 +155,45 @@
     function renderItem(item) {
       var node = element('article', 'feed-item');
       node.setAttribute('data-feed-item', item.id);
-      node.appendChild(element('span', 'role-chip', item.source));
+      var badge = element('span', 'feed-badge feed-badge-' + colourIndex(item.source), initials(item.source));
+      badge.setAttribute('role', 'img');
+      badge.setAttribute('aria-label', item.source);
+      badge.title = item.source;
+      node.appendChild(badge);
+      var body = element('div', 'feed-body');
       var title = element('h3', 'feed-title');
       var link = element('a', null, item.title);
       link.href = item.url;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       title.appendChild(link);
-      node.appendChild(title);
-      node.appendChild(element('p', 'feed-summary', item.summary));
+      body.appendChild(title);
+      body.appendChild(element('p', 'feed-summary', item.summary));
       var actions = element('div', 'feed-actions');
       actions.appendChild(discussButton(item));
-      node.appendChild(actions);
+      body.appendChild(actions);
       var reason = element('p', 'feed-reason');
       reason.setAttribute('role', 'status');
       reason.hidden = true;
-      node.appendChild(reason);
+      body.appendChild(reason);
+      node.appendChild(body);
       return node;
     }
 
     function renderRun(run) {
-      var card = element('section', 'routine-card feed-run');
+      var group = element('section', 'feed-run');
       var headingId = 'feed-run-' + run.id;
-      card.setAttribute('aria-labelledby', headingId);
-      card.setAttribute('data-feed-run', run.id);
-      var header = element('div', 'card-header');
-      var title = element('h2', 'card-name', dateSentence(run.date));
+      group.setAttribute('aria-labelledby', headingId);
+      group.setAttribute('data-feed-run', run.id);
+      var header = element('div', 'feed-run-header');
+      var title = element('h2', 'feed-date', dateSentence(run.date));
       title.id = headingId;
       header.appendChild(title);
       var since = sinceSentence(run.since);
-      if (since) header.appendChild(element('span', 'card-note', since));
-      card.appendChild(header);
-      objectsIn(run.items).forEach(function (item) { card.appendChild(renderItem(item)); });
-      return card;
+      if (since) header.appendChild(element('span', 'feed-since', since));
+      group.appendChild(header);
+      objectsIn(run.items).forEach(function (item) { group.appendChild(renderItem(item)); });
+      return group;
     }
 
     function setMessage(lines) {
@@ -167,7 +210,7 @@
       rendered = null;
     }
 
-    // Builds every card before touching the page, so a body that is not the
+    // Builds every group before touching the page, so a body that is not the
     // expected shape leaves the last render in place and says so.
     function render() {
       if (!data) return;
@@ -183,7 +226,7 @@
       var problems = arrayOf(data.problems).filter(function (text) { return typeof text === 'string'; });
       setMessage(built.length === 0 ? [EMPTY].concat(problems) : problems);
       runs.textContent = '';
-      built.forEach(function (card) { runs.appendChild(card); });
+      built.forEach(function (group) { runs.appendChild(group); });
       rendered = JSON.stringify(data);
     }
 
