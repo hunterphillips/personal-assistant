@@ -23,7 +23,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 
 | Route | Purpose |
 | --- | --- |
-| `GET /`, `/agents`, `/focus`, `/reading`, `/brief`, `/feed`, `/goals`, `/health` | The shell. `/` and `/agents` show the Agents view; `/reading` and `/brief` show Reading on its Brief tab and `/feed` on its Feed tab; `/health` shows Health. |
+| `GET /`, `/agents`, `/focus`, `/reading`, `/brief`, `/feed`, `/goals`, `/health` | The shell. `/` and `/agents` show the Agents view; `/reading` and `/feed` show Reading on its Feed tab and `/brief` on its Brief tab; `/health` shows Health. |
 | `GET /routines`, `/routines/` | 302 to `/health`, keeping the query. Kept for one release while the jobs move from Agents to Health. |
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
 | `GET /api/state` | Checks Focus and the brief, then returns the state hub's snapshot (below). |

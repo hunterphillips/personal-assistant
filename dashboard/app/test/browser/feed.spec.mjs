@@ -189,10 +189,10 @@ test.describe('with the fixture store', () => {
     await expectView(page, 'agents', 'Agents');
     await nav(page, 'Reading').click();
     await tabs(page).getByRole('link', { name: 'Feed' }).click();
-    await expect(page).toHaveURL(`${hub.origin}/feed`);
+    await expect(page).toHaveURL(`${hub.origin}/reading`);
     await item(page, 'watch/2026-09-28/4').getByRole('button', { name: /^Discuss/ }).click();
     await expect(item(page, 'watch/2026-09-28/4').locator('.feed-reason')).toHaveText(BUSY);
-    await expect(page).toHaveURL(`${hub.origin}/feed`);
+    await expect(page).toHaveURL(`${hub.origin}/reading`);
     expect(hub.requests('/api/feed/discuss').map((entry) => entry.status)).toEqual([202, 409]);
   });
 
@@ -202,19 +202,19 @@ test.describe('with the fixture store', () => {
     await openFeed(page, hub);
 
     await tabs(page).getByRole('link', { name: 'Brief' }).click();
-    await expect(page).toHaveURL(`${hub.origin}/reading`);
+    await expect(page).toHaveURL(`${hub.origin}/brief`);
     await expectView(page, 'reading', 'Reading');
     await expect(page.frameLocator('#brief-frame').locator('h1')).toHaveText(`Daily Brief — ${DATE}`);
     await expect(page.locator('#reading-feed')).toBeHidden();
 
     await tabs(page).getByRole('link', { name: 'Feed' }).click();
-    await expect(page).toHaveURL(`${hub.origin}/feed`);
+    await expect(page).toHaveURL(`${hub.origin}/reading`);
     await expectView(page, 'reading', 'Feed');
     await expect(page.locator('#brief-frame')).toBeHidden();
     await expect(runs(page)).toHaveCount(2);
 
     await page.goBack();
-    await expect(page).toHaveURL(`${hub.origin}/reading`);
+    await expect(page).toHaveURL(`${hub.origin}/brief`);
     await expectView(page, 'reading', 'Reading');
     await expect(page.locator('#brief-frame')).toBeVisible();
     await expect(page.locator('iframe#brief-frame')).toHaveCount(1);
@@ -243,6 +243,15 @@ test.describe('with an empty store', () => {
     await expectView(page, 'reading', 'Feed');
     await expect(page.locator('#feed-message')).toHaveText(/^Nothing in the feed yet\./);
     await expect(runs(page)).toHaveCount(0);
+  });
+
+  test('/reading opens on the Feed tab, which comes before Brief', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/reading`);
+    await expectView(page, 'reading', 'Feed');
+    const links = tabs(page).getByRole('link');
+    await expect(links).toHaveText(['Feed', 'Brief']);
+    await expect(links.first()).toHaveAttribute('aria-current', 'page');
+    await expect(links.last()).not.toHaveAttribute('aria-current', 'page');
   });
 });
 
@@ -292,7 +301,7 @@ test.describe('with the feed instructions', () => {
   });
 
   test('the button is only on the Feed tab', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/reading`);
+    await page.goto(`${hub.origin}/brief`);
     await expectView(page, 'reading', 'Reading');
     await expect(toggle(page)).toHaveCount(0);
     await tabs(page).getByRole('link', { name: 'Feed' }).click();
@@ -354,7 +363,7 @@ test.describe('with the feed instructions', () => {
     await input(page).fill('Drop the Invented Gazette.');
     await panel(page).getByRole('button', { name: 'Send' }).click();
     await expect(panel(page).locator('.composer-reason')).toHaveText(BUSY);
-    await expect(page).toHaveURL(`${hub.origin}/feed`);
+    await expect(page).toHaveURL(`${hub.origin}/reading`);
     await expect(input(page)).toHaveValue('Drop the Invented Gazette.');
     expect(hub.requests('/api/feed/instructions/propose')).toEqual([{ method: 'POST', status: 409 }]);
   });

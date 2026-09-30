@@ -24,6 +24,12 @@ function markButton(page, id, label) {
   return page.frameLocator('#brief-frame').locator(`.item[data-id="${id}"]`).getByRole('button', { name: label });
 }
 
+// The Reading rail link lands on the Feed tab by default; these tests are
+// about the Brief tab, so they follow it with a click on the Brief tab.
+function briefTab(page) {
+  return page.getByRole('navigation', { name: 'Reading' }).getByRole('link', { name: 'Brief' });
+}
+
 test('deep links, links, Back and Forward, and reload show the right view', async ({ page, hub }) => {
   needsFocus();
   await hub.writeBrief(DATE);
@@ -61,8 +67,7 @@ test('deep links, links, Back and Forward, and reload show the right view', asyn
   await focusBoardReady(page);
   await nav(page, 'Reading').click();
   await page.reload();
-  await expectView(page, 'reading', 'Reading');
-  await briefReady(page);
+  await expectView(page, 'reading', 'Feed');
 });
 
 test('frames are created once and kept, hidden, across navigation', async ({ page, hub }) => {
@@ -77,6 +82,7 @@ test('frames are created once and kept, hidden, across navigation', async ({ pag
   await focusFrame.evaluate(() => { window.dashboardMarker = 'focus-kept'; });
 
   await nav(page, 'Reading').click();
+  await briefTab(page).click();
   await briefReady(page);
   const briefFrame = await frameOf(page, '#brief-frame');
   await briefFrame.evaluate(() => { window.dashboardMarker = 'brief-kept'; });
@@ -150,6 +156,7 @@ test('marks survive navigation and reload through the viewer storage key', async
 
   await nav(page, 'Home').click();
   await nav(page, 'Reading').click();
+  await briefTab(page).click();
   await expect(markButton(page, 'invented-two', 'Dismiss')).toHaveAttribute('aria-pressed', 'true');
   await expect(viewer.locator('#overall')).toHaveValue('Unsaved invented draft.');
 
@@ -196,6 +203,7 @@ test('when Focus stops, the shell reports it and keeps the mounted frame', async
   expect(await (await frameOf(page, '#focus-frame')).evaluate(() => window.dashboardMarker)).toBe('still-here');
 
   await nav(page, 'Reading').click();
+  await briefTab(page).click();
   await briefReady(page);
 });
 
@@ -213,6 +221,7 @@ test.describe('with Focus not running', () => {
     await retried;
     await expect(notice).toBeVisible();
     await nav(page, 'Reading').click();
+    await briefTab(page).click();
     await briefReady(page);
   });
 });
@@ -228,6 +237,7 @@ test('a newer brief is offered, and the open one stays until it is loaded', asyn
   await nav(page, 'Home').click();
   await expect.poll(async () => (await (await page.request.get(`${hub.origin}/api/state`)).json()).brief.date).toBe(NEXT_DATE);
   await nav(page, 'Reading').click();
+  await briefTab(page).click();
   const newer = page.locator('#brief-newer');
   await expect(newer).toContainText('A newer brief is available.');
   await briefReady(page);
@@ -257,6 +267,7 @@ test('a same-date replacement refuses the stale save and keeps the draft', async
 
   await nav(page, 'Home').click();
   await nav(page, 'Reading').click();
+  await briefTab(page).click();
   await page.locator('#brief-newer').getByRole('button', { name: 'Load newer brief' }).click();
   await briefReady(page, revised);
   await expect(markButton(page, 'invented-one', 'Approve')).toHaveAttribute('aria-pressed', 'true');
@@ -281,6 +292,7 @@ test('a brief replaced before its view opens is mounted from fresh status', asyn
   const revised = `Daily Brief — ${DATE} (revised)`;
   await hub.writeBrief(DATE, { heading: revised });
   await nav(page, 'Reading').click();
+  await briefTab(page).click();
   await briefReady(page, revised);
   await expect(page.locator('#brief-frame')).toBeVisible();
   expect(refused).toEqual([]);
@@ -295,6 +307,7 @@ test('a same-date replacement of a mounted brief is offered and never shown as a
   await hub.writeBrief(DATE, { heading: `Daily Brief — ${DATE} (revised)` });
   await nav(page, 'Home').click();
   await nav(page, 'Reading').click();
+  await briefTab(page).click();
   const newer = page.locator('#brief-newer');
   await expect(newer).toContainText('A newer brief is available.');
   await briefReady(page);

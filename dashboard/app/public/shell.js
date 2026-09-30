@@ -4,8 +4,8 @@
 // API, creates each child frame the first time its view is shown and keeps
 // it afterwards, and keeps one copy of the server's state, which it hands
 // to the Health, Agents, and Goals views. Agents is the page at `/`;
-// `/agents` shows it too, `/reading` and `/brief` show Reading on the Brief
-// tab, `/feed` shows it on the Feed tab, `/health` shows Health (the server
+// `/agents` shows it too, `/reading` and `/feed` show Reading on the Feed
+// tab, `/brief` shows it on the Brief tab, `/health` shows Health (the server
 // redirects the old `/routines` there), and any unknown path lands on
 // Agents. The brief frame is created only on
 // the Brief tab and kept while the Feed tab is shown.
@@ -43,7 +43,7 @@
   var FAILED = 'data-failed';
 
   var current = null;
-  var tab = 'brief'; // the Reading tab: 'brief' or 'feed'
+  var tab = 'feed'; // the Reading tab: 'brief' or 'feed'
   var state = null; // latest snapshot, or null before the first one
   var applied = 0; // counts snapshots and deltas applied, to order fetches
   var sequence = 0;
@@ -83,7 +83,7 @@
   }
 
   function tabFor(pathname) {
-    return pathname === '/feed' ? 'feed' : 'brief';
+    return pathname === '/brief' ? 'brief' : 'feed';
   }
 
   function onFeed() {

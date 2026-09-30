@@ -505,7 +505,7 @@ test('with no agents, Home says so, and Health refreshes once when opened', asyn
   await expect.poll(() => hub.routines.calls).toBe(1);
 });
 
-test('the rail holds five links without scrolling, and /brief and /reading show Reading', async ({ page, hub }) => {
+test('the rail holds five links without scrolling, and /brief shows the Brief tab, /reading the Feed tab', async ({ page, hub }) => {
   await page.goto(`${hub.origin}/goals`);
   await expectView(page, 'goals', 'Goals');
   await expect(page.locator('#view-goals h1')).toHaveText('Goals');
@@ -533,11 +533,13 @@ test('the rail holds five links without scrolling, and /brief and /reading show 
     expect(await page.locator('.nav').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   }
 
-  for (const path of ['/brief', '/reading']) {
-    await page.goto(`${hub.origin}${path}`);
-    await expect(page.locator('#view-reading')).toBeVisible();
-    await expect(page).toHaveTitle('Reading · Dashboard');
-  }
+  await page.goto(`${hub.origin}/brief`);
+  await expect(page.locator('#view-reading')).toBeVisible();
+  await expect(page).toHaveTitle('Reading · Dashboard');
+
+  await page.goto(`${hub.origin}/reading`);
+  await expect(page.locator('#view-reading')).toBeVisible();
+  await expect(page).toHaveTitle('Feed · Dashboard');
   await nav(page, 'Home').click();
   await expectView(page, 'agents', 'Agents');
   await nav(page, 'Goals').click();
