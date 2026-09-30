@@ -1,7 +1,12 @@
-// Feed routes over feed.mjs (read-only) and the watch persona:
+// Feed routes over feed.mjs and feed-instructions.mjs (both read-only) and
+// the watch persona:
 //   GET  /api/feed          200 feed.read()
 //   POST /api/feed/discuss  { id } -> 202 { ok: true, agentId } once the
 //                           persona has accepted a turn carrying the item
+//   GET  /api/feed/instructions          200 instructions.read()
+//   POST /api/feed/instructions/propose  { text } -> 202 { ok: true, agentId }
+//                           once the persona has accepted a turn asking it
+//                           to change the criteria file
 // discuss never writes the store: it sends the item to the persona named by
 // the feed's agentId, which reads the link and answers in its own thread;
 // the shell then opens that thread.
@@ -13,13 +18,22 @@
 // startTurn (agent-routes.mjs) maps: 409 busy, 503 unavailable or
 // shutting_down, 400 invalid_text.
 //
-// createFeedRoutes({ feed, hub, log, shuttingDown }) returns
+// propose never writes the file either: the persona edits it under its own
+// rules in its own thread. It refuses, in this order: 400 invalid_body (any
+// key but text, or text not a string), 400 invalid_text (blank), 413
+// payload_too_large (text over limits.sendTextBytes), then as discuss from
+// 503 shutting_down on, without no_such_item.
+//
+// createFeedRoutes({ feed, instructions, hub, log, limits, shuttingDown }) returns
 //   serveRead(res) -> Promise<void>
 //   serveDiscuss(req, res) -> Promise<void>
+//   serveInstructions(res) -> Promise<void>
+//   serveProposeInstructions(req, res) -> Promise<void>
 // The router (app.mjs) has already checked the method, Origin, and content
-// type; serveDiscuss reads the body itself.
+// type; the POST routes read the body themselves.
 
 import { personaFor, startTurn } from './agent-routes.mjs';
+import { INSTRUCTIONS_PATH } from './feed-instructions.mjs';
 import { HttpError, readJsonBody, sendJson } from './http.mjs';
 
 const ID_MAX = 200;
@@ -31,9 +45,28 @@ export function discussMessage({ title, source, url, summary }) {
     'Then wait for my question.';
 }
 
-export function createFeedRoutes({ feed, hub, log, shuttingDown }) {
+export function instructionsMessage(text) {
+  return "Change the feed's criteria.\n\n" +
+    `The criteria are in ${INSTRUCTIONS_PATH}, which you read every run.\n\n` +
+    `What I want changed:\n${text}\n\n` +
+    'Ask me what you need, then edit the file under its own rules, keep the\n' +
+    'sender list in daily-brief/watch/contribute in step with the sources table,\n' +
+    'and tell me what changed.';
+}
+
+export function createFeedRoutes({ feed, instructions, hub, log, limits, shuttingDown }) {
   async function serveRead(res) {
     sendJson(res, 200, await feed.read());
+  }
+
+  // The persona the feed names, when the registry lists it as a persona
+  // and it is running.
+  async function watchPersona() {
+    const { agentId } = await feed.read();
+    const listed = hub.snapshot().agents.find((agent) => agent.id === agentId && agent.kind === 'persona');
+    if (!listed) throw new HttpError(404, 'no_such_agent');
+    personaFor(hub, agentId);
+    return agentId;
   }
 
   async function serveDiscuss(req, res) {
@@ -42,10 +75,7 @@ export function createFeedRoutes({ feed, hub, log, shuttingDown }) {
       typeof body.id === 'string' && body.id !== '' && body.id.length <= ID_MAX;
     if (!valid) throw new HttpError(400, 'invalid_body');
     if (shuttingDown()) throw new HttpError(503, 'shutting_down');
-    const { agentId } = await feed.read();
-    const listed = hub.snapshot().agents.find((agent) => agent.id === agentId && agent.kind === 'persona');
-    if (!listed) throw new HttpError(404, 'no_such_agent');
-    personaFor(hub, agentId);
+    const agentId = await watchPersona();
     const item = await feed.find(body.id);
     if (!item) throw new HttpError(404, 'no_such_item');
     // startTurn checks shutdown and the persona again: find() awaited.
@@ -53,7 +83,27 @@ export function createFeedRoutes({ feed, hub, log, shuttingDown }) {
     sendJson(res, 202, { ok: true, agentId });
   }
 
-  return { serveRead, serveDiscuss };
+  async function serveInstructions(res) {
+    sendJson(res, 200, await instructions.read());
+  }
+
+  async function serveProposeInstructions(req, res) {
+    // Twice the text cap leaves room for JSON escapes around the text.
+    const body = await readJsonBody(req, { limit: limits.sendTextBytes * 2 });
+    if (!isRecord(body) || Object.keys(body).join() !== 'text' || typeof body.text !== 'string') {
+      throw new HttpError(400, 'invalid_body');
+    }
+    const { text } = body;
+    if (text.trim() === '') throw new HttpError(400, 'invalid_text');
+    if (Buffer.byteLength(text, 'utf8') > limits.sendTextBytes) throw new HttpError(413, 'payload_too_large');
+    if (shuttingDown()) throw new HttpError(503, 'shutting_down');
+    const agentId = await watchPersona();
+    // startTurn checks shutdown and the persona again: read() awaited.
+    await startTurn({ hub, log, shuttingDown }, agentId, instructionsMessage(text));
+    sendJson(res, 202, { ok: true, agentId });
+  }
+
+  return { serveRead, serveDiscuss, serveInstructions, serveProposeInstructions };
 }
 
 function isRecord(value) {

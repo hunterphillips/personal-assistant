@@ -136,7 +136,7 @@ A thread started moments ago is listed by its folder name, with no title, until 
 
 The Agents view and the persona runtime read the agent registry from `personal-assistant/registry/agents.json`, outside the app directory. It is tracked in the umbrella repository and holds absolute paths. Set `DASHBOARD_REGISTRY_PATH` to use another file (default `../../registry/agents.json`, resolved from the app directory) and `DASHBOARD_LAUNCH_AGENTS_DIR` to read plists from another directory (default `~/Library/LaunchAgents`). The daemon checks the file every few seconds; if an edit leaves it unreadable or invalid, the daemon keeps the last good registry and reports the error in the state, and the Health view shows it above the jobs.
 
-Goals needs a `second-brain` persona in the registry and reads its notes from that persona's cwd. The Feed reads `feed/items/` at the umbrella root (`DASHBOARD_FEED_DIR`) and its Discuss needs a `watch` persona.
+Goals needs a `second-brain` persona in the registry and reads its notes from that persona's cwd. The Feed reads `feed/items/` at the umbrella root (`DASHBOARD_FEED_DIR`) and `daily-brief/watch/relevance.md` (`DASHBOARD_FEED_INSTRUCTIONS`); its Discuss and its Feed instructions composer need a `watch` persona.
 
 ## cmux
 

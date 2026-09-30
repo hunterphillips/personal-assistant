@@ -130,3 +130,10 @@ test('persona limits and timeouts are exposed', () => {
   assert.equal(config.limits.threadCacheMessages, 200);
   assert.equal(config.limits.threadCacheBytes, 1_048_576);
 });
+
+test('the feed instructions path defaults beside the watch job and takes an override', () => {
+  assert.equal(loadConfig({}).feedInstructionsPath, path.resolve(APP_ROOT, '../../daily-brief/watch/relevance.md'));
+  assert.equal(loadConfig({ DASHBOARD_FEED_INSTRUCTIONS: '/tmp/criteria.md' }).feedInstructionsPath, '/tmp/criteria.md');
+  assert.equal(loadConfig({ DASHBOARD_FEED_INSTRUCTIONS: 'var/criteria.md' }).feedInstructionsPath,
+    path.resolve(APP_ROOT, 'var/criteria.md'));
+});
