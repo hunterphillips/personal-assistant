@@ -15,7 +15,10 @@
 //     - `updated` is the file's modification time as ISO, or null.
 //     - `blocks` are the markdown parsed by goals-markdown.mjs into the
 //       shapes the Goals view renders: { type: 'p', text }, { type: 'h',
-//       text }, { type: 'list', items: [text] }, inline markup flattened.
+//       text }, { type: 'list', ordered, items: [text] }, inline markup
+//       flattened. A paragraph whose every line starts with `|` and whose
+//       second line is a delimiter row is a table instead:
+//       { type: 'table', head: [cell], rows: [[cell]] }.
 //     - `problem` is null, or one sentence with `blocks` empty: a missing
 //       file, one that is not a regular file, one over
 //       limits.feedInstructionsBytes (checked from lstat and again on the
@@ -67,7 +70,10 @@ export function createFeedInstructions({ file, limits, log: rawLog = () => {} })
     else {
       const text = await readCapped(file, maxBytes);
       if (text === null) result = shaped(updated, tooLarge);
-      else result = shaped(updated, null, parseBlocks(splitLines(text)).map(proseBlock));
+      else {
+        const lines = splitLines(text);
+        result = shaped(updated, null, parseBlocks(lines).map((block) => proseBlock(block, lines)));
+      }
     }
     cache = { signature, result };
     return result;
@@ -91,9 +97,24 @@ function shaped(updated, problem, blocks = []) {
   return deepFreeze({ path: INSTRUCTIONS_PATH, updated, problem, blocks });
 }
 
-function proseBlock(block) {
-  if (block.type === 'list') return { type: 'list', items: block.items.map((item) => flatten(item.raw)) };
+const DELIMITER_ROW = /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$/;
+
+function proseBlock(block, lines) {
+  if (block.type === 'list') {
+    return { type: 'list', ordered: block.ordered, items: block.items.map((item) => flatten(item.raw)) };
+  }
+  if (block.type === 'p') {
+    const rows = lines.slice(block.start, block.end + 1).map((line) => line.trim());
+    if (rows.length >= 2 && rows.every((row) => row.startsWith('|')) && DELIMITER_ROW.test(rows[1])) {
+      return { type: 'table', head: cells(rows[0]), rows: rows.slice(2).map(cells) };
+    }
+  }
   return { type: block.type, text: flatten(block.raw) };
+}
+
+// A table row's cells, flattened, without the outer pipes.
+function cells(row) {
+  return row.replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => flatten(cell));
 }
 
 // The file's text, or null when it holds more than maxBytes. Opened without

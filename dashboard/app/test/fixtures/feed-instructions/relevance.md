@@ -5,6 +5,11 @@ not as topics.
 
 ## Sources
 
+| Source | Sender | Cadence |
+|---|---|---|
+| Invented Gazette | `gazette@example.com` | daily |
+| Invented Letters | `letters@example.com`, **free** | weekly |
+
 - Invented Gazette
 - Invented Letters, **weekly**
 

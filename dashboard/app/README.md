@@ -248,11 +248,13 @@ the producers do.
 ```json
 { "path": "daily-brief/watch/relevance.md", "updated": "<ISO or null>", "problem": null,
   "blocks": [{ "type": "h", "text": "..." }, { "type": "p", "text": "..." },
-             { "type": "list", "items": ["..."] }] }
+             { "type": "list", "ordered": true, "items": ["..."] },
+             { "type": "table", "head": ["..."], "rows": [["..."]] }] }
 ```
 
 `updated` is the file's modification time. The blocks come from the Goals
-markdown reader, with inline markup flattened. A file that is missing, not
+markdown reader, with inline markup flattened; a paragraph of `|` rows under
+a delimiter row, such as the sources table, becomes a table. A file that is missing, not
 a regular file, or over 64 KiB gives no blocks and one `problem` sentence.
 Reads are cached by the file's lstat and happen only on request.
 

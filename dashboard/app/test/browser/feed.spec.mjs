@@ -274,9 +274,14 @@ test.describe('with the feed instructions', () => {
       .toHaveText('The feed keeps what passes these tests. A change goes to Watch, which edits the file.');
     await expect(panel(page).locator('.goal-prose h4')).toHaveText(['Invented watch criteria', 'Sources', 'An item survives if']);
     await expect(panel(page).locator('.goal-prose p')).toHaveText(['What the invented feed keeps. Written as tests, not as topics.']);
-    await expect(panel(page).locator('.goal-prose li')).toHaveText([
-      'Invented Gazette', 'Invented Letters, weekly', 'It changes how the garden is planted.', 'It names a trail opening nearby.',
-    ]);
+    await expect(panel(page).locator('.goal-prose ul li')).toHaveText(['Invented Gazette', 'Invented Letters, weekly']);
+    await expect(panel(page).locator('.goal-prose ol li'))
+      .toHaveText(['It changes how the garden is planted.', 'It names a trail opening nearby.']);
+    const table = panel(page).locator('.goal-prose table');
+    await expect(table.locator('th')).toHaveText(['Source', 'Sender', 'Cadence']);
+    await expect(table.locator('tbody tr')).toHaveCount(2);
+    await expect(table.locator('tbody tr').nth(1).locator('td'))
+      .toHaveText(['Invented Letters', 'letters@example.com, free', 'weekly']);
     await expect(input(page)).toBeFocused();
     await expect(panel(page).getByRole('button', { name: 'Send' })).toBeVisible();
     const box = await panel(page).boundingBox();
@@ -358,9 +363,13 @@ test.describe('with the feed instructions', () => {
     await page.clock.install();
     await openPanel(page, hub);
     await input(page).pressSequentially('Drop the Gazette');
-    const before = hub.requests('/api/feed').length;
+    await writeFile(path.join(hub.feedDir, '2026-10-05-watch.json'), JSON.stringify({
+      producer: 'watch', date: '2026-10-05', items: [{
+        id: 'watch/2026-10-05/1', title: 'A new story', source: 'Invented Gazette', url: 'https://example.com/new', summary: 'New.',
+      }],
+    }));
     await page.clock.runFor(60_000);
-    await expect.poll(() => hub.requests('/api/feed').length).toBe(before + 1);
+    await expect(runs(page)).toHaveCount(3);
     await expect(panel(page)).toBeVisible();
     await expect(input(page)).toBeFocused();
     await expect(input(page)).toHaveValue('Drop the Gazette');
@@ -384,9 +393,15 @@ test.describe('with the feed instructions', () => {
 test.describe('with no feed instructions file', () => {
   test.use({ hubOptions: { feed: FEED, agents: [WATCH] } });
 
-  test('the panel says the file is missing', async ({ page, hub }) => {
+  test('the panel says the file is missing and does not show an old copy on reopen', async ({ page, hub }) => {
     await openFeed(page, hub);
     await page.getByRole('button', { name: 'Feed instructions' }).click();
     await expect(page.locator('#feed-instructions .feed-instructions-problem')).toHaveText('The feed instructions file is missing.');
+    await page.getByRole('button', { name: 'Feed instructions' }).click();
+    // The next read is held, so only what openPanel leaves in place shows.
+    await page.route('**/api/feed/instructions', () => {});
+    await page.getByRole('button', { name: 'Feed instructions' }).click();
+    await expect(page.locator('#feed-instructions')).toBeVisible();
+    await expect(page.locator('#feed-instructions .feed-instructions-problem')).toHaveCount(0);
   });
 });

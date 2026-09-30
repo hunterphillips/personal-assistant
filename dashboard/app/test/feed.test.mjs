@@ -234,13 +234,22 @@ test('the instructions read as the path, the file time, and prose blocks', async
       { type: 'h', text: 'Invented watch criteria' },
       { type: 'p', text: 'What the invented feed keeps. Written as tests, not as topics.' },
       { type: 'h', text: 'Sources' },
-      { type: 'list', items: ['Invented Gazette', 'Invented Letters, weekly'] },
+      {
+        type: 'table',
+        head: ['Source', 'Sender', 'Cadence'],
+        rows: [
+          ['Invented Gazette', 'gazette@example.com', 'daily'],
+          ['Invented Letters', 'letters@example.com, free', 'weekly'],
+        ],
+      },
+      { type: 'list', ordered: false, items: ['Invented Gazette', 'Invented Letters, weekly'] },
       { type: 'h', text: 'An item survives if' },
-      { type: 'list', items: ['It changes how the garden is planted.', 'It names a trail opening nearby.'] },
+      { type: 'list', ordered: true, items: ['It changes how the garden is planted.', 'It names a trail opening nearby.'] },
     ],
   });
   assert.ok(Object.isFrozen(result));
-  assert.ok(Object.isFrozen(result.blocks[3].items));
+  assert.ok(Object.isFrozen(result.blocks[4].items));
+  assert.ok(Object.isFrozen(result.blocks[3].rows[0]));
 });
 
 test('unchanged instructions return the same object; a changed file reads again', async (t) => {

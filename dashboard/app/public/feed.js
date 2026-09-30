@@ -314,11 +314,28 @@
         if (block.type === 'p') node.appendChild(element('p', null, block.text));
         else if (block.type === 'h') node.appendChild(element('h4', null, block.text));
         else if (block.type === 'list') {
-          var list = element('ul');
+          var list = element(block.ordered === true ? 'ol' : 'ul');
           arrayOf(block.items).forEach(function (text) { list.appendChild(element('li', null, text)); });
           node.appendChild(list);
-        }
+        } else if (block.type === 'table') node.appendChild(table(block));
       });
+      return node;
+    }
+
+    function table(block) {
+      var node = element('table', 'feed-instructions-table');
+      var head = element('thead');
+      var headRow = element('tr');
+      arrayOf(block.head).forEach(function (text) { headRow.appendChild(element('th', null, text)); });
+      head.appendChild(headRow);
+      node.appendChild(head);
+      var body = element('tbody');
+      arrayOf(block.rows).forEach(function (cells) {
+        var row = element('tr');
+        arrayOf(cells).forEach(function (text) { row.appendChild(element('td', null, text)); });
+        body.appendChild(row);
+      });
+      node.appendChild(body);
       return node;
     }
 
@@ -345,6 +362,7 @@
       panel.hidden = false;
       toggle.setAttribute('aria-expanded', 'true');
       panelReason.hidden = true;
+      panelBody.textContent = '';
       loadInstructions();
       input.focus();
     }

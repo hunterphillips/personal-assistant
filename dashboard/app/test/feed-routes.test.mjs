@@ -211,8 +211,8 @@ test('GET /api/feed/instructions returns the path, the file time, and the prose'
   assert.equal(response.json.path, 'daily-brief/watch/relevance.md');
   assert.equal(response.json.problem, null);
   assert.ok(!Number.isNaN(Date.parse(response.json.updated)));
-  assert.deepEqual(response.json.blocks.map((block) => block.type), ['h', 'p', 'h', 'list', 'h', 'list']);
-  assert.deepEqual(response.json.blocks[3], { type: 'list', items: ['Invented Gazette', 'Invented Letters, weekly'] });
+  assert.deepEqual(response.json.blocks.map((block) => block.type), ['h', 'p', 'h', 'table', 'list', 'h', 'list']);
+  assert.deepEqual(response.json.blocks[4], { type: 'list', ordered: false, items: ['Invented Gazette', 'Invented Letters, weekly'] });
 });
 
 test('GET /api/feed/instructions with no file is 200 with no blocks and one sentence', async (t) => {
