@@ -757,6 +757,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .goal-composer-actions { margin-top: 8px; }
 
 .agent-group { margin-bottom: 20px; }
+.agent-group-pinned { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 
 .agent-group-heading {
   margin: 0 0 4px;

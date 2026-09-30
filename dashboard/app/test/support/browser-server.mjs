@@ -248,16 +248,17 @@ export const WATCH = Object.freeze({
 
 // A registry held in memory. set(fields) replaces what current() returns and
 // notifies the hub, as a changed registry file would.
-function controlledRegistry({ ok = true, error = null, agents = [] }) {
+function controlledRegistry({ ok = true, error = null, agents = [], groups = [] }) {
   const listeners = new Set();
   const build = (fields) => Object.freeze({
     ok: fields.ok,
     error: fields.error,
     agents: fields.ok ? fields.agents : [],
+    groups: fields.ok ? fields.groups : [],
     loadedAt: fields.ok ? '2026-01-01T00:00:00.000Z' : null,
     path: '/invented/agents.json',
   });
-  let fields = { ok, error, agents };
+  let fields = { ok, error, agents, groups };
   let current = build(fields);
   return {
     current: () => current,

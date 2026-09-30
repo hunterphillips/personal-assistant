@@ -17,13 +17,55 @@ const persona = (fields) => ({ id: 'cfo', name: 'CFO', kind: 'persona', provider
 
 const shape = (list) => plain(list.map((g) => [g.title, g.entries.map((e) => [e.agent ? e.agent.id : null, e.sessions.map((s) => s.id)])]));
 
-test('groups keeps registry order under Work then Personal and drops empty groups', () => {
+const GROUP_LIST = [{ id: 'work', name: 'Work' }, { id: 'personal', name: 'Personal' }];
+
+test('groups follows the registry list in order, then unlisted groups as first seen, and drops empty groups', () => {
   const agents = [
     { id: 'a', group: 'personal' }, { id: 'b', group: 'work' }, { id: 'c', group: 'personal' },
   ];
-  assert.deepEqual(shape(view.groups(agents)), [['Work', [['b', []]]], ['Personal', [['a', []], ['c', []]]]]);
-  assert.deepEqual(plain(view.groups([{ id: 'b', group: 'work' }]).map((g) => g.title)), ['Work']);
-  assert.deepEqual(plain(view.groups([])), []);
+  assert.deepEqual(shape(view.groups(agents, [], GROUP_LIST)), [['Work', [['b', []]]], ['Personal', [['a', []], ['c', []]]]]);
+  assert.deepEqual(plain(view.groups([{ id: 'b', group: 'work' }], [], GROUP_LIST).map((g) => g.title)), ['Work']);
+  assert.deepEqual(plain(view.groups([], [], GROUP_LIST)), []);
+  // The list sets the order; a listed group with no agents is left out.
+  const reversed = [{ id: 'personal', name: 'Home life' }, { id: 'work', name: 'Work' }, { id: 'empty', name: 'Nobody' }];
+  assert.deepEqual(plain(view.groups(agents, [], reversed).map((g) => g.title)), ['Home life', 'Work']);
+  // Groups the list leaves out follow it, in the order agents first name them, with the id's first letter raised.
+  const more = agents.concat([{ id: 'd', group: 'family' }, { id: 'e', group: 'side-projects' }, { id: 'f', group: 'family' }]);
+  assert.deepEqual(shape(view.groups(more, [], GROUP_LIST)), [
+    ['Work', [['b', []]]], ['Personal', [['a', []], ['c', []]]], ['Family', [['d', []], ['f', []]]], ['Side-projects', [['e', []]]],
+  ]);
+  // With no list at all every group is unlisted.
+  assert.deepEqual(plain(view.groups(agents).map((g) => g.title)), ['Personal', 'Work']);
+});
+
+test('roleChip is off when the role only repeats the name', () => {
+  assert.equal(view.roleChip({ name: 'Assistant', role: 'Assistant' }), false);
+  assert.equal(view.roleChip({ name: 'CFO', role: 'Money' }), true);
+  assert.equal(view.roleChip({ name: 'CFO', role: '' }), false);
+  assert.equal(view.roleChip({ name: 'CFO' }), false);
+});
+
+test('groupName is the registry name, else the id with its first letter raised', () => {
+  assert.equal(view.groupName('work', GROUP_LIST), 'Work');
+  assert.equal(view.groupName('family', GROUP_LIST), 'Family');
+  assert.equal(view.groupName('family'), 'Family');
+  assert.equal(view.groupName(''), '');
+  assert.equal(view.groupName(undefined, GROUP_LIST), '');
+});
+
+test('groups puts pinned personas first under no heading and pinnedPersona finds the first', () => {
+  const agents = [
+    { id: 'cfo', group: 'work', kind: 'persona' },
+    persona({ id: 'assistant', group: 'personal', pinned: true }),
+    { id: 'brain', group: 'personal', kind: 'persona' },
+  ];
+  const list = view.groups(agents, [], GROUP_LIST);
+  assert.deepEqual(plain(list.map((g) => [g.key, g.title])), [['pinned', null], ['work', 'Work'], ['personal', 'Personal']]);
+  assert.deepEqual(shape(list), [[null, [['assistant', []]]], ['Work', [['cfo', []]]], ['Personal', [['brain', []]]]]);
+  assert.equal(view.pinnedPersona(agents).id, 'assistant');
+  // A pinned entry that is not a persona (nothing to open) is not the default.
+  assert.equal(view.pinnedPersona([{ id: 'x', pinned: true, kind: 'system' }]), null);
+  assert.equal(view.pinnedPersona([{ id: 'cfo', kind: 'persona', provider: 'claude' }]), null);
 });
 
 test('groups nests sessions under their project in snapshot order and puts the rest under Other sessions', () => {
@@ -32,11 +74,12 @@ test('groups nests sessions under their project in snapshot order and puts the r
     { id: 'codex:1', projectId: 'b' }, { id: 'claude:2', projectId: null }, { id: 'codex:3', projectId: 'b' }, { id: 'codex:4', projectId: 'gone' },
     { id: 'codex:5', projectId: 'c' },
   ];
-  // A project in a group the list does not show (c) has no row, so its sessions are loose.
-  assert.deepEqual(shape(view.groups(agents, sessions)), [
+  // A project in a group the list leaves out (c) still has a row, under its own heading, so its sessions nest there.
+  assert.deepEqual(shape(view.groups(agents, sessions, GROUP_LIST)), [
     ['Work', [['b', ['codex:1', 'codex:3']]]],
     ['Personal', [['a', []]]],
-    ['Other sessions', [[null, ['claude:2', 'codex:4', 'codex:5']]]],
+    ['Archive', [['c', ['codex:5']]]],
+    ['Other sessions', [[null, ['claude:2', 'codex:4']]]],
   ]);
   assert.deepEqual(shape(view.groups([], sessions.slice(1, 2))), [['Other sessions', [[null, ['claude:2']]]]]);
 });

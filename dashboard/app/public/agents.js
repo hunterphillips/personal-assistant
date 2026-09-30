@@ -44,9 +44,9 @@
 (function () {
   'use strict';
 
-  var GROUPS = [['work', 'Work'], ['personal', 'Personal']];
+  var PINNED = 'pinned';
   var PROVIDERS = { claude: 'Claude', codex: 'Codex' };
-  var WATCHED = ['agents', 'registry', 'sessions', 'codex', 'cmux'];
+  var WATCHED = ['agents', 'groups', 'registry', 'sessions', 'codex', 'cmux'];
   var AGENT_ID = /^[a-z][a-z0-9-]{1,31}$/;
   var SESSION_ID = /^(?:codex|claude):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
   var NO_SESSIONS = 'No coding sessions. Start the Codex server or open a terminal in cmux.';
@@ -96,9 +96,27 @@
     return Object.prototype.hasOwnProperty.call(PROVIDERS, provider) ? PROVIDERS[provider] : provider;
   }
 
-  function groupName(key) {
-    for (var i = 0; i < GROUPS.length; i += 1) if (GROUPS[i][0] === key) return GROUPS[i][1];
-    return '';
+  // The heading for a group id: the registry's name when it lists the
+  // group, else the id with its first letter raised ("family" -> "Family").
+  function groupName(key, groupList) {
+    if (!key) return '';
+    for (var i = 0; i < (groupList || []).length; i += 1) if (groupList[i].id === key) return groupList[i].name;
+    return key.charAt(0).toUpperCase() + key.slice(1);
+  }
+
+  // The groups to show, in order: the registry's list, then any group an
+  // agent names that the list leaves out, in the order first seen.
+  function groupOrder(agents, groupList) {
+    var order = [];
+    var seen = {};
+    for (var i = 0; i < (groupList || []).length; i += 1) {
+      if (!seen[groupList[i].id]) { seen[groupList[i].id] = true; order.push(groupList[i].id); }
+    }
+    for (var j = 0; j < (agents || []).length; j += 1) {
+      var key = agents[j].group;
+      if (key && !seen[key]) { seen[key] = true; order.push(key); }
+    }
+    return order;
   }
 
   function isPersona(agent) {
@@ -147,30 +165,44 @@
 
   // The rows under each group heading in registry order, each with the
   // sessions nested under it (newest first, as the snapshot lists them);
-  // groups with no rows are left out. Sessions under no project, or under
-  // a project in no listed group, form one more group after the others.
-  function groups(agents, sessions) {
+  // groups with no rows are left out. Pinned personas come first under no
+  // heading. Sessions under no project form one more group after the
+  // others.
+  function groups(agents, sessions, groupList) {
     var nested = {};
     var loose = [];
-    var listed = GROUPS.map(function (group) { return group[0]; });
     for (var s = 0; s < (sessions || []).length; s += 1) {
       var session = sessions[s];
       var projectId = session.projectId;
-      var known = projectId && (agents || []).some(function (agent) {
-        return agent.id === projectId && listed.indexOf(agent.group) !== -1;
-      });
+      var known = projectId && (agents || []).some(function (agent) { return agent.id === projectId && !agent.pinned; });
       if (!known) loose.push(session);
       else (nested[projectId] = nested[projectId] || []).push(session);
     }
+    var entry = function (agent) { return { agent: agent, sessions: nested[agent.id] || [] }; };
     var result = [];
-    for (var i = 0; i < GROUPS.length; i += 1) {
-      var members = (agents || []).filter(function (agent) { return agent.group === GROUPS[i][0]; });
+    var pinned = (agents || []).filter(function (agent) { return agent.pinned === true; });
+    if (pinned.length > 0) result.push({ key: PINNED, title: null, entries: pinned.map(entry) });
+    var order = groupOrder(agents, groupList);
+    for (var i = 0; i < order.length; i += 1) {
+      var members = (agents || []).filter(function (agent) { return agent.group === order[i] && !agent.pinned; });
       if (members.length === 0) continue;
-      var entries = members.map(function (agent) { return { agent: agent, sessions: nested[agent.id] || [] }; });
-      result.push({ key: GROUPS[i][0], title: GROUPS[i][1], entries: entries });
+      result.push({ key: order[i], title: groupName(order[i], groupList), entries: members.map(entry) });
     }
     if (loose.length > 0) result.push({ key: 'other', title: 'Other sessions', entries: [{ agent: null, sessions: loose }] });
     return result;
+  }
+
+  // The role chip is left out when it would only repeat the name.
+  function roleChip(agent) {
+    return !!agent.role && agent.role !== agent.name;
+  }
+
+  // The first pinned persona, which a desk opens when the URL names none.
+  function pinnedPersona(agents) {
+    for (var i = 0; i < (agents || []).length; i += 1) {
+      if (agents[i].pinned === true && isPersona(agents[i])) return agents[i];
+    }
+    return null;
   }
 
   // The sentence under the list when nothing could be listed and both
@@ -457,7 +489,7 @@
 
       var head = element('span', 'agent-row-head');
       head.appendChild(element('span', 'agent-row-name', agent.name));
-      if (agent.role) head.appendChild(chip('role-chip', agent.role));
+      if (roleChip(agent)) head.appendChild(chip('role-chip', agent.role));
       if (providerName(agent)) head.appendChild(chip('provider-chip', providerName(agent)));
       if (persona && agent.lastMessage) head.appendChild(timeSpan('agent-row-time', agent.lastMessage.at));
       node.appendChild(head);
@@ -507,14 +539,18 @@
       groupsNode.textContent = '';
       renderMessage();
 
-      var list = groups(state.agents, state.sessions);
+      var list = groups(state.agents, state.sessions, state.groups);
       for (var i = 0; i < list.length; i += 1) {
         var section = element('section', 'agent-group agent-group-' + list[i].key);
-        var headingId = 'agents-group-' + list[i].key;
-        section.setAttribute('aria-labelledby', headingId);
-        var heading = element('h2', 'agent-group-heading', list[i].title);
-        heading.id = headingId;
-        section.appendChild(heading);
+        if (list[i].title) {
+          var headingId = 'agents-group-' + list[i].key;
+          section.setAttribute('aria-labelledby', headingId);
+          var heading = element('h2', 'agent-group-heading', list[i].title);
+          heading.id = headingId;
+          section.appendChild(heading);
+        } else {
+          section.setAttribute('aria-label', 'Pinned');
+        }
         for (var j = 0; j < list[i].entries.length; j += 1) {
           var entry = list[i].entries[j];
           if (entry.agent) section.appendChild(row(entry.agent));
@@ -777,7 +813,7 @@
     function renderDetails(agent) {
       var pairs = [
         ['Role', agent.role],
-        ['Group', groupName(agent.group)],
+        ['Group', groupName(agent.group, state.groups)],
         ['Provider', providerName(agent)],
         ['Folder', shortPath(agent.cwd, state.home)],
       ];
@@ -827,7 +863,7 @@
 
       nameNode.textContent = name;
       chips.textContent = '';
-      if (agent.role) chips.appendChild(chip('role-chip', agent.role));
+      if (roleChip(agent)) chips.appendChild(chip('role-chip', agent.role));
       if (providerName(agent)) chips.appendChild(chip('provider-chip', providerName(agent)));
       cost.textContent = persona && typeof agent.costUsd === 'number' ? '$' + agent.costUsd.toFixed(2) + ' this session' : '';
       description.textContent = session ? shortPath(agent.cwd, state.home) : persona ? '' : agent.description || '';
@@ -948,6 +984,15 @@
       terminalError = '';
       confirming = false;
       resetThread(id);
+    }
+
+    // On a desk with no agent in the URL the first pinned persona's thread
+    // is open; a phone shows the list. The URL is left alone, so Back still
+    // leaves the page and a row click still adds its entry.
+    function defaultId() {
+      if (!wide.matches || !state) return null;
+      var agent = pinnedPersona(state.agents);
+      return agent ? agent.id : null;
     }
 
     // A history entry is added only when the URL names a different agent,
@@ -1157,18 +1202,36 @@
       }
     });
 
+    // Turning a phone into a desk with nothing chosen opens the pinned
+    // thread, the same as arriving on a desk; turning a desk into a phone
+    // with only that default open goes back to the list.
+    wide.addEventListener('change', function () {
+      if (!visible || agentFromUrl()) return;
+      var id = defaultId();
+      if (id === selectedId) return;
+      if (selectedId && !wide.matches && !agentFromUrl()) setSelected(null);
+      else if (id && !selectedId) setSelected(id);
+      else return;
+      render();
+      syncThread();
+    });
+
     return {
       update: function (next, keys) {
         state = next;
         var touched = !keys || keys.some(function (key) { return WATCHED.indexOf(key) !== -1; });
         if (touched && visible) {
+          if (!selectedId && !agentFromUrl()) {
+            var id = defaultId();
+            if (id) setSelected(id);
+          }
           render();
           syncThread();
         }
       },
       show: function () {
         visible = true;
-        var id = agentFromUrl();
+        var id = agentFromUrl() || defaultId();
         if (id !== selectedId) setSelected(id);
         if (tick === null) tick = setInterval(function () { refreshTimes(view); }, TICK_MS);
         render();
@@ -1185,6 +1248,9 @@
   window.DashboardAgents = {
     create: create,
     groups: groups,
+    groupName: groupName,
+    pinnedPersona: pinnedPersona,
+    roleChip: roleChip,
     errorSentence: errorSentence,
     composerReason: composerReason,
     refusalSentence: refusalSentence,

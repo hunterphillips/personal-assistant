@@ -624,6 +624,127 @@ test.describe('with a persona whose last turn the clock stopped', () => {
   });
 });
 
+// The registry's groups list, a pinned persona above it, and a group the
+// list leaves out. Seeded only here, so the other tests keep an empty pane.
+const PINNED_AGENTS = [
+  { id: 'assistant', name: 'Assistant', role: 'Assistant', description: 'I am the way in.', group: 'personal', kind: 'persona', provider: 'claude',
+    cwd: '/invented/assistant', pinned: true, routines: ['com.invented.dashboard'] },
+  ...AGENTS,
+  { id: 'kin', name: 'Kin', role: 'Family', description: 'Invented.', group: 'family', kind: 'persona', provider: 'claude' },
+];
+const PINNED_ROUTINES = [...ROUTINES, {
+  ...ROUTINES[0], label: 'com.invented.dashboard', agentId: 'assistant', agentName: 'Assistant', name: 'dashboard',
+  schedule: { kind: 'keepalive', text: 'Always on' }, outcome: 'ok', exitStatus: 0,
+}];
+
+test.describe('with a pinned persona and a group the list leaves out', () => {
+  test.use({
+    hubOptions: {
+      build: () => ({
+        ...seeded().build(),
+        agents: PINNED_AGENTS,
+        registry: { groups: [{ id: 'work', name: 'Work' }, { id: 'personal', name: 'Personal' }] },
+        routines: { items: PINNED_ROUTINES, focusAvailable: true, refreshedAt: ago(5_000) },
+      }),
+    },
+  });
+
+  test('the pinned row sits above the groups, the unlisted group follows them, and Home is a chat icon', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await expectView(page, 'agents', 'Agents');
+    await expect(page.locator('#agents-groups > section').first()).toHaveClass(/agent-group-pinned/);
+    await expect(page.locator('#agents-groups > section').first().locator('h2')).toHaveCount(0);
+    await expect(page.locator('#agents-groups > section').first()).toHaveAttribute('aria-label', 'Pinned');
+    await expect(page.locator('.agent-group-heading')).toHaveText(['Work', 'Personal', 'Family']);
+    await expect(page.locator('#agents-groups .agent-row .agent-row-name')).toHaveText(['Assistant', 'CFO', 'Catchup', 'Second brain', 'Dev', 'Focus', 'Kin']);
+    // A role that only repeats the name is not shown as a chip.
+    await expect(row(page, 'Assistant').locator('.role-chip')).toHaveCount(0);
+    await expect(row(page, 'Kin').locator('.role-chip')).toHaveText('Family');
+    await expect(nav(page, 'Home').locator('svg.nav-icon')).toHaveCount(1);
+    await expect(nav(page, 'Home').locator('svg.nav-icon path')).toHaveCount(3);
+  });
+
+  test('a desk opens the pinned thread at /, keeps the URL, and a phone shows the list', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await expectView(page, 'agents', 'Agents');
+    if (phone(page)) {
+      await expect(page.locator('#agents-list')).toBeVisible();
+      await expect(page.locator('#agent-thread')).toBeHidden();
+      await expect(row(page, 'Assistant')).not.toHaveAttribute('aria-current', /.*/);
+      await row(page, 'Assistant').click();
+      await expect(page).toHaveURL(`${hub.origin}/?agent=assistant`);
+      await expect(pane(page)).toBeVisible();
+      return;
+    }
+    await expect(pane(page)).toBeVisible();
+    await expect(page.locator('#agent-name')).toHaveText('Assistant');
+    await expect(row(page, 'Assistant')).toHaveAttribute('aria-current', 'true');
+    await expect(page).toHaveURL(`${hub.origin}/`);
+    await expect(page.locator('#agent-empty')).toBeHidden();
+    // The default never takes the keyboard.
+    await expect(page.locator('#agent-input')).not.toBeFocused();
+
+    // A row click still adds its entry, and Back lands on the default again.
+    const before = await historyLength(page);
+    await row(page, 'CFO').click();
+    await expect(page).toHaveURL(`${hub.origin}/?agent=cfo`);
+    await expect(page.locator('#agent-name')).toHaveText('CFO');
+    expect(await historyLength(page)).toBe(before + 1);
+    await page.goBack();
+    await expect(page).toHaveURL(`${hub.origin}/`);
+    await expect(page.locator('#agent-name')).toHaveText('Assistant');
+    await expect(row(page, 'Assistant')).toHaveAttribute('aria-current', 'true');
+
+    // A reload lands on the same default; a tab coming back does not rebuild the thread.
+    await page.reload();
+    await expect(page.locator('#agent-name')).toHaveText('Assistant');
+    await watchRebuilds(page, '#agent-messages');
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(page.locator('#agent-name')).toHaveText('Assistant');
+    expect(await rebuilds(page)).toBe(0);
+  });
+
+  test('resizing between phone and desk opens and closes the default thread', async ({ page, hub }) => {
+    test.skip(phone(page), 'the emulated phone cannot resize');
+    await page.setViewportSize({ width: 600, height: 800 });
+    await page.goto(`${hub.origin}/`);
+    await watchRebuilds(page, '#agents-groups');
+    await expect(page.locator('#agents-list')).toBeVisible();
+    await expect(page.locator('#agent-thread')).toBeHidden();
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await crossed(page, true);
+    await expect(pane(page)).toBeVisible();
+    await expect(page.locator('#agent-name')).toHaveText('Assistant');
+    await expect(page).toHaveURL(`${hub.origin}/`);
+
+    await page.setViewportSize({ width: 600, height: 800 });
+    await crossed(page, false);
+    await expect(page.locator('#agents-list')).toBeVisible();
+    await expect(page.locator('#agent-thread')).toBeHidden();
+    await expect(row(page, 'Assistant')).not.toHaveAttribute('aria-current', /.*/);
+
+    // A thread named in the URL stays open on a phone.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await crossed(page, true);
+    await row(page, 'CFO').click();
+    await expect(page).toHaveURL(`${hub.origin}/?agent=cfo`);
+    await page.setViewportSize({ width: 600, height: 800 });
+    await crossed(page, false);
+    await expect(pane(page)).toBeVisible();
+    await expect(page.locator('#agent-name')).toHaveText('CFO');
+  });
+
+  test('Health lists the dashboard job under the pinned agent and the settings name its group', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/health`);
+    await expectView(page, 'health', 'Health');
+    await expect(page.locator('.routine-card .card-name')).toHaveText(['Assistant', 'CFO']);
+    await page.goto(`${hub.origin}/?agent=kin`);
+    await page.locator('#agent-details-toggle').click();
+    await expect(page.locator('#agent-details .request-detail-text').nth(1)).toHaveText('Family');
+  });
+});
+
 test.describe('with an unreadable registry', () => {
   // The fake registry lists no agents while it cannot be read; the cards
   // come from the routines' own agent names.
