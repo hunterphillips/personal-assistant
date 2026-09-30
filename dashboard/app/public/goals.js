@@ -1,13 +1,17 @@
 // Goals: the priorities and goal notes read from the vault (/api/goals), one
-// card per section, with a composer that sends a new goal or a change to one
-// to the second-brain persona (/api/goals/propose). The shell calls
+// row per goal under each section heading, with a composer that sends a new
+// goal or a change to one to the second-brain persona (/api/goals/propose).
+// A row opens and closes its details; a section heading opens and folds its
+// rows, and only Now is open on load. The shell calls
 // create(shellApi) once, then update(state, keys) on every state change, and
 // show() and hide() as the view comes on and off screen.
 //
 // While shown, the view fetches /api/goals on show(), every 60 seconds, and
 // at once when the second-brain persona leaves busy or waiting (its turn may
 // have written the vault). A refetch keeps an open composer, its text, and its
-// focus, and an answer identical to the last one rendered changes nothing.
+// focus, keeps open rows and sections open (by item and section id) and focus
+// on the row, heading, or Edit button that had it, and an answer identical to
+// the last one rendered changes nothing.
 // A body that is not the expected shape shows the no-answer sentence.
 // Buttons carry data-goal-action, never data-action, which the shell's own
 // click handler owns. Every text node is set with textContent.
@@ -112,6 +116,28 @@
     return parts;
   }
 
+  // A row's title and status line: a Now item's now, a goal note's what,
+  // else the first paragraph of its prose. An item with no title takes that
+  // paragraph as its title instead. used is the prose block the row shows,
+  // which the details leave out.
+  function summaryOf(item) {
+    var first = objectsIn(item.prose).filter(function (block) { return block.type === 'p'; })[0] || null;
+    var title = item.title || null;
+    var status = item.now || item.what || null;
+    var used = null;
+    if (first && (!title || !status)) {
+      used = first;
+      if (!title) title = first.text;
+      else status = first.text;
+    }
+    return { title: title || '', status: status, used: used };
+  }
+
+  function setExpanded(button, panel, open) {
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    panel.hidden = !open;
+  }
+
   function sectionEmpty(section) {
     return objectsIn(section.items).length === 0 && !section.principle && objectsIn(section.horizons).length === 0;
   }
@@ -130,6 +156,8 @@
     var composer = null;
     var items = {}; // id -> item, from the last render
     var rendered = null; // the JSON text of the answer on screen
+    var openRows = {}; // item id -> true for each open row
+    var openSections = { now: true }; // section id -> true for each open section
 
     function editButton(item) {
       var button = element('button', 'button button-small', 'Edit');
@@ -145,48 +173,38 @@
       return button;
     }
 
-    // An item's title row: its title (when it has one) and its Edit button.
-    function head(item, extra) {
-      var node = element('div', 'goal-item-head');
-      if (item.title) node.appendChild(element('h3', 'goal-title', item.title));
-      if (extra) node.appendChild(extra);
+    // One goal: a row button with its title and status line, which opens the
+    // details under it (the Why line, the rest of its prose, a horizon chip,
+    // and Edit). tag is the item's element, 'li' inside the Long term list.
+    function renderItem(item, tag) {
+      var node = element(tag || 'div', 'goal-item');
+      var summary = summaryOf(item);
+      var button = element('button', 'goal-row');
+      button.type = 'button';
+      button.setAttribute('data-goal-action', 'toggle');
+      button.appendChild(element('span', 'goal-title', summary.title));
+      if (summary.status) button.appendChild(element('span', 'goal-status', summary.status));
+      node.appendChild(button);
+      var details = element('div', 'goal-details');
+      if (item.id) {
+        button.setAttribute('data-goal-id', item.id);
+        details.id = 'goal-details-' + item.id;
+        button.setAttribute('aria-controls', details.id);
+      }
+      setExpanded(button, details, Boolean(item.id && openRows[item.id]));
+      if (item.why) details.appendChild(line('Why', item.why));
+      var rest = objectsIn(item.prose).filter(function (block) { return block !== summary.used; });
+      if (rest.length > 0) details.appendChild(prose(rest));
+      var foot = element('div', 'goal-details-foot');
+      if (item.horizon) foot.appendChild(element('span', 'role-chip', item.horizon));
       if (item.id) {
         items[item.id] = item;
-        node.appendChild(editButton(item));
+        node.setAttribute('data-goal-item', item.id);
+        foot.appendChild(editButton(item));
       }
+      if (foot.firstChild) details.appendChild(foot);
+      node.appendChild(details);
       return node;
-    }
-
-    function itemNode(item, fill) {
-      var node = element('div', 'goal-item');
-      if (item.id) node.setAttribute('data-goal-item', item.id);
-      fill(node);
-      return node;
-    }
-
-    function renderNow(item) {
-      return itemNode(item, function (node) {
-        node.appendChild(head(item));
-        if (item.now) node.appendChild(line('Now', item.now));
-        if (item.why) node.appendChild(line('Why', item.why));
-        node.appendChild(prose(item.prose));
-      });
-    }
-
-    function renderListed(item) {
-      return itemNode(item, function (node) {
-        node.appendChild(head(item));
-        node.appendChild(prose(item.prose));
-      });
-    }
-
-    function renderNote(item) {
-      return itemNode(item, function (node) {
-        node.appendChild(head(item, item.horizon ? element('span', 'role-chip', item.horizon) : null));
-        if (item.what) node.appendChild(line('What', item.what));
-        if (item.why) node.appendChild(line('Why', item.why));
-        node.appendChild(prose(item.prose));
-      });
     }
 
     function renderLongTerm(section, card) {
@@ -194,12 +212,7 @@
       var top = objectsIn(section.items);
       if (top.length > 0) {
         var list = element('ol', 'goal-top');
-        top.forEach(function (item) {
-          var li = element('li', 'goal-item');
-          if (item.id) li.setAttribute('data-goal-item', item.id);
-          li.appendChild(head(item));
-          list.appendChild(li);
-        });
+        top.forEach(function (item) { list.appendChild(renderItem(item, 'li')); });
         card.appendChild(list);
       }
       var spans = objectsIn(section.horizons);
@@ -213,23 +226,34 @@
       }
     }
 
+    // A section: its heading is a button with the title and the count of
+    // items, which opens or folds the rows under it.
     function renderSection(section) {
-      var card = element('section', 'routine-card goal-card');
+      var node = element('section', 'goal-section');
       var headingId = 'goals-section-' + section.id;
-      card.setAttribute('aria-labelledby', headingId);
-      card.setAttribute('data-goal-section', section.id);
+      node.setAttribute('aria-labelledby', headingId);
+      node.setAttribute('data-goal-section', section.id);
       var header = element('div', 'card-header');
-      var title = element('h2', 'card-name', section.title);
+      var title = element('h2', 'card-name');
       title.id = headingId;
+      var button = element('button', 'goal-section-toggle', section.title);
+      button.type = 'button';
+      button.setAttribute('data-goal-action', 'section');
+      button.setAttribute('data-goal-id', section.id);
+      button.appendChild(document.createTextNode(' '));
+      button.appendChild(element('span', 'goal-count', String(objectsIn(section.items).length)));
+      title.appendChild(button);
       header.appendChild(title);
       if (section.updated) header.appendChild(element('span', 'card-note', 'Updated ' + section.updated));
-      card.appendChild(header);
-      if (section.id === 'long-term') renderLongTerm(section, card);
-      else {
-        var fill = section.id === 'now' ? renderNow : section.id === 'goals' ? renderNote : renderListed;
-        objectsIn(section.items).forEach(function (item) { card.appendChild(fill(item)); });
-      }
-      return card;
+      node.appendChild(header);
+      var body = element('div', 'goal-section-body');
+      body.id = 'goals-body-' + section.id;
+      button.setAttribute('aria-controls', body.id);
+      setExpanded(button, body, Boolean(openSections[section.id]));
+      if (section.id === 'long-term') renderLongTerm(section, body);
+      else objectsIn(section.items).forEach(function (item) { body.appendChild(renderItem(item)); });
+      node.appendChild(body);
+      return node;
     }
 
     function setMessage(lines) {
@@ -267,6 +291,20 @@
       }
     }
 
+    // The row, section, or Edit button for an id, when it is on screen.
+    function controlFor(action, id) {
+      return cards.querySelector('button[data-goal-action="' + action + '"][data-goal-id="' + CSS.escape(id) + '"]');
+    }
+
+    // The row, section, or Edit button that has focus, outside the composer,
+    // so a re-render can put focus on its replacement.
+    function controlFocus() {
+      var active = document.activeElement;
+      if (!active || !cards.contains(active) || (composer && composer.node.contains(active))) return null;
+      var id = active.getAttribute('data-goal-id');
+      return id ? { action: active.getAttribute('data-goal-action'), id: id } : null;
+    }
+
     // Puts the open composer under its item, or at the top of the cards.
     function placeComposer() {
       if (!composer) return;
@@ -300,12 +338,18 @@
       // not for a vault that could not be found.
       var empty = typeof data.agentId === 'string' && sections.every(sectionEmpty);
       setMessage(empty ? [EMPTY].concat(problems) : problems);
+      Object.keys(openRows).forEach(function (id) {
+        if (!Object.prototype.hasOwnProperty.call(found, id)) delete openRows[id];
+      });
       var saved = composerFocus();
+      var control = controlFocus();
       if (composer) composer.node.remove();
       cards.textContent = '';
       built.forEach(function (card) { cards.appendChild(card); });
       placeComposer();
       restoreFocus(saved);
+      var again = control ? controlFor(control.action, control.id) : null;
+      if (again) again.focus();
       rendered = JSON.stringify(data);
     }
 
@@ -332,9 +376,9 @@
       composer.node.remove();
       composer = null;
       if (!fromUser) return;
-      var button = opener
-        ? cards.querySelector('button[data-goal-action="edit"][data-goal-id="' + CSS.escape(opener) + '"]')
-        : document.getElementById('goals-add');
+      var button = opener ? controlFor('edit', opener) : document.getElementById('goals-add');
+      // An Edit button inside a closed row gives focus to the row instead.
+      if (opener && button && button.closest('[hidden]')) button = controlFor('toggle', opener);
       if (button) button.focus();
     }
 
@@ -448,6 +492,17 @@
       });
     }
 
+    // Opens or closes a row or section, and remembers it by id for re-renders.
+    function toggle(button, state) {
+      var id = button.getAttribute('data-goal-id');
+      var panel = document.getElementById(button.getAttribute('aria-controls'));
+      if (!id || !panel) return;
+      var open = button.getAttribute('aria-expanded') !== 'true';
+      setExpanded(button, panel, open);
+      if (open) state[id] = true;
+      else delete state[id];
+    }
+
     document.getElementById('goals-add').addEventListener('click', function () {
       openComposer('add', null);
     });
@@ -457,6 +512,8 @@
       var action = button.getAttribute('data-goal-action');
       if (action === 'edit') openComposer('edit', button.getAttribute('data-goal-id'));
       else if (action === 'cancel') closeComposer(true);
+      else if (action === 'toggle') toggle(button, openRows);
+      else if (action === 'section') toggle(button, openSections);
     });
 
     function brainStateIn(state) {

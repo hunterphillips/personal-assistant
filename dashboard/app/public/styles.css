@@ -554,7 +554,8 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   font-size: 13px;
 }
 
-/* Goals: the vault's priorities and goal notes, one card per section. */
+/* Goals: the vault's priorities and goal notes, one row per goal under each
+   section heading, the details only when a row is open. */
 
 #view-goals {
   min-height: 0;
@@ -569,28 +570,70 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 
 #view-goals .goals-heading { margin: 0; }
 
-.goal-item { padding: 10px 0 12px; }
+.goal-section-toggle,
+.goal-row {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.goal-section-toggle { padding: 0; }
+
+.goal-section .card-header > .card-name { flex: 1; min-width: 0; }
+
+.goal-count { color: var(--muted); }
+
 .goal-item + .goal-item { border-top: 1px solid var(--line); }
 
-.goal-item-head {
+.goal-row { padding: 12px 0; }
+
+.goal-title {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.goal-status {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.goal-row[aria-expanded="true"] .goal-status {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: none;
+}
+
+.goal-details { padding: 0 0 12px; }
+.goal-details > :first-child { margin-top: 0; }
+
+.goal-details-foot {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 10px;
+  margin-top: 10px;
 }
 
-.goal-title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
+.goal-details-foot .button-small { margin-left: auto; }
 
-.goal-item-head .button-small { margin-left: auto; }
-
-.goal-item-head .role-chip { overflow-wrap: anywhere; }
+.goal-details-foot .role-chip { overflow-wrap: anywhere; }
 
 .goal-line,
 .goal-principle {
@@ -614,9 +657,6 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   margin: 8px 0 0;
   padding-left: 22px;
 }
-.goal-top > .goal-item { padding: 4px 0; }
-.goal-top > .goal-item + .goal-item { border-top: 0; }
-.goal-top .goal-title { font-weight: 400; }
 
 .goal-horizons { margin: 10px 0 12px; }
 .goal-horizons dt { float: left; margin-right: 6px; font-weight: 600; }
