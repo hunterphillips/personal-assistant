@@ -508,7 +508,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 
 .goal-section-toggle { padding: 0; }
 
-.card-header > .card-name { flex: 1; min-width: 0; }
+.goal-section .card-header > .card-name { flex: 1; min-width: 0; }
 
 .goal-count { color: var(--muted); }
 
