@@ -5,11 +5,13 @@
 // objects (see focus-proxy.mjs and brief-adapter.mjs for their contracts);
 // dashboard state comes from the injected `hub` (hub.mjs). The persona
 // routes are agent-routes.mjs, the Goals routes goals-routes.mjs over the
-// injected `goals` (goals.mjs), and the event stream is events.mjs; this
+// injected `goals` (goals.mjs), the Feed routes feed-routes.mjs over the
+// injected `feed` (feed.mjs), and the event stream is events.mjs; this
 // module builds them and dispatches to them. Without `goals`, /api/goals
-// and /api/goals/propose answer 404 not_found.
+// and /api/goals/propose answer 404 not_found; without `feed`, /api/feed
+// and /api/feed/discuss do.
 //
-// createApp({ config, focus, brief, hub, store, cmux, goals, log }) returns a
+// createApp({ config, focus, brief, hub, store, cmux, goals, feed, log }) returns a
 // (req, res) handler and opens nothing; server.mjs owns listening. The handler also
 // carries closeStreams(), which ends every open event stream for shutdown
 // and makes later persona sends, goal proposals, new threads, sessions
@@ -21,6 +23,7 @@ import path from 'node:path';
 import { createAgentRoutes } from './agent-routes.mjs';
 import { ASSETS } from './assets.mjs';
 import { createEvents } from './events.mjs';
+import { createFeedRoutes } from './feed-routes.mjs';
 import { createGoalsRoutes } from './goals-routes.mjs';
 import { isCalendarDate } from './hub.mjs';
 import {
@@ -49,7 +52,7 @@ const READ = ['GET', 'HEAD'];
 // Exact-path routes. `methods` lists what is allowed; anything else is 405.
 const EXACT_ROUTES = new Map([
   ['/', { name: 'shell', methods: READ }],
-  ...['/focus', '/reading', '/brief', '/routines', '/agents', '/goals'].flatMap((view) => [
+  ...['/focus', '/reading', '/brief', '/feed', '/routines', '/agents', '/goals'].flatMap((view) => [
     [view, { name: 'shell', methods: READ }],
     [`${view}/`, { name: 'slash-redirect', methods: READ }],
   ]),
@@ -73,6 +76,8 @@ const EXACT_ROUTES = new Map([
   ['/api/brief/feedback', { name: 'brief-feedback', methods: ['POST'] }],
   ['/api/goals', { name: 'goals', methods: ['GET'] }],
   ['/api/goals/propose', { name: 'goals-propose', methods: ['POST'] }],
+  ['/api/feed', { name: 'feed', methods: ['GET'] }],
+  ['/api/feed/discuss', { name: 'feed-discuss', methods: ['POST'] }],
 ]);
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -84,7 +89,7 @@ export function defaultLog(entry) {
   process.stdout.write(`${JSON.stringify({ time: new Date().toISOString(), ...entry })}\n`);
 }
 
-export function createApp({ config, focus, brief, hub, store = null, cmux = null, goals = null, log = defaultLog }) {
+export function createApp({ config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, log = defaultLog }) {
   if (!hub) throw new TypeError('createApp requires a hub');
   const allowedHosts = new Set(config.allowedHosts);
   const allowedOrigins = new Set(config.allowedOrigins);
@@ -95,6 +100,7 @@ export function createApp({ config, focus, brief, hub, store = null, cmux = null
   const goalsRoutes = goals
     ? createGoalsRoutes({ goals, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
     : null;
+  const feedRoutes = feed ? createFeedRoutes({ feed, hub, log, shuttingDown: isShuttingDown }) : null;
 
   function matchRoute(pathname) {
     const exact = EXACT_ROUTES.get(pathname);
@@ -227,6 +233,12 @@ export function createApp({ config, focus, brief, hub, store = null, cmux = null
       case 'goals-propose':
         if (!goalsRoutes) throw new HttpError(404, 'not_found');
         return goalsRoutes.servePropose(req, res);
+      case 'feed':
+        if (!feedRoutes) throw new HttpError(404, 'not_found');
+        return feedRoutes.serveRead(res);
+      case 'feed-discuss':
+        if (!feedRoutes) throw new HttpError(404, 'not_found');
+        return feedRoutes.serveDiscuss(req, res);
       default:
         throw new HttpError(404, 'not_found');
     }

@@ -1,0 +1,10 @@
+{
+ "producer": "watch",
+ "date": "2026-09-21",
+ "since": "2026-09-07",
+ "generated_at": "2026-09-21T14:10:02-05:00",
+ "items": [
+  {"id": "watch/2026-09-21/1", "title": "A new trail opens along the creek", "source": "Invented Gazette", "url": "https://example.com/trail", "test": 5, "summary": "The creek trail opened on Saturday with a footbridge at the mill.", "kept": true},
+  {"id": "watch/2026-09-21/2", "title": "Hand-bound notebooks, a how-to", "source": "Invented Letters", "url": "https://example.com/notebooks", "test": 2, "summary": "A step-by-step on binding a notebook with a needle and waxed thread.", "kept": false}
+ ]
+}

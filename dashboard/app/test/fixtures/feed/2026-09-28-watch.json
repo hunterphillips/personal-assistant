@@ -1,0 +1,16 @@
+{
+ "producer": "watch",
+ "date": "2026-09-28",
+ "since": "2026-09-14",
+ "generated_at": "2026-09-28T14:47:22-05:00",
+ "items": [
+  {"id": "watch/2026-09-28/1", "title": "Town council adopts a rule for delivery robots", "source": "Invented Gazette", "url": "https://example.com/robots", "test": 5, "summary": "The Invented Gazette reports the town adopted a rule for delivery robots on sidewalks.", "kept": true},
+  {"id": "watch/2026-09-28/2", "title": "A bakery moves its ordering app back to plain forms", "source": "Invented Weekly", "url": "https://example.com/bakery", "test": 1, "summary": "The Invented Weekly says a bakery dropped its app for plain web forms because the app cost more than it earned.", "kept": true},
+  {"id": "watch/2026-09-28/3", "title": "Notes on a slower way to read", "source": "Invented Letters", "url": "https://example.com/slow", "test": 2, "summary": "An essay on reading fewer things more carefully.", "kept": false},
+  {"id": "watch/2026-09-28/4", "title": "A library lends tools now", "source": "Invented Gazette", "url": "https://example.com/tools", "test": 5, "summary": "The branch on Elm Street lends hand tools for a week at a time.", "kept": false},
+  {"id": "watch/2026-09-28/5", "title": "Why the bridge repair slipped a year", "source": "Invented Gazette, Invented Weekly", "url": "https://example.com/bridge", "test": 4, "summary": "Two papers trace the bridge delay to one missing survey.", "kept": false},
+  {"id": "watch/2026-09-28/6", "title": "Seed swap on the tenth", "source": "Invented Weekly", "url": "https://example.com/seeds", "summary": "A seed swap at the community hall on the tenth, bring what you have.", "kept": false},
+  {"id": "watch/2026-09-28/7", "title": "The last typewriter shop", "source": "Invented Letters", "url": "https://example.com/typewriter", "test": 2, "summary": "A profile of a repair shop that still fixes typewriters."},
+  {"id": "watch/2026-09-28/8", "title": "Rain barrels for sale", "source": "Invented Gazette", "url": "https://example.com/barrels", "test": 5, "summary": "The water district sells rain barrels at cost until the end of the month.", "kept": false}
+ ]
+}

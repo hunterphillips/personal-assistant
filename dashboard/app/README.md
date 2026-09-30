@@ -23,7 +23,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 
 | Route | Purpose |
 | --- | --- |
-| `GET /`, `/agents`, `/routines`, `/focus`, `/reading`, `/brief`, `/goals` | The shell. `/`, `/agents`, and `/routines` show the Agents view. |
+| `GET /`, `/agents`, `/routines`, `/focus`, `/reading`, `/brief`, `/feed`, `/goals` | The shell. `/`, `/agents`, and `/routines` show the Agents view; `/reading` and `/brief` show Reading on its Brief tab and `/feed` on its Feed tab. |
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
 | `GET /api/state` | Checks Focus and the brief, then returns the state hub's snapshot (below). |
 | `GET /api/events` | Server-Sent Events: the snapshot, then each change (below). |
@@ -46,8 +46,10 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/sessions/refresh` | Re-reads the cmux inventory and the Codex catalogue now and answers `{"ok": true, "revision": N}`. |
 | `GET /api/goals` | Priorities and goal notes read from the vault (below). |
 | `POST /api/goals/propose` | Sends a new goal or a change to one to the second-brain persona; 202 `{"ok": true, "agentId": "second-brain"}` once the turn has started (below). |
+| `GET /api/feed` | The feed store's runs, newest first (below). |
+| `POST /api/feed/discuss` | Sends one feed item to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
 
-`/focus/`, `/reading/`, `/brief/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
+`/focus/`, `/reading/`, `/brief/`, `/feed/`, `/routines/`, `/agents/`, and `/goals/` redirect to the
 paths without the slash. A known path
 with the wrong method is 405, and anything else is 404. Errors are JSON bodies of the form
 `{"error": "<code>"}`. The comment at the top of each route module describes
@@ -58,6 +60,7 @@ what `lib/app.mjs` expects from it.
 - `lib/app.mjs` routes requests, checks Host and Origin, logs, and serves the shell, assets, health, status, state, and routines refresh.
 - `lib/agent-routes.mjs` serves the persona routes under `/api/agents/` and the session routes under `/api/sessions/`.
 - `lib/goals-routes.mjs` serves the Goals routes over `lib/goals.mjs`, which reads the vault.
+- `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
 - `lib/focus-proxy.mjs` forwards the Focus routes.
@@ -203,6 +206,35 @@ date, with one write per date at a time.
 to the second-brain persona as a new message, and the shell opens that
 persona's thread. The dashboard never writes the vault; the persona does, in its own
 turn.
+
+### Feed
+
+`GET /api/feed` reads the feed store, `feed/items/` at the umbrella root
+(`DASHBOARD_FEED_DIR`; `feed/README.md` describes the files), and answers
+
+```json
+{ "agentId": "watch", "readAt": "<ISO>", "problems": [],
+  "runs": [{ "id": "2026-09-28-watch", "producer": "watch", "date": "2026-09-28", "since": "2026-09-14",
+             "generatedAt": "<ISO>",
+             "items": [{ "id": "watch/2026-09-28/1", "title": "...", "source": "...", "url": "https://...",
+                         "summary": "...", "test": 5, "kept": true }] }] }
+```
+
+Runs are the newest 30 files by name, regular files only. A file that is
+over 256 KiB, not JSON, or not a run is left out with one problem sentence;
+an item without its five text fields, with a URL that is not `http` or
+`https`, or with an id already used is left out and counted in one sentence
+per run. A missing directory is one problem and no runs. Reads are cached by
+the files' lstat and happen only on request.
+
+`POST /api/feed/discuss` takes `{"id": "watch/2026-09-28/1"}`, sends the
+item's title, source, link, and summary to the watch persona as a new
+message asking it to read the link and say what it found, and the shell
+opens that persona's thread. It refuses with 400 `invalid_body`, 503
+`shutting_down`, 404 `no_such_agent` (no `watch` persona in the registry),
+409 `persona_unavailable`, 404 `no_such_item`, then the persona send
+refusals (409 `busy` and the rest). The dashboard never writes the store;
+the producers do.
 
 ### Focus proxy
 
@@ -1044,6 +1076,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_PORT` | `4243` | Startup fails if the port is taken. |
 | `DASHBOARD_PUBLIC_ORIGIN` | unset | The tailnet `https://` origin. When set, its host is accepted as a Host header and it is accepted as an Origin. When unset, only `127.0.0.1:<port>` and `localhost:<port>` are accepted. |
 | `DASHBOARD_BRIEFS_DIR` | `../../daily-brief/briefs` | Resolved from this directory, not the working directory. |
+| `DASHBOARD_FEED_DIR` | `../../feed/items` | The feed store the producers write. Resolved from this directory; does not need to exist at startup. |
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
 | `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |

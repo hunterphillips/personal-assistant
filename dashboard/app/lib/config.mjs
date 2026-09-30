@@ -6,6 +6,7 @@
 //   DASHBOARD_PUBLIC_ORIGIN     optional https:// tailnet origin; its host joins the
 //                               Host and Origin allowlists
 //   DASHBOARD_BRIEFS_DIR        generated brief directory (default ../../daily-brief/briefs)
+//   DASHBOARD_FEED_DIR          the feed store the producers write (default ../../feed/items)
 //   DASHBOARD_FOCUS_ORIGIN      Focus server, http:// loopback only (default http://127.0.0.1:4242)
 //   DASHBOARD_REGISTRY_PATH     agent registry JSON file (default ../../registry/agents.json)
 //   DASHBOARD_LAUNCH_AGENTS_DIR directory holding launchd plists (default ~/Library/LaunchAgents)
@@ -28,6 +29,7 @@ export const APP_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url
 const DEFAULT_PORT = 4243;
 const DEFAULT_FOCUS_ORIGIN = 'http://127.0.0.1:4242';
 const DEFAULT_BRIEFS_DIR = '../../daily-brief/briefs';
+const DEFAULT_FEED_DIR = '../../feed/items';
 const DEFAULT_REGISTRY_PATH = '../../registry/agents.json';
 const DEFAULT_THREADS_DIR = 'var/threads';
 export const DEFAULT_CODEX_DIR = 'var/codex';
@@ -51,6 +53,8 @@ export const LIMITS = Object.freeze({
   cmuxFrameBytes: 1024 * 1024, // one line from the cmux socket
   goalsFileBytes: 256 * 1024, // one vault note read by the Goals view
   goalsNotes: 50, // files read from the vault's notes/goals/
+  feedFileBytes: 256 * 1024, // one feed run file read by the Feed view
+  feedFiles: 30, // newest feed run files read
 });
 
 export const TIMEOUTS = Object.freeze({
@@ -91,6 +95,7 @@ export function loadConfig(env = process.env) {
   const publicOrigin = parsePublicOrigin(env.DASHBOARD_PUBLIC_ORIGIN, problems);
   const focusOrigin = parseFocusOrigin(env.DASHBOARD_FOCUS_ORIGIN, problems);
   const briefsDir = parsePath(env.DASHBOARD_BRIEFS_DIR, DEFAULT_BRIEFS_DIR);
+  const feedDir = parsePath(env.DASHBOARD_FEED_DIR, DEFAULT_FEED_DIR);
   const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, DEFAULT_REGISTRY_PATH);
   // The default is already absolute, so path.resolve keeps it as-is; only a
   // relative override is resolved from APP_ROOT.
@@ -126,6 +131,7 @@ export function loadConfig(env = process.env) {
     publicOrigin: publicOrigin ? publicOrigin.origin : null,
     focusOrigin: focusOrigin.origin,
     briefsDir,
+    feedDir,
     registryPath,
     launchAgentsDir,
     threadsDir,

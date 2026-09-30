@@ -16,7 +16,9 @@
 // sessions come from a fake Codex adapter (`codex`, see fakeCodex) and a
 // fake cmux client over a seeded inventory (`cmux`, harness.mjs), with
 // terminal bindings from `bindings`; none is present unless seeded. Goals
-// reads a temporary copy of the `vault` option's notes, when given.
+// reads a temporary copy of the `vault` option's notes, when given, and the
+// Feed a temporary copy of the `feed` option's run files; without it the
+// feed directory is a missing path in the temporary directory.
 // stopStreams() ends every event stream with `bye` and
 // leaves the app refusing new ones (503 shutting_down), as during shutdown;
 // restartApp() then puts a new app handler over the same hub, as after a
@@ -35,6 +37,7 @@ import path from 'node:path';
 
 import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
+import { createFeed } from '../../lib/feed.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
@@ -70,10 +73,14 @@ export { focusSourceAvailable };
 //              Goals reads it and propose sends to it. `vaultDir` is its path.
 //              It cannot be combined with a second-brain entry in `agents`
 //              or with a `registry` that carries its own agents.
+//   feed       a directory of feed run files (such as test/fixtures/feed)
+//              copied into a temporary feed directory. It adds nothing to
+//              `agents`; a test that discusses an item adds the WATCH persona
+//              itself. `feedDir` is the copy's path.
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, routines: routinesSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
-  vault = null,
+  vault = null, feed = null,
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
     throw new Error('startHub: the vault option adds second-brain; remove it from agents.');
@@ -97,6 +104,8 @@ export async function startHub({
     if (typeof vault === 'string') await cp(vault, vaultDir, { recursive: true });
     else if (vault) await mkdir(vaultDir);
     if (vaultDir) agents = [...agents, { ...SECOND_BRAIN, cwd: vaultDir }];
+    const feedDir = path.join(root, feed ? 'feed' : 'feed-missing');
+    if (feed) await cp(feed, feedDir, { recursive: true });
 
     const focus = withFocus && focusSourceAvailable() ? await startIsolatedFocus(context) : null;
     const focusOrigin = focus?.origin ?? `http://127.0.0.1:${await freePort()}`;
@@ -116,6 +125,7 @@ export async function startHub({
       DASHBOARD_PORT: String(plainPort),
       DASHBOARD_PUBLIC_ORIGIN: `https://localhost:${securePort}`,
       DASHBOARD_BRIEFS_DIR: briefsDir,
+      DASHBOARD_FEED_DIR: feedDir,
       DASHBOARD_FOCUS_ORIGIN: focusOrigin,
     });
     const focusRoutes = createFocusProxy(config);
@@ -156,7 +166,10 @@ export async function startHub({
       },
     };
     const goals = createGoals({ registry, limits: config.limits });
-    const newHandler = () => createApp({ config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, log: () => {} });
+    const feedReader = createFeed({ dir: feedDir, limits: config.limits });
+    const newHandler = () => createApp({
+      config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, log: () => {},
+    });
     let handler = newHandler();
     cleanups.push(async () => {
       handler.closeStreams();
@@ -175,6 +188,7 @@ export async function startHub({
       secureOrigin: `https://localhost:${securePort}`,
       briefsDir,
       vaultDir,
+      feedDir,
       focus,
       writeBrief: (date, options) => writeFile(path.join(briefsDir, `viewer-${date}.html`), inventedViewer({ date, ...options })),
       writeRawBrief: (date, html) => writeFile(path.join(briefsDir, `viewer-${date}.html`), html),
@@ -211,6 +225,12 @@ export async function startHub({
 export const SECOND_BRAIN = Object.freeze({
   id: 'second-brain', name: 'Second brain', role: 'Memory', description: 'Invented.',
   group: 'personal', kind: 'persona', provider: 'claude',
+});
+
+// The persona the Feed's Discuss sends to; a test adds it to `agents`.
+export const WATCH = Object.freeze({
+  id: 'watch', name: 'Watch', role: 'Newsletters', description: 'Invented.',
+  group: 'personal', kind: 'persona', provider: 'claude', cwd: '/invented/watch',
 });
 
 // A registry held in memory. set(fields) replaces what current() returns and
