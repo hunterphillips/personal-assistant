@@ -18,6 +18,11 @@ The agent pinned above the others. Hunter talks to it by default; it reads
 anything and hands judgment to the agent that owns it.
 _Avoid_: orchestrator, chief of staff, router, system
 
+**Group**:
+A heading agents are listed under, such as Work or Personal. Any name;
+the registry sets the order and labels. Not a permission boundary.
+_Avoid_: category, team, workspace
+
 **Thread**:
 One agent's conversation, continuing across days. Hunter and other agents
 write into it; it is also the record of what the agent did.
