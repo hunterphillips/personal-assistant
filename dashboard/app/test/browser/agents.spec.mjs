@@ -690,7 +690,7 @@ test.describe('with a pinned persona and a group the list leaves out', () => {
     await expect(row(page, 'Assistant').locator('.role-chip')).toHaveCount(0);
     await expect(row(page, 'Kin').locator('.role-chip')).toHaveText('Family');
     await expect(nav(page, 'Home').locator('svg.nav-icon')).toHaveCount(1);
-    await expect(nav(page, 'Home').locator('svg.nav-icon path')).toHaveCount(3);
+    await expect(nav(page, 'Home').locator('svg.nav-icon path')).toHaveCount(1);
   });
 
   test('a desk opens the pinned thread at /, keeps the URL, and a phone shows the list', async ({ page, hub }) => {
