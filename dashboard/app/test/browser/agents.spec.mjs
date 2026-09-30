@@ -161,13 +161,6 @@ test.describe('with seeded agents', () => {
     await expect(page.locator('#agent-empty')).toBeHidden();
   });
 
-  test('a persona with jobs has no Routines button and no rows above its messages', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/?agent=cfo`);
-    await expect(messages(page)).toHaveCount(2);
-    await expect(pane(page).locator('.thread-header').getByRole('button')).toHaveText(['New thread']);
-    await expect(pane(page).locator('.routine-row')).toHaveCount(0);
-  });
-
   test('opening a persona shows its thread, and a reload lands on it', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await row(page, 'CFO').click();

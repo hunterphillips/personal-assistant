@@ -121,7 +121,7 @@ test.describe('with seeded routines', () => {
     await expect(row(page, 'scan-git').locator('.routine-failures')).toHaveCount(0);
     await expect(row(page, 'scan-drive').locator('.badge')).toHaveClass(/badge-wait/);
     await expect(row(page, 'scan-notes').locator('.routine-run')).toHaveText('3 hours ago');
-    const yesterday = new Date(Date.parse(items()[6].lastRun));
+    const yesterday = new Date(Date.parse(hub.routines.items[6].lastRun));
     await expect(row(page, 'brain-drain').locator('.routine-run')).toHaveText(
       `Yesterday ${pad(yesterday.getHours())}:${pad(yesterday.getMinutes())}`);
     await expect(row(page, 'brain-audit').locator('.routine-run')).toHaveText(/^[A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}$/);

@@ -174,20 +174,8 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .notice button:hover { background: var(--green-dark); }
 
 /* Health: the launchd jobs (the code's routines), one card per agent.
-   The header and card rules are shared with Goals and the Feed. */
-
-#view-health {
-  min-height: 0;
-  padding: 40px 34px;
-  overflow: auto;
-}
-
-#view-health > * {
-  width: 100%;
-  max-width: 720px;
-}
-
-#view-health .health-heading { margin: 0; }
+   Its column is Goals's, below; the header and card rules are shared with
+   Goals and the Feed. */
 
 .routines-header {
   display: flex;
@@ -552,18 +540,21 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 /* Goals: the vault's priorities and goal notes, one row per goal under each
    section heading, the details only when a row is open. */
 
-#view-goals {
+#view-goals,
+#view-health {
   min-height: 0;
   padding: 40px 34px;
   overflow: auto;
 }
 
-#view-goals > * {
+#view-goals > *,
+#view-health > * {
   width: 100%;
   max-width: 720px;
 }
 
-#view-goals .goals-heading { margin: 0; }
+#view-goals .goals-heading,
+#view-health .health-heading { margin: 0; }
 
 .goal-section-toggle,
 .goal-row {

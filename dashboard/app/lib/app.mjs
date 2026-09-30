@@ -1,10 +1,10 @@
 // Request router and policy: Host/Origin checks, common headers, method
 // handling, body limits, request logging, and the dashboard's own routes
 // (shell, assets, health, status and state, routines refresh). The reader
-// sees launchd jobs on the Health view; the code still calls them routines. Route bodies
-// for Focus and the Daily Brief live in the injected `focus` and `brief`
-// objects (see focus-proxy.mjs and brief-adapter.mjs for their contracts);
-// dashboard state comes from the injected `hub` (hub.mjs). The persona
+// sees launchd jobs on the Health view; the code still calls them routines.
+// Route bodies for Focus and the Daily Brief live in the injected `focus`
+// and `brief` objects (see focus-proxy.mjs and brief-adapter.mjs for their
+// contracts); dashboard state comes from the injected `hub` (hub.mjs). The persona
 // routes are agent-routes.mjs, the Goals routes goals-routes.mjs over the
 // injected `goals` (goals.mjs), the Feed routes feed-routes.mjs over the
 // injected `feed` (feed.mjs), and the event stream is events.mjs; this
