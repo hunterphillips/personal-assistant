@@ -12,16 +12,21 @@ const VAULT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fix
 const BUSY = 'Second brain is in the middle of a turn. Try again when it is idle.';
 const NO_ANSWER = 'The dashboard did not respond.';
 
-const cards = (page) => page.locator('#goals-cards .goal-card');
+const sections = (page) => page.locator('#goals-cards .goal-section');
 const item = (page, id) => page.locator(`[data-goal-item="${id}"]`);
 const row = (page, id) => item(page, id).locator('.goal-row');
 const composer = (page) => page.locator('#goals-cards form.goal-composer');
 const messages = (page) => page.locator('#agent-messages .thread-message');
 
+async function openRow(page, section, id) {
+  await page.getByRole('button', { name: new RegExp(`^${section} \\d+$`) }).click();
+  await row(page, id).click();
+}
+
 async function openGoals(page, hub) {
   await page.goto(`${hub.origin}/goals`);
   await expectView(page, 'goals', 'Goals');
-  await expect(cards(page)).toHaveCount(5);
+  await expect(sections(page)).toHaveCount(5);
 }
 
 test.describe('with the fixture vault', () => {
@@ -61,26 +66,64 @@ test.describe('with the fixture vault', () => {
     await expect(row(page, 'now:learn-the-cello')).toHaveAttribute('aria-expanded', 'true');
   });
 
-  test('renders each section as a card with its items', async ({ page, hub }) => {
+  test('Enter and Space on a focused row toggle it', async ({ page, hub }) => {
     await openGoals(page, hub);
-    await expect(cards(page).locator('.card-name')).toHaveText(['Now', 'Later', 'Not now', 'Long term', 'Goal notes']);
-    await expect(cards(page).first().locator('.card-note')).toHaveText('Updated 2026-03-04');
-    await expect(page.locator('#goals-message')).toBeHidden();
+    const cello = row(page, 'now:learn-the-cello');
+    await cello.focus();
+    await page.keyboard.press('Enter');
+    await expect(cello).toHaveAttribute('aria-expanded', 'true');
+    await expect(item(page, 'now:learn-the-cello').locator('.goal-prose')).toBeVisible();
+    await page.keyboard.press('Space');
+    await expect(cello).toHaveAttribute('aria-expanded', 'false');
+    await expect(item(page, 'now:learn-the-cello').locator('.goal-prose')).toBeHidden();
+    await expect(cello).toBeFocused();
+  });
 
-    const garden = item(page, 'now:ship-the-garden-planner');
-    await expect(garden.locator('h3')).toHaveText('Ship the garden planner');
-    await expect(garden.locator('.goal-line')).toHaveText([
-      'Now: sketch the three beds and order seeds before the frost date.',
-      'Why: fresh food from the yard by early summer.',
+  test('the other sections are folded headers with counts that open to their rows', async ({ page, hub }) => {
+    await openGoals(page, hub);
+    const toggles = page.locator('#goals-cards .goal-section-toggle');
+    await expect(toggles).toHaveText(['Now 2', 'Later 4', 'Not now 2', 'Long term 3', 'Goal notes 4']);
+    expect(await toggles.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-expanded'))))
+      .toEqual(['true', 'false', 'false', 'false', 'false']);
+    await expect(page.locator('[data-goal-section="later"] .goal-count')).toHaveText('4');
+    await expect(page.locator('[data-goal-section="later"] .card-note')).toHaveText('Updated 2026-03-04');
+    await expect(row(page, 'later:kayak-trip')).toBeHidden();
+
+    await page.getByRole('button', { name: /^Later/ }).click();
+    await expect(row(page, 'later:kayak-trip')).toBeVisible();
+    await expect(row(page, 'later:kayak-trip').locator('.goal-status')).toHaveText('pick a river in May.');
+    await expect(row(page, 'later:reorganise-the-garage-shelves-one-weekend').locator('.goal-title'))
+      .toHaveText('Reorganise the garage shelves one weekend soon.');
+    await expect(row(page, 'later:reorganise-the-garage-shelves-one-weekend').locator('.goal-status')).toHaveCount(0);
+
+    await page.getByRole('button', { name: /^Long term/ }).click();
+    const longTerm = page.locator('[data-goal-section="long-term"]');
+    await expect(longTerm.locator('.goal-principle')).toHaveText('Make things by hand and share them with friends.');
+    await expect(longTerm.locator('.goal-row .goal-title')).toHaveText([
+      'A workshop of my own', 'Steady savings (or a path to them)', 'A garden that feeds the household most of the year',
     ]);
-    await expect(garden.locator('.goal-prose p')).toContainText('https://example.com/beds');
-    await expect(garden.locator('.goal-prose a')).toHaveCount(0);
+    await expect(longTerm.locator('.goal-status')).toHaveCount(0);
+    await expect(longTerm.locator('.goal-horizons dt')).toHaveText(['1 yr', '5 yrs']);
 
+    await page.getByRole('button', { name: /^Goal notes/ }).click();
+    await expect(row(page, 'goal:boat').locator('.goal-status')).toHaveText('a small wooden rowing boat.');
+    await expect(row(page, 'goal:zine').locator('.goal-status')).toHaveText('A photocopied zine about the neighbourhood.');
+    await row(page, 'goal:boat').click();
     await expect(item(page, 'goal:boat').locator('.role-chip')).toHaveText('five years');
+    await row(page, 'goal:zine').click();
     await expect(item(page, 'goal:zine').locator('.role-chip')).toHaveCount(0);
-    await expect(page.locator('.goal-principle')).toHaveText('Make things by hand and share them with friends.');
-    await expect(page.locator('.goal-top h3')).toHaveCount(3);
+    await expect(item(page, 'goal:zine').locator('.goal-prose p')).toHaveText(['Walks and maps.', 'Recipes.']);
+
+    await page.getByRole('button', { name: /^Later/ }).click();
+    await expect(row(page, 'later:kayak-trip')).toBeHidden();
     await expect(page.locator('#view-goals [data-action]')).toHaveCount(0);
+  });
+
+  test('renders the five sections in order under the Updated note', async ({ page, hub }) => {
+    await openGoals(page, hub);
+    await expect(sections(page).locator('.card-name')).toHaveText(['Now 2', 'Later 4', 'Not now 2', 'Long term 3', 'Goal notes 4']);
+    await expect(sections(page).first().locator('.card-note')).toHaveText('Updated 2026-03-04');
+    await expect(page.locator('#goals-message')).toBeHidden();
   });
 
   test('Add goal sends the text to the second-brain persona and opens its thread', async ({ page, hub }) => {
@@ -100,6 +143,7 @@ test.describe('with the fixture vault', () => {
 
   test('Edit quotes the goal note and sends an edit for its id', async ({ page, hub }) => {
     await openGoals(page, hub);
+    await openRow(page, 'Goal notes', 'goal:boat');
     await item(page, 'goal:boat').getByRole('button', { name: 'Edit Build a boat' }).click();
     const form = item(page, 'goal:boat').locator('form.goal-composer');
     await expect(form.locator('blockquote p')).toHaveText(['Build a boat', 'What: a small wooden rowing boat.']);
@@ -114,6 +158,7 @@ test.describe('with the fixture vault', () => {
 
   test('only one composer is open; Cancel and Escape close it and return focus', async ({ page, hub }) => {
     await openGoals(page, hub);
+    await openRow(page, 'Later', 'later:kayak-trip');
     await page.getByRole('button', { name: 'Add goal' }).click();
     const kayak = item(page, 'later:kayak-trip').getByRole('button', { name: 'Edit Kayak trip' });
     await kayak.click();
@@ -153,7 +198,7 @@ test.describe('with the fixture vault', () => {
 
     await page.clock.runFor(60_000);
     await expect.poll(() => hub.requests('/api/goals').length).toBe(before + 1);
-    await expect(item(page, 'goal:swim').locator('h3')).toHaveText('Swim a mile');
+    await expect(item(page, 'goal:swim').locator('.goal-title')).toHaveText('Swim a mile');
     await expect(input).toBeFocused();
     await expect(input).toHaveValue('Swim a mile');
     await input.press('End');
@@ -185,13 +230,14 @@ test.describe('with the fixture vault', () => {
     await asked;
     await page.clock.runFor(8_000);
     await expect(page.locator('#goals-message')).toHaveText(NO_ANSWER);
-    await expect(cards(page)).toHaveCount(0);
+    await expect(sections(page)).toHaveCount(0);
     await page.unrouteAll({ behavior: 'ignoreErrors' });
     await stalled.abort().catch(() => {});
   });
 
   test('an edit of a goal that has gone becomes a new goal with the same text', async ({ page, hub }) => {
     await openGoals(page, hub);
+    await openRow(page, 'Goal notes', 'goal:zine');
     await item(page, 'goal:zine').getByRole('button', { name: 'Edit Zine' }).click();
     await composer(page).getByLabel('What should change?').fill('Add a third issue.');
     await rm(path.join(hub.vaultDir, 'notes', 'goals', 'zine.md'));
@@ -245,7 +291,7 @@ test.describe('with the second-brain persona busy', () => {
     await openGoals(page, hub);
     await writeFile(path.join(hub.vaultDir, 'notes', 'goals', 'weld.md'), '# Learn to weld\n');
     await hub.personas.reply('second-brain', 'Wrote notes/goals/weld.md.');
-    await expect(item(page, 'goal:weld').locator('h3')).toHaveText('Learn to weld');
+    await expect(item(page, 'goal:weld').locator('.goal-title')).toHaveText('Learn to weld');
   });
 });
 
@@ -261,6 +307,6 @@ test.describe('with an empty vault', () => {
       .filter((child) => child.nodeType === Node.TEXT_NODE).map((child) => child.textContent));
     expect(lines[0]).toBe('Nothing in the vault yet.');
     expect(lines.slice(1)).toContain('notes/current-priorities.md is missing.');
-    await expect(cards(page)).toHaveCount(0);
+    await expect(sections(page)).toHaveCount(0);
   });
 });

@@ -153,6 +153,7 @@
     var items = {}; // id -> item, from the last render
     var rendered = null; // the JSON text of the answer on screen
     var openRows = {}; // item id -> true for each open row
+    var openSections = { now: true }; // section id -> true for each open section
 
     function editButton(item) {
       var button = element('button', 'button button-small', 'Edit');
@@ -221,20 +222,34 @@
       }
     }
 
+    // A section: its heading is a button with the title and the count of
+    // items, which opens or folds the rows under it.
     function renderSection(section) {
-      var card = element('section', 'routine-card goal-card');
+      var node = element('section', 'goal-section');
       var headingId = 'goals-section-' + section.id;
-      card.setAttribute('aria-labelledby', headingId);
-      card.setAttribute('data-goal-section', section.id);
+      node.setAttribute('aria-labelledby', headingId);
+      node.setAttribute('data-goal-section', section.id);
       var header = element('div', 'card-header');
-      var title = element('h2', 'card-name', section.title);
+      var title = element('h2', 'card-name');
       title.id = headingId;
+      var button = element('button', 'goal-section-toggle', section.title);
+      button.type = 'button';
+      button.setAttribute('data-goal-action', 'section');
+      button.setAttribute('data-goal-id', section.id);
+      button.appendChild(document.createTextNode(' '));
+      button.appendChild(element('span', 'goal-count', String(objectsIn(section.items).length)));
+      title.appendChild(button);
       header.appendChild(title);
       if (section.updated) header.appendChild(element('span', 'card-note', 'Updated ' + section.updated));
-      card.appendChild(header);
-      if (section.id === 'long-term') renderLongTerm(section, card);
-      else objectsIn(section.items).forEach(function (item) { card.appendChild(renderItem(item)); });
-      return card;
+      node.appendChild(header);
+      var body = element('div', 'goal-section-body');
+      body.id = 'goals-body-' + section.id;
+      button.setAttribute('aria-controls', body.id);
+      setExpanded(button, body, Boolean(openSections[section.id]));
+      if (section.id === 'long-term') renderLongTerm(section, body);
+      else objectsIn(section.items).forEach(function (item) { body.appendChild(renderItem(item)); });
+      node.appendChild(body);
+      return node;
     }
 
     function setMessage(lines) {
@@ -474,6 +489,7 @@
       if (action === 'edit') openComposer('edit', button.getAttribute('data-goal-id'));
       else if (action === 'cancel') closeComposer(true);
       else if (action === 'toggle') toggle(button, openRows);
+      else if (action === 'section') toggle(button, openSections);
     });
 
     function brainStateIn(state) {
