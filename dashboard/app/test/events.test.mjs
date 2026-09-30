@@ -277,3 +277,60 @@ test('the new shell paths serve the shell and their slash forms redirect', async
     assert.equal(slash.headers.location, `${view}?a=1`);
   }
 });
+
+// Brief notices (notices.mjs) as the event stream drives them.
+function fakeNotices() {
+  const fake = {
+    reconciles: 0,
+    starts: [],
+    stops: 0,
+    running: false,
+    reconcile: async () => { fake.reconciles += 1; },
+    start(intervalMs) { fake.starts.push(intervalMs); fake.running = true; },
+    stop() { fake.stops += 1; fake.running = false; },
+  };
+  return fake;
+}
+
+test('a connect reconciles the brief notice after the status refresh, and the open-stream count rises and falls', async (t) => {
+  const notices = fakeNotices();
+  const app = await startStreamingApp(t, { notices, configure: withTimeouts({ noticePollMs: 12_345 }) });
+  assert.equal(app.handler.openStreams(), 0);
+  assert.equal(notices.reconciles, 0);
+
+  const first = await open(t, app);
+  await first.next();
+  assert.equal(app.handler.openStreams(), 1);
+  await waitFor(() => notices.reconciles === 1);
+  assert.equal(app.counts.health, 1);
+  assert.deepEqual(notices.starts, [12_345]);
+
+  const second = await open(t, app);
+  await second.next();
+  assert.equal(app.handler.openStreams(), 2);
+  await waitFor(() => notices.reconciles === 2);
+  assert.deepEqual(notices.starts, [12_345], 'the timer starts once for the first stream');
+
+  first.close();
+  await first.closed;
+  await waitFor(() => app.handler.openStreams() === 1);
+  assert.equal(notices.stops, 0);
+
+  second.close();
+  await second.closed;
+  await waitFor(() => app.handler.openStreams() === 0);
+  assert.equal(notices.stops, 1);
+  assert.equal(notices.running, false);
+});
+
+test('closing the streams for shutdown stops the notice timer', async (t) => {
+  const notices = fakeNotices();
+  const app = await startStreamingApp(t, { notices });
+  const stream = await open(t, app);
+  await stream.next();
+  assert.equal(notices.running, true);
+  app.handler.closeStreams();
+  await stream.closed;
+  assert.equal(notices.running, false);
+  assert.equal(app.handler.openStreams(), 0);
+});

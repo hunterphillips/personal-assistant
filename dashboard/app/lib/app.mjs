@@ -13,11 +13,14 @@
 // answer 404 not_found; without `feed` or `feedInstructions`, /api/feed and
 // the routes under it do.
 //
-// createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, log }) returns a
-// (req, res) handler and opens nothing; server.mjs owns listening. The handler also
-// carries closeStreams(), which ends every open event stream for shutdown
-// and makes later persona sends, goal proposals, new threads, sessions
-// refreshes, and event streams answer 503 shutting_down.
+// createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, log })
+// returns a (req, res) handler and opens nothing; server.mjs owns listening.
+// `notices` (notices.mjs, optional) is handed to the event stream, which
+// reconciles the brief notice on each connect and runs its timer while a
+// stream is open. The handler also carries closeStreams(), which ends every
+// open event stream for shutdown and makes later persona sends, goal
+// proposals, new threads, sessions refreshes, and event streams answer 503
+// shutting_down, and openStreams(), the count of open event streams.
 
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -97,14 +100,15 @@ export function defaultLog(entry) {
 }
 
 export function createApp({
-  config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, feedInstructions = null, log = defaultLog,
+  config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, feedInstructions = null, notices = null,
+  log = defaultLog,
 }) {
   if (!hub) throw new TypeError('createApp requires a hub');
   const allowedHosts = new Set(config.allowedHosts);
   const allowedOrigins = new Set(config.allowedOrigins);
   let shuttingDown = false;
   const isShuttingDown = () => shuttingDown;
-  const events = createEvents({ hub, timeouts: config.timeouts, limits: config.limits, shuttingDown: isShuttingDown });
+  const events = createEvents({ hub, notices, timeouts: config.timeouts, limits: config.limits, shuttingDown: isShuttingDown });
   const agents = createAgentRoutes({ hub, store, cmux, log, limits: config.limits, shuttingDown: isShuttingDown });
   const goalsRoutes = goals
     ? createGoalsRoutes({ goals, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
@@ -322,6 +326,7 @@ export function createApp({
     shuttingDown = true;
     events.closeStreams();
   };
+  handle.openStreams = events.openStreams;
   return handle;
 }
 

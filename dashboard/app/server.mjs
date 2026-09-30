@@ -1,8 +1,10 @@
 // Entry point: load configuration, load the agent registry and the Codex
 // terminal bindings, compose the routines view, thread store, runtime
 // adapters (Claude for personas, Codex for the shared app-server's threads),
-// the cmux client, state hub, the Goals, Feed, and feed instructions readers, and app, start the personas, listen on 127.0.0.1, and shut down
-// within a bounded window on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
+// the cmux client, state hub, the Goals, Feed, and feed instructions
+// readers, the brief notices, and app, start the personas, post any brief
+// notice not yet in the Assistant's thread, listen on 127.0.0.1, and shut
+// down within a bounded window on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
 // runs main(). A missing or invalid registry does not stop startup; the hub
 // reports it.
 //
@@ -11,7 +13,7 @@
 // every persona is unavailable with lastError 'api_key_in_env'. Persona
 // turns must bill the subscription, never an API key.
 //
-// Shutdown order: end event streams and refuse new sends (closeStreams),
+// Shutdown order: stop the notice timer, end event streams and refuse new sends (closeStreams),
 // close each adapter (Claude drains running turns for up to drainMs, then
 // aborts the rest and waits abortGraceMs for them; Codex closes its socket),
 // close the cmux client's socket, close the hub, stop the registry and
@@ -31,6 +33,7 @@ import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
 import { createGoals } from './lib/goals.mjs';
 import { createHub } from './lib/hub.mjs';
+import { createNotices } from './lib/notices.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { createRoutines } from './lib/routines.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
@@ -58,9 +61,11 @@ function defaultAdapters({ config, store, log, bindings }) {
 // Starts the dashboard and resolves once it is listening. Rejects on invalid
 // configuration or a port already in use; it never picks another port.
 // `createAdapters({ config, store, log, bindings })` returns the adapters by provider;
-// tests pass fakes. It is not called when an API key is in `env`.
-export async function startDashboard({ env = process.env, log, createAdapters = defaultAdapters } = {}) {
-  const config = loadConfig(env);
+// tests pass fakes. It is not called when an API key is in `env`. `timeouts`
+// overrides entries of the configured timeouts; tests shorten polls with it.
+export async function startDashboard({ env = process.env, log, createAdapters = defaultAdapters, timeouts = null } = {}) {
+  const loaded = loadConfig(env);
+  const config = timeouts ? Object.freeze({ ...loaded, timeouts: Object.freeze({ ...loaded.timeouts, ...timeouts }) }) : loaded;
   const focus = createFocusProxy(config);
   const brief = createBriefRoutes(config);
   const logEntry = log ?? defaultLog;
@@ -108,13 +113,17 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   const goals = createGoals({ registry, limits: config.limits, log: logEntry });
   const feed = createFeed({ dir: config.feedDir, limits: config.limits, log: logEntry });
   const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log: logEntry });
-  const app = createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, log: logEntry });
+  const notices = createNotices({
+    briefsDir: config.briefsDir, threadsDir: config.threadsDir, hub, limits: config.limits, log: logEntry,
+  });
+  const app = createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, log: logEntry });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;
   server.requestTimeout = config.timeouts.requestMs;
   server.keepAliveTimeout = config.timeouts.keepAliveMs;
 
   const shutdownState = async () => {
+    notices.stop();
     app.closeStreams();
     await Promise.all(Object.values(adapters).map((adapter) => adapter.close()));
     cmux.close();
@@ -125,6 +134,8 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
 
   await Promise.all([registry.start(), bindings.start()]);
   await hub.start();
+  // The brief notice waiting since the last run, if any; never fatal.
+  await notices.reconcile();
   try {
     await new Promise((resolve, reject) => {
       server.once('error', reject);

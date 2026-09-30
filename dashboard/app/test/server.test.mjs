@@ -5,7 +5,7 @@ import net from 'node:net';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { writeFile } from 'node:fs/promises';
+import { stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { TIMEOUTS } from '../lib/config.mjs';
@@ -228,4 +228,110 @@ test('a port collision still closes the adapters it created', async (t) => {
     { code: 'EADDRINUSE' },
   );
   assert.deepEqual(order, ['adapter.close', 'adapter.drained', 'hub.close']);
+});
+
+// The brief notice end to end: a notice file the run wrote, the Assistant
+// as a started persona, and the thread route.
+async function assistantEntry(t) {
+  return {
+    id: 'assistant', name: 'Assistant', role: 'Assistant', description: 'Invented.', group: 'personal', kind: 'persona',
+    cwd: await tempDir(t), provider: 'claude', pinned: true,
+  };
+}
+
+function idleAdapter() {
+  return {
+    start: async () => ({}),
+    state: () => ({ state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null }),
+    subscribe: () => () => {},
+    close: async () => {},
+  };
+}
+
+function writeNotice(env, date, fields = {}) {
+  return writeFile(
+    path.join(env.DASHBOARD_BRIEFS_DIR, `notice-${date}.json`),
+    JSON.stringify({ date, state: 'ready', opening: `Opening for ${date}. Second sentence.`, memo: `## Money\n\nMemo ${date}.`, ...fields }),
+  );
+}
+
+async function readThread(dashboard, id = 'assistant') {
+  const response = await fetch(`http://127.0.0.1:${dashboard.config.port}/api/agents/${id}/thread`);
+  assert.equal(response.status, 200);
+  return (await response.json()).messages;
+}
+
+test('booting with an unposted notice file posts it once into the Assistant thread', async (t) => {
+  const env = await testEnv(t);
+  await writeRegistry(env, [await assistantEntry(t)]);
+  await writeNotice(env, '2026-09-30');
+  const logs = [];
+  const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => dashboard.close());
+
+  const messages = await readThread(dashboard);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].kind, 'brief');
+  assert.equal(messages[0].summary, 'Opening for 2026-09-30.');
+  assert.equal(messages[0].text, '## Money\n\nMemo 2026-09-30.');
+  assert.match(messages[0].at, /^\d{4}-\d{2}-\d{2}T/);
+  const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
+  assert.equal(state.agents[0].lastMessage.text, 'Opening for 2026-09-30.');
+  assert.ok(logs.some((e) => e.event === 'notice_posted' && e.date === '2026-09-30'));
+
+  // Two streams opened at once reconcile again and add nothing.
+  const app = { port: dashboard.config.port, authority: `127.0.0.1:${dashboard.config.port}` };
+  const [one, two] = await Promise.all([openEvents(app), openEvents(app)]);
+  t.after(() => { one.close(); two.close(); });
+  await Promise.all([one.next(), two.next()]);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal((await readThread(dashboard)).length, 1);
+});
+
+test('a notice written while a stream is open is posted by the timer, once; three missed dates post two', async (t) => {
+  const env = await testEnv(t);
+  await writeRegistry(env, [await assistantEntry(t)]);
+  const dashboard = await startDashboard({
+    env, log: () => {}, createAdapters: () => ({ claude: idleAdapter() }), timeouts: { noticePollMs: 30 },
+  });
+  t.after(() => dashboard.close());
+  assert.deepEqual(await readThread(dashboard), []);
+
+  const app = { port: dashboard.config.port, authority: `127.0.0.1:${dashboard.config.port}` };
+  const stream = await openEvents(app);
+  t.after(() => stream.close());
+  await stream.next();
+  await writeNotice(env, '2026-09-30');
+  const delta = await stream.next(2_000);
+  assert.equal(delta.event, 'delta');
+  assert.equal(delta.data.patch.agents[0].lastMessage.text, 'Opening for 2026-09-30.');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal((await readThread(dashboard)).length, 1);
+
+  // The run writes a failed notice over it: real information, posted too.
+  await writeNotice(env, '2026-09-30', { state: 'failed', opening: 'The morning brief did not build.', memo: undefined });
+  await stream.next(2_000);
+  const messages = await readThread(dashboard);
+  assert.deepEqual(messages.map((m) => [m.date, m.state]), [['2026-09-30', 'ready'], ['2026-09-30', 'failed']]);
+  assert.equal(messages[1].text, 'The morning brief did not build.');
+
+  // Three dates the daemon missed: only the newest two post.
+  for (const date of ['2026-10-01', '2026-10-02', '2026-10-03']) await writeNotice(env, date);
+  await stream.next(2_000);
+  await stream.next(2_000);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual((await readThread(dashboard)).map((m) => m.date), ['2026-09-30', '2026-09-30', '2026-10-02', '2026-10-03']);
+});
+
+test('a notice waits for the Assistant when its adapter fails to start, and no persona means no post', async (t) => {
+  const env = await testEnv(t);
+  await writeRegistry(env, [await assistantEntry(t)]);
+  await writeNotice(env, '2026-09-30');
+  const logs = [];
+  const failing = { ...idleAdapter(), start: async () => { throw new Error('invented'); } };
+  const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: failing }) });
+  t.after(() => dashboard.close());
+  // The thread route answers 409 for an unavailable persona; the store shows nothing was written.
+  await assert.rejects(stat(path.join(env.DASHBOARD_THREADS_DIR, 'assistant.jsonl')), { code: 'ENOENT' });
+  assert.ok(logs.some((e) => e.event === 'notice_skipped' && e.reason === 'agent_not_started'));
 });

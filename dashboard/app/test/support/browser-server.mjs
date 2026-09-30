@@ -45,6 +45,7 @@ import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
 import { RuntimeError } from '../../lib/runtime/adapter.mjs';
+import { createNotices } from '../../lib/notices.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } from './harness.mjs';
 import { focusSourceAvailable, startIsolatedFocus } from './isolated-focus.mjs';
@@ -142,7 +143,8 @@ export async function startHub({
     const briefRoutes = createBriefRoutes(config);
     const registry = controlledRegistry({ agents, ...registryState });
     const routines = controlledRoutines(routinesSeed);
-    const store = createThreadStore({ dir: path.join(root, 'threads'), limits: config.limits });
+    const threadsDir = path.join(root, 'threads');
+    const store = createThreadStore({ dir: threadsDir, limits: config.limits });
     const personas = fakePersonas(personaSeed, store);
     for (const [id, seed] of Object.entries(personaSeed)) {
       for (const message of seed.messages ?? []) await store.append(id, message);
@@ -178,9 +180,10 @@ export async function startHub({
     const goals = createGoals({ registry, limits: config.limits });
     const feedReader = createFeed({ dir: feedDir, limits: config.limits });
     const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits });
+    const notices = createNotices({ briefsDir, threadsDir, hub, limits: config.limits });
     const newHandler = () => createApp({
       config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, feedInstructions,
-      log: () => {},
+      notices, log: () => {},
     });
     let handler = newHandler();
     cleanups.push(async () => {
@@ -205,6 +208,10 @@ export async function startHub({
       focus,
       writeBrief: (date, options) => writeFile(path.join(briefsDir, `viewer-${date}.html`), inventedViewer({ date, ...options })),
       writeRawBrief: (date, html) => writeFile(path.join(briefsDir, `viewer-${date}.html`), html),
+      // A brief notice as the run writes it; the Assistant must be in `agents`
+      // as a started persona for the daemon to post it.
+      writeNotice: (date, fields) => writeFile(path.join(briefsDir, `notice-${date}.json`), JSON.stringify({ date, state: 'ready', ...fields })),
+      notices,
       readFeedback: (date) => readFile(path.join(briefsDir, `feedback-${date}.md`), 'utf8'),
       state: hub,
       // Requests the app received, with the status sent so far (null before

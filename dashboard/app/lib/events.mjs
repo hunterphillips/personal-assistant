@@ -20,13 +20,18 @@
 //     sessions (the cmux inventory and the Codex catalogue) every
 //     timeouts.sessionsPollMs, once at the first open as well. Neither
 //     refresh is awaited by a stream; its changes arrive as deltas.
+//   - With `notices` (notices.mjs): each connect runs notices.reconcile()
+//     after the status refresh, fire and forget, and the notice timer
+//     (notices.start(timeouts.noticePollMs)) runs only while at least one
+//     stream is open; the last close stops it. openStreams() is the count.
 //   - The router logs a stream once, when it closes, as event stream_closed;
 //     isStream(res) tells it which responses those are.
 //
-// createEvents({ hub, timeouts, limits, shuttingDown }) returns
+// createEvents({ hub, notices, timeouts, limits, shuttingDown }) returns
 //   serve(req, res) -> Promise<void>   the route body
 //   isStream(res) -> boolean           true once serve() took the response
 //   closeStreams()                     bye and end every open stream
+//   openStreams() -> number            streams open right now
 // `shuttingDown` is a function answering whether the app's closeStreams()
 // has run; the app sets that before calling closeStreams() here.
 
@@ -39,7 +44,7 @@ const SSE_HEADERS = {
   'X-Accel-Buffering': 'no',
 };
 
-export function createEvents({ hub, timeouts, limits, shuttingDown }) {
+export function createEvents({ hub, notices = null, timeouts, limits, shuttingDown }) {
   const streams = new Set(); // one close() per open event stream
   const streamingResponses = new WeakSet();
   let statusPoll = null;
@@ -52,11 +57,13 @@ export function createEvents({ hub, timeouts, limits, shuttingDown }) {
       sessionsPoll = setInterval(() => hub.refreshSessions(), timeouts.sessionsPollMs);
       sessionsPoll.unref();
       hub.refreshSessions();
+      notices?.start(timeouts.noticePollMs);
     } else if (streams.size === 0 && statusPoll) {
       clearInterval(statusPoll);
       clearInterval(sessionsPoll);
       statusPoll = null;
       sessionsPoll = null;
+      notices?.stop();
     }
   }
 
@@ -111,6 +118,8 @@ export function createEvents({ hub, timeouts, limits, shuttingDown }) {
 
     await hub.refreshStatus({ signal: closedSignal(res) });
     if (!open) return;
+    // A posted notice lands as a delta after the snapshot.
+    notices?.reconcile();
     const snapshot = hub.snapshot();
     write(`id: ${snapshot.revision}\nevent: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
     unsubscribe = hub.subscribe(({ revision, patch }) => {
@@ -131,5 +140,5 @@ export function createEvents({ hub, timeouts, limits, shuttingDown }) {
     for (const close of [...streams]) close({ bye: true });
   }
 
-  return { serve, isStream, closeStreams };
+  return { serve, isStream, closeStreams, openStreams: () => streams.size };
 }

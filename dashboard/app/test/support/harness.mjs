@@ -149,10 +149,11 @@ export function fakeCmux(inventory = null) {
 // test reads the real store; pass null for an app without the Feed routes.
 // The feed instructions reader reads DASHBOARD_FEED_INSTRUCTIONS, which is
 // likewise a missing path in a temporary directory unless `env` names it.
+// `notices` (notices.mjs) is optional and goes to the event stream.
 // `configure` may adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), routines, hub, adapters, store, bindings, cmux = null, goals, feed,
-  configure = (c) => c,
+  notices = null, configure = (c) => c,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
@@ -182,7 +183,7 @@ export async function startApp(t, {
   const instructionsReader = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log });
   const handler = createApp({
     config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader,
-    feedInstructions: instructionsReader, log,
+    feedInstructions: instructionsReader, notices, log,
   });
   server.on('request', handler);
   t.after(() => {

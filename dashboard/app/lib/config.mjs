@@ -71,6 +71,7 @@ export const TIMEOUTS = Object.freeze({
   launchctlMs: 3_000, // budget for one launchctl call
   heartbeatMs: 25_000, // comment ping on each open event stream
   statusPollMs: 30_000, // status refresh while any event stream is open
+  noticePollMs: 60_000, // brief notice check while any event stream is open (notices.mjs)
   drainMs: 30_000, // wait for busy persona turns at shutdown
   abortGraceMs: 2_000, // wait for aborted turns to end after the drain
   requestMaxAgeMs: 30 * 60_000, // a question or approval unanswered this long is denied

@@ -580,3 +580,46 @@ test('close clears turn clocks and unsubscribes from the adapters without closin
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.deepEqual(adapter.calls, [['start', 'cfo'], ['unsubscribe']]);
 });
+
+test('notify appends through the store with at, sets lastMessage from the summary, and bumps the revision', async () => {
+  const adapter = fakeAdapter();
+  const appended = [];
+  const store = { read: async () => [], append: async (id, message) => { appended.push([id, message]); } };
+  const { hub, deltas } = makeHub({ adapters: { claude: adapter }, store });
+  await hub.start();
+  const before = hub.snapshot().revision;
+
+  const record = await hub.notify('cfo', {
+    role: 'system', kind: 'brief', date: '2026-09-30', state: 'ready', summary: 'Cash is fine.', text: '## Money\n\nLong memo text.',
+  });
+  assert.equal(record.at, '2026-09-25T12:00:00.000Z');
+  assert.deepEqual(appended, [['cfo', record]]);
+  assert.equal(hub.snapshot().revision, before + 1);
+  assert.deepEqual(deltas.at(-1).patch.agents[0].lastMessage, { role: 'system', text: 'Cash is fi', at: '2026-09-25T12:00:00.000Z' });
+
+  // A given `at` is kept; a message without a summary previews its text.
+  await hub.notify('cfo', { role: 'system', text: 'Plain note', at: '2026-09-25T13:00:00.000Z' });
+  assert.deepEqual(persona(hub).lastMessage, { role: 'system', text: 'Plain note', at: '2026-09-25T13:00:00.000Z' });
+  assert.equal(appended[1][1].at, '2026-09-25T13:00:00.000Z');
+});
+
+test('notify without a store rejects, and a store refusal propagates without a bump', async () => {
+  const { hub } = makeHub();
+  await assert.rejects(hub.notify('cfo', { role: 'system', text: 'x' }), { message: 'no_store' });
+
+  const store = { read: async () => [], append: async () => { throw new Error('invalid_message'); } };
+  const { hub: withStore, deltas } = makeHub({ adapters: { claude: fakeAdapter() }, store });
+  await withStore.start();
+  const count = deltas.length;
+  await assert.rejects(withStore.notify('cfo', { role: 'system', text: 'x' }), { message: 'invalid_message' });
+  assert.equal(deltas.length, count);
+});
+
+test('the last cached message previews its summary when it has one', async () => {
+  const store = {
+    read: async () => [{ role: 'system', kind: 'brief', summary: 'Short.', text: 'A long memo', at: 'a' }],
+  };
+  const { hub } = makeHub({ adapters: { claude: fakeAdapter() }, store });
+  await hub.start();
+  assert.deepEqual(persona(hub).lastMessage, { role: 'system', text: 'Short.', at: 'a' });
+});

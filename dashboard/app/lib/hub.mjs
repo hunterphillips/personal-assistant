@@ -42,6 +42,7 @@
 //                    with truncated false, since a question cut short cannot
 //                    be answered (the tool bounds its size anyway).
 //       lastMessage  null or { role, text, at }, text cut to limits.previewChars
+//                    (a message's `summary` stands in for its text when present)
 //       lastError    null or a string
 //       costUsd      null or the session's running total
 //     `sessions` is the union of every adapter's sessions() (adapter.mjs),
@@ -131,6 +132,16 @@
 //
 //   persona(id) -> { agent, adapter } | null
 //     The registry agent (with cwd) and its adapter, for a started persona.
+//
+//   notify(agentId, message) -> Promise<message>
+//     Appends `message` ({ role, text, ...fields }, `at` defaulting to now)
+//     to the agent's thread through the store, so the daemon stays the
+//     thread's only writer, then sets the persona's lastMessage from it
+//     (`summary` over `text` when the message carries one) and commits.
+//     For a message from outside a turn: the morning brief notice
+//     (notices.mjs). Rejects when there is no store or the store refuses
+//     the message; an agentId that is not a listed persona still appends
+//     (the store validates the id) but changes no snapshot.
 //
 //   session(id) -> { agent, adapter } | null
 //     { id } and the adapter following that session, for a listed session;
@@ -479,6 +490,18 @@ export function createHub({
       return { agent: entry.agent, adapter: entry.adapter };
     },
 
+    async notify(agentId, message) {
+      if (!store) throw new Error('no_store');
+      const record = { ...message, at: typeof message?.at === 'string' ? message.at : now().toISOString() };
+      await store.append(agentId, record);
+      const entry = personas.get(agentId);
+      if (entry && !closed) {
+        entry.lastMessage = preview(record, limits);
+        commitAgents();
+      }
+      return record;
+    },
+
     session(id) {
       const listed = state.sessions.find((session) => session.id === id);
       if (!listed) return null;
@@ -652,11 +675,14 @@ function codexStatus(adapters, adaptersDisabled) {
   return { available: false, reason };
 }
 
+// The snapshot's lastMessage: a message's summary when it carries one (a
+// brief notice), else its text, cut to limits.previewChars.
 function preview(message, limits) {
   if (!message || typeof message.text !== 'string') return null;
+  const text = typeof message.summary === 'string' && message.summary !== '' ? message.summary : message.text;
   return {
     role: message.role,
-    text: Array.from(message.text).slice(0, limits.previewChars).join(''),
+    text: Array.from(text).slice(0, limits.previewChars).join(''),
     at: typeof message.at === 'string' ? message.at : null,
   };
 }
