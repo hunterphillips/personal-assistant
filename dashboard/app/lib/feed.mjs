@@ -15,7 +15,7 @@
 //     result, deeply frozen:
 //       { agentId, readAt, problems: [sentence],
 //         runs: [{ id, producer, date, since, generatedAt,
-//                  items: [{ id, title, source, url, summary, test, kept }] }] }
+//                  items: [{ id, title, source, url, summary, test, kept, image }] }] }
 //     - `agentId` is the persona Discuss sends to; the routes check the
 //       registry for it.
 //     - Runs are the files whose names match, regular files only, newest
@@ -29,8 +29,9 @@
 //       non-empty strings, with a `url` that is not http or https, or with
 //       an id another item already used, is skipped, and the run's items
 //       that were skipped are counted in one problem sentence. `kept` is a
-//       boolean, false unless true; `test` is an integer or null; `since`
-//       and `generatedAt` are strings or null.
+//       boolean, false unless true; `test` is an integer or null; `image`
+//       is an http or https URL or null, and never gets an item skipped;
+//       `since` and `generatedAt` are strings or null.
 //     - A missing directory is one problem and no runs; more files than
 //       limits.feedFiles is one problem naming the count.
 //
@@ -213,6 +214,7 @@ function parseRun(text, name, problems, index) {
       summary: entry.summary,
       test: Number.isInteger(entry.test) ? entry.test : null,
       kept: entry.kept === true,
+      image: nonEmpty(entry.image) && URL_SCHEME.test(entry.image) ? entry.image : null,
     };
     items.push(item);
     index.set(item.id, Object.freeze({ ...item, producer, date }));

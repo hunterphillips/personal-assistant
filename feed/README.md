@@ -29,6 +29,11 @@ redo a run, delete its file first.
   `http` or `https`.
 - `kept` is true for an item the producer also handed to the Daily Brief.
 - `test` is the producer's relevance criterion number, or null. Not shown.
+- `image`, optional, is an absolute `http` or `https` URL of the story's
+  picture. The reader sets anything else to null and still shows the item.
+  `bin/enrich` fills it after a run, from the story page's `og:image`,
+  `twitter:image`, or `image_src`; an item it finds nothing for is left
+  without the key.
 - `since` is the window the run covered, when the producer has one.
 
 ## Producers

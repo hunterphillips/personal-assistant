@@ -44,7 +44,7 @@ test('the fixture store reads with no problems, newest run first, items in file 
   assert.deepEqual(newest.items[0], {
     id: 'watch/2026-09-28/1', title: 'Town council adopts a rule for delivery robots', source: 'Invented Gazette',
     url: 'https://example.com/robots', summary: 'The Invented Gazette reports the town adopted a rule for delivery robots on sidewalks.',
-    test: 5, kept: true,
+    test: 5, kept: true, image: null,
   });
   // A missing test is null; a missing kept is false.
   assert.deepEqual([newest.items[5].test, newest.items[6].kept], [null, false]);
@@ -77,7 +77,7 @@ test('find returns the item with its run, or null', async (t) => {
   assert.deepEqual(found, {
     id: 'watch/2026-09-21/2', title: 'Hand-bound notebooks, a how-to', source: 'Invented Letters',
     url: 'https://example.com/notebooks', summary: 'A step-by-step on binding a notebook with a needle and waxed thread.',
-    test: 2, kept: false, producer: 'watch', date: '2026-09-21',
+    test: 2, kept: false, image: null, producer: 'watch', date: '2026-09-21',
   });
   assert.ok(Object.isFrozen(found));
   assert.equal(await feed.find('watch/2026-09-21/9'), null);
@@ -128,6 +128,27 @@ test('items that are not the expected shape are left out and counted once per ru
   assert.deepEqual([newest.items[2].test, newest.items[2].kept], [null, false]);
   assert.equal(older.items.length, 7);
   assert.equal((await feed.find('watch/2026-09-28/1')).date, '2026-10-05');
+});
+
+test('an item keeps an http or https image and gets null for anything else, never skipped for it', async (t) => {
+  const dir = await feedCopy(t);
+  await run(dir, '2026-10-05', [
+    item('watch/2026-10-05/1', { image: 'https://example.com/a.jpg' }),
+    item('watch/2026-10-05/2', { image: 'http://example.com/b.png' }),
+    item('watch/2026-10-05/3', { image: '/images/c.png' }),
+    item('watch/2026-10-05/4', { image: '' }),
+    item('watch/2026-10-05/5', { image: 42 }),
+    item('watch/2026-10-05/6', { image: 'javascript:alert(1)' }),
+    item('watch/2026-10-05/7'),
+    item('watch/2026-10-05/8', { image: null }),
+  ]);
+  const feed = feedFor(dir);
+  const result = await feed.read();
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(result.runs[0].items.map((entry) => entry.image), [
+    'https://example.com/a.jpg', 'http://example.com/b.png', null, null, null, null, null, null,
+  ]);
+  assert.equal((await feed.find('watch/2026-10-05/1')).image, 'https://example.com/a.jpg');
 });
 
 test('a file over the cap is skipped, from its size and from its bytes', async (t) => {
