@@ -412,7 +412,11 @@ its thread." when nothing is pinned. On a phone the list fills the width,
 nothing opens by itself, and a thread takes the whole width with an "All
 agents" link back. The launchd jobs, the registry error, and the lines for
 the Codex server and cmux are on the Health view; the Agents view says only
-what each row needs.
+what each row needs. From 720px, a button at the left of the thread header
+(`public/agents-sidebar.js`) hides and shows the list so an open thread can
+take the full width; the choice is kept in `localStorage` under
+`dashboard.agentsListHidden` and applied before the view paints. The button
+is hidden on a phone, which keeps its own list/thread switch.
 
 #### Sessions
 

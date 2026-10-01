@@ -179,6 +179,40 @@ test.describe('with seeded agents', () => {
     await expect(messages(page)).toHaveCount(2);
   });
 
+  test('the agents toggle hides and shows the list, widens the thread, and a reload keeps the choice', async ({ page, hub }) => {
+    test.skip(phone(page), 'the toggle is desktop only');
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    const list = page.locator('#agents-list');
+    const threadMain = pane(page).locator('.thread-main');
+
+    await expect(list).toBeVisible();
+    var toggle = page.getByRole('button', { name: 'Hide agents', exact: true });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(toggle).toHaveAttribute('aria-controls', 'agents-list');
+    const narrowWidth = (await threadMain.boundingBox()).width;
+
+    await toggle.click();
+    await expect(list).toBeHidden();
+    toggle = page.getByRole('button', { name: 'Show agents', exact: true });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const wideWidth = (await threadMain.boundingBox()).width;
+    expect(wideWidth).toBeGreaterThan(narrowWidth);
+
+    await page.reload();
+    await expect(list).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Show agents', exact: true })).toHaveAttribute('aria-expanded', 'false');
+
+    await page.getByRole('button', { name: 'Show agents', exact: true }).click();
+    await expect(list).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Hide agents', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('the agents toggle does not appear on a phone', async ({ page, hub }) => {
+    test.skip(!phone(page), 'desktop only has the toggle');
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(page.locator('#agents-toggle')).toBeHidden();
+  });
+
   test('a persona without jobs has no jobs line', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=brain`);
     await expect(pane(page).locator('#agent-name')).toHaveText('Second brain');
