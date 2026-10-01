@@ -179,13 +179,16 @@ test.describe('with seeded agents', () => {
     await expect(messages(page)).toHaveCount(2);
   });
 
-  test('the agents toggle hides and shows the list, widens the thread, and a reload keeps the choice', async ({ page, hub }) => {
+  test('the agents toggle hides and shows the list, moves between the two panes, widens and centers the thread, and a reload keeps the choice', async ({ page, hub }) => {
     test.skip(phone(page), 'the toggle is desktop only');
     await page.goto(`${hub.origin}/?agent=cfo`);
     const list = page.locator('#agents-list');
     const threadMain = pane(page).locator('.thread-main');
+    const threadHeader = pane(page).locator('.thread-header');
 
     await expect(list).toBeVisible();
+    await expect(list.locator('#agents-toggle')).toHaveCount(1);
+    await expect(threadHeader.locator('#agents-toggle')).toHaveCount(0);
     var toggle = page.getByRole('button', { name: 'Hide agents', exact: true });
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await expect(toggle).toHaveAttribute('aria-controls', 'agents-list');
@@ -193,17 +196,31 @@ test.describe('with seeded agents', () => {
 
     await toggle.click();
     await expect(list).toBeHidden();
+    await expect(threadHeader.locator('#agents-toggle')).toHaveCount(1);
+    await expect(list.locator('#agents-toggle')).toHaveCount(0);
     toggle = page.getByRole('button', { name: 'Show agents', exact: true });
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     const wideWidth = (await threadMain.boundingBox()).width;
     expect(wideWidth).toBeGreaterThan(narrowWidth);
 
+    if (page.viewportSize().width === 1280) {
+      const mainBox = await threadMain.boundingBox();
+      const messagesBox = await pane(page).locator('#agent-messages').boundingBox();
+      expect(messagesBox.width).toBeLessThanOrEqual(822);
+      const leftGap = messagesBox.x - mainBox.x;
+      const rightGap = mainBox.x + mainBox.width - (messagesBox.x + messagesBox.width);
+      expect(Math.abs(leftGap - rightGap)).toBeLessThanOrEqual(3);
+    }
+
     await page.reload();
     await expect(list).toBeHidden();
+    await expect(threadHeader.locator('#agents-toggle')).toHaveCount(1);
     await expect(page.getByRole('button', { name: 'Show agents', exact: true })).toHaveAttribute('aria-expanded', 'false');
 
     await page.getByRole('button', { name: 'Show agents', exact: true }).click();
     await expect(list).toBeVisible();
+    await expect(list.locator('#agents-toggle')).toHaveCount(1);
+    await expect(threadHeader.locator('#agents-toggle')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Hide agents', exact: true })).toHaveAttribute('aria-expanded', 'true');
   });
 
@@ -647,7 +664,7 @@ test.describe('with seeded agents', () => {
     const heading = await page.locator('.agents-heading').boundingBox();
     const firstGroup = await page.locator('.agent-group-heading').first().boundingBox();
     const between = await page.locator('#agents-list > :visible').evaluateAll((nodes) => nodes.map((n) => n.className));
-    expect(between).toEqual(['agents-heading', '']);
+    expect(between).toEqual(['agents-list-head', '']);
     expect(firstGroup.y).toBeGreaterThan(heading.y);
 
     await row(page, 'CFO').click();

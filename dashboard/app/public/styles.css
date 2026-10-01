@@ -384,9 +384,19 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   border-right: 1px solid var(--line);
 }
 
-/* The thread-header button that hides and shows .agents-list, so an open
-   thread can take the full width. Desk only: the phone layout below 720px
-   keeps its own list/thread switch untouched. */
+/* The Agents heading and, while the list shows, the toggle beside it. */
+.agents-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* The toggle that hides and shows .agents-list, so an open thread can take
+   the full width. public/agents-sidebar.js moves it between this row and
+   the thread header. Desk only: the phone layout below 720px keeps its own
+   list/thread switch untouched. */
 @media (min-width: 720px) {
   .agents.agents-collapsed {
     grid-template-columns: minmax(0, 1fr);
@@ -397,6 +407,25 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   }
 }
 
+.agents-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.agents-toggle:hover,
+.agents-toggle:focus-visible {
+  color: var(--ink);
+}
+
 .agents-heading, .goals-heading, .health-heading {
   margin: 0 0 12px;
   font-family: var(--serif);
@@ -404,6 +433,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   font-weight: 400;
   line-height: 1.2;
 }
+.agents-list-head .agents-heading { margin-bottom: 0; }
 
 .agents-message { margin: 0 0 12px; }
 
@@ -1011,12 +1041,18 @@ a.agent-row[aria-current="true"] {
   border-bottom: 1px solid var(--line);
 }
 
+/* The message column and, below, the composer row share one centered
+   column (ChatGPT- and Claude-style), capped at 820px and full width
+   below that. The thread header stays full width above them. */
 .thread-messages {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  width: 100%;
+  max-width: 820px;
+  margin-inline: auto;
   padding: 16px 24px;
   overflow: auto;
   overscroll-behavior: contain;
@@ -1326,6 +1362,17 @@ a.agent-row[aria-current="true"] {
   padding: 12px 24px;
   padding-bottom: max(12px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
+}
+
+/* The thread's own composer: the form (and its top divider) stays full
+   width, but its label, input row, and reason share the message column's
+   centered width. Other composers (Goals, Feed instructions) keep their
+   own container's width and are untouched by this selector. */
+.thread-main > .composer > .composer-label,
+.thread-main > .composer > .composer-row,
+.thread-main > .composer > .composer-reason {
+  max-width: 820px;
+  margin-inline: auto;
 }
 
 .composer-label {
