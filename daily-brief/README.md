@@ -12,7 +12,7 @@ The plan and its decisions:
 | 05:15 Mon-Fri | `com.hunter.catchup.daily`, the work brief | `~/workspace/work/nowgentic/.claude/bin/` |
 | 05:30 | `com.hunter.cfo.daily`, cfo's snapshot | `~/workspace/work/investing/cfo/launchd/` |
 | 05:50 | `com.focus.scan-notes`, `com.focus.scan-work` | `~/workspace/projects/AI/focus/launchd/` |
-| 05:40 Mon | `com.personal-assistant.watch`, the newsletter packet | `launchd/` here |
+| 05:40 | `com.personal-assistant.watch`, the newsletter packet | `launchd/` here |
 | 06:05 | `com.personal-assistant.daily-brief` | `launchd/` here |
 
 A normal morning finishes around 06:45. The runner does not trust the
@@ -59,11 +59,15 @@ curator rules they point at are the files beside this README.
 
 ## Watch
 
-`watch/contribute` reads the five newsletters in `watch/relevance.md` from
-Gmail (haiku lists the issues and extracts each one's stories, one session
-per issue; opus triages them against the criteria with no tools), then
-`watch/render.py` writes `watch/packets/<date>.yaml`, `watch/overflow/<date>.json`,
+`watch/contribute` runs daily at 05:40. It reads the five newsletters in
+`watch/relevance.md` from Gmail (haiku lists the issues and extracts each
+one's stories, one session per issue; opus triages them against the
+criteria with no tools), then `watch/render.py` writes
+`watch/packets/<date>.yaml`, `watch/overflow/<date>.json`,
 appends `watch/seen.jsonl`, and sets `last_run` in `watch/state.json`. The
+sources are weekly, so most days there is nothing new: the Gmail listing
+comes back empty and the run exits clean without writing a packet, a feed
+file, or touching `seen.jsonl` or `state.json`. The
 next brief run copies the newest packet not in `state.json.reported` in as
 `watch.yaml` and marks it after a successful build. Hand run:
 

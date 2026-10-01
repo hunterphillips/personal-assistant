@@ -20,11 +20,9 @@
     <key>PATH</key>
     <string>/Users/hunterphillips/.local/bin:/Users/hunterphillips/.nvm/versions/node/v24.18.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
-  <!-- Mondays 05:40, before the 06:05 brief run, which reports the packet. -->
+  <!-- Daily 05:40, before the 06:05 brief run, which reports the packet. -->
   <key>StartCalendarInterval</key>
   <dict>
-    <key>Weekday</key>
-    <integer>1</integer>
     <key>Hour</key>
     <integer>5</integer>
     <key>Minute</key>

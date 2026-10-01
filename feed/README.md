@@ -38,7 +38,7 @@ redo a run, delete its file first.
 
 ## Producers
 
-- `watch` (`daily-brief/watch/render.py`, Mondays): the newsletter
+- `watch` (`daily-brief/watch/render.py`, daily): the newsletter
   survivors first, then the overflow that passed a test but not the cap.
   Criteria in `daily-brief/watch/relevance.md`.
 

@@ -35,7 +35,7 @@ from here.
   edit.
 - **Use cases**: `daily-brief/`, running every morning since 2026-09-27
   (gather one packet per domain, curate, build, verify), with the newsletter
-  `watch` domain on Mondays; `feed/`, the store behind the Feed, which
+  `watch` domain daily; `feed/`, the store behind the Feed, which
   watch writes and the dashboard reads. A later weekly review or decision
   prep sits beside them with its own contract.
 - **The agents' repos**, each its own repo with its own CLAUDE.md, launchd
@@ -75,7 +75,7 @@ contribution per domain) are code words until they are renamed.
    agent; the launchd jobs are "jobs" and live in Health.
 2. `thoughts/shared/lanes/daily-brief/handoff.md`: the brief. Scheduled since
    09-27 (`thoughts/shared/plans/2026-09-27-daily-brief-scheduled-run.md`),
-   watch on Mondays (`2026-09-28-watch-domain.md`). On 2026-09-29 the writing
+   watch daily since 2026-10-01 (`2026-09-28-watch-domain.md`). On 2026-09-29 the writing
    rules collapsed to seven content rules after Hunter preferred a one-shot
    prompt's brief; do not add sentence-level prose rules back.
 3. `thoughts/shared/research/2026-09-10-daily-brief-landscape.md`: read

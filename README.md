@@ -67,7 +67,7 @@ decision prep would sit beside it with its own contract and its own inputs.
 - `daily-brief/contribution-schema.md` — the YAML shape, derived from the first three runs
 - `daily-brief/run-prompts.md` — the one-line prompt pasted into each domain repo
 - `daily-brief/curator.md` — the curator's seven content rules; headings and shape are the model's
-- `daily-brief/watch/` — the newsletter domain: `contribute` runs Mondays, `relevance.md` holds its sources and survival criteria
+- `daily-brief/watch/` — the newsletter domain: `contribute` runs daily, `relevance.md` holds its sources and survival criteria
 - `feed/` — the feed store the dashboard's Feed reads; `items/` holds one JSON file per producer run, gitignored
 - `daily-brief/bin/run-brief` — the scheduled morning run; `daily-brief/README.md` has the schedule and flags
 - `daily-brief/contributions/YYYY-MM-DD/<domain>.yaml` — a day's raw contributions
@@ -117,7 +117,7 @@ the catchup, cfo, and Focus jobs it depends on. On 2026-09-24 the briefs were
 found to overlap the Focus board, and Hunter decided the split: Focus is
 actions, the brief is orientation and never restates the board (§8 of
 `thoughts/shared/research/2026-09-24-brief-vs-focus.md`). A `watch` domain
-distills five newsletters weekly. On 2026-09-29 Hunter preferred a one-shot
+checks five newsletters daily and distills whatever is new. On 2026-09-29 Hunter preferred a one-shot
 prompt's brief to the rule-stacked memo, so the voice file and fixed labels
 were retired; the curator now writes from a ten-line prompt and seven content
 rules on Sonnet 5.5.

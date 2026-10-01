@@ -347,7 +347,7 @@ ROSTER
         : # weekend: no work brief is expected, and the curator knows
     fi
 
-    # Watch: the weekly contributor leaves packets in watch/packets/; the newest
+    # Watch: the daily contributor leaves packets in watch/packets/; the newest
     # one not yet reported rides into this brief and is marked after verify.
     watch_packet=
     for f in "$brief_dir"/watch/packets/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].yaml; do

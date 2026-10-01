@@ -1,7 +1,8 @@
 #!/bin/sh
-# Weekly watch contributor. Reads the chosen newsletters from Gmail, extracts
+# Daily watch contributor. Reads the chosen newsletters from Gmail, extracts
 # their stories, triages them against relevance.md, and writes
-# watch/packets/<date>.yaml for the next Daily Brief run to pick up.
+# watch/packets/<date>.yaml for the next Daily Brief run to pick up. Most
+# days find nothing new, since the five sources are weekly.
 #
 #   contribute [--date YYYY-MM-DD] [--since YYYY-MM-DD] [--dry-run]
 #
@@ -115,8 +116,14 @@ if ! run_session "$stage_seconds" '.structured_output.threads | length > 0' "$wo
     --allowedTools mcp__claude_ai_Gmail__search_threads \
     --output-format json --json-schema \"\$(cat \"$watch/schemas/threads.json\")\" \
     <\"$work/list.md\" >\"$work/list.json\" 2>\"$work/list.err\""; then
-    # Axios alone is five issues a week, so an empty search is a failed
-    # search: no packet, no state change, the next run covers the gap.
+    # A daily run mostly finds nothing: the five sources are weekly, so an
+    # empty listing with no error is a quiet day, not a failure. Only
+    # list.md's error field (set when the tool call itself failed, was
+    # denied, or was unavailable) or a malformed/missing structured_output
+    # counts as a real failure.
+    if $jq -e '.structured_output.threads == [] and .structured_output.error == null' "$work/list.json" >/dev/null 2>&1; then
+        log "exit=0 date=$date since=$since reason=nothing-new"; exit 0
+    fi
     err=$($jq -r '.structured_output.error // .result // ""' "$work/list.json" 2>/dev/null | /usr/bin/head -c 160)
     log "exit=1 date=$date since=$since reason=list-empty-or-failed error=${err:-none}"; /bin/cat "$work/list.err" >&2; exit 1
 fi

@@ -4,7 +4,7 @@ scheduled run in {{ROOT}}: do not ask anything.
 The inputs are in daily-brief/contributions/{{DATE}}/: what his systems
 reported this morning. `cfo.yaml` is his finances, `focus.yaml` his task
 board, `second-brain.yaml` his personal notes, `calendar.yaml` his calendar,
-`watch.yaml` a weekly newsletter digest (most weeks absent), `run.yaml` a
+`watch.yaml` a newsletter digest checked daily (most days absent), `run.yaml` a
 note from the process that gathered the inputs, and `work.md` a summary of
 his work week from his job (absent on weekends). The last brief he read was
 {{CURSOR}}; the previous memos are {{PREVIOUS_MEMOS}}.

@@ -9,7 +9,7 @@ The curator is one session, started by `bin/run-brief` every morning with
 
 One packet per domain in `contributions/<date>/`, written against
 `contribution-contract.md`: `cfo.yaml`, `focus.yaml`, `second-brain.yaml`,
-`calendar.yaml`, `watch.yaml` (weekly), `run.yaml` (the coordinator's own
+`calendar.yaml`, `watch.yaml` (most days absent), `run.yaml` (the coordinator's own
 caveats about missing or stale inputs), and `work.md` (the work brief,
 weekdays). Plus the previous two memos.
 
