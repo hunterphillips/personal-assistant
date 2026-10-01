@@ -333,7 +333,8 @@ module, `public/routines.js`, the snapshot's `routines` key, and
 ### Shell
 
 `public/index.html`, `public/shell.js`, `public/agents.js`,
-`public/routines.js`, `public/goals.js`, and `public/styles.css` make up the
+`public/markdown.js`, `public/routines.js`, `public/goals.js`, and
+`public/styles.css` make up the
 page served at `/`, `/agents`, `/reading`, `/brief`, `/focus`, `/goals`,
 and `/health`. The Agents view is the page at `/`; `/agents` shows the same
 view. `/reading` and `/brief` show the Reading view, `/focus` Focus,
@@ -513,7 +514,12 @@ The thread is read from `GET /api/agents/<id>/thread` when it opens and
 again whenever the state shows a new last message or a turn that started or
 ended, so it follows the turn without reconstructing it from deltas. Your
 messages sit on the right, the persona's on the left, and "New thread"
-markers in the middle. While the persona works or waits on an answer, the
+markers in the middle. Every message, and the brief notice's memo, renders
+its Markdown (`public/markdown.js`): paragraphs with their line breaks,
+headings, bulleted and numbered lists nested by indent, bold, italic,
+inline code, fenced code blocks, blockquotes, rules, and http, https, and
+mailto links, which open in a new tab. Raw HTML and any other link render
+as text. The row preview and the notice's summary strip the markers. While the persona works or waits on an answer, the
 pane says so and offers Interrupt, which ends the turn and denies any open
 request. A question becomes one card per question with its options
 (label and description), an Other field, and Answer, which posts one answer

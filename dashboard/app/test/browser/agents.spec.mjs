@@ -861,8 +861,10 @@ test.describe('with a brief notice in the Assistant thread', () => {
     await brief.locator('summary').click();
     await expect(brief).toHaveAttribute('open', '');
     await expect(brief.locator('.thread-brief-body')).toBeVisible();
-    await expect(brief.locator('.thread-brief-body')).toContainText('## Money');
     await expect(brief.locator('.thread-brief-body')).toContainText('Two threads wait on other people.');
+    await expect(brief.locator('.thread-brief-body h4')).toHaveText('Money');
+    await expect(brief.locator('.thread-brief-body li')).toHaveText(['Drift is under a point.']);
+    await expect(brief.locator('.thread-brief-body')).not.toContainText('##');
     await expect(page.locator('#agent-messages .thread-day')).toHaveCount(0);
   });
 
@@ -899,5 +901,94 @@ test.describe('with a brief notice in the Assistant thread', () => {
     await hub.notices.reconcile();
     await page.reload();
     await expect(messages(page)).toHaveCount(3);
+  });
+});
+
+// Messages render their Markdown: an agent's reply, a plain line, and the
+// brief notice's memo.
+const MARKDOWN_REPLY = [
+  '## Needs you',
+  '',
+  'Two things wait on **you** today:',
+  '',
+  '- Sign the `wire` form at [the bank](https://bank.example/forms)',
+  '- Reply to Sam',
+  '  - about the lease',
+  '',
+  '```sh',
+  'cfo snapshot --date 2026-10-01',
+  '```',
+  '',
+  '<img src=x onerror="window.__injected = true">',
+].join('\n');
+const MARKDOWN_BRIEF = {
+  role: 'system', kind: 'brief', date: '2026-09-30', state: 'ready',
+  summary: '**Cash** is fine.',
+  text: 'Cash is fine.\n\n## Money\n\n- Drift is under a point.\n- Nothing is due before Thursday.\n\n## Work\n\n1. One thread waits on Sam.',
+  at: ago(40 * MINUTE),
+};
+
+test.describe('with Markdown messages', () => {
+  test.use({
+    hubOptions: {
+      build: () => ({
+        agents: [ASSISTANT, ...AGENTS],
+        personas: {
+          assistant: { messages: [
+            MARKDOWN_BRIEF,
+            { role: 'user', text: 'What needs me?', at: ago(20 * MINUTE) },
+            { role: 'assistant', text: 'Cash is fine.', at: ago(19 * MINUTE) },
+            { role: 'assistant', text: MARKDOWN_REPLY, at: ago(18 * MINUTE) },
+          ] },
+        },
+      }),
+    },
+  });
+
+  test('a reply renders its heading, list, code, and link, and raw HTML stays text', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText(/^Needs you Two things wait on you today: Sign the wire form at the bank Reply to Sam about the lease/);
+
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await expect(messages(page)).toHaveCount(4);
+    const reply = messages(page).nth(3).locator('.thread-message-text');
+    await expect(reply.locator('h4')).toHaveText('Needs you');
+    await expect(reply.locator('strong')).toHaveText('you');
+    await expect(reply.locator(':scope > ul > li')).toHaveCount(2);
+    await expect(reply.locator('ul ul > li')).toHaveText(['about the lease']);
+    await expect(reply.locator('p code')).toHaveText('wire');
+    const link = reply.locator('a');
+    await expect(link).toHaveText('the bank');
+    await expect(link).toHaveAttribute('href', 'https://bank.example/forms');
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(reply.locator('pre code')).toHaveText('cfo snapshot --date 2026-10-01');
+    await expect(reply).not.toContainText('##');
+    await expect(reply.locator('img')).toHaveCount(0);
+    await expect(reply).toContainText('<img src=x onerror="window.__injected = true">');
+    expect(await page.evaluate(() => window.__injected)).toBeUndefined();
+
+    // A plain line is one paragraph, with the bubble's own size.
+    const plain = messages(page).nth(2).locator('.thread-message-text');
+    await expect(plain.locator('> *')).toHaveCount(1);
+    await expect(plain.locator('> p')).toHaveText('Cash is fine.');
+    const sizes = await plain.locator('> p').evaluate((node) => {
+      const own = getComputedStyle(node);
+      const outer = getComputedStyle(node.parentElement);
+      return [own.fontSize, own.marginTop, own.marginBottom, outer.fontSize];
+    });
+    expect(sizes).toEqual(['15px', '0px', '0px', '15px']);
+  });
+
+  test('the brief memo renders its headings and lists, and the summary and preview show no markers', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    const brief = messages(page).nth(0).locator('details.thread-brief');
+    await expect(brief.locator('summary')).toHaveText('Brief, Wednesday, September 30: Cash is fine.');
+    await brief.locator('summary').click();
+    const body = brief.locator('.thread-brief-body');
+    await expect(body.locator('h4')).toHaveText(['Money', 'Work']);
+    await expect(body.locator('ul > li')).toHaveText(['Drift is under a point.', 'Nothing is due before Thursday.']);
+    await expect(body.locator('ol > li')).toHaveText(['One thread waits on Sam.']);
+    await expect(body).not.toContainText('##');
   });
 });
