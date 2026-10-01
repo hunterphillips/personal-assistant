@@ -334,14 +334,14 @@
     }
   }
 
-  // The one-line preview under a row: the last message, or the description
-  // for an agent that has no thread.
+  // The one-line preview under a row: the last message with its Markdown
+  // markers stripped, or the description for an agent that has no thread.
   function previewText(agent) {
     if (!isPersona(agent)) return agent.description || '';
     var message = agent.lastMessage;
     if (!message || typeof message.text !== 'string') return '';
     var source = typeof message.summary === 'string' && message.summary ? message.summary : message.text;
-    var text = source.replace(/\s+/g, ' ').trim();
+    var text = window.DashboardMarkdown.plain(source);
     return message.role === 'user' ? 'You: ' + text : text;
   }
 
@@ -578,9 +578,14 @@
       if (entry.role === 'system' && entry.kind === 'brief') return briefNode(entry);
       var role = entry.role === 'user' || entry.role === 'system' ? entry.role : 'assistant';
       var node = element('div', 'thread-message thread-message-' + role);
-      node.appendChild(element('div', 'thread-message-text', typeof entry.text === 'string' ? entry.text : ''));
+      node.appendChild(markdownNode('thread-message-text', entry.text));
       node.appendChild(messageMeta(entry));
       return node;
+    }
+
+    // A message body rendered from its Markdown (markdown.js).
+    function markdownNode(className, text) {
+      return window.DashboardMarkdown.renderInto(element('div', className + ' markdown'), text);
     }
 
     // The morning brief's notice: one line that opens to the memo. A brief
@@ -597,8 +602,8 @@
       var details = element('details', 'thread-brief');
       var line = typeof entry.summary === 'string' && entry.summary ? entry.summary : text;
       var day = briefDay(entry.date);
-      details.appendChild(element('summary', 'thread-brief-summary', 'Brief' + (day ? ', ' + day : '') + ': ' + line));
-      details.appendChild(element('div', 'thread-brief-body', text));
+      details.appendChild(element('summary', 'thread-brief-summary', 'Brief' + (day ? ', ' + day : '') + ': ' + window.DashboardMarkdown.plain(line)));
+      details.appendChild(markdownNode('thread-brief-body', text));
       node.appendChild(details);
       node.appendChild(messageMeta(entry));
       return node;

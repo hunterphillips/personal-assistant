@@ -7,7 +7,9 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../public/agents.js', import.meta.url), 'utf8');
+const markdown = readFileSync(new URL('../public/markdown.js', import.meta.url), 'utf8');
 const context = { window: {} };
+vm.runInNewContext(markdown, context);
 vm.runInNewContext(source, context);
 const view = context.window.DashboardAgents;
 // Values made inside the vm context have other Object and Array prototypes.
@@ -213,6 +215,10 @@ test('previewText collapses whitespace and marks your own messages', () => {
   assert.equal(view.previewText(persona({ lastMessage: { role: 'user', text: 'Hi' } })), 'You: Hi');
   assert.equal(view.previewText(persona()), '');
   assert.equal(view.previewText({ kind: 'project', description: 'A folder.' }), 'A folder.');
+  // Markdown markers never reach the row.
+  assert.equal(view.previewText(persona({ lastMessage: { role: 'assistant', text: '## Needs you\n\n- **Call** the [bank](https://bank.example) about `wire`' } })),
+    'Needs you Call the bank about wire');
+  assert.equal(view.previewText(persona({ lastMessage: { role: 'system', kind: 'brief', summary: '**Cash** is _fine_.', text: '## Money' } })), 'Cash is fine.');
 });
 
 test('stateLine marks waiting, busy, error, and unavailable personas only', () => {
