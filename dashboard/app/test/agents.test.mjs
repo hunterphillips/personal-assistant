@@ -12,7 +12,7 @@ const status = {
 function agent(id, extra = {}) {
   return Object.freeze({
     id, name: id.toUpperCase(), role: 'Role', description: 'Invented.', group: 'work', kind: 'persona',
-    cwd: '/invented', provider: 'claude', routines: [], ...extra,
+    cwd: '/invented', provider: 'claude', jobs: [], ...extra,
   });
 }
 
@@ -383,8 +383,8 @@ async function startEditable(t, agents = [agent('cfo'), agent('assistant', { pin
   return { ...app, registry, adapter };
 }
 
-test('settings PUT rewrites the entry in schema order, keeps routines, omits accepts for everyone, and answers the stored agent', async (t) => {
-  const app = await startEditable(t, [agent('cfo', { routines: ['com.hunter.cfo.daily'] }), agent('assistant', { pinned: true })]);
+test('settings PUT rewrites the entry in schema order, keeps jobs, omits accepts for everyone, and answers the stored agent', async (t) => {
+  const app = await startEditable(t, [agent('cfo', { jobs: ['com.hunter.cfo.daily'] }), agent('assistant', { pinned: true })]);
   const response = await put(app, '/api/agents/cfo/settings', settingsBody({
     name: 'Money desk', role: 'Finance', description: 'The money picture.', model: 'sonnet', effort: 'low', accepts: ['assistant'], pinned: true,
   }));
@@ -393,9 +393,9 @@ test('settings PUT rewrites the entry in schema order, keeps routines, omits acc
   assert.equal(response.json.note, undefined);
   assert.deepEqual(response.json.agent, {
     id: 'cfo', name: 'Money desk', role: 'Finance', description: 'The money picture.', group: 'work', kind: 'persona', cwd: '/invented',
-    provider: 'claude', model: 'sonnet', effort: 'low', accepts: ['assistant'], pinned: true, routines: ['com.hunter.cfo.daily'],
+    provider: 'claude', model: 'sonnet', effort: 'low', accepts: ['assistant'], pinned: true, jobs: ['com.hunter.cfo.daily'],
   });
-  assert.deepEqual(Object.keys(app.registry.writes[0].agents[0]), ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'accepts', 'routines', 'pinned']);
+  assert.deepEqual(Object.keys(app.registry.writes[0].agents[0]), ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'accepts', 'jobs', 'pinned']);
 
   // The snapshot follows in one revision, with the agent level visible.
   const { agents } = (await request(app, 'GET', '/api/state')).json;
@@ -504,7 +504,7 @@ test('POST /api/agents creates a Claude persona with the defaults, starts it, an
   assert.equal(created.status, 201);
   assert.deepEqual(created.json, {
     ok: true,
-    agent: { id: 'scout', name: 'Scout', role: 'Files', description: 'Reads my files.', group: 'work', kind: 'persona', cwd: '/invented/scout', provider: 'claude', routines: [] },
+    agent: { id: 'scout', name: 'Scout', role: 'Files', description: 'Reads my files.', group: 'work', kind: 'persona', cwd: '/invented/scout', provider: 'claude', jobs: [] },
   });
   const written = app.registry.writes[0].agents.at(-1);
   assert.deepEqual(written, { id: 'scout', name: 'Scout', role: 'Files', description: 'Reads my files.', group: 'work', kind: 'persona', cwd: '/invented/scout', provider: 'claude' });

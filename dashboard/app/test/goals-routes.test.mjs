@@ -17,7 +17,7 @@ const status = {
 function agent(id, cwd, extra = {}) {
   return Object.freeze({
     id, name: id.toUpperCase(), role: 'Role', description: 'Invented.', group: 'personal', kind: 'persona',
-    cwd, provider: 'claude', routines: [], ...extra,
+    cwd, provider: 'claude', jobs: [], ...extra,
   });
 }
 

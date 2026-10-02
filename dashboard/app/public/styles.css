@@ -173,7 +173,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 .notice button:hover { background: var(--green-dark); }
 
-/* Health: the launchd jobs (the code's routines), one card per agent.
+/* Health: the launchd jobs (the code's jobs), one card per agent.
    Its column is Goals's, below; the header and card rules are shared with
    Goals and the Feed. */
 
@@ -186,12 +186,12 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   margin-bottom: 16px;
 }
 
-.routines-updated {
+.jobs-updated {
   margin: 2px 0 0;
   color: var(--muted);
   font-size: 13px;
 }
-.routines-updated:empty { display: none; }
+.jobs-updated:empty { display: none; }
 
 .button {
   min-height: 44px;
@@ -282,7 +282,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 .availability p { margin: 0; }
 
-.routines-code {
+.jobs-code {
   color: var(--muted);
   font-size: 13px;
 }

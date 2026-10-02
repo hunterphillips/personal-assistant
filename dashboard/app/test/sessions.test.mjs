@@ -145,7 +145,7 @@ function editableRegistry(agents) {
   };
 }
 
-const project = (id, cwd) => ({ id, name: id, role: 'Code', description: 'Invented.', group: 'work', kind: 'project', cwd, routines: [] });
+const project = (id, cwd) => ({ id, name: id, role: 'Code', description: 'Invented.', group: 'work', kind: 'project', cwd, jobs: [] });
 
 test('each session names the deepest registry project holding its cwd, and the snapshot carries the home directory', async (t) => {
   const registry = editableRegistry([project('work', '/invented/work'), project('deep', '/invented/work/deep/'), { ...project('cfo', '/invented/work/deep'), kind: 'persona', provider: 'claude' }]);
@@ -393,7 +393,7 @@ test('without a Codex adapter the snapshot says so', async (t) => {
 });
 
 test('a Codex persona in the registry is unavailable as provider_unavailable', async (t) => {
-  const agents = [{ id: 'dev', name: 'DEV', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', provider: 'codex', routines: [] }];
+  const agents = [{ id: 'dev', name: 'DEV', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', provider: 'codex', jobs: [] }];
   const app = await startSessions(t, { agents });
   const [dev] = app.hub.snapshot().agents;
   assert.deepEqual([dev.state, dev.lastError], ['unavailable', 'provider_unavailable']);

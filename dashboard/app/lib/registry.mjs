@@ -44,7 +44,7 @@
 //                                    // absent or null means everyone. Read
 //                                    // by delegation (design phase 3);
 //                                    // nothing enforces it yet
-//         "routines": ["com.hunter.cfo.daily"], // optional, default [];
+//         "jobs": ["com.hunter.cfo.daily"], // optional, default [];
 //                                    // each /^[A-Za-z0-9][A-Za-z0-9.-]*$/,
 //                                    // unique across the whole registry
 //         "pinned": true             // optional; a persona listed above
@@ -159,7 +159,7 @@ const KINDS = new Set(['persona', 'project', 'system']);
 const PROVIDERS = new Set(['claude', 'codex']);
 const MAX_ACCEPTS = 100;
 const AGENT_KEYS = new Set([
-  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'permission', 'accepts', 'routines', 'pinned',
+  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'permission', 'accepts', 'jobs', 'pinned',
 ]);
 const GROUP_KEYS = new Set(['id', 'name']);
 const EMPTY_DOCUMENT = Object.freeze({ version: 1, groups: [], agents: [] });
@@ -429,7 +429,7 @@ function validateRegistry(value, problems, checkDirectory) {
   }
 
   const ids = new Map(); // id -> index of first agent that claimed it
-  const routineLabels = new Map(); // label -> "agent <index> (<id>)" that first claimed it
+  const jobLabels = new Map(); // label -> "agent <index> (<id>)" that first claimed it
   const agents = [];
   const entries = [];
   value.agents.forEach((entry, index) => {
@@ -442,11 +442,11 @@ function validateRegistry(value, problems, checkDirectory) {
     } else {
       ids.set(agent.id, index);
     }
-    for (const routineLabel of agent.routines) {
-      if (routineLabels.has(routineLabel)) {
-        problems.push(`agent ${index} (${agent.id}): routine "${routineLabel}" already used by ${routineLabels.get(routineLabel)}`);
+    for (const jobLabel of agent.jobs) {
+      if (jobLabels.has(jobLabel)) {
+        problems.push(`agent ${index} (${agent.id}): job "${jobLabel}" already used by ${jobLabels.get(jobLabel)}`);
       } else {
-        routineLabels.set(routineLabel, `agent ${index} (${agent.id})`);
+        jobLabels.set(jobLabel, `agent ${index} (${agent.id})`);
       }
     }
     agents.push(agent);
@@ -463,7 +463,7 @@ function validateRegistry(value, problems, checkDirectory) {
 
   return agents.map((agent) => Object.freeze({
     ...agent,
-    routines: Object.freeze([...agent.routines]),
+    jobs: Object.freeze([...agent.jobs]),
     ...(agent.accepts ? { accepts: Object.freeze([...agent.accepts]) } : {}),
   }));
 }
@@ -561,14 +561,14 @@ function validateAgent(entry, index, problems, checkDirectory = isDirectory) {
     }
   }
 
-  let routines = [];
-  if (entry.routines !== undefined) {
-    const isValidRoutines = Array.isArray(entry.routines) &&
-      entry.routines.every((item) => typeof item === 'string' && ROUTINE_LABEL.test(item));
-    if (!isValidRoutines) {
-      fail('routines must be an array of strings matching /^[A-Za-z0-9][A-Za-z0-9.-]*$/');
+  let jobs = [];
+  if (entry.jobs !== undefined) {
+    const isValidJobs = Array.isArray(entry.jobs) &&
+      entry.jobs.every((item) => typeof item === 'string' && ROUTINE_LABEL.test(item));
+    if (!isValidJobs) {
+      fail('jobs must be an array of strings matching /^[A-Za-z0-9][A-Za-z0-9.-]*$/');
     } else {
-      routines = entry.routines;
+      jobs = entry.jobs;
     }
   }
 
@@ -587,7 +587,7 @@ function validateAgent(entry, index, problems, checkDirectory = isDirectory) {
     ...(entry.permission !== undefined ? { permission: entry.permission } : {}),
     ...(accepts ? { accepts } : {}),
     ...(entry.pinned === true ? { pinned: true } : {}),
-    routines,
+    jobs,
   };
 }
 

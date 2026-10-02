@@ -21,7 +21,7 @@
 // matches an existing group joins it), and `group` must then equal its id.
 // A created agent is kind persona and provider claude; a project or system
 // entry is still a hand edit. The entry is written in the schema's key
-// order with its `routines` kept, so a dashboard write reads as a small
+// order with its `jobs` kept, so a dashboard write reads as a small
 // diff.
 //
 // Refusals, in this order: 400 invalid_body (a wrong shape or type), 400
@@ -181,7 +181,7 @@ function entryFor(fields) {
   if (fields.effort !== null && fields.effort !== undefined) entry.effort = fields.effort;
   if (fields.permission !== null && fields.permission !== undefined) entry.permission = fields.permission;
   if (Array.isArray(fields.accepts) && fields.accepts.length > 0) entry.accepts = [...fields.accepts];
-  if (Array.isArray(fields.routines) && fields.routines.length > 0) entry.routines = [...fields.routines];
+  if (Array.isArray(fields.jobs) && fields.jobs.length > 0) entry.jobs = [...fields.jobs];
   if (fields.pinned === true) entry.pinned = true;
   return entry;
 }

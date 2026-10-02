@@ -1,7 +1,7 @@
 // Coding sessions in the Agents view, in real browsers against the fake
 // Codex adapter, cmux inventory, and bindings of
 // test/support/browser-server.mjs. Personas and the Health view are
-// covered in agents.spec.mjs and routines.spec.mjs; what is off shows on
+// covered in agents.spec.mjs and jobs.spec.mjs; what is off shows on
 // Health, which is checked here.
 
 import { expect, expectView, test } from '../support/browser-test.mjs';
@@ -99,7 +99,7 @@ function seeded(extra = {}) {
   return {
     build: () => ({
       agents: AGENTS,
-      routines: { items: [], focusAvailable: true, refreshedAt: ago(5_000) },
+      jobs: { items: [], focusAvailable: true, refreshedAt: ago(5_000) },
       personas: { cfo: {} },
       codex: { sessions: sessions(), status: { available: true }, threads: THREADS },
       cmux: inventory(),
@@ -169,7 +169,7 @@ test.describe('with sessions', () => {
     await expect(page.locator('#agent-description')).toHaveText('~/work/catchup/sub');
     await expect(page.locator('#agent-cost')).toBeEmpty();
     await expect(page.locator('#agent-new-thread')).toBeHidden();
-    await expect(pane(page).getByRole('button', { name: /Routines/ })).toHaveCount(0);
+    await expect(pane(page).getByRole('button', { name: /Jobs/ })).toHaveCount(0);
     await expect(page.locator('#agent-details-toggle')).toBeHidden();
     await expect(page.locator('#agent-details')).toBeHidden();
     await expect(page.locator('#agent-composer')).toBeHidden();

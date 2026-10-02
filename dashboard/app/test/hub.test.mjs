@@ -30,7 +30,7 @@ function registryState(agents, { ok = true, error = null } = {}) {
 function agent(id, extra = {}) {
   return Object.freeze({
     id, name: id.toUpperCase(), role: 'Role', description: 'Invented.', group: 'work', kind: 'persona',
-    cwd: '/invented', provider: 'claude', routines: ['com.invented.job'], ...extra,
+    cwd: '/invented', provider: 'claude', jobs: ['com.invented.job'], ...extra,
   });
 }
 
@@ -46,20 +46,20 @@ function fakeStatus({ available = true, metadata = { state: 'ready', date: '2026
   return deps;
 }
 
-function fakeRoutines(result = { refreshedAt: '2026-09-25T12:00:00.000Z', focusAvailable: true, routines: [{ label: 'com.invented.job' }] }) {
-  const routines = {
+function fakeJobs(result = { refreshedAt: '2026-09-25T12:00:00.000Z', focusAvailable: true, jobs: [{ label: 'com.invented.job' }] }) {
+  const jobs = {
     calls: 0,
     signals: [],
     gate: null,
     async refresh({ signal } = {}) {
-      routines.calls += 1;
-      routines.signals.push(signal);
-      if (routines.gate) await routines.gate;
-      if (routines.fail) throw new Error('invented failure');
+      jobs.calls += 1;
+      jobs.signals.push(signal);
+      if (jobs.gate) await jobs.gate;
+      if (jobs.fail) throw new Error('invented failure');
       return result;
     },
   };
-  return routines;
+  return jobs;
 }
 
 function makeHub(overrides = {}) {
@@ -67,7 +67,7 @@ function makeHub(overrides = {}) {
   const logs = [];
   const hub = createHub({
     registry: overrides.registry ?? fakeRegistry(),
-    routines: overrides.routines ?? fakeRoutines(),
+    jobs: overrides.jobs ?? fakeJobs(),
     focus: status.focus,
     brief: status.brief,
     timeouts: { statusMs: 200, turnMaxMs: overrides.turnMaxMs ?? 60_000 },
@@ -91,7 +91,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-test('the initial snapshot is frozen, carries agent cwd and job count, and omits routines', () => {
+test('the initial snapshot is frozen, carries agent cwd and job count, and omits jobs', () => {
   const { hub } = makeHub();
   const snapshot = hub.snapshot();
   assert.equal(snapshot.revision, 1);
@@ -107,10 +107,10 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
       permission: { level: 'ask', source: 'system', agent: null, default: 'ask' }, accepts: null,
     },
   ]);
-  assert.deepEqual(snapshot.routines, { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] });
+  assert.deepEqual(snapshot.jobs, { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] });
   assert.deepEqual(snapshot.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' } });
   assert.deepEqual(snapshot.models.map((m) => m.id), ['fable', 'opus', 'sonnet', 'haiku']);
-  assert.ok(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.agents[0]) && Object.isFrozen(snapshot.routines));
+  assert.ok(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.agents[0]) && Object.isFrozen(snapshot.jobs));
   assert.ok(Object.isFrozen(snapshot.settings) && Object.isFrozen(snapshot.models));
 });
 
@@ -232,11 +232,11 @@ test('a registry change bumps the revision with a registry and agents patch', ()
   assert.deepEqual(deltas[0].patch.agents.map((a) => a.id), ['cfo', 'ops']);
   assert.equal('provider' in deltas[0].patch.agents[1], false);
   assert.equal(deltas[0].patch.agents[1].cwd, '/invented');
+  // The view carries the count, never the labels.
   assert.equal(deltas[0].patch.agents[1].jobs, 1);
-  assert.equal('routines' in deltas[0].patch.agents[1], false);
 
   // An entry with no cwd and no jobs.
-  registry.emit(registryState([agent('bare', { cwd: undefined, routines: undefined })]));
+  registry.emit(registryState([agent('bare', { cwd: undefined, jobs: undefined })]));
   assert.equal(hub.snapshot().agents[0].cwd, null);
   assert.equal(hub.snapshot().agents[0].jobs, 0);
 
@@ -324,12 +324,12 @@ test('an aborted caller stops waiting without aborting the shared status run', a
   assert.deepEqual(hub.snapshot().focus, { available: true });
 });
 
-test('a routines refresh bumps for refreshing and again for the result', async () => {
+test('a jobs refresh bumps for refreshing and again for the result', async () => {
   const { hub, deltas } = makeHub();
-  await hub.refreshRoutines();
-  assert.deepEqual(deltas.map((d) => [d.revision, Object.keys(d.patch)]), [[2, ['routines']], [3, ['routines']]]);
-  assert.equal(deltas[0].patch.routines.refreshing, true);
-  assert.deepEqual(hub.snapshot().routines, {
+  await hub.refreshJobs();
+  assert.deepEqual(deltas.map((d) => [d.revision, Object.keys(d.patch)]), [[2, ['jobs']], [3, ['jobs']]]);
+  assert.equal(deltas[0].patch.jobs.refreshing, true);
+  assert.deepEqual(hub.snapshot().jobs, {
     refreshedAt: '2026-09-25T12:00:00.000Z',
     focusAvailable: true,
     refreshing: false,
@@ -338,36 +338,36 @@ test('a routines refresh bumps for refreshing and again for the result', async (
   });
 });
 
-test('concurrent routines refreshes share one call and pass the first signal through', async () => {
-  const routines = fakeRoutines();
+test('concurrent jobs refreshes share one call and pass the first signal through', async () => {
+  const jobs = fakeJobs();
   const gate = deferred();
-  routines.gate = gate.promise;
-  const { hub } = makeHub({ routines });
+  jobs.gate = gate.promise;
+  const { hub } = makeHub({ jobs });
   const controller = new AbortController();
-  const both = Promise.all([hub.refreshRoutines({ signal: controller.signal }), hub.refreshRoutines()]);
-  assert.equal(hub.snapshot().routines.refreshing, true);
+  const both = Promise.all([hub.refreshJobs({ signal: controller.signal }), hub.refreshJobs()]);
+  assert.equal(hub.snapshot().jobs.refreshing, true);
   gate.resolve();
   await both;
-  assert.equal(routines.calls, 1);
-  assert.equal(routines.signals[0], controller.signal);
-  await hub.refreshRoutines();
-  assert.equal(routines.calls, 2);
+  assert.equal(jobs.calls, 1);
+  assert.equal(jobs.signals[0], controller.signal);
+  await hub.refreshJobs();
+  assert.equal(jobs.calls, 2);
 });
 
-test('a failed routines refresh records the error, logs it, and resolves', async () => {
-  const routines = fakeRoutines();
-  const { hub, logs } = makeHub({ routines });
-  await hub.refreshRoutines();
-  routines.fail = true;
-  await hub.refreshRoutines();
-  const current = hub.snapshot().routines;
+test('a failed jobs refresh records the error, logs it, and resolves', async () => {
+  const jobs = fakeJobs();
+  const { hub, logs } = makeHub({ jobs });
+  await hub.refreshJobs();
+  jobs.fail = true;
+  await hub.refreshJobs();
+  const current = hub.snapshot().jobs;
   assert.equal(current.refreshing, false);
   assert.equal(current.error, 'refresh_failed');
   assert.deepEqual(current.items, [{ label: 'com.invented.job' }]);
-  assert.ok(logs.some((entry) => entry.event === 'routines_error' && typeof entry.error === 'string'));
-  routines.fail = false;
-  await hub.refreshRoutines();
-  assert.equal(hub.snapshot().routines.error, null);
+  assert.ok(logs.some((entry) => entry.event === 'jobs_error' && typeof entry.error === 'string'));
+  jobs.fail = false;
+  await hub.refreshJobs();
+  assert.equal(hub.snapshot().jobs.error, null);
 });
 
 test('subscribe returns an unsubscribe and clientCount tracks live subscribers', async () => {
@@ -379,7 +379,7 @@ test('subscribe returns an unsubscribe and clientCount tracks live subscribers',
   await hub.refreshStatus();
   unsubscribe();
   assert.equal(hub.clientCount(), 1);
-  await hub.refreshRoutines();
+  await hub.refreshJobs();
   assert.deepEqual(seen, [2]);
 });
 

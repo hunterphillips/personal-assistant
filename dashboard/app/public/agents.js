@@ -11,7 +11,7 @@
 // that URL; the shell's popstate handler calls show(), which reads it back.
 // On a phone the list comes first and fills the width until a row is chosen.
 // The launchd jobs, the registry error, and what is off (the Codex server,
-// cmux) are on the Health view (routines.js); this view says only what
+// cmux) are on the Health view (jobs.js); this view says only what
 // each row needs.
 //
 // A gear in the thread header, for every agent but a coding session, opens
@@ -102,8 +102,8 @@
   }
 
   function formatTime(iso) {
-    var routines = window.DashboardRoutines;
-    return routines && typeof iso === 'string' ? routines.formatTime(iso, Date.now()) : '';
+    var jobs = window.DashboardJobs;
+    return jobs && typeof iso === 'string' ? jobs.formatTime(iso, Date.now()) : '';
   }
 
   // A time span that refreshTimes() keeps current.

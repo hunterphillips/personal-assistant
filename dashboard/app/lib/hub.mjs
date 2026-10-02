@@ -1,11 +1,11 @@
 // State hub: one in-memory snapshot of what the dashboard knows (Focus
 // health, the latest brief, the agent registry, persona state, coding
-// sessions and the cmux terminals behind them, and routines), with a
+// sessions and the cmux terminals behind them, and jobs), with a
 // revision that bumps on every change and a subscriber list for the event
 // stream. It owns no persistence and no refresh timers; callers decide when
 // to refresh. Its only timers are the persona turn wall clocks.
 //
-// createHub({ registry, routines, focus, brief, timeouts, limits, adapters,
+// createHub({ registry, jobs, focus, brief, timeouts, limits, adapters,
 //             store, bindings, cmux, adaptersDisabled, settings, models, home,
 //             log, now }) returns:
 //
@@ -29,13 +29,13 @@
 //                      state, updatedAt, binding }],
 //       codex: { available } | { available: false, reason },
 //       cmux: { available, stale? } | { available: false, reason },
-//       routines: { refreshedAt, focusAvailable, refreshing, error, items },
+//       jobs: { refreshedAt, focusAvailable, refreshing, error, items },
 //       settings: { ok, error, model: { default, effort }, brief: { agent },
 //                   permission: { default } },
 //       models: [{ id, name }] }
 //     An agent's cwd is the registry's, or null, and jobs is how many
-//     launchd labels its registry routines name; agents never carry the
-//     routines themselves. Each object in it is frozen.
+//     launchd labels its registry jobs name; agents never carry the
+//     jobs themselves. Each object in it is frozen.
 //     `home` is the `home` option, os.homedir() by default.
 //     A non-persona agent has state null and no other runtime fields. A
 //     persona (kind 'persona') has:
@@ -131,17 +131,17 @@
 //     streams are open (events.mjs) and the sessions refresh route calls
 //     it on demand.
 //
-//   refreshRoutines({ signal }) -> Promise<void>
-//     Single-flight. Sets routines.refreshing (bump), awaits
-//     routines.refresh({ signal }) with the first caller's signal, then
+//   refreshJobs({ signal }) -> Promise<void>
+//     Single-flight. Sets jobs.refreshing (bump), awaits
+//     jobs.refresh({ signal }) with the first caller's signal, then
 //     stores the result with refreshing false and error null (bump). If the
 //     refresh throws, refreshing is false and error 'refresh_failed' (bump),
-//     logged as { event: 'routines_error', error }. Never rejects.
+//     logged as { event: 'jobs_error', error }. Never rejects.
 //
 //   subscribe(fn) -> unsubscribe
 //     fn({ revision, patch }) runs after every bump; `patch` holds only the
 //     top-level content keys that changed (focus, brief, registry, agents,
-//     sessions, codex, cmux, routines), never revision or updatedAt. A throwing listener is logged
+//     sessions, codex, cmux, jobs), never revision or updatedAt. A throwing listener is logged
 //     as { event: 'hub_listener_error', error } and the rest still run.
 //
 //   start() -> Promise<void>
@@ -251,7 +251,7 @@ const REVISION = /^[0-9a-f]{64}$/;
 const STATE_WORD = /^[a-z_]{1,40}$/;
 
 export function createHub({
-  registry, routines, focus, brief, timeouts, limits = LIMITS, adapters = {}, store = null, bindings = null, cmux = null,
+  registry, jobs, focus, brief, timeouts, limits = LIMITS, adapters = {}, store = null, bindings = null, cmux = null,
   adaptersDisabled = null, settings = null, models = MODELS, home = os.homedir(), log = () => {}, now = () => new Date(),
 }) {
   const listeners = new Set();
@@ -272,12 +272,12 @@ export function createHub({
     sessions: [],
     codex: codexStatus(adapters, adaptersDisabled),
     cmux: cmuxStatus(cmux),
-    routines: { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] },
+    jobs: { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] },
     settings: settingsCurrent(),
     models: models.map((model) => ({ id: model.id, name: model.name })),
   });
   let statusRun = null;
-  let routinesRun = null;
+  let jobsRun = null;
   let sessionsRun = null;
 
   // Applies `patch` (top-level keys to replace), bumps, and notifies.
@@ -540,22 +540,22 @@ export function createHub({
     if (!closed) commitSessions();
   }
 
-  async function runRoutines(signal) {
-    commit({ routines: { ...state.routines, refreshing: true } });
+  async function runJobs(signal) {
+    commit({ jobs: { ...state.jobs, refreshing: true } });
     try {
-      const result = await routines.refresh({ signal });
+      const result = await jobs.refresh({ signal });
       commit({
-        routines: {
+        jobs: {
           refreshedAt: result?.refreshedAt ?? null,
           focusAvailable: typeof result?.focusAvailable === 'boolean' ? result.focusAvailable : null,
           refreshing: false,
           error: null,
-          items: Array.isArray(result?.routines) ? result.routines : [],
+          items: Array.isArray(result?.jobs) ? result.jobs : [],
         },
       });
     } catch (error) {
-      log({ event: 'routines_error', error: error?.message ?? String(error) });
-      commit({ routines: { ...state.routines, refreshing: false, error: 'refresh_failed' } });
+      log({ event: 'jobs_error', error: error?.message ?? String(error) });
+      commit({ jobs: { ...state.jobs, refreshing: false, error: 'refresh_failed' } });
     }
   }
 
@@ -585,11 +585,11 @@ export function createHub({
       return untilAborted(sessionsRun, signal);
     },
 
-    refreshRoutines({ signal } = {}) {
-      routinesRun ??= runRoutines(signal).finally(() => {
-        routinesRun = null;
+    refreshJobs({ signal } = {}) {
+      jobsRun ??= runJobs(signal).finally(() => {
+        jobsRun = null;
       });
-      return routinesRun;
+      return jobsRun;
     },
 
     subscribe(fn) {
@@ -762,7 +762,7 @@ function agentViews(current, personas, settingsState) {
       group: agent.group,
       kind: agent.kind,
       cwd: typeof agent.cwd === 'string' ? agent.cwd : null,
-      jobs: Array.isArray(agent.routines) ? agent.routines.length : 0,
+      jobs: Array.isArray(agent.jobs) ? agent.jobs.length : 0,
     };
     if (agent.provider !== undefined) view.provider = agent.provider;
     if (agent.pinned === true) view.pinned = true;

@@ -7,25 +7,25 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { TIMEOUTS } from '../lib/config.mjs';
-import { createRoutines, defaultLaunchctlList, defaultReadPlist } from '../lib/routines.mjs';
+import { createJobs, defaultLaunchctlList, defaultReadPlist } from '../lib/jobs.mjs';
 import { tempDir } from './support/harness.mjs';
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/launchd/', import.meta.url));
 const LAUNCH_AGENTS = '/nonexistent/LaunchAgents';
 
-function agent(id, routines, name = id.toUpperCase()) {
-  return { id, name, routines };
+function agent(id, jobs, name = id.toUpperCase()) {
+  return { id, name, jobs };
 }
 
 function fakeRegistry(agents) {
   return { current: () => ({ ok: true, agents }) };
 }
 
-// Builds routines over in-memory plists keyed by label and scripted launchctl
+// Builds jobs over in-memory plists keyed by label and scripted launchctl
 // answers keyed by label. A label with no plist entry reads as unreadable; a
 // label with no launchctl entry is not loaded.
-function routinesFor({ agents, plists = {}, launchctl = {}, focus = null, log, launchctlList, readPlist }) {
-  return createRoutines({
+function jobsFor({ agents, plists = {}, launchctl = {}, focus = null, log, launchctlList, readPlist }) {
+  return createJobs({
     registry: fakeRegistry(agents),
     launchAgentsDir: LAUNCH_AGENTS,
     focus,
@@ -37,9 +37,9 @@ function routinesFor({ agents, plists = {}, launchctl = {}, focus = null, log, l
 }
 
 async function one(plist, launchctl = { pid: null, lastExitStatus: 0 }) {
-  const routines = routinesFor({ agents: [agent('a', ['com.x.job'])], plists: { 'com.x.job': plist }, launchctl: { 'com.x.job': launchctl } });
-  const { routines: [routine] } = await routines.refresh();
-  return routine;
+  const jobs = jobsFor({ agents: [agent('a', ['com.x.job'])], plists: { 'com.x.job': plist }, launchctl: { 'com.x.job': launchctl } });
+  const { jobs: [job] } = await jobs.refresh();
+  return job;
 }
 
 const SCHEDULES = [
@@ -78,14 +78,14 @@ const SCHEDULES = [
 
 test('schedules are described in plain words', async () => {
   for (const [name, plist, kind, text] of SCHEDULES) {
-    const routine = await one(plist);
-    assert.deepEqual(routine.schedule, { kind, text }, name);
+    const job = await one(plist);
+    assert.deepEqual(job.schedule, { kind, text }, name);
   }
 });
 
 test('generic outcomes come from launchctl: running, ok, failed, not loaded', async () => {
   const plist = { StartCalendarInterval: { Minute: 0 } };
-  const routines = routinesFor({
+  const jobs = jobsFor({
     agents: [agent('a', ['com.x.running', 'com.x.ok', 'com.x.failed', 'com.x.gone'])],
     plists: { 'com.x.running': plist, 'com.x.ok': plist, 'com.x.failed': plist, 'com.x.gone': plist },
     launchctl: {
@@ -94,7 +94,7 @@ test('generic outcomes come from launchctl: running, ok, failed, not loaded', as
       'com.x.failed': { pid: null, lastExitStatus: 78 },
     },
   });
-  const byLabel = Object.fromEntries((await routines.refresh()).routines.map((r) => [r.label, r]));
+  const byLabel = Object.fromEntries((await jobs.refresh()).jobs.map((r) => [r.label, r]));
   assert.equal(byLabel['com.x.running'].outcome, 'running');
   assert.equal(byLabel['com.x.ok'].outcome, 'ok');
   assert.equal(byLabel['com.x.ok'].exitStatus, 0);
@@ -102,27 +102,27 @@ test('generic outcomes come from launchctl: running, ok, failed, not loaded', as
   assert.equal(byLabel['com.x.failed'].exitStatus, 78);
   assert.equal(byLabel['com.x.gone'].outcome, 'not loaded');
   assert.equal(byLabel['com.x.gone'].exitStatus, null);
-  for (const routine of Object.values(byLabel)) {
-    assert.equal(routine.source, 'launchctl');
-    assert.equal(routine.available, true);
-    assert.equal(routine.failures24h, null);
-    assert.equal(routine.paused, null);
+  for (const job of Object.values(byLabel)) {
+    assert.equal(job.source, 'launchctl');
+    assert.equal(job.available, true);
+    assert.equal(job.failures24h, null);
+    assert.equal(job.paused, null);
   }
 });
 
-test('an unreadable plist makes the routine unavailable without asking launchctl', async () => {
+test('an unreadable plist makes the job unavailable without asking launchctl', async () => {
   const asked = [];
-  const routines = routinesFor({
+  const jobs = jobsFor({
     agents: [agent('a', ['com.x.missing'])],
     launchctlList: async (label) => {
       asked.push(label);
       return { pid: null, lastExitStatus: 0 };
     },
   });
-  const { routines: [routine] } = await routines.refresh();
-  assert.equal(routine.available, false);
-  assert.equal(routine.outcome, 'unknown');
-  assert.equal(routine.schedule.kind, 'unknown');
+  const { jobs: [job] } = await jobs.refresh();
+  assert.equal(job.available, false);
+  assert.equal(job.outcome, 'unknown');
+  assert.equal(job.schedule.kind, 'unknown');
   assert.deepEqual(asked, []);
 });
 
@@ -154,10 +154,10 @@ test('Focus scans take lastRun, outcome, failures, and paused from the Focus sta
       };
     },
   };
-  const result = await routinesFor({ agents: [FOCUS_AGENT], plists: FOCUS_PLISTS, launchctl: FOCUS_LAUNCHCTL, focus }).refresh();
+  const result = await jobsFor({ agents: [FOCUS_AGENT], plists: FOCUS_PLISTS, launchctl: FOCUS_LAUNCHCTL, focus }).refresh();
   assert.equal(calls, 1);
   assert.equal(result.focusAvailable, true);
-  const byLabel = Object.fromEntries(result.routines.map((r) => [r.label, r]));
+  const byLabel = Object.fromEntries(result.jobs.map((r) => [r.label, r]));
   assert.deepEqual(
     [byLabel['com.focus.scan-gmail'].source, byLabel['com.focus.scan-gmail'].lastRun, byLabel['com.focus.scan-gmail'].outcome,
       byLabel['com.focus.scan-gmail'].failures24h, byLabel['com.focus.scan-gmail'].paused],
@@ -181,38 +181,38 @@ test('a scan Focus reports as never ran keeps that outcome', async () => {
       },
     }),
   };
-  const result = await routinesFor({ agents: [FOCUS_AGENT], plists: FOCUS_PLISTS, launchctl: FOCUS_LAUNCHCTL, focus }).refresh();
-  const byLabel = Object.fromEntries(result.routines.map((r) => [r.label, r]));
+  const result = await jobsFor({ agents: [FOCUS_AGENT], plists: FOCUS_PLISTS, launchctl: FOCUS_LAUNCHCTL, focus }).refresh();
+  const byLabel = Object.fromEntries(result.jobs.map((r) => [r.label, r]));
   assert.equal(byLabel['com.focus.scan-gmail'].outcome, 'never ran');
   assert.equal(byLabel['com.focus.scan-gmail'].lastRun, null);
   assert.equal(byLabel['com.focus.scan-git'].outcome, 'unknown');
 });
 
 test('without a Focus status every scan falls back to launchctl and focusAvailable is false', async () => {
-  const result = await routinesFor({
+  const result = await jobsFor({
     agents: [FOCUS_AGENT],
     plists: FOCUS_PLISTS,
     launchctl: FOCUS_LAUNCHCTL,
     focus: { fetchStatus: async () => null },
   }).refresh();
   assert.equal(result.focusAvailable, false);
-  const byLabel = Object.fromEntries(result.routines.map((r) => [r.label, r]));
+  const byLabel = Object.fromEntries(result.jobs.map((r) => [r.label, r]));
   assert.equal(byLabel['com.focus.scan-gmail'].source, 'launchctl');
   assert.equal(byLabel['com.focus.scan-gmail'].outcome, 'ok');
   assert.equal(byLabel['com.focus.scan-gmail'].failures24h, null);
   assert.equal(byLabel['com.focus.scan-git'].outcome, 'failed');
 
-  const unconfigured = await routinesFor({ agents: [FOCUS_AGENT], plists: FOCUS_PLISTS, launchctl: FOCUS_LAUNCHCTL }).refresh();
+  const unconfigured = await jobsFor({ agents: [FOCUS_AGENT], plists: FOCUS_PLISTS, launchctl: FOCUS_LAUNCHCTL }).refresh();
   assert.equal(unconfigured.focusAvailable, false);
-  assert.ok(unconfigured.routines.every((r) => r.source === 'launchctl'));
+  assert.ok(unconfigured.jobs.every((r) => r.source === 'launchctl'));
 });
 
 test('a scan whose source is missing from the Focus status falls back to launchctl', async () => {
   const focus = {
     fetchStatus: async () => ({ paused: false, sources: { gmail: { lastRun: '2026-09-25T13:35:04Z', lastOutcome: 'skipped', failures24h: 0 } } }),
   };
-  const result = await routinesFor({ agents: [FOCUS_AGENT], plists: FOCUS_PLISTS, launchctl: FOCUS_LAUNCHCTL, focus }).refresh();
-  const byLabel = Object.fromEntries(result.routines.map((r) => [r.label, r]));
+  const result = await jobsFor({ agents: [FOCUS_AGENT], plists: FOCUS_PLISTS, launchctl: FOCUS_LAUNCHCTL, focus }).refresh();
+  const byLabel = Object.fromEntries(result.jobs.map((r) => [r.label, r]));
   assert.equal(byLabel['com.focus.scan-gmail'].source, 'focus');
   assert.equal(byLabel['com.focus.scan-gmail'].outcome, 'skipped');
   assert.equal(byLabel['com.focus.scan-git'].source, 'launchctl');
@@ -220,13 +220,13 @@ test('a scan whose source is missing from the Focus status falls back to launchc
   assert.equal(byLabel['com.focus.scan-git'].paused, null);
 });
 
-test('a generic routine\'s lastRun is its log file\'s mtime, and null when the log is missing', async (t) => {
+test('a generic job\'s lastRun is its log file\'s mtime, and null when the log is missing', async (t) => {
   const dir = await tempDir(t);
   const logPath = path.join(dir, 'job.log');
   await writeFile(logPath, 'ran\n');
   const when = new Date('2026-09-24T06:00:00.000Z');
   await utimes(logPath, when, when);
-  const routines = routinesFor({
+  const jobs = jobsFor({
     agents: [agent('a', ['com.x.logged', 'com.x.unlogged', 'com.x.nolog'])],
     plists: {
       'com.x.logged': { StandardOutPath: logPath, StartCalendarInterval: { Minute: 0 } },
@@ -234,7 +234,7 @@ test('a generic routine\'s lastRun is its log file\'s mtime, and null when the l
       'com.x.nolog': { StartCalendarInterval: { Minute: 0 } },
     },
   });
-  const byLabel = Object.fromEntries((await routines.refresh()).routines.map((r) => [r.label, r]));
+  const byLabel = Object.fromEntries((await jobs.refresh()).jobs.map((r) => [r.label, r]));
   assert.equal(byLabel['com.x.logged'].lastRun, when.toISOString());
   assert.equal(byLabel['com.x.logged'].logPath, logPath);
   assert.equal(byLabel['com.x.unlogged'].lastRun, null);
@@ -253,24 +253,24 @@ test('no more than four labels are inspected at once', async () => {
     inFlight -= 1;
     return value;
   };
-  const routines = routinesFor({
+  const jobs = jobsFor({
     agents: [agent('a', labels.slice(0, 6)), agent('b', labels.slice(6))],
     readPlist: () => track({ StartCalendarInterval: { Minute: 0 } }),
     launchctlList: () => track({ pid: null, lastExitStatus: 0 }),
   });
-  const result = await routines.refresh();
-  assert.equal(result.routines.length, 12);
-  assert.ok(result.routines.every((r) => r.outcome === 'ok'));
+  const result = await jobs.refresh();
+  assert.equal(result.jobs.length, 12);
+  assert.ok(result.jobs.every((r) => r.outcome === 'ok'));
   assert.ok(peak <= 4, `peak in flight was ${peak}`);
   assert.ok(peak > 1, 'work did not run concurrently');
 });
 
-test('an abort mid-refresh resolves at once and marks unfinished routines unavailable', async () => {
+test('an abort mid-refresh resolves at once and marks unfinished jobs unavailable', async () => {
   const labels = Array.from({ length: 12 }, (_, i) => `com.x.job-${String(i).padStart(2, '0')}`);
   const reads = [];
   const hang = new Promise(() => {});
   const controller = new AbortController();
-  const routines = routinesFor({
+  const jobs = jobsFor({
     agents: [agent('a', labels)],
     readPlist: async (file) => {
       reads.push(file);
@@ -279,14 +279,14 @@ test('an abort mid-refresh resolves at once and marks unfinished routines unavai
     // The first four finish; the rest never answer.
     launchctlList: async (label) => (labels.indexOf(label) < 4 ? { pid: null, lastExitStatus: 0 } : hang),
   });
-  const pending = routines.refresh({ signal: controller.signal });
+  const pending = jobs.refresh({ signal: controller.signal });
   await delay(20);
   const readsAtAbort = reads.length;
   assert.equal(readsAtAbort, 8, 'four finished and four are stuck');
   controller.abort();
   const result = await Promise.race([pending, delay(1_000).then(() => 'timeout')]);
   assert.notEqual(result, 'timeout');
-  const byLabel = Object.fromEntries(result.routines.map((r) => [r.label, r]));
+  const byLabel = Object.fromEntries(result.jobs.map((r) => [r.label, r]));
   for (const label of labels.slice(0, 4)) assert.equal(byLabel[label].available, true, label);
   for (const label of labels.slice(4)) {
     assert.equal(byLabel[label].available, false, label);
@@ -300,7 +300,7 @@ test('a repeated identical launchctl error is logged once', async () => {
   const logs = [];
   const labels = ['com.x.one', 'com.x.two', 'com.x.three'];
   const plist = { StartCalendarInterval: { Minute: 0 } };
-  const routines = routinesFor({
+  const jobs = jobsFor({
     agents: [agent('a', labels)],
     plists: Object.fromEntries(labels.map((label) => [label, plist])),
     launchctlList: async () => {
@@ -308,16 +308,16 @@ test('a repeated identical launchctl error is logged once', async () => {
     },
     log: (entry) => logs.push(entry),
   });
-  const first = await routines.refresh();
-  await routines.refresh();
-  assert.ok(first.routines.every((r) => r.outcome === 'not loaded'));
+  const first = await jobs.refresh();
+  await jobs.refresh();
+  assert.ok(first.jobs.every((r) => r.outcome === 'not loaded'));
   const errors = logs.filter((entry) => entry.event === 'launchctl_error');
   assert.equal(errors.length, 1);
   assert.ok(labels.includes(errors[0].label));
   assert.match(errors[0].error, /timed out/);
 });
 
-test('routines are ordered by agent in registry order, then by label, with the owner prefix trimmed from names', async () => {
+test('jobs are ordered by agent in registry order, then by label, with the owner prefix trimmed from names', async () => {
   const agents = [
     agent('second-brain', ['com.hunter.brain-refresh', 'com.hunter.brain-drain'], 'Second brain'),
     agent('cfo', ['com.hunter.cfo.daily'], 'CFO'),
@@ -325,8 +325,8 @@ test('routines are ordered by agent in registry order, then by label, with the o
     agent('bare', ['standalone'], 'Bare'),
   ];
   const plists = new Proxy({}, { get: () => ({ StartCalendarInterval: { Minute: 0 } }) });
-  const result = await routinesFor({ agents, plists }).refresh();
-  assert.deepEqual(result.routines.map((r) => [r.agentId, r.label, r.name]), [
+  const result = await jobsFor({ agents, plists }).refresh();
+  assert.deepEqual(result.jobs.map((r) => [r.agentId, r.label, r.name]), [
     ['second-brain', 'com.hunter.brain-drain', 'brain-drain'],
     ['second-brain', 'com.hunter.brain-refresh', 'brain-refresh'],
     ['cfo', 'com.hunter.cfo.daily', 'cfo.daily'],
@@ -335,13 +335,13 @@ test('routines are ordered by agent in registry order, then by label, with the o
     ['focus', 'com.focus.server', 'server'],
     ['bare', 'standalone', 'standalone'],
   ]);
-  assert.equal(result.routines[2].agentName, 'CFO');
+  assert.equal(result.jobs[2].agentName, 'CFO');
   assert.ok(!Number.isNaN(Date.parse(result.refreshedAt)));
 });
 
 test('plists are read from the LaunchAgents directory by label', async () => {
   const files = [];
-  await createRoutines({
+  await createJobs({
     registry: fakeRegistry([agent('a', ['com.x.job'])]),
     launchAgentsDir: '/somewhere/LaunchAgents',
     focus: null,

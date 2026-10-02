@@ -1,5 +1,5 @@
 // Entry point: load configuration, load the agent registry and the Codex
-// terminal bindings, compose the routines view, thread store, runtime
+// terminal bindings, compose the jobs view, thread store, runtime
 // adapters (Claude for personas, Codex for the shared app-server's threads),
 // the cmux client, state hub, the Goals, Feed, and feed instructions
 // readers, the settings store, the brief notices, and app, start the
@@ -37,7 +37,7 @@ import { createGoals } from './lib/goals.mjs';
 import { createHub } from './lib/hub.mjs';
 import { createNotices } from './lib/notices.mjs';
 import { createRegistry } from './lib/registry.mjs';
-import { createRoutines } from './lib/routines.mjs';
+import { createJobs } from './lib/jobs.mjs';
 import { createSettings } from './lib/settings.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
 import { createCmux } from './lib/runtime/cmux.mjs';
@@ -76,7 +76,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   const logEntry = log ?? defaultLog;
   const registry = createRegistry({ path: config.registryPath, log: logEntry });
   const bindings = createBindings({ path: path.join(config.codexDir, 'bindings.json'), pollMs: config.timeouts.codexPollMs, log: logEntry });
-  const routines = createRoutines({
+  const jobs = createJobs({
     registry,
     launchAgentsDir: config.launchAgentsDir,
     focus,
@@ -109,7 +109,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   await settings.load();
   const hub = createHub({
     registry,
-    routines,
+    jobs,
     focus,
     brief,
     timeouts: config.timeouts,

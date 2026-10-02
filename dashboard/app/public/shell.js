@@ -1,6 +1,6 @@
 // Dashboard shell: switches between Agents (Home, agents.js), Reading (the
 // Daily Brief on its Brief tab, feed.js on its Feed tab), Focus, Goals
-// (goals.js), and Health (routines.js, the launchd jobs) with the History
+// (goals.js), and Health (jobs.js, the launchd jobs) with the History
 // API, creates each child frame the first time its view is shown and keeps
 // it afterwards, and keeps one copy of the server's state, which it hands
 // to the Health, Agents, and Goals views. Agents is the page at `/`;
@@ -71,7 +71,7 @@
       show('agents');
     },
   };
-  var routines = window.DashboardRoutines ? window.DashboardRoutines.create(shellApi) : null;
+  var jobs = window.DashboardJobs ? window.DashboardJobs.create(shellApi) : null;
   var settings = window.DashboardSettings ? window.DashboardSettings.create(shellApi) : null;
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
@@ -206,7 +206,7 @@
     applied += 1;
     if (fresh) applyRequests();
     render(fresh);
-    if (routines) routines.update(state, keys);
+    if (jobs) jobs.update(state, keys);
     if (settings) settings.update(state, keys);
     if (agents) agents.update(state, keys);
     if (goals) goals.update(state, keys);
@@ -214,7 +214,7 @@
 
   function isSnapshot(body) {
     return !!body && typeof body === 'object' && typeof body.revision === 'number' &&
-      !!body.focus && !!body.brief && !!body.routines && Array.isArray(body.agents);
+      !!body.focus && !!body.brief && !!body.jobs && Array.isArray(body.agents);
   }
 
   function parse(text) {
@@ -369,9 +369,9 @@
     document.title = TITLES[onFeed() ? 'feed' : view] + ' · Dashboard';
     // Goals fetches the vault while shown, the Feed its store, and Health
     // refreshes stale jobs when it opens.
-    if (routines) {
-      if (view === 'health') routines.show();
-      else routines.hide();
+    if (jobs) {
+      if (view === 'health') jobs.show();
+      else jobs.hide();
     }
     if (settings) {
       if (view === 'health') settings.show();
@@ -424,14 +424,14 @@
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
       disconnect();
-      if (routines) routines.hide();
+      if (jobs) jobs.hide();
       if (settings) settings.hide();
       if (agents) agents.hide();
       if (goals) goals.hide();
       if (feed) feed.hide();
     } else {
       connect();
-      if (routines && current === 'health') routines.show();
+      if (jobs && current === 'health') jobs.show();
       if (settings && current === 'health') settings.show();
       if (agents && current === 'agents') agents.show();
       if (goals && current === 'goals') goals.show();

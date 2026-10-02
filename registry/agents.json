@@ -21,7 +21,7 @@
       "cwd": "/Users/hunterphillips/workspace/work/investing/cfo",
       "provider": "claude",
       "model": "opus",
-      "routines": [
+      "jobs": [
         "com.hunter.cfo.daily"
       ]
     },
@@ -34,7 +34,7 @@
       "kind": "persona",
       "cwd": "/Users/hunterphillips/workspace/projects/AI/focus",
       "provider": "claude",
-      "routines": [
+      "jobs": [
         "com.focus.server",
         "com.focus.scan-calendar",
         "com.focus.scan-gmail",
@@ -52,7 +52,7 @@
       "kind": "persona",
       "cwd": "/Users/hunterphillips/workspace/second-brain",
       "provider": "claude",
-      "routines": [
+      "jobs": [
         "com.hunter.brain-drain",
         "com.hunter.brain-refresh",
         "com.hunter.brain-audit"
@@ -67,7 +67,7 @@
       "kind": "persona",
       "cwd": "/Users/hunterphillips/workspace/personal-assistant",
       "provider": "claude",
-      "routines": [
+      "jobs": [
         "com.personal-assistant.watch"
       ]
     },
@@ -80,7 +80,7 @@
       "kind": "project",
       "cwd": "/Users/hunterphillips/workspace/work/nowgentic",
       "provider": "claude",
-      "routines": [
+      "jobs": [
         "com.hunter.catchup.daily"
       ]
     },
@@ -94,7 +94,7 @@
       "cwd": "/Users/hunterphillips/workspace/personal-assistant",
       "provider": "claude",
       "pinned": true,
-      "routines": [
+      "jobs": [
         "com.personal-assistant.dashboard"
       ]
     }

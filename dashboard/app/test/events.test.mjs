@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { fakeCmux, fakeRoutines, request, startApp, startSyntheticFocus } from './support/harness.mjs';
+import { fakeCmux, fakeJobs, request, startApp, startSyntheticFocus } from './support/harness.mjs';
 import { openEvents } from './support/sse.mjs';
 
 const REVISION = 'b'.repeat(64);
@@ -56,29 +56,29 @@ test('a stream opens with SSE headers and a snapshot whose id is its revision', 
   assert.equal(first.data.revision, app.hub.snapshot().revision);
 });
 
-test('a routines refresh reaches an open stream as deltas', async (t) => {
-  const app = await startStreamingApp(t, { routines: fakeRoutines([{ label: 'com.invented.job' }]) });
+test('a jobs refresh reaches an open stream as deltas', async (t) => {
+  const app = await startStreamingApp(t, { jobs: fakeJobs([{ label: 'com.invented.job' }]) });
   const stream = await open(t, app);
   const snapshot = await stream.next();
-  await app.hub.refreshRoutines();
+  await app.hub.refreshJobs();
   const refreshing = await stream.next();
   const done = await stream.next();
   assert.deepEqual([refreshing.event, done.event], ['delta', 'delta']);
   assert.equal(Number(refreshing.id), snapshot.data.revision + 1);
   assert.equal(Number(done.id), snapshot.data.revision + 2);
-  assert.deepEqual(Object.keys(done.data.patch), ['routines']);
+  assert.deepEqual(Object.keys(done.data.patch), ['jobs']);
   assert.equal(done.data.revision, Number(done.id));
-  assert.deepEqual(done.data.patch.routines.items, [{ label: 'com.invented.job' }]);
+  assert.deepEqual(done.data.patch.jobs.items, [{ label: 'com.invented.job' }]);
 });
 
 test('a stream that stops reading drops deltas and gets one reload after drain', async (t) => {
   const big = Array.from({ length: 200 }, (_, i) => ({ label: `com.invented.job-${i}`, note: 'x'.repeat(4_000) }));
-  const app = await startStreamingApp(t, { routines: fakeRoutines(big) });
+  const app = await startStreamingApp(t, { jobs: fakeJobs(big) });
   const stream = await open(t, app);
   await stream.next();
   stream.pause();
   const emitted = 40;
-  for (let i = 0; i < emitted / 2; i += 1) await app.hub.refreshRoutines();
+  for (let i = 0; i < emitted / 2; i += 1) await app.hub.refreshJobs();
   stream.resume();
   const events = [];
   for (;;) {
@@ -206,62 +206,62 @@ test('GET /api/state checks Focus and the brief, then returns the hub snapshot',
   assert.equal(response.status, 200);
   assert.equal(response.headers['cache-control'], 'no-store');
   assert.match(response.headers['content-type'], /^application\/json/);
-  for (const key of ['revision', 'updatedAt', 'focus', 'brief', 'registry', 'agents', 'routines']) {
+  for (const key of ['revision', 'updatedAt', 'focus', 'brief', 'registry', 'agents', 'jobs']) {
     assert.ok(key in response.json, key);
   }
   assert.deepEqual(response.json, JSON.parse(JSON.stringify(app.hub.snapshot())));
   assert.equal((await request(app, 'POST', '/api/state', { headers: { origin: app.origin } })).status, 405);
 });
 
-test('POST /api/routines/refresh needs an exact Origin and no body', async (t) => {
+test('POST /api/jobs/refresh needs an exact Origin and no body', async (t) => {
   const app = await startStreamingApp(t);
-  const missing = await request(app, 'POST', '/api/routines/refresh');
+  const missing = await request(app, 'POST', '/api/jobs/refresh');
   assert.equal(missing.status, 403);
   assert.deepEqual(missing.json, { error: 'forbidden_origin' });
-  const foreign = await request(app, 'POST', '/api/routines/refresh', { headers: { origin: 'http://example.com' } });
+  const foreign = await request(app, 'POST', '/api/jobs/refresh', { headers: { origin: 'http://example.com' } });
   assert.equal(foreign.status, 403);
-  const declared = await request(app, 'POST', '/api/routines/refresh', { headers: { origin: app.origin }, body: 'x' });
+  const declared = await request(app, 'POST', '/api/jobs/refresh', { headers: { origin: app.origin }, body: 'x' });
   assert.equal(declared.status, 413);
-  const chunked = await request(app, 'POST', '/api/routines/refresh', {
+  const chunked = await request(app, 'POST', '/api/jobs/refresh', {
     headers: { origin: app.origin, 'transfer-encoding': 'chunked' },
     body: 'x',
   });
   assert.equal(chunked.status, 400);
-  assert.equal(app.routines.calls, 0);
+  assert.equal(app.jobs.calls, 0);
 });
 
-test('POST /api/routines/refresh refreshes and returns the new revision', async (t) => {
+test('POST /api/jobs/refresh refreshes and returns the new revision', async (t) => {
   const app = await startStreamingApp(t);
   const before = app.hub.snapshot().revision;
-  const response = await request(app, 'POST', '/api/routines/refresh', { headers: { origin: app.origin } });
+  const response = await request(app, 'POST', '/api/jobs/refresh', { headers: { origin: app.origin } });
   assert.equal(response.status, 200);
   assert.equal(response.json.ok, true);
   assert.ok(response.json.revision > before);
   assert.equal(response.json.revision, app.hub.snapshot().revision);
-  assert.equal(app.routines.calls, 1);
-  assert.equal(app.hub.snapshot().routines.refreshing, false);
+  assert.equal(app.jobs.calls, 1);
+  assert.equal(app.hub.snapshot().jobs.refreshing, false);
 });
 
-test('a successful forwarded pause or resume refreshes routines', async (t) => {
+test('a successful forwarded pause or resume refreshes jobs', async (t) => {
   const upstream = await startSyntheticFocus(t);
   const app = await startApp(t, { env: { DASHBOARD_FOCUS_ORIGIN: upstream.origin } });
   const pause = await request(app, 'POST', '/api/pause', { headers: { origin: app.origin } });
   assert.equal(pause.status, 200);
-  await waitFor(() => app.routines.calls === 1);
+  await waitFor(() => app.jobs.calls === 1);
   await request(app, 'POST', '/api/resume', { headers: { origin: app.origin } });
-  await waitFor(() => app.routines.calls === 2);
+  await waitFor(() => app.jobs.calls === 2);
   await request(app, 'POST', '/api/refresh', { headers: { origin: app.origin } });
   await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.equal(app.routines.calls, 2);
+  assert.equal(app.jobs.calls, 2);
 });
 
-test('a failed forwarded pause does not refresh routines', async (t) => {
+test('a failed forwarded pause does not refresh jobs', async (t) => {
   // Nothing listens on the Focus origin startApp picks, so the proxy answers 502.
   const app = await startApp(t);
   const pause = await request(app, 'POST', '/api/pause', { headers: { origin: app.origin } });
   assert.equal(pause.status, 502);
   await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.equal(app.routines.calls, 0);
+  assert.equal(app.jobs.calls, 0);
 });
 
 test('the new shell paths serve the shell and their slash forms redirect', async (t) => {

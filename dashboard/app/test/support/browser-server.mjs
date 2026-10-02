@@ -7,8 +7,8 @@
 //     certificate, with DASHBOARD_PUBLIC_ORIGIN set to that https origin so
 //     its Host and Origin pass the app's checks.
 // Briefs live in a new temporary directory and are invented by
-// writeBrief(). The registry and routines are in-memory fakes seeded from
-// the options (see controlledRegistry and controlledRoutines); `state` is the
+// writeBrief(). The registry and jobs are in-memory fakes seeded from
+// the options (see controlledRegistry and controlledJobs); `state` is the
 // state hub itself. Personas run on a fake Claude adapter over a real thread
 // store in the temporary directory (see fakePersonas): a send is answered by
 // an invented reply unless the persona is held, and `personas` lets a test
@@ -64,7 +64,7 @@ export { focusSourceAvailable };
 //   withFocus  start the isolated Focus copy (default true)
 //   agents     registry agents (default none)
 //   registry   { ok, error } to seed a registry that could not be read
-//   routines   { items, focusAvailable, refreshedAt }: when given, the hub is
+//   jobs   { items, focusAvailable, refreshedAt }: when given, the hub is
 //              refreshed once at startup so the snapshot holds them
 //   personas   { <agentId>: { state, pending, lastError, costUsd, messages,
 //              model, startFails } } seeds each persona's runtime state and
@@ -101,7 +101,7 @@ export { focusSourceAvailable };
 //              store cannot read. `settings` on the result is the store and
 //              `settingsPath` the file.
 export async function startHub({
-  withFocus = true, agents = [], registry: registryState, routines: routinesSeed, personas: personaSeed = {},
+  withFocus = true, agents = [], registry: registryState, jobs: jobsSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
   vault = null, feed = null, instructions = null, settings: settingsSeed = null, delegationWaitMs = null,
 } = {}) {
@@ -172,7 +172,7 @@ export async function startHub({
     const focusRoutes = createFocusProxy(config);
     const briefRoutes = createBriefRoutes(config);
     const registry = controlledRegistry({ agents, ...registryState });
-    const routines = controlledRoutines(routinesSeed);
+    const jobs = controlledJobs(jobsSeed);
     const threadsDir = path.join(root, 'threads');
     const store = createThreadStore({ dir: threadsDir, limits: config.limits });
     const personas = fakePersonas(personaSeed, store);
@@ -185,14 +185,14 @@ export async function startHub({
     const adapters = { claude: personas.adapter };
     if (codex) adapters.codex = codex.adapter;
     const hub = createTestHub({
-      config, focus: focusRoutes, brief: briefRoutes, registry, routines, adapters, store, bindings, cmux, settings, home,
+      config, focus: focusRoutes, brief: briefRoutes, registry, jobs, adapters, store, bindings, cmux, settings, home,
     });
     await hub.start();
     const delegation = createDelegation({ hub, registry, limits: config.limits, timeouts: config.timeouts });
     personas.adapter.setDelegation(delegation);
-    if (routinesSeed) {
-      await hub.refreshRoutines();
-      routines.calls = 0;
+    if (jobsSeed) {
+      await hub.refreshJobs();
+      jobs.calls = 0;
     }
     if (cmux) await hub.refreshSessions();
     // The app subscribes through this wrapper so a test can send a delta the
@@ -257,7 +257,7 @@ export async function startHub({
         .filter((entry) => entry.path === pathname)
         .map((entry) => ({ method: entry.method, status: entry.res.headersSent ? entry.res.statusCode : null })),
       registry,
-      routines,
+      jobs,
       personas,
       delegation,
       codex,
@@ -339,11 +339,11 @@ function controlledRegistry({ ok = true, error = null, agents = [], groups = [] 
   return fake;
 }
 
-// Routines that run no subprocess. `calls` counts refreshes; the fields may
+// Jobs that run no subprocess. `calls` counts refreshes; the fields may
 // be changed between refreshes. hold() makes refreshes wait until the
 // returned release() is called; `fail` makes them throw. `refreshedAt`, when
 // set, is used once and then cleared, so later refreshes report now.
-function controlledRoutines({ items = [], focusAvailable = null, refreshedAt = null } = {}) {
+function controlledJobs({ items = [], focusAvailable = null, refreshedAt = null } = {}) {
   const fake = {
     calls: 0,
     items,
@@ -365,7 +365,7 @@ function controlledRoutines({ items = [], focusAvailable = null, refreshedAt = n
       if (fake.fail) throw new Error('invented refresh failure');
       const at = fake.refreshedAt ?? new Date().toISOString();
       fake.refreshedAt = null;
-      return { refreshedAt: at, focusAvailable: fake.focusAvailable, routines: fake.items };
+      return { refreshedAt: at, focusAvailable: fake.focusAvailable, jobs: fake.items };
     },
   };
   return fake;

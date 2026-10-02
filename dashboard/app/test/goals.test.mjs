@@ -14,7 +14,7 @@ const CURRENT = 'notes/current-priorities.md';
 const LONG_TERM = 'notes/longterm-priorities.md';
 
 function persona(cwd, overrides = {}) {
-  return { id: 'second-brain', name: 'Second brain', kind: 'persona', cwd, provider: 'claude', routines: [], ...overrides };
+  return { id: 'second-brain', name: 'Second brain', kind: 'persona', cwd, provider: 'claude', jobs: [], ...overrides };
 }
 
 // A registry whose agents can be swapped between reads.

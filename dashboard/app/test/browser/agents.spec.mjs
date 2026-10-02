@@ -1,7 +1,7 @@
 // The Agents view, the page at `/`, in real browsers against the in-memory
-// registry, routines, and fake persona adapter of
+// registry, jobs, and fake persona adapter of
 // test/support/browser-server.mjs. The jobs are on the Health view, covered
-// in routines.spec.mjs.
+// in jobs.spec.mjs.
 
 import { expect, expectView, nav, test } from '../support/browser-test.mjs';
 
@@ -10,7 +10,7 @@ const ago = (ms) => new Date(Date.now() - ms).toISOString();
 
 const AGENTS = [
   { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude', cwd: '/invented/cfo',
-    routines: ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'] },
+    jobs: ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'] },
   { id: 'catchup', name: 'Catchup', role: 'Work', description: 'Invented work folder.', group: 'work', kind: 'project', provider: 'codex', cwd: '/invented/catchup' },
   { id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'claude', cwd: '/invented/brain' },
   { id: 'dev', name: 'Dev', role: 'Code', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'codex', cwd: '/invented/dev' },
@@ -18,7 +18,7 @@ const AGENTS = [
 ];
 
 // CFO's two jobs; the other agents have none.
-const ROUTINES = ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'].map((label, i) => ({
+const JOBS = ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'].map((label, i) => ({
   label,
   agentId: 'cfo',
   agentName: 'CFO',
@@ -52,7 +52,7 @@ function seeded(extra = {}) {
   return {
     build: () => ({
       agents: AGENTS,
-      routines: { items: ROUTINES, focusAvailable: true, refreshedAt: ago(5_000) },
+      jobs: { items: JOBS, focusAvailable: true, refreshedAt: ago(5_000) },
       personas: {
         cfo: {
           messages: [
@@ -148,7 +148,7 @@ test.describe('with seeded agents', () => {
       const list = await page.locator('#agents-list').boundingBox();
       expect((await empty.boundingBox()).x).toBeGreaterThanOrEqual(list.x + list.width);
     }
-    expect(hub.routines.calls).toBe(0);
+    expect(hub.jobs.calls).toBe(0);
   });
 
   test('/agents?agent=cfo and /?agent=cfo both open the thread', async ({ page, hub }) => {
@@ -564,11 +564,11 @@ test.describe('with seeded agents', () => {
     await page.goto(`${hub.origin}/health`);
     await expectView(page, 'health', 'Health');
     await expect(page.locator('.routine-card .card-name')).toHaveText(['CFO']);
-    await watchRebuilds(page, '#routines-cards');
+    await watchRebuilds(page, '#jobs-cards');
 
     // The refresh changes the state twice: refreshing, then the result.
-    hub.routines.items = ROUTINES.slice(0, 1);
-    await hub.state.refreshRoutines();
+    hub.jobs.items = JOBS.slice(0, 1);
+    await hub.state.refreshJobs();
     await expect(page.locator('.routine-name')).toHaveText(['cfo.daily']);
     expect(await rebuilds(page)).toBe(2);
   });
@@ -665,8 +665,8 @@ test.describe('with seeded agents', () => {
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#agent-thread')).toBeHidden();
 
-    // No Routines row: the first thing under the heading is a group.
-    await expect(page.locator('#view-agents').getByText('Routines')).toHaveCount(0);
+    // No Jobs row: the first thing under the heading is a group.
+    await expect(page.locator('#view-agents').getByText('Jobs')).toHaveCount(0);
     const heading = await page.locator('.agents-heading').boundingBox();
     const firstGroup = await page.locator('.agent-group-heading').first().boundingBox();
     const between = await page.locator('#agents-list > :visible').evaluateAll((nodes) => nodes.map((n) => n.className));
@@ -685,7 +685,7 @@ test.describe('with seeded agents', () => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
 
-    await expect(page.locator('#agent-panel').getByRole('button', { name: /Routines/ })).toHaveCount(0);
+    await expect(page.locator('#agent-panel').getByRole('button', { name: /Jobs/ })).toHaveCount(0);
     await expect(page.locator('#agent-details-toggle')).toBeVisible();
 
     await back.click();
@@ -714,12 +714,12 @@ test.describe('with a persona whose last turn the clock stopped', () => {
 // list leaves out. Seeded only here, so the other tests keep an empty pane.
 const PINNED_AGENTS = [
   { id: 'assistant', name: 'Assistant', role: 'Assistant', description: 'I am the way in.', group: 'personal', kind: 'persona', provider: 'claude',
-    cwd: '/invented/assistant', pinned: true, routines: ['com.invented.dashboard'] },
+    cwd: '/invented/assistant', pinned: true, jobs: ['com.invented.dashboard'] },
   ...AGENTS,
   { id: 'kin', name: 'Kin', role: 'Family', description: 'Invented.', group: 'family', kind: 'persona', provider: 'claude', cwd: '/invented/kin' },
 ];
-const PINNED_ROUTINES = [...ROUTINES, {
-  ...ROUTINES[0], label: 'com.invented.dashboard', agentId: 'assistant', agentName: 'Assistant', name: 'dashboard',
+const PINNED_JOBS = [...JOBS, {
+  ...JOBS[0], label: 'com.invented.dashboard', agentId: 'assistant', agentName: 'Assistant', name: 'dashboard',
   schedule: { kind: 'keepalive', text: 'Always on' }, outcome: 'ok', exitStatus: 0,
 }];
 
@@ -730,7 +730,7 @@ test.describe('with a pinned persona and a group the list leaves out', () => {
         ...seeded().build(),
         agents: PINNED_AGENTS,
         registry: { groups: [{ id: 'work', name: 'Work' }, { id: 'personal', name: 'Personal' }] },
-        routines: { items: PINNED_ROUTINES, focusAvailable: true, refreshedAt: ago(5_000) },
+        jobs: { items: PINNED_JOBS, focusAvailable: true, refreshedAt: ago(5_000) },
       }),
     },
   });
@@ -837,7 +837,7 @@ test.describe('with a pinned persona and a group the list leaves out', () => {
 
 test.describe('with an unreadable registry', () => {
   // The fake registry lists no agents while it cannot be read; the cards
-  // come from the routines' own agent names.
+  // come from the jobs' own agent names.
   test.use({ hubOptions: { build: () => ({ ...seeded().build(), registry: { ok: false, error: 'registry_invalid_json' } }) } });
 
   test('Health says the registry could not be read, and the list claims nothing', async ({ page, hub }) => {
@@ -852,7 +852,7 @@ test.describe('with an unreadable registry', () => {
 
     await nav(page, 'Health').click();
     await expectView(page, 'health', 'Health');
-    await expect(page.locator('#routines-message')).toHaveText('The registry could not be read. registry_invalid_json');
+    await expect(page.locator('#jobs-message')).toHaveText('The registry could not be read. registry_invalid_json');
     await expect(page.locator('.routine-card .card-name')).toHaveText(['CFO']);
   });
 });
@@ -1243,7 +1243,7 @@ test.describe('the settings form', () => {
     const written = hub.registry.writes[0].agents.find((a) => a.id === 'cfo');
     expect(written).toEqual({
       id: 'cfo', name: 'CFO', role: 'Finance', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented/cfo',
-      provider: 'claude', model: 'sonnet', effort: 'low', routines: ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'],
+      provider: 'claude', model: 'sonnet', effort: 'low', jobs: ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'],
     });
     if (!phone(page)) await expect(row(page, 'CFO').locator('.role-chip')).toHaveText('Finance');
     // The composer follows the agent's level.
@@ -1353,7 +1353,7 @@ test.describe('the settings form', () => {
     expect(hub.registry.writes).toHaveLength(1);
     const written = hub.registry.writes[0].agents.find((a) => a.id === 'cfo');
     expect(written.permission).toBe('full');
-    expect(Object.keys(written)).toEqual(['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'permission', 'routines']);
+    expect(Object.keys(written)).toEqual(['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'permission', 'jobs']);
     await expect(field(page, 'permission')).toHaveValue('full');
     await expect(note).toHaveText('Runs every tool without asking.');
     // The level shows nowhere but the form: the row's chips are as before.

@@ -43,12 +43,12 @@ function baseAgent(cwd, overrides = {}) {
   };
 }
 
-test('a valid file loads all fields and defaults routines to []', async (t) => {
+test('a valid file loads all fields and defaults jobs to []', async (t) => {
   const dir = await tempDir(t);
   const file = await write(dir, {
     version: 1,
     agents: [
-      baseAgent(dir, { routines: ['com.hunter.cfo.daily'] }),
+      baseAgent(dir, { jobs: ['com.hunter.cfo.daily'] }),
       {
         id: 'assistant',
         name: 'Assistant',
@@ -70,8 +70,8 @@ test('a valid file loads all fields and defaults routines to []', async (t) => {
   assert.equal(state.path, file);
   assert.match(state.loadedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(state.agents.length, 2);
-  assert.deepEqual(state.agents[0].routines, ['com.hunter.cfo.daily']);
-  assert.deepEqual(state.agents[1].routines, []);
+  assert.deepEqual(state.agents[0].jobs, ['com.hunter.cfo.daily']);
+  assert.deepEqual(state.agents[1].jobs, []);
   assert.equal(state.agents[1].provider, undefined);
   assert.ok(Object.isFrozen(state));
   assert.ok(Object.isFrozen(state.agents));
@@ -97,13 +97,13 @@ test('duplicate id is rejected and names both agents', async (t) => {
   assert.match(state.error, /agent 0/);
 });
 
-test('a duplicate routine label across agents is rejected', async (t) => {
+test('a duplicate job label across agents is rejected', async (t) => {
   const dir = await tempDir(t);
   const file = await write(dir, {
     version: 1,
     agents: [
-      baseAgent(dir, { id: 'cfo', routines: ['com.hunter.shared'] }),
-      baseAgent(dir, { id: 'focus', routines: ['com.hunter.shared'] }),
+      baseAgent(dir, { id: 'cfo', jobs: ['com.hunter.shared'] }),
+      baseAgent(dir, { id: 'focus', jobs: ['com.hunter.shared'] }),
     ],
   });
   const registry = createRegistry({ path: file, pollMs: 10_000 });
@@ -116,11 +116,11 @@ test('a duplicate routine label across agents is rejected', async (t) => {
   assert.match(state.error, /agent 1 \(focus\)/);
 });
 
-test('a routine label starting with a hyphen is rejected', async (t) => {
+test('a job label starting with a hyphen is rejected', async (t) => {
   const dir = await tempDir(t);
   const file = await write(dir, {
     version: 1,
-    agents: [baseAgent(dir, { routines: ['-x'] })],
+    agents: [baseAgent(dir, { jobs: ['-x'] })],
   });
   const registry = createRegistry({ path: file, pollMs: 10_000 });
   await registry.start();
@@ -128,7 +128,7 @@ test('a routine label starting with a hyphen is rejected', async (t) => {
 
   const state = registry.current();
   assert.equal(state.ok, false);
-  assert.match(state.error, /routines must be an array of strings matching/);
+  assert.match(state.error, /jobs must be an array of strings matching/);
 });
 
 test('a missing cwd directory is rejected', async (t) => {
@@ -229,7 +229,7 @@ test('pinned is kept on a persona, dropped when false, and rejected on other kin
   const file = await write(dir, {
     version: 1,
     agents: [
-      baseAgent(dir, { id: 'assistant', pinned: true, routines: ['com.invented.dashboard'] }),
+      baseAgent(dir, { id: 'assistant', pinned: true, jobs: ['com.invented.dashboard'] }),
       baseAgent(dir, { id: 'cfo', pinned: false }),
       baseAgent(dir, { id: 'plain' }),
     ],
@@ -241,7 +241,7 @@ test('pinned is kept on a persona, dropped when false, and rejected on other kin
   const state = registry.current();
   assert.equal(state.ok, true, state.error);
   assert.equal(state.agents[0].pinned, true);
-  assert.deepEqual(state.agents[0].routines, ['com.invented.dashboard']);
+  assert.deepEqual(state.agents[0].jobs, ['com.invented.dashboard']);
   assert.equal('pinned' in state.agents[1], false);
   assert.equal('pinned' in state.agents[2], false);
 
@@ -273,6 +273,21 @@ test('an unknown key on an agent is rejected', async (t) => {
   const state = registry.current();
   assert.equal(state.ok, false);
   assert.match(state.error, /unknown key "extra"/);
+});
+
+test('the old routines key is an unknown key, not an alias for jobs', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, {
+    version: 1,
+    agents: [baseAgent(dir, { routines: ['com.hunter.cfo.daily'] })],
+  });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  const state = registry.current();
+  assert.equal(state.ok, false);
+  assert.match(state.error, /unknown key "routines"/);
 });
 
 test('a file over the 256 KiB cap is rejected as oversized', async (t) => {

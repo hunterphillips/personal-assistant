@@ -1,16 +1,15 @@
 // The Health view: one card per agent with launchd jobs, one row per job,
 // rendered from the shell's state, with what is off (the Codex server,
-// cmux) above the cards. The reader sees "jobs"; the code, the snapshot's
-// `routines` key, and its routes still say routines. The shell calls
+// cmux) above the cards, from the snapshot's `jobs` key. The shell calls
 // create({ requestState, isStreaming }) once, then update(state, keys) on
 // every change (keys is null for a whole snapshot), show() when the view
 // opens, and hide() when it closes or the tab is hidden. Nothing is rebuilt
 // while off screen; show() renders the latest state.
 //
-// Routines are refreshed only on demand: when the view opens and the last
+// Jobs are refreshed only on demand: when the view opens and the last
 // refresh is missing or older than 60 seconds, and when Refresh is chosen.
 // The Focus card carries Pause or Resume, forwarded to Focus; the server
-// refreshes routines after either succeeds, and the card follows the state.
+// refreshes jobs after either succeeds, and the card follows the state.
 // A failed Pause or Resume is reported there until the next attempt or
 // until the state shows Focus paused or resumed.
 (function () {
@@ -31,7 +30,7 @@
     'not loaded': { text: 'Not loaded', tone: 'wait' },
     unknown: { text: 'Unknown', tone: 'wait' },
   };
-  var WATCHED = ['routines', 'registry', 'focus', 'agents', 'codex', 'cmux'];
+  var WATCHED = ['jobs', 'registry', 'focus', 'agents', 'codex', 'cmux'];
 
   function pad(n) {
     return n < 10 ? '0' + n : String(n);
@@ -81,12 +80,12 @@
     return badge;
   }
 
-  // Cards in agent order, each with that agent's routines; routines naming an
+  // Cards in agent order, each with that agent's jobs; jobs naming an
   // agent the registry no longer lists come last under their own name.
   function groups(state) {
     var byAgent = {};
     var order = [];
-    var items = state.routines.items || [];
+    var items = state.jobs.items || [];
     for (var i = 0; i < items.length; i += 1) {
       var id = items[i].agentId;
       if (!Object.prototype.hasOwnProperty.call(byAgent, id)) {
@@ -114,15 +113,15 @@
 
   // Whether the state shows any Focus scan paused.
   function focusPaused(state) {
-    var items = state && state.routines && state.routines.items ? state.routines.items : [];
+    var items = state && state.jobs && state.jobs.items ? state.jobs.items : [];
     return items.some(function (item) { return isFocusScan(item) && item.paused === true; });
   }
 
   function create(shell) {
-    var updated = document.getElementById('routines-updated');
-    var refreshButton = document.getElementById('routines-refresh');
-    var message = document.getElementById('routines-message');
-    var cards = document.getElementById('routines-cards');
+    var updated = document.getElementById('jobs-updated');
+    var refreshButton = document.getElementById('jobs-refresh');
+    var message = document.getElementById('jobs-message');
+    var cards = document.getElementById('jobs-cards');
     var availability = document.getElementById('health-availability');
 
     var state = null;
@@ -155,7 +154,7 @@
     function section(group) {
       var node = element('section', 'routine-card');
       var header = element('div', 'card-header');
-      var headingId = 'routines-agent-' + group.id;
+      var headingId = 'jobs-agent-' + group.id;
       node.setAttribute('aria-labelledby', headingId);
       var title = element('h3', 'card-name', group.name);
       title.id = headingId;
@@ -169,13 +168,13 @@
         if (paused) header.appendChild(element('span', 'badge badge-wait', 'Paused'));
         var button = element('button', 'button card-action', paused ? 'Resume' : 'Pause');
         button.type = 'button';
-        button.setAttribute('data-routines-action', paused ? 'resume' : 'pause');
+        button.setAttribute('data-jobs-action', paused ? 'resume' : 'pause');
         button.disabled = pauseBusy;
         header.appendChild(button);
       }
       node.appendChild(header);
 
-      if (scans.length > 0 && state.routines.focusAvailable === false) {
+      if (scans.length > 0 && state.jobs.focusAvailable === false) {
         node.appendChild(element('p', 'card-note', 'Focus is not responding; showing launchd status.'));
       }
       if (scans.length > 0 && pauseError) {
@@ -194,12 +193,12 @@
     // button across the rebuild.
     function rebuildCards() {
       var active = document.activeElement;
-      var hadFocus = !!active && cards.contains(active) && active.hasAttribute('data-routines-action');
+      var hadFocus = !!active && cards.contains(active) && active.hasAttribute('data-jobs-action');
       cards.textContent = '';
       var list = groups(state);
       for (var i = 0; i < list.length; i += 1) cards.appendChild(section(list[i]));
       if (hadFocus) {
-        var again = cards.querySelector('[data-routines-action]');
+        var again = cards.querySelector('[data-jobs-action]');
         if (again) again.focus();
       }
     }
@@ -219,24 +218,24 @@
       message.textContent = text || '';
       if (text && code) {
         message.appendChild(document.createTextNode(' '));
-        message.appendChild(element('span', 'routines-code', code));
+        message.appendChild(element('span', 'jobs-code', code));
       }
       message.hidden = !text;
     }
 
     function render() {
       if (!state || !visible) return;
-      var routines = state.routines;
-      var busy = refreshing || routines.refreshing === true;
+      var jobs = state.jobs;
+      var busy = refreshing || jobs.refreshing === true;
       refreshButton.textContent = busy ? 'Refreshing…' : 'Refresh';
       refreshButton.disabled = busy;
-      updated.textContent = routines.refreshedAt ? 'Updated ' + formatTime(routines.refreshedAt, Date.now()) : '';
+      updated.textContent = jobs.refreshedAt ? 'Updated ' + formatTime(jobs.refreshedAt, Date.now()) : '';
 
       // A bad registry edit keeps the last good agents on the server, so the
       // cards stay while the sentence says the file could not be read.
       if (state.registry && state.registry.ok === false) setMessage('The registry could not be read.', state.registry.error || null);
-      else if (routines.error) setMessage('Jobs could not be refreshed.');
-      else if (routines.refreshedAt && (routines.items || []).length === 0) setMessage('No jobs are registered.');
+      else if (jobs.error) setMessage('Jobs could not be refreshed.');
+      else if (jobs.refreshedAt && (jobs.items || []).length === 0) setMessage('No jobs are registered.');
       else setMessage('');
 
       renderAvailability();
@@ -244,7 +243,7 @@
     }
 
     function stale() {
-      var at = state.routines.refreshedAt;
+      var at = state.jobs.refreshedAt;
       var time = at ? Date.parse(at) : NaN;
       return isNaN(time) || Date.now() - time > STALE_MS;
     }
@@ -252,7 +251,7 @@
     function maybeRefreshOnOpen() {
       if (!visible || !checkOnOpen || !state) return;
       checkOnOpen = false;
-      if (!refreshing && state.routines.refreshing !== true && stale()) refresh();
+      if (!refreshing && state.jobs.refreshing !== true && stale()) refresh();
     }
 
     // Resolves to the response, or null when the request itself failed.
@@ -265,7 +264,7 @@
       if (refreshing) return;
       refreshing = true;
       render();
-      post('/api/routines/refresh').then(function () {
+      post('/api/jobs/refresh').then(function () {
         refreshing = false;
         // `ok` only says the control ran; the outcome arrives in the state.
         if (!shell.isStreaming()) shell.requestState();
@@ -293,8 +292,8 @@
     refreshButton.addEventListener('click', refresh);
     // Pause and Resume exist only in what this module renders.
     document.addEventListener('click', function (event) {
-      var button = event.target.closest && event.target.closest('button[data-routines-action]');
-      if (button && !button.disabled) togglePause(button.getAttribute('data-routines-action'));
+      var button = event.target.closest && event.target.closest('button[data-jobs-action]');
+      if (button && !button.disabled) togglePause(button.getAttribute('data-jobs-action'));
     });
 
     return {
@@ -324,5 +323,5 @@
     };
   }
 
-  window.DashboardRoutines = { create: create, formatTime: formatTime };
+  window.DashboardJobs = { create: create, formatTime: formatTime };
 }());

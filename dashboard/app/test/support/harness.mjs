@@ -99,13 +99,13 @@ export function fakeRegistry(agents = [], { groups = [], ok = true, error = null
   return fake;
 }
 
-// Routines that run no subprocess; `calls` counts refreshes.
-export function fakeRoutines(routines = []) {
+// Jobs that run no subprocess; `calls` counts refreshes.
+export function fakeJobs(jobs = []) {
   const fake = {
     calls: 0,
     async refresh() {
       fake.calls += 1;
-      return { refreshedAt: new Date().toISOString(), focusAvailable: null, routines };
+      return { refreshedAt: new Date().toISOString(), focusAvailable: null, jobs };
     },
   };
   return fake;
@@ -181,14 +181,14 @@ export function fakeSettings(initial = {}, { ok = true, error = null } = {}) {
 }
 
 // Builds a hub over the given focus and brief, with fake registry,
-// routines, and settings unless real ones are passed, and no persona
+// jobs, and settings unless real ones are passed, and no persona
 // adapters unless given.
 export function createTestHub({
-  config, focus, brief, registry = fakeRegistry(), routines = fakeRoutines(), adapters = {}, store = null, bindings = null,
+  config, focus, brief, registry = fakeRegistry(), jobs = fakeJobs(), adapters = {}, store = null, bindings = null,
   cmux = null, settings = fakeSettings(), home = '/invented', log = () => {},
 }) {
   return createHub({
-    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, home, log,
+    registry, jobs, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, home, log,
   });
 }
 
@@ -223,7 +223,7 @@ export function fakeCmux(inventory = null) {
 }
 
 // Starts the app on an ephemeral port. `focus` and `brief` default to the
-// real phase 1 modules; tests may pass fakes. `registry` and `routines`
+// real phase 1 modules; tests may pass fakes. `registry` and `jobs`
 // default to the fakes above, and `hub` to a hub over all four plus any
 // `adapters` and `store` fakes (default none), started before the app
 // listens. `goals` defaults to createGoals over the same registry; pass null
@@ -242,7 +242,7 @@ export function fakeCmux(inventory = null) {
 // route; pass null for an app without the settings route. `configure` may
 // adjust config.
 export async function startApp(t, {
-  env = {}, focus, brief, registry = fakeRegistry(), routines, hub, adapters, store, bindings, cmux = null, goals, feed,
+  env = {}, focus, brief, registry = fakeRegistry(), jobs, hub, adapters, store, bindings, cmux = null, goals, feed,
   notices = null, settings = fakeSettings(), configure = (c) => c, delegation = null,
 } = {}) {
   const server = http.createServer();
@@ -263,9 +263,9 @@ export async function startApp(t, {
   const log = (entry) => logs.push(entry);
   const focusRoutes = focus ?? createFocusProxy(config);
   const briefRoutes = brief ?? createBriefRoutes(config);
-  const routinesModule = routines ?? fakeRoutines();
+  const jobsModule = jobs ?? fakeJobs();
   const stateHub = hub ?? createTestHub({
-    config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, adapters, store, bindings, cmux, log,
+    config, focus: focusRoutes, brief: briefRoutes, registry, jobs: jobsModule, adapters, store, bindings, cmux, log,
     ...(settings ? { settings } : {}),
   });
   if (!hub) await stateHub.start();
@@ -286,7 +286,7 @@ export async function startApp(t, {
   });
   const authority = `127.0.0.1:${port}`;
   return {
-    port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, routines: routinesModule, settings, handler,
+    port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, jobs: jobsModule, settings, handler,
     delegation: delegationService,
   };
 }

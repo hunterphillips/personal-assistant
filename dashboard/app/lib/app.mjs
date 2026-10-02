@@ -1,7 +1,7 @@
 // Request router and policy: Host/Origin checks, common headers, method
 // handling, body limits, request logging, and the dashboard's own routes
-// (shell, assets, health, status and state, routines refresh). The reader
-// sees launchd jobs on the Health view; the code still calls them routines.
+// (shell, assets, health, status and state, jobs refresh: the launchd
+// jobs the Health view lists, jobs.mjs).
 // Route bodies for Focus and the Daily Brief live in the injected `focus`
 // and `brief` objects (see focus-proxy.mjs and brief-adapter.mjs for their
 // contracts); dashboard state comes from the injected `hub` (hub.mjs). The persona
@@ -70,7 +70,7 @@ const EXACT_ROUTES = new Map([
   ['/api/dashboard/status', { name: 'status', methods: ['GET'] }],
   ['/api/state', { name: 'state', methods: ['GET'] }],
   ['/api/events', { name: 'events', methods: ['GET'] }],
-  ['/api/routines/refresh', { name: 'routines-refresh', methods: ['POST'], bodyless: true }],
+  ['/api/jobs/refresh', { name: 'jobs-refresh', methods: ['POST'], bodyless: true }],
   ['/api/sessions/refresh', { name: 'sessions-refresh', methods: ['POST'], bodyless: true }],
   ['/embedded/focus', { name: 'focus-page', methods: ['GET'] }],
   ['/api/focus', { name: 'focus-api', methods: ['GET', 'PUT'] }],
@@ -96,7 +96,7 @@ const EXACT_ROUTES = new Map([
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-// Focus controls after which the routines view is refreshed.
+// Focus controls after which the jobs view is refreshed.
 const ROUTINE_CONTROLS = new Set(['/api/pause', '/api/resume']);
 
 export function defaultLog(entry) {
@@ -189,8 +189,8 @@ export function createApp({
     sendJson(res, 200, hub.snapshot());
   }
 
-  async function serveRoutinesRefresh(res) {
-    await hub.refreshRoutines();
+  async function serveJobsRefresh(res) {
+    await hub.refreshJobs();
     sendJson(res, 200, { ok: true, revision: hub.snapshot().revision });
   }
 
@@ -203,7 +203,7 @@ export function createApp({
   async function serveFocusControl(req, res, path) {
     await focus.handleControl(req, res, { path });
     if (ROUTINE_CONTROLS.has(path) && res.statusCode >= 200 && res.statusCode < 300) {
-      hub.refreshRoutines(); // never rejects; failures land in the snapshot
+      hub.refreshJobs(); // never rejects; failures land in the snapshot
     }
   }
 
@@ -224,8 +224,8 @@ export function createApp({
         return serveState(res);
       case 'events':
         return events.serve(req, res);
-      case 'routines-refresh':
-        return serveRoutinesRefresh(res);
+      case 'jobs-refresh':
+        return serveJobsRefresh(res);
       case 'sessions-refresh':
         return serveSessionsRefresh(res);
       case 'asset':

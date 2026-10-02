@@ -48,7 +48,7 @@
 //     failure, including a truncated response.
 //
 //   fetchStatus({ signal }) -> Promise<object | null>
-//     Used by the routines module: a GET of upstream /api/status, read up to
+//     Used by the jobs module: a GET of upstream /api/status, read up to
 //     API_LIMIT and parsed. Resolves with the parsed object when the reply is
 //     200 JSON whose body is a plain JSON object. Stops when `signal` aborts or
 //     after config.timeouts.upstreamMs. Resolves null on any failure (timeout,

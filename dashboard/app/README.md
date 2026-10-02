@@ -28,7 +28,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
 | `GET /api/state` | Checks Focus and the brief, then returns the state hub's snapshot (below). |
 | `GET /api/events` | Server-Sent Events: the snapshot, then each change (below). |
-| `POST /api/routines/refresh` | Re-reads the routines and answers `{"ok": true, "revision": N}`. |
+| `POST /api/jobs/refresh` | Re-reads the jobs and answers `{"ok": true, "revision": N}`. |
 | `GET /api/dashboard/status` | Focus and brief status (below). The shell no longer reads it; kept for one release. |
 | `GET /assets/<name>` | Shell scripts, styles, and the brief bridge. |
 | `GET /embedded/focus`, `/api/focus`, `/api/status`; `PUT /api/focus`; `POST /api/pause`, `/api/resume`, `/api/refresh` | Forwarded to Focus (below). |
@@ -64,7 +64,7 @@ what `lib/app.mjs` expects from it.
 
 ### Modules
 
-- `lib/app.mjs` routes requests, checks Host and Origin, logs, and serves the shell, assets, health, status, state, and routines refresh.
+- `lib/app.mjs` routes requests, checks Host and Origin, logs, and serves the shell, assets, health, status, state, and jobs refresh.
 - `lib/agent-routes.mjs` serves the persona routes under `/api/agents/` and the session routes under `/api/sessions/`.
 - `lib/goals-routes.mjs` serves the Goals routes over `lib/goals.mjs`, which reads the vault.
 - `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store, and `lib/feed-instructions.mjs`, which reads the criteria file.
@@ -73,7 +73,7 @@ what `lib/app.mjs` expects from it.
 - `lib/focus-proxy.mjs` forwards the Focus routes.
 - `lib/brief-adapter.mjs` serves the brief routes over `lib/briefs.mjs` and `lib/feedback.mjs`.
 - `lib/hub.mjs` keeps the state snapshot and its subscribers.
-- `lib/registry.mjs` and `lib/routines.mjs` read the agent registry and its launchd jobs; `lib/launchd.mjs` renders the plist for `bin/dashboard-install`.
+- `lib/registry.mjs` and `lib/jobs.mjs` read the agent registry and its launchd jobs; `lib/launchd.mjs` renders the plist for `bin/dashboard-install`.
 - `lib/threads.mjs` and `lib/runtime/` hold the persona thread files, the two runtime adapters (`claude.mjs` runs personas, `codex.mjs` follows the shared Codex app-server's threads), and the cmux client (`cmux.mjs`).
 - `lib/bindings.mjs` reads the terminal bindings `bin/codex-new` records.
 - `lib/config.mjs` and `lib/assets.mjs` hold configuration and the asset allowlist.
@@ -128,7 +128,7 @@ snapshot; concurrent requests share one check. It stays for one release.
                  "binding": { "workspaceId": "...", "surfaceId": "...", "live": true } }],
   "codex": { "available": true },
   "cmux": { "available": true },
-  "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] },
+  "jobs": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] },
   "settings": { "ok": true, "error": null, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" }, "permission": { "default": "ask" } },
   "models": [{ "id": "fable", "name": "Fable" }, { "id": "opus", "name": "Opus" }, { "id": "sonnet", "name": "Sonnet" }, { "id": "haiku", "name": "Haiku" }] }
 ```
@@ -139,7 +139,7 @@ which the Agents view shortens to `~` in the paths it shows. `focus` and
 `state` is `unknown` before the first check). Every agent carries its
 registry `cwd` (a string, or null when the registry has none), which the
 Agents view shows as the agent's folder, and `jobs`, how many launchd
-labels its registry `routines` name; agents leave out `routines` itself. A
+labels its registry `jobs` name; agents leave out `jobs` itself. A
 persona also carries
 its runtime state (see Personas below); any other kind has `state: null`.
 `sessions` lists the coding sessions the dashboard follows but does not
@@ -151,7 +151,7 @@ with `no_server` (no `owner.json`, or its pid is gone), `disconnected`
 (a server is known but the socket is down; the rows are kept as
 `unavailable` meanwhile), `ws_unavailable` (the `ws` package is not
 installed), `no_adapter`, or `api_key_in_env`. `cmux` says the same for
-the cmux inventory (its reasons are listed with the rows). `routines.items` is empty
+the cmux inventory (its reasons are listed with the rows). `jobs.items` is empty
 until the first refresh; a failed refresh keeps the previous items and sets
 `error` to `refresh_failed`. `GET /api/state` refreshes Focus and the brief
 the same way the status route does (one shared check, bounded by
@@ -178,11 +178,11 @@ brief every 30 seconds and sends a delta only when the answer changed.
 A stream is logged once, as `stream_closed`, when it ends. Once the server
 has begun shutting down, a new stream request gets 503 `shutting_down`.
 
-`POST /api/routines/refresh` follows the rules for the Focus controls: exact
+`POST /api/jobs/refresh` follows the rules for the Focus controls: exact
 `Origin`, no body. It answers once the refresh has finished. `ok` means the
 control ran, not that the refresh worked; a failed refresh shows up in the
-state as `routines.error`. A successful `POST /api/pause` or `/api/resume` also starts
-a routines refresh.
+state as `jobs.error`. A successful `POST /api/pause` or `/api/resume` also starts
+a jobs refresh.
 
 ### Daily Brief
 
@@ -324,9 +324,9 @@ The write tests run the real Focus server from a temporary copy with
 an invented board in a throwaway Git repository (`test/support/isolated-focus.mjs`);
 they skip when the Focus checkout is missing.
 
-### Routines
+### Jobs
 
-`lib/routines.mjs` lists every job named in the agent registry's `routines`.
+`lib/jobs.mjs` lists every job named in the agent registry's `jobs`.
 For each label it reads the plist from `DASHBOARD_LAUNCH_AGENTS_DIR` with
 `plutil`, asks `launchctl list` for the last exit status and PID, and takes
 the log file's modification time as the last run. Focus scans
@@ -334,15 +334,16 @@ the log file's modification time as the last run. Focus scans
 module only reads: it never loads, starts, or stops a job, and it runs only
 when asked.
 
-The reader-facing word is "jobs": the Health view heads them "Jobs" and
-every sentence it shows says job. The code word is still "routines": this
-module, `public/routines.js`, the snapshot's `routines` key, and
-`POST /api/routines/refresh` keep their names for now.
+A job is a launchd plist an agent's repo owns; a routine (a scheduled
+prompt the daemon runs itself) is a different thing and never appears
+here. The snapshot's `jobs` key, `public/jobs.js`, and
+`POST /api/jobs/refresh` carry the name; `/routines` still redirects to
+`/health` for one release.
 
 ### Shell
 
 `public/index.html`, `public/shell.js`, `public/agents.js`,
-`public/markdown.js`, `public/routines.js`, `public/goals.js`, and
+`public/markdown.js`, `public/jobs.js`, `public/goals.js`, and
 `public/styles.css` make up the
 page served at `/`, `/agents`, `/reading`, `/brief`, `/focus`, `/goals`,
 and `/health`. The Agents view is the page at `/`; `/agents` shows the same
@@ -537,7 +538,7 @@ back. The row, the header, and the form follow the registry change through
 the snapshot. A refused save lists the validator's problems under the form
 ("name must be a non-empty string of at most 40 characters") until the
 next edit; a saved folder change adds "The folder applies when a new thread
-starts." The jobs sentence (see Routines) follows the form. Edits made
+starts." The jobs sentence (see Jobs) follows the form. Edits made
 elsewhere while the form holds unsaved changes leave the form alone.
 
 A project or system entry stays read-only: Role, Group, Provider, and
@@ -895,7 +896,7 @@ the three is 400 `invalid_permission`; `newGroup: { id, name }` adds a group who
 listed group has (one that does joins it) and `group` must equal its id.
 A created agent is kind `persona` on `claude`; project and system entries
 are still hand edits. The entry is written in the schema's key order with
-its `routines` kept, and the whole file as 2-space JSON with a trailing
+its `jobs` kept, and the whole file as 2-space JSON with a trailing
 newline, so a dashboard write reads as a small diff; unrelated top-level
 keys are kept. The write is atomic (a temp file beside the registry,
 renamed over it, with the file's mode kept), the registry reloads at
@@ -1425,7 +1426,7 @@ after cmux's reply), or
 `no_password`, `auth_failed`, `error`). No route ever picks a terminal by
 its working directory. `POST /api/sessions/refresh` refreshes the cmux
 inventory and the Codex catalogue now and answers the revision after
-that, as `/api/routines/refresh` does for routines; it waits for the
+that, as `/api/jobs/refresh` does for jobs; it waits for the
 Codex poll no longer than `TIMEOUTS.statusMs` and answers with the
 revision it has then.
 
@@ -1472,7 +1473,7 @@ Requires Node 24 (`.nvmrc`).
   its own isolated Focus copy, the app over HTTP, and the same app over HTTPS
   with a throwaway self-signed certificate, all on ephemeral ports, with
   invented brief viewers in a temporary directory, an in-memory registry
-  and routines, and personas on a fake Claude adapter over a thread store
+  and jobs, and personas on a fake Claude adapter over a thread store
   in that directory (`test/support/browser-server.mjs`). Shared fixtures are in
   `test/support/browser-test.mjs`. Only the HTTPS test's browser context
   accepts that certificate. Requests to any other host are blocked, and a CSP

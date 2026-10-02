@@ -28,7 +28,7 @@ from here.
   reads the vault's priorities with add and edit going through the
   Second brain agent, Health holds Settings (the default model, effort, and
   permission level, which agent receives the brief) and lists the launchd jobs and their
-  state (the code still calls them routines). The design (the Assistant as the pinned
+  state. The design (the Assistant as the pinned
   agent, delegation, models, and what comes next: routines as scheduled
   prompts, Ideas) is
   `thoughts/shared/plans/2026-09-30-assistant-system-design.md`. The app

@@ -1,20 +1,20 @@
-// Routines: a read-only view of every scheduled job the registry names. Each
-// agent's `routines` are launchd labels; for each one this module reads the
+// Jobs: a read-only view of every scheduled job the registry names. Each
+// agent's `jobs` are launchd labels; for each one this module reads the
 // plist in config.launchAgentsDir (through `plutil`), asks `launchctl list`
 // for its last exit status and PID, and, for Focus scans, reads Focus's own
 // status. It never loads, starts, stops, or edits a job, and it runs nothing
 // on a timer: the caller refreshes on demand.
 //
-// createRoutines({ registry, launchAgentsDir, focus, timeouts, log,
-//                  readPlist, launchctlList }) returns:
+// createJobs({ registry, launchAgentsDir, focus, timeouts, log,
+//             readPlist, launchctlList }) returns:
 //
-//   refresh({ signal }) -> Promise<{ refreshedAt, focusAvailable, routines }>
-//     Builds one routine per label on every agent in registry.current().
+//   refresh({ signal }) -> Promise<{ refreshedAt, focusAvailable, jobs }>
+//     Builds one job per label on every agent in registry.current().
 //     Per-label work (plist read, log stat, launchctl) runs at most
 //     CONCURRENCY at a time. `signal` is threaded through to the plist and
 //     launchctl subprocesses, so aborting also aborts any in-flight ones.
 //     When `signal` aborts, no new work starts and the promise resolves at
-//     once; every routine not finished by then is returned with available:
+//     once; every job not finished by then is returned with available:
 //     false. Never rejects.
 //
 //     Labels starting with FOCUS_SCAN_PREFIX are Focus scans. When there is
@@ -22,7 +22,7 @@
 //     bounded by timeouts.statusMs and the caller's signal. `focusAvailable`
 //     is true only when that call returned a status.
 //
-//     Each routine:
+//     Each job:
 //       { label, agentId, agentName, name, schedule: { kind, text }, logPath,
 //         lastRun, outcome, exitStatus, failures24h, paused, source, available }
 //     - name: the label without the agent's shared owner prefix (the leading
@@ -69,7 +69,7 @@ const LAUNCHCTL_NOT_FOUND = 113;
 const CALENDAR_KEYS = new Set(['Minute', 'Hour', 'Weekday', 'Day', 'Month']);
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-export function createRoutines({
+export function createJobs({
   registry,
   launchAgentsDir,
   focus,
@@ -116,8 +116,8 @@ export function createRoutines({
       const agents = registry.current().agents;
       const jobs = [];
       for (const agent of agents) {
-        const prefix = ownerPrefix(agent.routines);
-        for (const label of [...agent.routines].sort(compareStrings)) {
+        const prefix = ownerPrefix(agent.jobs);
+        for (const label of [...agent.jobs].sort(compareStrings)) {
           jobs.push({ agent, label, name: label.slice(prefix.length) || label });
         }
       }
@@ -130,14 +130,14 @@ export function createRoutines({
       return {
         refreshedAt: new Date().toISOString(),
         focusAvailable: status !== null,
-        routines: jobs.map((job, index) => buildRoutine(job, results[index], status)),
+        jobs: jobs.map((job, index) => buildRoutine(job, results[index], status)),
       };
     },
   };
 }
 
 function buildRoutine({ agent, label, name }, result, status) {
-  const routine = {
+  const job = {
     label,
     agentId: agent.id,
     agentName: agent.name,
@@ -152,30 +152,30 @@ function buildRoutine({ agent, label, name }, result, status) {
     source: 'launchctl',
     available: false,
   };
-  if (!result?.plist) return routine;
+  if (!result?.plist) return job;
 
   const { plist, logPath, logMtime, launchctl } = result;
-  routine.available = true;
-  routine.schedule = describeSchedule(plist);
-  routine.logPath = logPath;
-  routine.exitStatus = launchctl?.lastExitStatus ?? null;
+  job.available = true;
+  job.schedule = describeSchedule(plist);
+  job.logPath = logPath;
+  job.exitStatus = launchctl?.lastExitStatus ?? null;
 
   const focusSource = focusSourceOf(label, status);
   if (focusSource) {
-    routine.source = 'focus';
-    routine.lastRun = stringOrNull(focusSource.lastRun);
-    routine.outcome = FOCUS_OUTCOMES.has(focusSource.lastOutcome) ? focusSource.lastOutcome : 'unknown';
-    routine.failures24h = Number.isFinite(focusSource.failures24h) ? focusSource.failures24h : null;
-    routine.paused = typeof status.paused === 'boolean' ? status.paused : null;
-    return routine;
+    job.source = 'focus';
+    job.lastRun = stringOrNull(focusSource.lastRun);
+    job.outcome = FOCUS_OUTCOMES.has(focusSource.lastOutcome) ? focusSource.lastOutcome : 'unknown';
+    job.failures24h = Number.isFinite(focusSource.failures24h) ? focusSource.failures24h : null;
+    job.paused = typeof status.paused === 'boolean' ? status.paused : null;
+    return job;
   }
 
-  routine.lastRun = logMtime;
-  if (!launchctl) routine.outcome = 'not loaded';
-  else if (launchctl.pid !== null && launchctl.pid !== undefined) routine.outcome = 'running';
-  else if (launchctl.lastExitStatus === 0) routine.outcome = 'ok';
-  else if (Number.isFinite(launchctl.lastExitStatus)) routine.outcome = 'failed';
-  return routine;
+  job.lastRun = logMtime;
+  if (!launchctl) job.outcome = 'not loaded';
+  else if (launchctl.pid !== null && launchctl.pid !== undefined) job.outcome = 'running';
+  else if (launchctl.lastExitStatus === 0) job.outcome = 'ok';
+  else if (Number.isFinite(launchctl.lastExitStatus)) job.outcome = 'failed';
+  return job;
 }
 
 function focusSourceOf(label, status) {

@@ -77,7 +77,7 @@ test('a message, a question, an answer, and the reply flow through the real rout
   t.after(() => adapter.close());
   const agents = [{
     id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona',
-    cwd: path.join(dir, 'repo'), provider: 'claude', routines: [],
+    cwd: path.join(dir, 'repo'), provider: 'claude', jobs: [],
   }];
   const app = await startApp(t, { ...status, registry: fakeRegistry(agents), adapters: { claude: adapter }, store });
   assert.equal((await request(app, 'GET', '/api/state')).json.agents[0].state, 'idle');

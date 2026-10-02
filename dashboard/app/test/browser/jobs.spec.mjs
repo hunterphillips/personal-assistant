@@ -1,7 +1,7 @@
-// The Health view's Settings card and jobs (the code's routines), the
+// The Health view's Settings card and jobs (the code's jobs), the
 // settings panel beside a thread with its jobs line, and the shell's event
 // stream client, in real
-// browsers against the in-memory registry and routines of
+// browsers against the in-memory registry and jobs of
 // test/support/browser-server.mjs. Pause and Resume reach the isolated
 // Focus copy, whose launchd stubs refuse.
 
@@ -15,21 +15,21 @@ const ago = (ms) => new Date(Date.now() - ms).toISOString();
 const AGENTS = [
   {
     id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented.', group: 'personal', kind: 'system',
-    routines: ['gmail', 'git', 'notes', 'work', 'calendar', 'drive'].map((name) => `com.focus.scan-${name}`),
+    jobs: ['gmail', 'git', 'notes', 'work', 'calendar', 'drive'].map((name) => `com.focus.scan-${name}`),
   },
   {
     id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented notes that keep themselves.', group: 'personal',
     kind: 'persona', provider: 'claude', cwd: '/invented/second-brain',
-    routines: ['com.hunter.brain-drain', 'com.hunter.brain-audit', 'com.hunter.brain-refresh'],
+    jobs: ['com.hunter.brain-drain', 'com.hunter.brain-audit', 'com.hunter.brain-refresh'],
   },
   {
-    id: 'scribe', name: 'Scribe', role: 'Drafts', description: 'Invented, with no routines.', group: 'work', kind: 'persona',
+    id: 'scribe', name: 'Scribe', role: 'Drafts', description: 'Invented, with no jobs.', group: 'work', kind: 'persona',
     provider: 'codex', cwd: '/elsewhere/scribe',
   },
-  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', routines: ['com.hunter.cfo.daily'] },
+  { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', jobs: ['com.hunter.cfo.daily'] },
 ];
 
-function routine(agent, label, fields) {
+function job(agent, label, fields) {
   const name = label.replace(/^com\.(focus|hunter)\./, '');
   return {
     label,
@@ -50,7 +50,7 @@ function routine(agent, label, fields) {
 }
 
 function focusScan(name, fields) {
-  return routine(AGENTS[0], `com.focus.scan-${name}`, { source: 'focus', exitStatus: null, paused: false, failures24h: 0, ...fields });
+  return job(AGENTS[0], `com.focus.scan-${name}`, { source: 'focus', exitStatus: null, paused: false, failures24h: 0, ...fields });
 }
 
 function items({ paused = true } = {}) {
@@ -61,18 +61,18 @@ function items({ paused = true } = {}) {
     focusScan('work', { outcome: 'failed', failures24h: 1 }),
     focusScan('calendar', { outcome: 'no change' }),
     focusScan('drive', { outcome: 'never ran', lastRun: null }),
-    routine(AGENTS[1], 'com.hunter.brain-drain', { schedule: { kind: 'calendar', text: 'Daily at 02:30' }, lastRun: ago(30 * HOUR) }),
-    routine(AGENTS[1], 'com.hunter.brain-audit', { outcome: 'failed', exitStatus: 78, lastRun: ago(5 * 24 * HOUR) }),
-    routine(AGENTS[1], 'com.hunter.brain-refresh', { outcome: 'not loaded', exitStatus: null, lastRun: null }),
-    routine(AGENTS[3], 'com.hunter.cfo.daily', {
+    job(AGENTS[1], 'com.hunter.brain-drain', { schedule: { kind: 'calendar', text: 'Daily at 02:30' }, lastRun: ago(30 * HOUR) }),
+    job(AGENTS[1], 'com.hunter.brain-audit', { outcome: 'failed', exitStatus: 78, lastRun: ago(5 * 24 * HOUR) }),
+    job(AGENTS[1], 'com.hunter.brain-refresh', { outcome: 'not loaded', exitStatus: null, lastRun: null }),
+    job(AGENTS[3], 'com.hunter.cfo.daily', {
       schedule: { kind: 'unavailable', text: 'Schedule unavailable' },
       outcome: 'unknown', exitStatus: null, lastRun: null, available: false,
     }),
   ];
 }
 
-function seeded(routines = {}) {
-  return { build: () => ({ agents: AGENTS, routines: { items: items(), focusAvailable: true, refreshedAt: ago(5_000), ...routines } }) };
+function seeded(jobs = {}) {
+  return { build: () => ({ agents: AGENTS, jobs: { items: items(), focusAvailable: true, refreshedAt: ago(5_000), ...jobs } }) };
 }
 
 function card(page, name) {
@@ -104,14 +104,14 @@ async function openHealth(page, hub) {
   await expectView(page, 'health', 'Health');
 }
 
-test.describe('with seeded routines', () => {
+test.describe('with seeded jobs', () => {
   test.use({ hubOptions: seeded() });
 
   test('each agent with jobs gets a card with its rows and outcome badges', async ({ page, hub }) => {
     await openHealth(page, hub);
     await expect(page.locator('#view-health').getByRole('heading', { name: 'Jobs', level: 1 })).toBeVisible();
-    await expect(page.locator('#routines-updated')).toHaveText('Updated just now');
-    await expect(page.locator('#routines-refresh')).toHaveText('Refresh');
+    await expect(page.locator('#jobs-updated')).toHaveText('Updated just now');
+    await expect(page.locator('#jobs-refresh')).toHaveText('Refresh');
 
     await expect(page.locator('.routine-card .card-name')).toHaveText(['Focus', 'Second brain', 'CFO']);
     await expect(card(page, 'Focus').locator('.role-chip')).toHaveText('Tasks');
@@ -137,7 +137,7 @@ test.describe('with seeded routines', () => {
     await expect(row(page, 'scan-git').locator('.routine-failures')).toHaveCount(0);
     await expect(row(page, 'scan-drive').locator('.badge')).toHaveClass(/badge-wait/);
     await expect(row(page, 'scan-notes').locator('.routine-run')).toHaveText('3 hours ago');
-    const yesterday = new Date(Date.parse(hub.routines.items[6].lastRun));
+    const yesterday = new Date(Date.parse(hub.jobs.items[6].lastRun));
     await expect(row(page, 'brain-drain').locator('.routine-run')).toHaveText(
       `Yesterday ${pad(yesterday.getHours())}:${pad(yesterday.getMinutes())}`);
     await expect(row(page, 'brain-audit').locator('.routine-run')).toHaveText(/^[A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}$/);
@@ -151,7 +151,7 @@ test.describe('with seeded routines', () => {
     await expect(focus.locator('.card-note')).toHaveCount(0);
 
     // A fresh refreshedAt means opening the view did not refresh.
-    expect(hub.routines.calls).toBe(0);
+    expect(hub.jobs.calls).toBe(0);
 
     for (const button of await page.locator('#view-health button').all()) {
       expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);
@@ -168,17 +168,17 @@ test.describe('with seeded routines', () => {
     await expectView(page, 'agents', 'Agents');
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#view-agents .routine-card')).toHaveCount(0);
-    await expect(page.locator('#view-agents').getByText(/routine/i)).toHaveCount(0);
-    expect(hub.routines.calls).toBe(0);
+    await expect(page.locator('#view-agents').getByText(/job/i)).toHaveCount(0);
+    expect(hub.jobs.calls).toBe(0);
   });
 
-  test('a thread header has no Routines button and no rows above the messages', async ({ page, hub }) => {
+  test('a thread header has no Jobs button and no rows above the messages', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=brain`);
     await expect(page.locator('#agent-name')).toHaveText('Second brain');
-    await expect(page.locator('#agent-panel').getByRole('button', { name: /Routines/ })).toHaveCount(0);
+    await expect(page.locator('#agent-panel').getByRole('button', { name: /Jobs/ })).toHaveCount(0);
     await expect(page.locator('#agent-panel .routine-row')).toHaveCount(0);
     await page.waitForTimeout(300);
-    expect(hub.routines.calls).toBe(0);
+    expect(hub.jobs.calls).toBe(0);
   });
 
   test('the gear opens the agent\'s settings and a jobs line pointing at Health', async ({ page, hub }) => {
@@ -189,7 +189,7 @@ test.describe('with seeded routines', () => {
     await expect(gear).toHaveAttribute('title', 'Details');
     await expect(gear).toHaveAttribute('aria-expanded', 'false');
     await expect(gear).toHaveAttribute('aria-controls', 'agent-details');
-    await expect(page.getByRole('button', { name: /^Routines/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Jobs/ })).toHaveCount(0);
     const details = page.locator('#agent-details');
     await expect(details).toBeHidden();
     expect((await gear.boundingBox()).height).toBeGreaterThanOrEqual(44);
@@ -211,7 +211,7 @@ test.describe('with seeded routines', () => {
     await expect(details.getByRole('button')).toHaveCount(3);
     await expect(details.getByRole('button', { name: 'Save' })).toBeDisabled();
     await expect(details.getByRole('button', { name: 'Close details' })).toBeVisible();
-    expect(hub.routines.calls).toBe(0);
+    expect(hub.jobs.calls).toBe(0);
   });
 
   test('the chevron and Escape close the panel and return the keyboard to the gear', async ({ page, hub }) => {
@@ -232,7 +232,7 @@ test.describe('with seeded routines', () => {
     await link.focus();
     // A state change that leaves the settings as they were keeps the keyboard where it is.
     const revision = await page.evaluate(() => fetch('/api/state').then((r) => r.json()).then((s) => s.revision));
-    await hub.state.refreshRoutines();
+    await hub.state.refreshJobs();
     await expect.poll(() => page.evaluate(() => fetch('/api/state').then((r) => r.json()).then((s) => s.revision))).toBeGreaterThan(revision);
     await page.waitForTimeout(200);
     await expect(link).toBeFocused();
@@ -263,7 +263,7 @@ test.describe('with seeded routines', () => {
     await expect(details.locator('[name="role"]')).toHaveValue('Drafts');
     await expect(details.locator('[name="cwd"]')).toHaveValue('/elsewhere/scribe');
     await expect(details.locator('.form-note-codex')).toHaveText('Codex, its own settings');
-    await expect(details.locator('[name="description"]')).toHaveValue('Invented, with no routines.');
+    await expect(details.locator('[name="description"]')).toHaveValue('Invented, with no jobs.');
     await expect(details.locator('.details-jobs')).toBeHidden();
     await expect(details.getByRole('link')).toHaveCount(0);
 
@@ -332,20 +332,20 @@ test.describe('with seeded routines', () => {
 
   test('Refresh posts the control and reads Refreshing… until the refresh finishes', async ({ page, hub }) => {
     await openHealth(page, hub);
-    const refresh = page.locator('#routines-refresh');
+    const refresh = page.locator('#jobs-refresh');
     await expect(refresh).toHaveText('Refresh');
-    const release = hub.routines.hold();
-    const posted = page.waitForRequest((r) => r.url().endsWith('/api/routines/refresh') && r.method() === 'POST');
+    const release = hub.jobs.hold();
+    const posted = page.waitForRequest((r) => r.url().endsWith('/api/jobs/refresh') && r.method() === 'POST');
     await refresh.click();
     await posted;
     await expect(refresh).toHaveText('Refreshing…');
     await expect(refresh).toBeDisabled();
-    hub.routines.items = items().slice(0, 5);
+    hub.jobs.items = items().slice(0, 5);
     release();
     await expect(refresh).toHaveText('Refresh');
     await expect(refresh).toBeEnabled();
     await expect(page.locator('.routine-card .card-name')).toHaveText(['Focus']);
-    expect(hub.routines.calls).toBe(1);
+    expect(hub.jobs.calls).toBe(1);
   });
 
   test('Resume follows the state once the control succeeds', async ({ page, hub }) => {
@@ -363,9 +363,9 @@ test.describe('with seeded routines', () => {
     answer();
     await expect(button).toBeEnabled();
 
-    // What the server does after a real resume: refresh routines.
-    hub.routines.items = items({ paused: false });
-    await hub.state.refreshRoutines();
+    // What the server does after a real resume: refresh jobs.
+    hub.jobs.items = items({ paused: false });
+    await hub.state.refreshJobs();
     await expect(focus.getByRole('button')).toHaveText(['Pause']);
     await expect(focus.locator('.card-header .badge')).toHaveCount(0);
     await expect(focus.locator('.card-error')).toHaveCount(0);
@@ -381,7 +381,7 @@ test.describe('with seeded routines', () => {
     expect((await response).status()).toBe(500);
     await expect(focus.locator('.card-error')).toHaveText('Focus reported an error.');
     await expect(focus.getByRole('button', { name: 'Resume' })).toBeEnabled();
-    expect(hub.routines.calls).toBe(0);
+    expect(hub.jobs.calls).toBe(0);
   });
 
   test('a Resume that gets no answer says Focus did not respond, and a state change clears it', async ({ page, hub }) => {
@@ -391,8 +391,8 @@ test.describe('with seeded routines', () => {
     await focus.getByRole('button', { name: 'Resume' }).click();
     await expect(focus.locator('.card-error')).toHaveText('Focus did not respond.');
 
-    hub.routines.items = items({ paused: false });
-    await hub.state.refreshRoutines();
+    hub.jobs.items = items({ paused: false });
+    await hub.state.refreshJobs();
     await expect(focus.getByRole('button')).toHaveText(['Pause']);
     await expect(focus.locator('.card-error')).toHaveCount(0);
   });
@@ -400,10 +400,10 @@ test.describe('with seeded routines', () => {
   test('a failed refresh says so and leaves Refresh available', async ({ page, hub }) => {
     await openHealth(page, hub);
     await expect(page.locator('.routine-card')).toHaveCount(3);
-    hub.routines.fail = true;
-    await page.locator('#routines-refresh').click();
-    await expect(page.locator('#routines-message')).toHaveText('Jobs could not be refreshed.');
-    await expect(page.locator('#routines-refresh')).toBeEnabled();
+    hub.jobs.fail = true;
+    await page.locator('#jobs-refresh').click();
+    await expect(page.locator('#jobs-message')).toHaveText('Jobs could not be refreshed.');
+    await expect(page.locator('#jobs-refresh')).toBeEnabled();
     await expect(page.locator('.routine-card')).toHaveCount(3);
   });
 
@@ -433,7 +433,7 @@ test.describe('with seeded routines', () => {
   });
 });
 
-test.describe('with stale routines', () => {
+test.describe('with stale jobs', () => {
   test.use({ hubOptions: seeded({ refreshedAt: ago(5 * MINUTE) }) });
 
   test('opening Health refreshes once, and Agents does not', async ({ page, hub }) => {
@@ -442,16 +442,16 @@ test.describe('with stale routines', () => {
     await page.goto(`${hub.origin}/?agent=scribe`);
     await expect(page.locator('#agent-name')).toHaveText('Scribe');
     await page.waitForTimeout(300);
-    expect(hub.routines.calls).toBe(0);
+    expect(hub.jobs.calls).toBe(0);
     await nav(page, 'Health').click();
-    await expect(page.locator('#routines-updated')).toHaveText('Updated just now');
+    await expect(page.locator('#jobs-updated')).toHaveText('Updated just now');
     await page.waitForTimeout(300);
-    expect(hub.routines.calls).toBe(1);
+    expect(hub.jobs.calls).toBe(1);
   });
 
 });
 
-test.describe('with routines never refreshed', () => {
+test.describe('with jobs never refreshed', () => {
   test.use({ hubOptions: { build: () => ({ agents: AGENTS }) } });
 
   test('the jobs line counts the registry\'s jobs without a refresh', async ({ page, hub }) => {
@@ -459,7 +459,7 @@ test.describe('with routines never refreshed', () => {
     await page.locator('#agent-details-toggle').click();
     await expect(page.locator('#agent-details .details-jobs')).toHaveText('Second brain runs 3 jobs.');
     await page.waitForTimeout(300);
-    expect(hub.routines.calls).toBe(0);
+    expect(hub.jobs.calls).toBe(0);
   });
 });
 
@@ -478,9 +478,9 @@ test.describe('with an unreadable registry', () => {
 
   test('Health says the registry could not be read and keeps the last good cards', async ({ page, hub }) => {
     await openHealth(page, hub);
-    const message = page.locator('#routines-message');
+    const message = page.locator('#jobs-message');
     await expect(message).toHaveText('The registry could not be read. registry_invalid_json');
-    await expect(message.locator('.routines-code')).toHaveText('registry_invalid_json');
+    await expect(message.locator('.jobs-code')).toHaveText('registry_invalid_json');
     await expect(page.locator('.routine-card').first()).toBeVisible();
   });
 });
@@ -629,14 +629,14 @@ test.describe('Settings with an unreadable file', () => {
   });
 });
 
-test.describe('with no routines registered', () => {
+test.describe('with no jobs registered', () => {
   test.use({ hubOptions: seeded({ items: [] }) });
 
   test('Health says none are registered', async ({ page, hub }) => {
     await openHealth(page, hub);
-    await expect(page.locator('#routines-message')).toHaveText('No jobs are registered.');
+    await expect(page.locator('#jobs-message')).toHaveText('No jobs are registered.');
     await expect(page.locator('.routine-card')).toHaveCount(0);
-    await expect(page.locator('#routines-refresh')).toBeEnabled();
+    await expect(page.locator('#jobs-refresh')).toBeEnabled();
   });
 });
 
@@ -645,13 +645,13 @@ test('with no agents, Home says so, and Health refreshes once when opened', asyn
   await expectView(page, 'agents', 'Agents');
   await expect(page.locator('#agents-message')).toHaveText('No agents are registered.');
   await page.waitForTimeout(300);
-  expect(hub.routines.calls).toBe(0);
+  expect(hub.jobs.calls).toBe(0);
   await nav(page, 'Health').click();
   await expect(page).toHaveURL(`${hub.origin}/health`);
   await expectView(page, 'health', 'Health');
-  await expect(page.locator('#routines-refresh')).toBeVisible();
+  await expect(page.locator('#jobs-refresh')).toBeVisible();
   // Health opened with nothing refreshed, so it refreshed once.
-  await expect.poll(() => hub.routines.calls).toBe(1);
+  await expect.poll(() => hub.jobs.calls).toBe(1);
 });
 
 test('the rail holds five links without scrolling, and /brief shows the Brief tab, /reading the Feed tab', async ({ page, hub }) => {
@@ -703,7 +703,7 @@ test('the rail holds five links without scrolling, and /brief shows the Brief ta
 });
 
 test.describe('stream client', () => {
-  // Routines already read and none registered, so nothing refreshes on open
+  // Jobs already read and none registered, so nothing refreshes on open
   // and the count starts at zero on every width.
   test.use({ hubOptions: seeded({ items: [] }) });
 
@@ -716,8 +716,8 @@ test.describe('stream client', () => {
   }
 
   // The rows on Health follow the jobs.
-  const rows = (page) => page.locator('#routines-cards .routine-row');
-  const none = (page) => expect(page.locator('#routines-message')).toHaveText('No jobs are registered.');
+  const rows = (page) => page.locator('#jobs-cards .routine-row');
+  const none = (page) => expect(page.locator('#jobs-message')).toHaveText('No jobs are registered.');
 
   test('the Health view follows deltas without refetching the state', async ({ page, hub }) => {
     const states = countRequests(page, '/api/state');
@@ -727,11 +727,11 @@ test.describe('stream client', () => {
     await settled(page, states);
     const before = states.length;
 
-    hub.routines.items = items().slice(0, 1);
-    await hub.state.refreshRoutines();
+    hub.jobs.items = items().slice(0, 1);
+    await hub.state.refreshJobs();
     await expect(rows(page)).toHaveCount(1);
-    hub.routines.items = items().slice(0, 2);
-    await hub.state.refreshRoutines();
+    hub.jobs.items = items().slice(0, 2);
+    await hub.state.refreshJobs();
     await expect(rows(page)).toHaveCount(2);
     expect(states.length).toBe(before);
   });
@@ -775,7 +775,7 @@ test.describe('stream client', () => {
     const answered = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/state');
 
     const current = hub.state.snapshot().revision;
-    hub.emitDelta(current + 2, { routines: { refreshedAt: new Date().toISOString(), focusAvailable: null, refreshing: false, error: null, items: items() } });
+    hub.emitDelta(current + 2, { jobs: { refreshedAt: new Date().toISOString(), focusAvailable: null, refreshing: false, error: null, items: items() } });
     const snapshot = await (await answered).json();
     expect(snapshot.revision).toBe(current);
     // The gap delta was not applied; the fetched snapshot was.
@@ -784,8 +784,8 @@ test.describe('stream client', () => {
     expect(states.length).toBe(before + 1);
 
     // The next real delta is revision + 1 of that snapshot and applies directly.
-    hub.routines.items = items().slice(0, 1);
-    await hub.state.refreshRoutines();
+    hub.jobs.items = items().slice(0, 1);
+    await hub.state.refreshJobs();
     await expect(rows(page)).toHaveCount(1);
     expect(states.length).toBe(before + 1);
   });
@@ -799,12 +799,12 @@ test.describe('stream client', () => {
     const before = states.length;
 
     const current = hub.state.snapshot().revision;
-    const stale = { routines: { refreshedAt: new Date().toISOString(), focusAvailable: null, refreshing: false, error: null, items: items() } };
+    const stale = { jobs: { refreshedAt: new Date().toISOString(), focusAvailable: null, refreshing: false, error: null, items: items() } };
     hub.emitDelta(current, stale);
     hub.emitDelta(current - 1, stale);
     // A real change after them shows both were handled, in order.
-    hub.routines.items = items().slice(0, 2);
-    await hub.state.refreshRoutines();
+    hub.jobs.items = items().slice(0, 2);
+    await hub.state.refreshJobs();
     await expect(rows(page)).toHaveCount(2);
     expect(states.length).toBe(before);
   });
@@ -819,8 +819,8 @@ test.describe('stream client', () => {
     hub.restartApp();
     await expect.poll(() => streamStatuses(hub)).toEqual([200, 200]);
     await expect(page.locator('#shell-notice')).toBeHidden();
-    hub.routines.items = items().slice(0, 2);
-    await hub.state.refreshRoutines();
+    hub.jobs.items = items().slice(0, 2);
+    await hub.state.refreshJobs();
     await expect(rows(page)).toHaveCount(2);
   });
 
