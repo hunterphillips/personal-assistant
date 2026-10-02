@@ -20,12 +20,14 @@ from here.
   line; messages render Markdown; a button under the composer picks the
   thread's model and effort; `@` mentions an agent; every Claude agent's
   turn carries one tool, `ask`, that messages another agent in its own
-  thread, with the exchange shown in both), Reading holds the Daily
+  thread, with the exchange shown in both and a card the receiver raises
+  shown where the exchange started; each agent runs at a permission
+  level, Ask, Auto, or Full access, set in its gear panel), Reading holds the Daily
   Brief and the Feed (what the producers found, with images, and Discuss
   opening the Watch agent), Focus is embedded through a proxy, Goals
   reads the vault's priorities with add and edit going through the
-  Second brain agent, Health holds Settings (the default model and effort,
-  which agent receives the brief) and lists the launchd jobs and their
+  Second brain agent, Health holds Settings (the default model, effort, and
+  permission level, which agent receives the brief) and lists the launchd jobs and their
   state (the code still calls them routines). The design (the Assistant as the pinned
   agent, delegation, models, and what comes next: routines as scheduled
   prompts, Ideas) is
