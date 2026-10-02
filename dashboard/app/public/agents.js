@@ -58,6 +58,14 @@
   var WATCHED = ['agents', 'groups', 'registry', 'sessions', 'codex', 'cmux', 'settings'];
   var EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
   var EFFORT_NAMES = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
+  var PERMISSION_LEVELS = ['ask', 'auto', 'full'];
+  var PERMISSION_NAMES = { ask: 'Ask', auto: 'Auto', full: 'Full access' };
+  // One sentence per level, under the Permissions select, for the level in force.
+  var PERMISSION_NOTES = {
+    ask: 'Asks before each tool that is not already allowed.',
+    auto: 'Claude decides, and asks only when it is unsure.',
+    full: 'Runs every tool without asking.',
+  };
   var CODE_DEFAULT = 'Claude Code default';
   var MODEL_BUSY = 'Wait for the turn to finish before changing the model.';
   var AGENT_ID = /^[a-z][a-z0-9-]{1,31}$/;
@@ -199,6 +207,7 @@
     }
     switch (result.code) {
       case 'duplicate_id': return ['An agent with that id exists.'];
+      case 'invalid_permission': return ['That permission level is not offered.'];
       case 'registry_invalid': return ['The registry file could not be read. Fix it by hand first.'];
       case 'not_editable': return ['This entry is edited in the registry file.'];
       case 'no_such_agent': return ['That agent is no longer registered.'];
@@ -373,6 +382,10 @@
 
   function effortNameOf(effort) {
     return EFFORT_NAMES[effort] || effort;
+  }
+
+  function permissionNameOf(level) {
+    return PERMISSION_NAMES[level] || level;
   }
 
   // The composer button's text for a resolved { id, effort }: "Sonnet · High",
@@ -1333,6 +1346,25 @@
       return { id: '', name: 'Default (' + name + ')' };
     }
 
+    // The system default level, which always has a value.
+    function defaultPermission() {
+      var settings = state.settings && state.settings.permission ? state.settings.permission : {};
+      return settings.default || 'ask';
+    }
+
+    function defaultPermissionOption() {
+      return { id: '', name: 'System default (' + permissionNameOf(defaultPermission()) + ')' };
+    }
+
+    // The sentence under the Permissions select follows the level in force:
+    // the chosen one, or the system default when none is chosen.
+    function syncPermissionNote() {
+      var select = control('permission');
+      var note = detailsForm.querySelector('.form-note-permission');
+      if (!select || !note) return;
+      note.textContent = PERMISSION_NOTES[select.value || defaultPermission()] || '';
+    }
+
     // The form's values as the routes take them, plus what Save compares.
     function formValues() {
       var groupSelect = control('group');
@@ -1349,6 +1381,7 @@
       }
       var model = control('model');
       var effort = control('effort');
+      var permission = control('permission');
       var idField = control('agentId');
       var pinned = control('pinned');
       return {
@@ -1361,6 +1394,7 @@
         cwd: expandPath(control('cwd').value, state.home),
         model: model && model.value ? model.value : null,
         effort: effort && effort.value ? effort.value : null,
+        permission: permission && permission.value ? permission.value : null,
         accepts: everyone || accepts.length === 0 ? null : accepts,
         pinned: !!(pinned && pinned.checked),
       };
@@ -1378,6 +1412,7 @@
       if (nameField) nameField.hidden = !groupSelect || groupSelect.value !== NEW_GROUP;
       var save = detailsForm.querySelector('[data-form-action="save"]');
       if (save) save.disabled = busy || !formDirty();
+      syncPermissionNote();
       var list = detailsForm.querySelector('.form-problems');
       var note = detailsForm.querySelector('.form-note-line');
       list.textContent = '';
@@ -1392,10 +1427,11 @@
     function renderForm(agent) {
       var target = creating ? 'create' : 'edit:' + agent.id;
       var level = agent && agent.model && agent.model.agent ? agent.model.agent : { id: null, effort: null };
+      var permission = agent && agent.permission ? agent.permission.agent : null;
       var key = JSON.stringify([
         target,
-        agent ? [agent.name, agent.role, agent.group, agent.description, agent.cwd, level, agent.accepts, agent.pinned, agent.provider] : null,
-        groupOptions(), state.models, otherPersonas(agent), state.settings && state.settings.model, state.home,
+        agent ? [agent.name, agent.role, agent.group, agent.description, agent.cwd, level, permission, agent.accepts, agent.pinned, agent.provider] : null,
+        groupOptions(), state.models, otherPersonas(agent), state.settings && state.settings.model, state.settings && state.settings.permission, state.home,
       ]);
       if (key === formKey) {
         syncForm();
@@ -1430,6 +1466,9 @@
         detailsForm.appendChild(formField('Model', selectInput('model', [defaultModelOption()].concat(models), level.id || ''), 'agent-form-model'));
         var efforts = EFFORTS.map(function (effort) { return { id: effort, name: effortNameOf(effort) }; });
         detailsForm.appendChild(formField('Effort', selectInput('effort', [defaultEffortOption()].concat(efforts), level.effort || ''), 'agent-form-effort'));
+        var levels = PERMISSION_LEVELS.map(function (id) { return { id: id, name: permissionNameOf(id) }; });
+        detailsForm.appendChild(formField('Permissions', selectInput('permission', [defaultPermissionOption()].concat(levels), permission || ''), 'agent-form-permission'));
+        detailsForm.appendChild(element('p', 'form-note form-note-permission'));
       }
       var accepts = agent && Array.isArray(agent.accepts) && agent.accepts.length > 0 ? agent.accepts : null;
       var who = element('fieldset', 'form-fieldset');
@@ -1469,6 +1508,7 @@
         cwd: values.cwd,
         model: values.model,
         effort: values.effort,
+        permission: values.permission,
         accepts: values.accepts,
         pinned: values.pinned,
       };

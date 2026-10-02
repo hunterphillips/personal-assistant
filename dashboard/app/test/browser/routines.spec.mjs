@@ -504,6 +504,9 @@ test.describe('Settings', () => {
     expect(await select(page, 'Default effort').locator('option').allTextContents()).toEqual(['Claude Code default', 'Low', 'Medium', 'High', 'Extra high', 'Max']);
     // Claude personas only: not the Codex one, not the system entry.
     expect(await select(page, 'Brief goes to').locator('option').allTextContents()).toEqual(['No one', 'Second brain']);
+    await expect(select(page, 'Default permissions')).toHaveValue('ask');
+    expect(await select(page, 'Default permissions').locator('option').allTextContents()).toEqual(['Ask', 'Auto', 'Full access']);
+    await expect(page.locator('#settings-permission-note')).toHaveText('Asks before each tool that is not already allowed.');
     await expect(status(page)).toBeHidden();
     // Settings is not a jobs card.
     await expect(page.locator('.routine-card')).toHaveCount(3);
@@ -528,6 +531,41 @@ test.describe('Settings', () => {
     await expect(status(page)).toHaveText('Saved.');
     expect((await readFile(hub)).brief).toEqual({ agent: null });
     await expect(status(page)).toHaveText('No agent receives the brief.', { timeout: 5_000 });
+  });
+
+  test('Default permissions saves the level, the sentence and the agents follow, and a refused level shows the sentence', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    const note = page.locator('#settings-permission-note');
+    await select(page, 'Default permissions').selectOption('auto');
+    await expect(status(page)).toHaveText('Saved.');
+    await expect(note).toHaveText('Claude decides, and asks only when it is unsure.');
+    expect((await readFile(hub)).permission).toEqual({ default: 'auto' });
+    expect(hub.state.snapshot().settings.permission).toEqual({ default: 'auto' });
+    expect(hub.state.snapshot().agents.find((a) => a.id === 'brain').permission).toEqual({ level: 'auto', source: 'system', agent: null, default: 'auto' });
+    expect('permission' in hub.state.snapshot().agents.find((a) => a.id === 'scribe')).toBe(false);
+
+    // The gear form's default option names the new level.
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await page.locator('#agent-details-toggle').click();
+    await expect(page.locator('#agent-form [name="permission"] option:checked')).toHaveText('System default (Auto)');
+    await expect(page.locator('#agent-form .form-note-permission')).toHaveText('Claude decides, and asks only when it is unsure.');
+
+    // A level the list does not carry is refused by the daemon, and the
+    // select goes back to the saved value.
+    await openHealth(page, hub);
+    await expect(select(page, 'Default permissions')).toHaveValue('auto');
+    await select(page, 'Default permissions').evaluate((node) => {
+      const option = document.createElement('option');
+      option.value = 'bypass';
+      option.textContent = 'Bypass';
+      node.appendChild(option);
+      node.value = 'bypass';
+      node.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await expect(status(page)).toHaveText('That permission level is not offered.');
+    await expect.poll(() => hub.requests('/api/settings').at(-1)).toEqual({ method: 'PUT', status: 400 });
+    await expect(select(page, 'Default permissions')).toHaveValue('auto');
+    expect((await readFile(hub)).permission).toEqual({ default: 'auto' });
   });
 
   test('a saved change reaches a second page through the stream', async ({ page, hub, browser }) => {
@@ -567,6 +605,7 @@ test.describe('Settings with no file', () => {
     await expect(card.getByLabel('Default model', { exact: true })).toHaveValue('');
     await expect(card.getByLabel('Default effort', { exact: true })).toHaveValue('');
     await expect(card.getByLabel('Brief goes to', { exact: true })).toHaveValue('');
+    await expect(card.getByLabel('Default permissions', { exact: true })).toHaveValue('ask');
     await expect(page.locator('#settings-status')).toHaveText('No agent receives the brief.');
     await card.getByLabel('Brief goes to', { exact: true }).selectOption('brain');
     await expect(page.locator('#settings-status')).toHaveText('Saved.');

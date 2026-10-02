@@ -522,8 +522,14 @@ hyphen, and a slug already listed joins that group), Description, Folder
 (the registry `cwd` with the home directory as `~`, expanded on save),
 Model and Effort (each a select whose first option is "Default (Sonnet)"
 or "Default (Claude Code)", the system default from Settings, then the
-model table or the five levels; a Codex persona reads "Codex, its own
-settings" in their place), Who may message (checkboxes: "Everyone" first,
+model table or the five levels), Permissions (a select whose first option
+is "System default (Ask)", naming the level Settings holds, then Ask,
+Auto, and Full access, with one sentence under it for the level in force:
+"Asks before each tool that is not already allowed.", "Claude decides,
+and asks only when it is unsure.", or "Runs every tool without asking.";
+the level shows nowhere else, so the row and the header carry no chip for
+it; a Codex persona reads "Codex, its own
+settings" in place of the three), Who may message (checkboxes: "Everyone" first,
 then the other personas; Everyone and the names exclude each other, and
 none chosen is everyone), and Pinned. Save is off until a field changed
 and sends one `PUT /api/agents/<id>/settings`; Cancel puts the values
@@ -621,17 +627,20 @@ The Health view, at `/health` and the last entry on the rail, opens with
 the Settings card and then lists the launchd jobs of every registry entry
 under the heading "Jobs". It scrolls on its own, in a 720px column.
 
-The Settings card has three rows, each a select. "Default model" offers
+The Settings card has four rows, each a select. "Default model" offers
 "Claude Code default" and the model table's names (Fable, Opus, Sonnet,
 Haiku); "Default effort" offers "Claude Code default" and the five levels
 (Low, Medium, High, Extra high, Max); "Brief goes to" offers "No one" and
-every Claude agent by name. A value the lists do not carry (a model id
+every Claude agent by name; "Default permissions" offers Ask, Auto, and
+Full access, seeded Ask, with the level's sentence under it (the same
+three as the gear panel's). A value the lists do not carry (a model id
 typed into the file by hand, an agent since removed) shows as itself.
 Changing a select sends one `PUT /api/settings`; the selects are disabled
 until it answers, "Saved." shows under the rows for three seconds, and the
 new values arrive through the state as on every other page. A refusal puts
 a sentence there instead and the selects return to the state's values:
-"That agent is not registered." (404), "The settings file could not be
+"That agent is not registered." (404), "That permission level is not
+offered." (400), "The settings file could not be
 read. Fix or delete it." (409, also shown on its own whenever the file is
 unreadable), or "Settings could not be saved." for anything else. When no
 agent receives the brief the card says "No agent receives the brief." On a

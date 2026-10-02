@@ -1,7 +1,9 @@
 // The Settings card at the top of Health: the default model and effort for
-// every agent's turns and which agent's thread the morning brief notice
-// goes to, each a select over the snapshot's `models`, the effort levels,
-// and the Claude agents the registry lists. A change is sent as one PUT
+// every agent's turns, which agent's thread the morning brief notice goes
+// to, and the default permission level, each a select over the snapshot's
+// `models`, the effort levels, the Claude agents the registry lists, and
+// the three levels (a sentence under the last says what the chosen level
+// does). A change is sent as one PUT
 // /api/settings; the saved values arrive back through the state like every
 // other change, so the card never holds a value the server did not. While
 // a save is in flight the selects are disabled; a refusal puts a sentence
@@ -22,6 +24,16 @@
     { id: 'xhigh', name: 'Extra high' },
     { id: 'max', name: 'Max' },
   ];
+  var PERMISSIONS = [
+    { id: 'ask', name: 'Ask' },
+    { id: 'auto', name: 'Auto' },
+    { id: 'full', name: 'Full access' },
+  ];
+  var PERMISSION_NOTES = {
+    ask: 'Asks before each tool that is not already allowed.',
+    auto: 'Claude decides, and asks only when it is unsure.',
+    full: 'Runs every tool without asking.',
+  };
   var CLAUDE_CODE_DEFAULT = 'Claude Code default';
   var NO_ONE = 'No one';
   var NO_TARGET = 'No agent receives the brief.';
@@ -29,6 +41,7 @@
   var FILE_UNREADABLE = 'The settings file could not be read. Fix or delete it.';
   var REFUSALS = {
     no_such_agent: 'That agent is not registered.',
+    invalid_permission: 'That permission level is not offered.',
     settings_invalid: FILE_UNREADABLE,
   };
   var SAVE_FAILED = 'Settings could not be saved.';
@@ -69,7 +82,9 @@
       model: $('settings-model'),
       effort: $('settings-effort'),
       brief: $('settings-brief'),
+      permission: $('settings-permission'),
     };
+    var permissionNote = $('settings-permission-note');
     var status = $('settings-status');
     var state = null;
     var visible = false;
@@ -79,7 +94,7 @@
     var savedTimer = null;
 
     function settingsOf() {
-      return (state && state.settings) || { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null } };
+      return (state && state.settings) || { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' } };
     }
 
     function setStatus(text, tone) {
@@ -104,9 +119,12 @@
       var agents = [{ id: '', name: NO_ONE }].concat(claudeAgents(state).map(function (agent) {
         return { id: agent.id, name: agent.name };
       }));
+      var level = (settings.permission && settings.permission.default) || 'ask';
       fill(selects.model, models, settings.model.default);
       fill(selects.effort, efforts, settings.model.effort);
       fill(selects.brief, agents, settings.brief.agent);
+      fill(selects.permission, PERMISSIONS, level);
+      if (permissionNote) permissionNote.textContent = PERMISSION_NOTES[level] || '';
       Object.keys(selects).forEach(function (key) { selects[key].disabled = saving; });
       if (message) setStatus(message.text, message.tone);
       else if (settings.ok === false) setStatus(FILE_UNREADABLE, 'bad');
@@ -137,6 +155,7 @@
       var chosen = value === '' ? null : value;
       if (key === 'model') return { model: { default: chosen } };
       if (key === 'effort') return { model: { effort: chosen } };
+      if (key === 'permission') return { permission: { default: value } };
       return { brief: { agent: chosen } };
     }
 

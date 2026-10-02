@@ -261,6 +261,13 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   cursor: default;
 }
 
+.settings-note {
+  grid-column: 2;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .settings-status {
   margin: 10px 0 0;
   color: var(--muted);
@@ -1780,6 +1787,9 @@ textarea.form-input {
   .settings-row {
     grid-template-columns: minmax(0, 1fr);
     gap: 6px;
+  }
+  .settings-note {
+    grid-column: 1;
   }
 
   .nav {

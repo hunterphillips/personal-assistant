@@ -173,7 +173,7 @@ test.describe('with seeded agents', () => {
     await gear.click();
     const details = page.locator('#agent-details');
     await expect(details.locator('.details-name')).toHaveText('CFO');
-    await expect(details.locator('#agent-form .form-label')).toHaveText(['Name', 'Role', 'Group', 'Group name', 'Description', 'Folder', 'Model', 'Effort']);
+    await expect(details.locator('#agent-form .form-label')).toHaveText(['Name', 'Role', 'Group', 'Group name', 'Description', 'Folder', 'Model', 'Effort', 'Permissions']);
     await expect(details.locator('[name="name"]')).toHaveValue('CFO');
     await expect(details.locator('[name="role"]')).toHaveValue('Money');
     await expect(details.locator('[name="group"]')).toHaveValue('work');
@@ -1328,7 +1328,54 @@ test.describe('the settings form', () => {
     await expect(form(page).locator('.form-note-codex')).toHaveText('Codex, its own settings');
     await expect(field(page, 'model')).toHaveCount(0);
     await expect(field(page, 'effort')).toHaveCount(0);
+    await expect(field(page, 'permission')).toHaveCount(0);
+    await expect(form(page).locator('.form-note-permission')).toHaveCount(0);
     await expect(field(page, 'role')).toHaveValue('Code');
+  });
+
+  test('Permissions offers the system default and the three levels, the sentence follows the choice, and Save writes the level', async ({ page, hub }) => {
+    await openForm(page, hub, 'cfo');
+    const note = form(page).locator('.form-note-permission');
+    await expect(field(page, 'permission')).toHaveValue('');
+    await expect(field(page, 'permission').locator('option:checked')).toHaveText('System default (Ask)');
+    expect(await field(page, 'permission').locator('option').allTextContents()).toEqual(['System default (Ask)', 'Ask', 'Auto', 'Full access']);
+    await expect(note).toHaveText('Asks before each tool that is not already allowed.');
+    await expect(save(page)).toBeDisabled();
+
+    await field(page, 'permission').selectOption('full');
+    await expect(note).toHaveText('Runs every tool without asking.');
+    await expect(save(page)).toBeEnabled();
+    await field(page, 'permission').selectOption('auto');
+    await expect(note).toHaveText('Claude decides, and asks only when it is unsure.');
+    await field(page, 'permission').selectOption('full');
+    await save(page).click();
+    await expect(save(page)).toBeDisabled();
+    expect(hub.registry.writes).toHaveLength(1);
+    const written = hub.registry.writes[0].agents.find((a) => a.id === 'cfo');
+    expect(written.permission).toBe('full');
+    expect(Object.keys(written)).toEqual(['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'permission', 'routines']);
+    await expect(field(page, 'permission')).toHaveValue('full');
+    await expect(note).toHaveText('Runs every tool without asking.');
+    // The level shows nowhere but the form: the row's chips are as before.
+    if (!phone(page)) {
+      await expect(row(page, 'CFO').locator('.role-chip')).toHaveText('Money');
+      await expect(row(page, 'CFO').getByText('Full access')).toHaveCount(0);
+    }
+    await expect(page.locator('#agent-chips').getByText('Full access')).toHaveCount(0);
+
+    await page.reload();
+    await page.locator('#agent-details-toggle').click();
+    await expect(field(page, 'permission')).toHaveValue('full');
+    await expect(note).toHaveText('Runs every tool without asking.');
+
+    // Back to the system default writes no key.
+    await field(page, 'permission').selectOption('');
+    await expect(note).toHaveText('Asks before each tool that is not already allowed.');
+    await save(page).click();
+    await expect(save(page)).toBeDisabled();
+    expect(hub.registry.writes).toHaveLength(2);
+    expect('permission' in hub.registry.writes[1].agents.find((a) => a.id === 'cfo')).toBe(false);
+    await expect(field(page, 'permission')).toHaveValue('');
   });
 
   test('New agent fills the defaults, slugs the id from the name, and opens the new thread', async ({ page, hub }) => {
@@ -1343,6 +1390,7 @@ test.describe('the settings form', () => {
     await expect(field(page, 'group')).toHaveValue('work');
     await expect(field(page, 'model').locator('option:checked')).toHaveText('Default (Claude Code)');
     await expect(field(page, 'effort').locator('option:checked')).toHaveText('Default (Claude Code)');
+    await expect(field(page, 'permission').locator('option:checked')).toHaveText('System default (Ask)');
     await expect(field(page, 'cwd')).toHaveValue('');
     await expect(checks(page)).toHaveCount(4);
     if (phone(page)) {
@@ -1366,6 +1414,7 @@ test.describe('the settings form', () => {
     expect(written).toMatchObject({ id: 'scout-two', name: 'Scout Two', role: 'Files', description: 'Reads my files.', group: 'work', kind: 'persona', provider: 'claude' });
     expect(written.cwd.endsWith('/scout')).toBe(true);
     expect('model' in written).toBe(false);
+    expect('permission' in written).toBe(false);
     expect('accepts' in written).toBe(false);
   });
 
@@ -1395,6 +1444,23 @@ const DELEGATION = (fields) => ({ role: 'system', kind: 'delegation', ...fields 
 const FROM_ASSISTANT = {
   role: 'user', from: 'assistant', mentions: ['brain'], text: 'Should he rebalance? Ask @Second brain about the lease too.', at: ago(9 * MINUTE),
 };
+
+test.describe('the settings form with Auto as the system default', () => {
+  test.use({ hubOptions: { build: () => ({ ...seeded().build(), settings: { model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'auto' } } }) } });
+
+  test('the default option names the system level and the sentence is its own until a level is chosen', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await page.locator('#agent-details-toggle').click();
+    const form = page.locator('#agent-form');
+    const select = form.locator('[name="permission"]');
+    await expect(select).toHaveValue('');
+    await expect(select.locator('option:checked')).toHaveText('System default (Auto)');
+    await expect(form.locator('.form-note-permission')).toHaveText('Claude decides, and asks only when it is unsure.');
+    expect(hub.state.snapshot().agents.find((a) => a.id === 'cfo').permission).toEqual({ level: 'auto', source: 'system', agent: null, default: 'auto' });
+    await select.selectOption('ask');
+    await expect(form.locator('.form-note-permission')).toHaveText('Asks before each tool that is not already allowed.');
+  });
+});
 
 test.describe('with messages between agents', () => {
   test.use({
