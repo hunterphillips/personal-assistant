@@ -96,7 +96,9 @@ Each persona keeps two files in `var/threads/` (`DASHBOARD_THREADS_DIR`), readab
 
 Back up `var/` to keep the session pointers. `POST /api/agents/<id>/new-thread` deletes both files for that persona.
 
-A persona turn is interrupted 30 minutes after it starts (`TIMEOUTS.turnMaxMs`), and that clock keeps running while the persona waits on an answer: a question raised 10 minutes in leaves 20 minutes to answer it. The persona then shows `turn_timeout` as its last error until its next turn. Changing a persona's `cwd` in the registry keeps its session pointer; if the next turn cannot resume, start a new thread.
+`var/settings.json` (`DASHBOARD_SETTINGS_PATH`) holds what the Settings card on Health sets: the default model and effort for every agent's turns (null means Claude Code's own default) and which agent's thread receives the morning brief notice. The daemon writes it on first start, naming the first pinned Claude agent, and reads it once at each start. If it is edited by hand into something the daemon cannot read, the daemon logs `settings_error`, runs on the last good values, and the card refuses saves until the file is fixed or deleted; deleting it makes the next start seed it again.
+
+A persona turn is interrupted 30 minutes after it starts (`TIMEOUTS.turnMaxMs`), and that clock keeps running while the persona waits on an answer: a question raised 10 minutes in leaves 20 minutes to answer it. The persona then shows `turn_timeout` as its last error until its next turn. Changing a persona's `cwd` in the registry keeps its session pointer and its working folder until a new thread starts; New thread moves the persona to the new folder.
 
 ## Running Codex sessions through the dashboard
 

@@ -51,6 +51,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/feed/discuss` | Sends one feed item to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
 | `GET /api/feed/instructions` | The feed's criteria file, read as prose (below). |
 | `POST /api/feed/instructions/propose` | Sends a change to the criteria to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
+| `PUT /api/settings` | Saves a partial patch of the settings (default model and effort, which agent receives the brief) and answers the whole document (below). |
 
 `/focus/`, `/reading/`, `/brief/`, `/feed/`, `/agents/`, `/goals/`, and `/health/` redirect to the
 paths without the slash. A known path
@@ -107,10 +108,11 @@ snapshot; concurrent requests share one check. It stays for one release.
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
                "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
                "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
-               "lastError": null, "costUsd": 0.42 },
+               "lastError": null, "costUsd": 0.42, "model": { "id": "opus", "effort": null, "source": "agent" }, "accepts": null },
              { "id": "assistant", "name": "Assistant", "role": "Assistant", "description": "...", "group": "personal", "kind": "persona",
                "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "provider": "claude", "pinned": true,
-               "state": "idle", "pending": null, "lastMessage": null, "lastError": null, "costUsd": null }],
+               "state": "idle", "pending": null, "lastMessage": null, "lastError": null, "costUsd": null,
+               "model": { "id": null, "effort": null, "source": "default" }, "accepts": null }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
                  "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
                  "pending": { "requestId": "2", "kind": "question", "toolName": "requestUserInput", "input": { "...": "..." }, "truncated": false },
@@ -121,7 +123,9 @@ snapshot; concurrent requests share one check. It stays for one release.
                  "binding": { "workspaceId": "...", "surfaceId": "...", "live": true } }],
   "codex": { "available": true },
   "cmux": { "available": true },
-  "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] } }
+  "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] },
+  "settings": { "ok": true, "error": null, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" } },
+  "models": [{ "id": "fable", "name": "Fable" }, { "id": "opus", "name": "Opus" }, { "id": "sonnet", "name": "Sonnet" }, { "id": "haiku", "name": "Haiku" }] }
 ```
 
 `revision` goes up by one on every change. `home` is the home directory,
@@ -547,9 +551,25 @@ thread is open.
 
 ### Health view
 
-The Health view, at `/health` and the last entry on the rail, lists the
-launchd jobs of every registry entry under the heading "Jobs". It scrolls
-on its own, in a 720px column. There is one card for each agent that has
+The Health view, at `/health` and the last entry on the rail, opens with
+the Settings card and then lists the launchd jobs of every registry entry
+under the heading "Jobs". It scrolls on its own, in a 720px column.
+
+The Settings card has three rows, each a select. "Default model" offers
+"Claude Code default" and the model table's names (Fable, Opus, Sonnet,
+Haiku); "Default effort" offers "Claude Code default" and the five levels
+(Low, Medium, High, Extra high, Max); "Brief goes to" offers "No one" and
+every Claude agent by name. A value the lists do not carry (a model id
+typed into the file by hand, an agent since removed) shows as itself.
+Changing a select sends one `PUT /api/settings`; the selects are disabled
+until it answers, "Saved." shows under the rows for three seconds, and the
+new values arrive through the state as on every other page. A refusal puts
+a sentence there instead and the selects return to the state's values:
+"That agent is not registered." (404), "The settings file could not be
+read. Fix or delete it." (409, also shown on its own whenever the file is
+unreadable), or "Settings could not be saved." for anything else. When no
+agent receives the brief the card says "No agent receives the brief." On a
+phone each label sits above its select. There is one card for each agent that has
 jobs, in registry order, with the agent's name and role. Each job is a row
 with its name, schedule, last run, and outcome, and Focus scans with
 failures in the last 24 hours also show how many. Times under a day are
@@ -609,6 +629,22 @@ events. Each persona in `agents` carries:
   could not be loaded; run `npm ci`), or `start_failed` (its session pointer
   could not be read).
 - `costUsd`: null, or the session's running total.
+- `model` (Claude personas only): `{ id, effort, source }`, what the next
+  turn runs on. `id` is a model id or alias or null, `effort` one of `low`,
+  `medium`, `high`, `xhigh`, `max`, or null; null means Claude Code's own
+  default. Each resolves on its own, the registry's `model` over the
+  settings' `model.default`, and the settings' `model.effort` for effort.
+  `source` names the level that set either: `agent`, `system`, or `default`
+  when neither did (`thread` is reserved for a choice made on the thread).
+- `accepts` (Claude personas only): the registry's `accepts` list, or null
+  for everyone. Nothing reads it yet.
+
+The snapshot's `settings` is the settings file's view (`lib/settings.mjs`,
+below): `ok` false with `error` when the file could not be read, and the
+last good values either way. `models` is the model table
+(`lib/models.mjs`), `[{ id, name }]` in display order; the ids are the
+Claude Code aliases (`fable`, `opus`, `sonnet`, `haiku`), which follow each
+family's current model, each confirmed with `claude -p --model <id>`.
 
 A persona whose turn runs longer than 30 minutes (`TIMEOUTS.turnMaxMs`) is
 interrupted, the timeout is logged as `persona_turn_timeout`, and its
@@ -616,8 +652,10 @@ interrupted, the timeout is logged as `persona_turn_timeout`, and its
 whole turn, including time spent waiting on an answer, so a question raised
 at minute 10 has 20 minutes left. Personas added to the registry are
 started; removed ones are dropped. A persona whose `cwd` changes in the
-registry keeps its session pointer (logged as `persona_cwd_changed`), so its
-next turn may fail to resume; New thread is the fix.
+registry keeps its session pointer and its working folder (logged as
+`persona_cwd_changed`): the adapter pins the folder when the persona starts
+or first takes a turn and moves it only on New thread, so an old session is
+never resumed in a new folder.
 
 ### Persona routes
 
@@ -687,8 +725,10 @@ seconds for it to exit; see [docs/operations.md](docs/operations.md).
   8 KiB and marked `truncated`. A partial last line left by a crash is
   skipped on read. Losing this file only empties the thread view.
 - `brief-notices.json` records which morning notices `lib/notices.mjs` has
-  posted into the Assistant's thread, as `{ version: 1, posted: { "<date>":
-  ["ready", "failed"] } }`, replaced atomically. The brief run writes
+  posted into the thread of the agent the settings name (`brief.agent`),
+  as `{ version: 1, posted: { "<date>": ["ready", "failed"] } }`, replaced
+  atomically. With no agent named, nothing is posted (logged as
+  `notice_skipped` with reason `no_target`) and the notice waits for one. The brief run writes
   `notice-<date>.json` beside each viewer; the daemon reads the newest two
   on start, on each event stream connect, and once a minute while a stream
   is open, and posts every date and state not recorded here as a system
@@ -697,15 +737,55 @@ seconds for it to exit; see [docs/operations.md](docs/operations.md).
 
 The agent id must match the registry's id pattern before any path is built.
 
+### Settings file
+
+`lib/settings.mjs` owns one file, `DASHBOARD_SETTINGS_PATH`:
+
+```json
+{ "version": 1, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" } }
+```
+
+`model.default` and `model.effort` are the system level of the resolution
+above; `brief.agent` is the agent whose thread receives the morning notice,
+or null for no one. The daemon reads the file once at start. On the first
+start, when there is no file, it writes this document with `brief.agent`
+set to the first pinned Claude persona in the registry (or null) and logs
+`settings_seeded`; no agent id lives in code. A present file is left alone.
+
+A file that cannot be read (bad JSON, a version other than 1, an unknown
+key, a bad value, over 64 KiB) is logged once as `settings_error`, the
+last good values stay in force, and the snapshot's `settings.ok` is false.
+Saves are then refused with 409 `settings_invalid` until the file is fixed
+or deleted, so a hand edit is never overwritten by a merge over the last
+good copy.
+
+`PUT /api/settings` takes a partial patch, `{ model?: { default?,
+effort? }, brief?: { agent? } }`, in a body of at most 4 KiB with a
+same-origin `Origin` and a JSON content type. The store merges it, writes
+the file atomically (temporary file with mode 0600, rename; the directory is
+created 0700), and answers 200 `{ ok: true, settings }` with the whole
+document; the hub then commits `settings` and the agent views that moved.
+Refusals, in order: 400 `invalid_body` (not an object, empty, or keys other
+than the three), 400 `invalid_model` (not null or 1 to 64 characters), 400
+`invalid_effort`, 400 `invalid_agent` (not null or an agent id), 404
+`no_such_agent` (names no Claude persona in the registry; null is allowed),
+409 `settings_invalid`, 503 `shutting_down`, 500 `settings_write_failed`
+(logged as `settings_write_error`).
+
 ### Turns
 
 - One turn per persona at a time. A second message while a turn is running
   is refused as `busy` before the SDK is called, because two resumes of one
   session both succeed and split its history.
-- Each turn resumes the stored session and passes `permissionMode:
-  'default'`, so the global `auto` mode never applies, and `maxTurns` 25.
-  It also passes a `canUseTool` callback on every turn; without one the SDK
-  removes `AskUserQuestion`.
+- Each turn resumes the stored session in the thread's pinned folder and
+  passes `permissionMode: 'default'`, so the global `auto` mode never
+  applies, and `maxTurns` 25. It also passes a `canUseTool` callback on
+  every turn; without one the SDK removes `AskUserQuestion`.
+- Each turn runs on the model and effort the hub resolves for the agent
+  (`model` in the snapshot): `model` and `effort` are passed to the SDK only
+  when set, so a null leaves Claude Code's own default in force. A model
+  the CLI rejects ends the turn in error with the CLI's explanation, which
+  names the model, as `lastError`.
 - `AskUserQuestion` becomes a question. Any other tool that needs
   permission becomes an approval that carries the tool name and its full
   input. The turn waits for an answer. After 30 minutes without one, the
@@ -1181,6 +1261,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
 | `DASHBOARD_THREADS_DIR` | `var/threads` | Persona session pointers and message caches. Resolved from this directory; created on the first write. |
+| `DASHBOARD_SETTINGS_PATH` | `var/settings.json` | The settings file the interface writes (below). Resolved from this directory; written on first start. |
 | `DASHBOARD_CODEX_DIR` | `var/codex` | The Codex socket, `owner.json`, `bindings.json` and its `bindings.lock`, and the `waiting/` markers, shared with `bin/codex-serve` and `bin/codex-new`. Resolved from this directory. |
 | `DASHBOARD_CMUX_SOCKET_PATH_FILE` | `~/.local/state/cmux/last-socket-path` | File cmux writes its socket path to while it runs. Missing means cmux is not running. |
 | `DASHBOARD_CMUX_PASSWORD_FILE` | `~/.local/state/cmux/socket-control-password` | The cmux socket password, where cmux keeps it. Read on each call, never logged. |

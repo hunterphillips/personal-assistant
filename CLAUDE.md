@@ -21,8 +21,9 @@ from here.
   Brief and the Feed (what the producers found, with images, and Discuss
   opening the Watch agent), Focus is embedded through a proxy, Goals
   reads the vault's priorities with add and edit going through the
-  Second brain agent, Health lists the launchd jobs and their state (the
-  code still calls them routines). The design for what comes next (the
+  Second brain agent, Health holds Settings (the default model and effort,
+  which agent receives the brief) and lists the launchd jobs and their
+  state (the code still calls them routines). The design for what comes next (the
   Assistant agent, delegation between agents, routines as scheduled
   prompts, models, Ideas) is
   `thoughts/shared/plans/2026-09-30-assistant-system-design.md`. The app
