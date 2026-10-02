@@ -103,11 +103,12 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
     {
       id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
       provider: 'claude', state: 'unavailable', pending: null, forwarded: [], lastMessage: null, lastError: null, costUsd: null, lastLineAt: null,
-      model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } }, accepts: null,
+      model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } },
+      permission: { level: 'ask', source: 'system', agent: null, default: 'ask' }, accepts: null,
     },
   ]);
   assert.deepEqual(snapshot.routines, { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] });
-  assert.deepEqual(snapshot.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null } });
+  assert.deepEqual(snapshot.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' } });
   assert.deepEqual(snapshot.models.map((m) => m.id), ['fable', 'opus', 'sonnet', 'haiku']);
   assert.ok(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.agents[0]) && Object.isFrozen(snapshot.routines));
   assert.ok(Object.isFrozen(snapshot.settings) && Object.isFrozen(snapshot.models));
@@ -117,7 +118,7 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
 // `set(patch)` changes them and notifies, as an update would.
 function fakeSettingsStore(initial = {}, { ok = true, error = null } = {}) {
   const listeners = new Set();
-  let settings = { version: 1, model: { default: null, effort: null, ...initial.model }, brief: { agent: null, ...initial.brief } };
+  let settings = { version: 1, model: { default: null, effort: null, ...initial.model }, brief: { agent: null, ...initial.brief }, permission: { default: 'ask', ...initial.permission } };
   let state = { ok, error, settings };
   return {
     current: () => state,
@@ -126,7 +127,7 @@ function fakeSettingsStore(initial = {}, { ok = true, error = null } = {}) {
       return () => listeners.delete(fn);
     },
     set(patch, meta = {}) {
-      settings = { version: 1, model: { ...settings.model, ...patch.model }, brief: { ...settings.brief, ...patch.brief } };
+      settings = { version: 1, model: { ...settings.model, ...patch.model }, brief: { ...settings.brief, ...patch.brief }, permission: { ...settings.permission, ...patch.permission } };
       state = { ok: meta.ok ?? true, error: meta.error ?? null, settings };
       for (const fn of listeners) fn(state);
     },
@@ -151,7 +152,7 @@ test('a Claude persona\'s model resolves agent over system, each field on its ow
   assert.equal(view('scribe').accepts, null, 'a Codex persona is messageable too');
   assert.equal('accepts' in view('tool'), false);
   assert.deepEqual(hub.snapshot().settings, {
-    ok: true, error: null, model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' },
+    ok: true, error: null, model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' }, permission: { default: 'ask' },
   });
   assert.deepEqual(hub.modelFor('cfo'), { id: 'sonnet', effort: 'low' });
   assert.deepEqual(hub.modelFor('ops'), { id: 'opus', effort: 'low' });
@@ -184,11 +185,41 @@ test('a settings change commits settings and the agent views that moved, and not
   // An unreadable file keeps the last good values and says so.
   settings.set({}, { ok: false, error: 'settings_invalid_json' });
   assert.deepEqual(hub.snapshot().settings, {
-    ok: false, error: 'settings_invalid_json', model: { default: null, effort: 'high' }, brief: { agent: 'cfo' },
+    ok: false, error: 'settings_invalid_json', model: { default: null, effort: 'high' }, brief: { agent: 'cfo' }, permission: { default: 'ask' },
   });
 
   hub.close();
   assert.equal(settings.listenerCount(), 0);
+});
+
+test('a Claude persona\'s permission resolves agent over system, permissionFor carries it, and a settings change re-resolves', () => {
+  const settings = fakeSettingsStore({ permission: { default: 'ask' } });
+  const registry = fakeRegistry(registryState([
+    agent('cfo'),
+    agent('ops', { permission: 'full' }),
+    agent('scribe', { provider: 'codex', permission: 'auto' }),
+    agent('tool', { kind: 'system', provider: undefined }),
+  ]));
+  const { hub, deltas } = makeHub({ registry, settings });
+  const view = (id) => hub.snapshot().agents.find((a) => a.id === id);
+  assert.deepEqual(view('cfo').permission, { level: 'ask', source: 'system', agent: null, default: 'ask' });
+  assert.deepEqual(view('ops').permission, { level: 'full', source: 'agent', agent: 'full', default: 'ask' });
+  assert.equal('permission' in view('scribe'), false, 'a Codex persona has no level; the key is ignored');
+  assert.equal('permission' in view('tool'), false);
+  assert.equal(hub.snapshot().settings.permission.default, 'ask');
+  assert.equal(hub.permissionFor('cfo'), 'ask');
+  assert.equal(hub.permissionFor('ops'), 'full');
+  assert.equal(hub.permissionFor('scribe'), null);
+  assert.equal(hub.permissionFor('tool'), null);
+  assert.equal(hub.permissionFor('nobody'), null);
+
+  // The system default moves without a restart; an agent's own level holds.
+  settings.set({ permission: { default: 'auto' } });
+  assert.deepEqual(deltas.at(-1).patch.settings.permission, { default: 'auto' });
+  assert.deepEqual(view('cfo').permission, { level: 'auto', source: 'system', agent: null, default: 'auto' });
+  assert.deepEqual(view('ops').permission, { level: 'full', source: 'agent', agent: 'full', default: 'auto' });
+  assert.equal(hub.permissionFor('cfo'), 'auto');
+  assert.equal(hub.permissionFor('ops'), 'full');
 });
 
 test('a registry change bumps the revision with a registry and agents patch', () => {
@@ -410,7 +441,8 @@ test('start seeds a persona from its adapter and the last cached message', async
     id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
     provider: 'claude', state: 'error', pending: null, forwarded: [], lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
     lastError: 'Invented failure', costUsd: 0.5, lastLineAt: null,
-    model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } }, accepts: null,
+    model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } },
+    permission: { level: 'ask', source: 'system', agent: null, default: 'ask' }, accepts: null,
   });
   assert.equal(persona(hub, 'ops').state, null);
   assert.equal('pending' in persona(hub, 'ops'), false);

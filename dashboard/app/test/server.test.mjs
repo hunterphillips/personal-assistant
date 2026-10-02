@@ -355,13 +355,14 @@ test('first start seeds the settings file with the brief going to the pinned Cla
   const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
   t.after(() => dashboard.close());
   assert.deepEqual(JSON.parse(await readFile(env.DASHBOARD_SETTINGS_PATH, 'utf8')), {
-    version: 1, model: { default: null, effort: null }, brief: { agent: 'assistant' },
+    version: 1, model: { default: null, effort: null }, brief: { agent: 'assistant' }, permission: { default: 'ask' },
   });
   assert.equal((await stat(env.DASHBOARD_SETTINGS_PATH)).mode & 0o777, 0o600);
   assert.deepEqual(logs.filter((e) => e.event === 'settings_seeded'), [{ event: 'settings_seeded', agent: 'assistant' }]);
   const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
-  assert.deepEqual(state.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: 'assistant' } });
+  assert.deepEqual(state.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: 'assistant' }, permission: { default: 'ask' } });
   assert.deepEqual(state.agents.find((a) => a.id === 'cfo').model, { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } });
+  assert.deepEqual(state.agents.find((a) => a.id === 'cfo').permission, { level: 'ask', source: 'system', agent: null, default: 'ask' });
   await dashboard.close();
 
   // A second start finds the file and leaves it alone, even after an edit.
@@ -372,6 +373,7 @@ test('first start seeds the settings file with the brief going to the pinned Cla
   const next = await (await fetch(`http://127.0.0.1:${again.config.port}/api/state`)).json();
   assert.deepEqual(next.settings.model, { default: 'haiku', effort: 'max' });
   assert.equal(next.settings.brief.agent, 'cfo');
+  assert.deepEqual(next.settings.permission, { default: 'ask' }, 'a file from before the key loads as ask');
   assert.deepEqual(next.agents.find((a) => a.id === 'cfo').model, { id: 'haiku', effort: 'max', source: 'system', default: { id: 'haiku', effort: 'max' }, agent: { id: null, effort: null } });
 });
 

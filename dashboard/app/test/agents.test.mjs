@@ -399,6 +399,39 @@ test('settings PUT rewrites the entry in schema order, keeps routines, omits acc
   }
 });
 
+test('settings PUT writes permission after effort when set, none for null or absent, refuses a bad level, and POST creates with none', async (t) => {
+  const app = await startEditable(t);
+  const full = await put(app, '/api/agents/cfo/settings', settingsBody({ model: 'sonnet', effort: 'low', accepts: ['assistant'], permission: 'full' }));
+  assert.equal(full.status, 200);
+  assert.equal(full.json.agent.permission, 'full');
+  assert.deepEqual(Object.keys(app.registry.writes.at(-1).agents[0]), ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'permission', 'accepts']);
+  const cfo = (await request(app, 'GET', '/api/state')).json.agents.find((a) => a.id === 'cfo');
+  assert.deepEqual(cfo.permission, { level: 'full', source: 'agent', agent: 'full', default: 'ask' });
+
+  const cleared = await put(app, '/api/agents/cfo/settings', settingsBody({ permission: null }));
+  assert.equal(cleared.status, 200);
+  assert.equal('permission' in app.registry.writes.at(-1).agents[0], false);
+  const absent = await put(app, '/api/agents/cfo/settings', settingsBody({ permission: 'auto' }));
+  assert.equal(absent.json.agent.permission, 'auto');
+  const older = await put(app, '/api/agents/cfo/settings', settingsBody());
+  assert.equal(older.status, 200, 'a body from before the control still saves');
+  assert.equal('permission' in app.registry.writes.at(-1).agents[0], false);
+
+  const writes = app.registry.writes.length;
+  for (const bad of ['bypass', 'Ask', '', 3]) {
+    const refused = await put(app, '/api/agents/cfo/settings', settingsBody({ permission: bad }));
+    assert.deepEqual([refused.status, refused.json], [400, { error: 'invalid_permission' }], JSON.stringify(bad));
+  }
+  assert.equal(app.registry.writes.length, writes);
+
+  const created = await post(app, '/api/agents', { id: 'scout', ...settingsBody({ name: 'Scout', role: 'Files', description: 'Reads my files.', cwd: '/invented/scout' }) });
+  assert.equal(created.status, 201);
+  assert.equal('permission' in created.json.agent, false);
+  const withLevel = await post(app, '/api/agents', { id: 'scribe', ...settingsBody({ name: 'Scribe', role: 'Drafts', description: 'Drafts.', cwd: '/invented/scribe', permission: 'auto' }) });
+  assert.equal(withLevel.status, 201);
+  assert.equal(withLevel.json.agent.permission, 'auto');
+});
+
 test('settings PUT notes a folder change, adds a new group, and joins an existing one by id', async (t) => {
   const app = await startEditable(t);
   const moved = await put(app, '/api/agents/cfo/settings', settingsBody({ cwd: '/invented/elsewhere' }));

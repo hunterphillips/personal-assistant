@@ -41,7 +41,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/agents/<id>/new-thread` | Starts the persona on a new session. |
 | `POST /api/agents/<id>/model` | Sets the model and effort the persona's thread runs on: `{"model": "sonnet"}`, `{"effort": "low"}`, or both; null for a key returns it to the agent's default (below). |
 | `GET /api/agents/<id>/thread` | The persona's cached messages. |
-| `PUT /api/agents/<id>/settings` | Rewrites a persona's registry entry (name, role, group, description, folder, model, effort, who may message it, pinned) and answers the stored entry (below). |
+| `PUT /api/agents/<id>/settings` | Rewrites a persona's registry entry (name, role, group, description, folder, model, effort, permission level, who may message it, pinned) and answers the stored entry (below). |
 | `POST /api/agents` | Adds a Claude persona to the registry from the same fields plus `id`; 201 with the stored entry (below). |
 | `POST /api/sessions/<id>/answer` | Answers a Codex thread's open question or approval (below). |
 | `POST /api/sessions/<id>/interrupt` | Stops the Codex thread's running turn. |
@@ -54,7 +54,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/feed/discuss` | Sends one feed item to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
 | `GET /api/feed/instructions` | The feed's criteria file, read as prose (below). |
 | `POST /api/feed/instructions/propose` | Sends a change to the criteria to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
-| `PUT /api/settings` | Saves a partial patch of the settings (default model and effort, which agent receives the brief) and answers the whole document (below). |
+| `PUT /api/settings` | Saves a partial patch of the settings (default model and effort, which agent receives the brief, the default permission level) and answers the whole document (below). |
 
 `/focus/`, `/reading/`, `/brief/`, `/feed/`, `/agents/`, `/goals/`, and `/health/` redirect to the
 paths without the slash. A known path
@@ -111,11 +111,13 @@ snapshot; concurrent requests share one check. It stays for one release.
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
                "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
                "state": "idle", "pending": null, "forwarded": [], "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
-               "lastError": null, "costUsd": 0.42, "lastLineAt": null, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null }, "agent": { "id": "opus", "effort": null } }, "accepts": null },
+               "lastError": null, "costUsd": 0.42, "lastLineAt": null, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null }, "agent": { "id": "opus", "effort": null } },
+               "permission": { "level": "full", "source": "agent", "agent": "full", "default": "ask" }, "accepts": null },
              { "id": "assistant", "name": "Assistant", "role": "Assistant", "description": "...", "group": "personal", "kind": "persona",
                "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "provider": "claude", "pinned": true,
                "state": "idle", "pending": null, "forwarded": [], "lastMessage": null, "lastError": null, "costUsd": null, "lastLineAt": null,
-               "model": { "id": null, "effort": null, "source": "default", "default": { "id": null, "effort": null }, "agent": { "id": null, "effort": null } }, "accepts": null }],
+               "model": { "id": null, "effort": null, "source": "default", "default": { "id": null, "effort": null }, "agent": { "id": null, "effort": null } },
+               "permission": { "level": "ask", "source": "system", "agent": null, "default": "ask" }, "accepts": null }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
                  "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
                  "pending": { "requestId": "2", "kind": "question", "toolName": "requestUserInput", "input": { "...": "..." }, "truncated": false },
@@ -127,7 +129,7 @@ snapshot; concurrent requests share one check. It stays for one release.
   "codex": { "available": true },
   "cmux": { "available": true },
   "routines": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] },
-  "settings": { "ok": true, "error": null, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" } },
+  "settings": { "ok": true, "error": null, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" }, "permission": { "default": "ask" } },
   "models": [{ "id": "fable", "name": "Fable" }, { "id": "opus", "name": "Opus" }, { "id": "sonnet", "name": "Sonnet" }, { "id": "haiku", "name": "Haiku" }] }
 ```
 
@@ -718,6 +720,13 @@ events. Each persona in `agents` carries:
   choice, what New thread or "Use the agent's default" returns to. `agent`
   is the registry's own `model` and `effort`, null where the entry sets
   none; the settings form edits that pair.
+- `permission` (Claude personas only): `{ level, source, agent, default }`,
+  the level the next turn runs at: `ask`, `auto`, or `full`
+  (`lib/permissions.mjs`). The registry's `permission` over the settings'
+  `permission.default`, which always has a value; `source` is `agent` or
+  `system`. `agent` is the registry's own level or null, and `default` the
+  settings level; the settings form edits the first and the Settings card
+  the second. What each level does is under Turns.
 - `accepts` (personas): the registry's `accepts` list, or null for
   everyone. The settings form edits it, and the ask tool enforces it
   (Delegation, below).
@@ -827,12 +836,15 @@ The agent id must match the registry's id pattern before any path is built.
 `lib/settings.mjs` owns one file, `DASHBOARD_SETTINGS_PATH`:
 
 ```json
-{ "version": 1, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" } }
+{ "version": 1, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" }, "permission": { "default": "ask" } }
 ```
 
 `model.default` and `model.effort` are the system level of the resolution
 above; `brief.agent` is the agent whose thread receives the morning notice,
-or null for no one. The daemon reads the file once at start. On the first
+or null for no one; `permission.default` is the level an agent's turns run
+at when its registry entry sets none, one of `ask`, `auto`, `full`, never
+null. A file from before the key loads as `ask` and gains the key on its
+next write. The daemon reads the file once at start. On the first
 start, when there is no file, it writes this document with `brief.agent`
 set to the first pinned Claude persona in the registry (or null) and logs
 `settings_seeded`; no agent id lives in code. A present file is left alone.
@@ -845,14 +857,15 @@ or deleted, so a hand edit is never overwritten by a merge over the last
 good copy.
 
 `PUT /api/settings` takes a partial patch, `{ model?: { default?,
-effort? }, brief?: { agent? } }`, in a body of at most 4 KiB with a
+effort? }, brief?: { agent? }, permission?: { default? } }`, in a body of at most 4 KiB with a
 same-origin `Origin` and a JSON content type. The store merges it, writes
 the file atomically (temporary file with mode 0600, rename; the directory is
 created 0700), and answers 200 `{ ok: true, settings }` with the whole
 document; the hub then commits `settings` and the agent views that moved.
 Refusals, in order: 400 `invalid_body` (not an object, empty, or keys other
-than the three), 400 `invalid_model` (not null or 1 to 64 characters), 400
-`invalid_effort`, 400 `invalid_agent` (not null or an agent id), 404
+than the four), 400 `invalid_model` (not null or 1 to 64 characters), 400
+`invalid_effort`, 400 `invalid_agent` (not null or an agent id), 400
+`invalid_permission` (not one of the three levels; null is refused), 404
 `no_such_agent` (names no Claude persona in the registry; null is allowed),
 409 `settings_invalid`, 503 `shutting_down`, 500 `settings_write_failed`
 (logged as `settings_write_error`).
@@ -866,7 +879,10 @@ body carries every field: `name`, `role`, `group`, `description`, `cwd`
 (absolute), `model` (null or an id or alias), `effort` (null or a level),
 `accepts` (null or a list of agent ids; null, an empty list, and every
 agent chosen all mean everyone and write no key), `pinned` (boolean), and
-for a create `id`; `newGroup: { id, name }` adds a group whose id no
+for a create `id`; `permission` (`ask`, `auto`, `full`, or null for the
+settings default, which writes no key) may be left out, so a body from
+before the control existed still saves, and a level that is not one of
+the three is 400 `invalid_permission`; `newGroup: { id, name }` adds a group whose id no
 listed group has (one that does joins it) and `group` must equal its id.
 A created agent is kind `persona` on `claude`; project and system entries
 are still hand edits. The entry is written in the schema's key order with

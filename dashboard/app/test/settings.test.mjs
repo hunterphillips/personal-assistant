@@ -26,15 +26,53 @@ test('a missing file is the defaults and no error; load sets loadedAt', async (t
   assert.deepEqual(settings.current(), { ok: true, settings: DEFAULTS, error: null, loadedAt: NOW, path: settingsPath });
   assert.ok(Object.isFrozen(settings.current()) && Object.isFrozen(settings.current().settings.model));
   assert.deepEqual(logs, []);
-  assert.deepEqual(DEFAULTS, { version: 1, model: { default: null, effort: null }, brief: { agent: null } });
+  assert.deepEqual(DEFAULTS, { version: 1, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' } });
 });
 
 test('a valid file loads with every key present and nulls kept', async (t) => {
   const { settings, settingsPath } = await setup(t);
   await writeFile(settingsPath, JSON.stringify({ version: 1, model: { default: 'opus' }, brief: { agent: 'cfo' } }));
   await settings.load();
-  assert.deepEqual(settings.current().settings, { version: 1, model: { default: 'opus', effort: null }, brief: { agent: 'cfo' } });
+  assert.deepEqual(settings.current().settings, { version: 1, model: { default: 'opus', effort: null }, brief: { agent: 'cfo' }, permission: { default: 'ask' } });
   assert.equal(settings.current().ok, true);
+});
+
+test('permission.default is one of the three levels, never null, fills in as ask, and gains the key on the next write', async (t) => {
+  const { settings, settingsPath, read } = await setup(t);
+  await writeFile(settingsPath, JSON.stringify({ version: 1, model: {}, brief: {}, permission: { default: 'full' } }));
+  await settings.load();
+  assert.deepEqual(settings.current().settings.permission, { default: 'full' });
+
+  // A file from before the key: ask, and the next write adds it.
+  await writeFile(settingsPath, JSON.stringify({ version: 1, model: { default: 'opus' }, brief: { agent: 'cfo' } }));
+  await settings.load();
+  assert.deepEqual(settings.current().settings.permission, { default: 'ask' });
+  await settings.update({ model: { effort: 'low' } });
+  assert.deepEqual(await read(), { version: 1, model: { default: 'opus', effort: 'low' }, brief: { agent: 'cfo' }, permission: { default: 'ask' } });
+
+  for (const [patch, code] of [
+    [{ permission: { default: null } }, 'invalid_permission'],
+    [{ permission: { default: 'bypass' } }, 'invalid_permission'],
+    [{ permission: { default: 'Ask' } }, 'invalid_permission'],
+    [{ permission: {} }, 'invalid_body'],
+    [{ permission: { level: 'ask' } }, 'invalid_body'],
+    [{ permission: 'ask' }, 'invalid_body'],
+  ]) {
+    await assert.rejects(settings.update(patch), (error) => error instanceof SettingsError && error.code === code, JSON.stringify(patch));
+    assert.equal(validatePatch(patch), code);
+  }
+  assert.equal((await read()).permission.default, 'ask');
+
+  const saved = await settings.update({ permission: { default: 'full' } });
+  assert.deepEqual(saved.permission, { default: 'full' });
+  assert.deepEqual((await read()).permission, { default: 'full' });
+
+  // A file whose key is bad does not load.
+  await writeFile(settingsPath, JSON.stringify({ version: 1, model: {}, brief: {}, permission: { default: 'bypass' } }));
+  await settings.load();
+  assert.equal(settings.current().ok, false);
+  assert.match(settings.current().error, /permission\.default must be one of/);
+  assert.deepEqual(settings.current().settings.permission, { default: 'full' }, 'the last good value stays');
 });
 
 test('an unreadable file keeps the last good settings, answers ok false, and logs once per message', async (t) => {
@@ -81,7 +119,7 @@ test('update merges, validates, writes atomically with mode 600, notifies, and a
   const { settings, settingsPath, dir, changes, read } = await setup(t, { nested: true });
   await settings.load();
   const saved = await settings.update({ model: { default: 'sonnet' } });
-  assert.deepEqual(saved, { version: 1, model: { default: 'sonnet', effort: null }, brief: { agent: null } });
+  assert.deepEqual(saved, { version: 1, model: { default: 'sonnet', effort: null }, brief: { agent: null }, permission: { default: 'ask' } });
   assert.ok(Object.isFrozen(saved));
   assert.deepEqual(await read(), saved);
   assert.equal((await stat(settingsPath)).mode & 0o777, 0o600);
@@ -92,7 +130,7 @@ test('update merges, validates, writes atomically with mode 600, notifies, and a
   assert.equal(changes[0].ok, true);
 
   await settings.update({ model: { effort: 'low' }, brief: { agent: 'cfo' } });
-  assert.deepEqual(settings.current().settings, { version: 1, model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' } });
+  assert.deepEqual(settings.current().settings, { version: 1, model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' }, permission: { default: 'ask' } });
   assert.deepEqual(await read(), settings.current().settings);
   await settings.update({ model: { default: null } });
   assert.deepEqual(settings.current().settings.model, { default: null, effort: 'low' });
@@ -147,14 +185,14 @@ test('concurrent updates apply in order over one another', async (t) => {
     settings.update({ model: { effort: 'high' } }),
     settings.update({ brief: { agent: 'cfo' } }),
   ]);
-  assert.deepEqual(await read(), { version: 1, model: { default: 'opus', effort: 'high' }, brief: { agent: 'cfo' } });
+  assert.deepEqual(await read(), { version: 1, model: { default: 'opus', effort: 'high' }, brief: { agent: 'cfo' }, permission: { default: 'ask' } });
 });
 
 test('seed writes the defaults with the given values only when the file is missing', async (t) => {
   const { settings, read, changes } = await setup(t, { nested: true });
   await settings.load();
   assert.equal(await settings.seed({ brief: { agent: 'assistant' } }), true);
-  assert.deepEqual(await read(), { version: 1, model: { default: null, effort: null }, brief: { agent: 'assistant' } });
+  assert.deepEqual(await read(), { version: 1, model: { default: null, effort: null }, brief: { agent: 'assistant' }, permission: { default: 'ask' } });
   assert.equal(settings.current().settings.brief.agent, 'assistant');
   assert.equal(changes.length, 1);
 

@@ -515,6 +515,42 @@ test('effort is accepted on a persona, must be an SDK level, and is absent for a
   assert.match(system.current().error, /effort must be absent/);
 });
 
+test('permission is one of ask, auto, full on a persona, absent for a system agent, and kept but unused on a project', async (t) => {
+  const dir = await tempDir(t);
+  const registry = createRegistry({ path: await write(dir, { version: 1, agents: [baseAgent(dir, { permission: 'auto' })] }), pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+  assert.equal(registry.current().agents[0].permission, 'auto');
+
+  const absent = createRegistry({ path: await write(await tempDir(t), { version: 1, agents: [baseAgent(dir)] }), pollMs: 10_000 });
+  await absent.start();
+  t.after(() => absent.stop());
+  assert.equal('permission' in absent.current().agents[0], false);
+
+  const bad = createRegistry({ path: await write(await tempDir(t), { version: 1, agents: [baseAgent(dir, { permission: 'bypass' })] }), pollMs: 10_000 });
+  await bad.start();
+  t.after(() => bad.stop());
+  assert.match(bad.current().error, /permission must be one of ask, auto, full/);
+
+  const systemDir = await tempDir(t);
+  const system = createRegistry({
+    path: await write(systemDir, {
+      version: 1,
+      agents: [{ id: 'ops', name: 'Ops', role: 'System', description: 'x', group: 'personal', kind: 'system', cwd: systemDir, permission: 'ask' }],
+    }),
+    pollMs: 10_000,
+  });
+  await system.start();
+  t.after(() => system.stop());
+  assert.match(system.current().error, /permission must be absent/);
+
+  const project = createRegistry({ path: await write(await tempDir(t), { version: 1, agents: [baseAgent(dir, { kind: 'project', permission: 'full' })] }), pollMs: 10_000 });
+  await project.start();
+  t.after(() => project.stop());
+  assert.equal(project.current().ok, true);
+  assert.equal(project.current().agents[0].permission, 'full');
+});
+
 test('accepts names other agents in the file; absent and null both load as everyone', async (t) => {
   const dir = await tempDir(t);
   const other = baseAgent(dir, { id: 'assistant', name: 'Assistant' });

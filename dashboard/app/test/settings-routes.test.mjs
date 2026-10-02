@@ -28,7 +28,7 @@ test('PUT saves a partial patch, answers the whole document, and the snapshot fo
   const response = await put(app, { model: { default: 'sonnet', effort: 'high' } });
   assert.equal(response.status, 200);
   assert.deepEqual(response.json, {
-    ok: true, settings: { version: 1, model: { default: 'sonnet', effort: 'high' }, brief: { agent: 'assistant' } },
+    ok: true, settings: { version: 1, model: { default: 'sonnet', effort: 'high' }, brief: { agent: 'assistant' }, permission: { default: 'ask' } },
   });
   assert.deepEqual(settings.updates, [{ model: { default: 'sonnet', effort: 'high' } }]);
   const snapshot = app.hub.snapshot();
@@ -38,12 +38,32 @@ test('PUT saves a partial patch, answers the whole document, and the snapshot fo
 
   const cleared = await put(app, { model: { default: null }, brief: { agent: null } });
   assert.equal(cleared.status, 200);
-  assert.deepEqual(cleared.json.settings, { version: 1, model: { default: null, effort: 'high' }, brief: { agent: null } });
+  assert.deepEqual(cleared.json.settings, { version: 1, model: { default: null, effort: 'high' }, brief: { agent: null }, permission: { default: 'ask' } });
   assert.equal(app.hub.snapshot().settings.brief.agent, null);
 
   const state = await request(app, 'GET', '/api/state');
-  assert.deepEqual(state.json.settings, { ok: true, error: null, model: { default: null, effort: 'high' }, brief: { agent: null } });
+  assert.deepEqual(state.json.settings, { ok: true, error: null, model: { default: null, effort: 'high' }, brief: { agent: null }, permission: { default: 'ask' } });
   assert.deepEqual(state.json.models.map((m) => m.name), ['Fable', 'Opus', 'Sonnet', 'Haiku']);
+});
+
+test('PUT saves a permission default, the agents follow, and a bad level is 400 invalid_permission', async (t) => {
+  const { app, settings } = await setup(t);
+  const response = await put(app, { permission: { default: 'full' } });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.json.settings.permission, { default: 'full' });
+  assert.deepEqual(settings.updates, [{ permission: { default: 'full' } }]);
+  const snapshot = app.hub.snapshot();
+  assert.deepEqual(snapshot.settings.permission, { default: 'full' });
+  assert.deepEqual(snapshot.agents.find((a) => a.id === 'cfo').permission, { level: 'full', source: 'system', agent: null, default: 'full' });
+  assert.equal('permission' in snapshot.agents.find((a) => a.id === 'scribe'), false);
+
+  for (const body of [{ permission: { default: 'bypass' } }, { permission: { default: null } }, { permission: { default: 'Ask' } }]) {
+    const refused = await put(app, body);
+    assert.deepEqual([refused.status, refused.json], [400, { error: 'invalid_permission' }], JSON.stringify(body));
+  }
+  assert.deepEqual((await put(app, { permission: { level: 'ask' } })).json, { error: 'invalid_body' });
+  assert.deepEqual((await put(app, { permission: {} })).json, { error: 'invalid_body' });
+  assert.equal(settings.updates.length, 1);
 });
 
 test('PUT refuses bad bodies and values with 400 and the code, and saves nothing', async (t) => {
@@ -122,5 +142,5 @@ test('without a settings store the route is 404', async (t) => {
   const app = await startApp(t, { registry: fakeRegistry(AGENTS), settings: null });
   const response = await put(app, { model: { default: 'opus' } });
   assert.equal(response.status, 404);
-  assert.deepEqual(app.hub.snapshot().settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null } });
+  assert.deepEqual(app.hub.snapshot().settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' } });
 });

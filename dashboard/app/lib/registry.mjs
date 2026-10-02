@@ -30,6 +30,13 @@
 //                                    // problem when given for system
 //         "effort": "high",          // optional, one of models.mjs EFFORTS;
 //                                    // a problem when given for system
+//         "permission": "auto",      // optional, one of permissions.mjs
+//                                    // PERMISSION_LEVELS (ask, auto, full):
+//                                    // the level the agent's turns run
+//                                    // at; absent means the settings
+//                                    // default. A problem when given for
+//                                    // system; accepted and ignored on a
+//                                    // project or a Codex agent, as model is
 //         "accepts": ["assistant"],  // optional, persona only: who may
 //                                    // message it, as registry ids (at
 //                                    // most 100, each an agent in this
@@ -140,6 +147,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { isEffort } from './models.mjs';
+import { isPermission } from './permissions.mjs';
 
 const MAX_BYTES = 256 * 1024;
 const MAX_AGENTS = 100;
@@ -151,7 +159,7 @@ const KINDS = new Set(['persona', 'project', 'system']);
 const PROVIDERS = new Set(['claude', 'codex']);
 const MAX_ACCEPTS = 100;
 const AGENT_KEYS = new Set([
-  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'accepts', 'routines', 'pinned',
+  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'permission', 'accepts', 'routines', 'pinned',
 ]);
 const GROUP_KEYS = new Set(['id', 'name']);
 const EMPTY_DOCUMENT = Object.freeze({ version: 1, groups: [], agents: [] });
@@ -522,6 +530,14 @@ function validateAgent(entry, index, problems, checkDirectory = isDirectory) {
     }
   }
 
+  if (entry.permission !== undefined) {
+    if (entry.kind === 'system') {
+      fail('permission must be absent when kind is "system"');
+    } else if (!isPermission(entry.permission)) {
+      fail('permission must be one of ask, auto, full');
+    }
+  }
+
   let accepts = null;
   if (entry.accepts !== undefined && entry.accepts !== null) {
     if (entry.kind !== 'persona') {
@@ -568,6 +584,7 @@ function validateAgent(entry, index, problems, checkDirectory = isDirectory) {
     ...(entry.kind === 'system' ? {} : { provider: entry.provider }),
     ...(entry.model !== undefined ? { model: entry.model } : {}),
     ...(entry.effort !== undefined ? { effort: entry.effort } : {}),
+    ...(entry.permission !== undefined ? { permission: entry.permission } : {}),
     ...(accepts ? { accepts } : {}),
     ...(entry.pinned === true ? { pinned: true } : {}),
     routines,

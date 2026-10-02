@@ -21,7 +21,8 @@
 //       groups: [{ id, name }],    // the registry's group list, in order
 //       agents: [{ id, name, role, description, group, kind, cwd, jobs,
 //                  provider?, pinned?, state, pending?, lastMessage?,
-//                  lastError?, costUsd?, lastLineAt?, model?, accepts? }],
+//                  lastError?, costUsd?, lastLineAt?, model?, permission?,
+//                  accepts? }],
 //       sessions: [{ id, provider, threadId, cwd, projectId, title, state,
 //                    pending, lastMessage, lastError, updatedAt, binding }
 //                  | { id, provider: 'claude', kind: 'terminal', cwd, projectId,
@@ -29,7 +30,8 @@
 //       codex: { available } | { available: false, reason },
 //       cmux: { available, stale? } | { available: false, reason },
 //       routines: { refreshedAt, focusAvailable, refreshing, error, items },
-//       settings: { ok, error, model: { default, effort }, brief: { agent } },
+//       settings: { ok, error, model: { default, effort }, brief: { agent },
+//                   permission: { default } },
 //       models: [{ id, name }] }
 //     An agent's cwd is the registry's, or null, and jobs is how many
 //     launchd labels its registry routines name; agents never carry the
@@ -63,6 +65,12 @@
 //                    thread returns to, so a view can mark it. `agent` is
 //                    the registry's own { id, effort } (either null), for a
 //                    form that edits them.
+//       permission   { level, source, agent, default }: the level its next
+//                    turn runs at (permissions.mjs PERMISSION_LEVELS).
+//                    source is 'agent' (the registry's `permission`) or
+//                    'system' (settings); agent is the registry's own
+//                    level or null; default is the settings level, which
+//                    always has a value.
 //       accepts      the registry's `accepts` list or null (everyone), on
 //                    every persona
 //     `settings` is the settings store's view (settings.mjs): `ok` false
@@ -184,6 +192,12 @@
 //     `model` is (thread over agent over system); { id: null, effort: null }
 //     for an agent that is not a Claude persona. The routes pass it to
 //     adapter.send as { model, effort }.
+//
+//   permissionFor(agentId) -> level | null
+//     The level the agent's next turn runs at, resolved as the agent view's
+//     `permission` is (agent over system); null for an agent that is not a
+//     Claude persona. The send route and a delegated hop pass it to
+//     adapter.send as { permission }.
 //
 //   notify(agentId, message) -> Promise<message>
 //     Appends `message` ({ role, text, ...fields }, `at` defaulting to now)
@@ -620,6 +634,12 @@ export function createHub({
       return { id, effort };
     },
 
+    permissionFor(agentId) {
+      const agent = (registry.current()?.agents ?? []).find((item) => item.id === agentId);
+      if (!agent || agent.kind !== 'persona' || agent.provider !== 'claude') return null;
+      return resolvePermission(agent, settingsCurrent()).level;
+    },
+
     async notify(agentId, message) {
       if (!store) throw new Error('no_store');
       const record = { ...message, at: typeof message?.at === 'string' ? message.at : now().toISOString() };
@@ -687,6 +707,7 @@ function settingsView(current) {
     error: current?.error ?? null,
     model: { default: settings.model?.default ?? null, effort: settings.model?.effort ?? null },
     brief: { agent: settings.brief?.agent ?? null },
+    permission: { default: settings.permission?.default ?? SETTINGS_DEFAULTS.permission.default },
   };
 }
 
@@ -723,6 +744,14 @@ function resolveModel(agent, thread, settingsState) {
   return { id, effort, source };
 }
 
+// The level a Claude persona's next turn runs at: the registry's
+// `permission` when set, else the settings default, which always has a
+// value.
+function resolvePermission(agent, settingsState) {
+  if (typeof agent.permission === 'string' && agent.permission !== '') return { level: agent.permission, source: 'agent' };
+  return { level: settingsState.permission.default, source: 'system' };
+}
+
 function agentViews(current, personas, settingsState) {
   return (current?.agents ?? []).map((agent) => {
     const view = {
@@ -755,6 +784,11 @@ function agentViews(current, personas, settingsState) {
         ...resolveModel(agent, threadChoice(entry), settingsState),
         default: { id: base.id, effort: base.effort },
         agent: { id: typeof agent.model === 'string' && agent.model !== '' ? agent.model : null, effort: typeof agent.effort === 'string' ? agent.effort : null },
+      };
+      view.permission = {
+        ...resolvePermission(agent, settingsState),
+        agent: typeof agent.permission === 'string' && agent.permission !== '' ? agent.permission : null,
+        default: settingsState.permission.default,
       };
     }
     if (agent.provider !== undefined) {

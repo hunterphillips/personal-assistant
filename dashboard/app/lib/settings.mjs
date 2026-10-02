@@ -3,7 +3,8 @@
 //
 //   { "version": 1,
 //     "model": { "default": null, "effort": null },
-//     "brief": { "agent": "assistant" } }
+//     "brief": { "agent": "assistant" },
+//     "permission": { "default": "ask" } }
 //
 // `model.default` is a model id or alias (models.mjs) or null, and
 // `model.effort` one of EFFORTS or null; null means Claude Code's own
@@ -11,7 +12,10 @@
 // before this file existed. `brief.agent` is the registry id of the agent
 // whose thread receives the morning brief notice (notices.mjs), or null for
 // no one. No agent id appears in code: seeding at first start picks the
-// first pinned Claude persona (server.mjs).
+// first pinned Claude persona (server.mjs). `permission.default` is one of
+// permissions.mjs PERMISSION_LEVELS, never null: the level an agent's turns
+// run at when its registry entry sets none. A file without the key loads
+// as 'ask' and gains the key on its next write.
 //
 // createSettings({ path, log, now }) returns:
 //
@@ -26,12 +30,12 @@
 //     polling, since the daemon is the file's only writer.
 //   update(patch) -> Promise<settings>
 //     `patch` is a partial { model?: { default?, effort? }, brief?: {
-//     agent? } }. Merged over current().settings, validated whole, written
+//     agent? }, permission?: { default? } }. Merged over current().settings, validated whole, written
 //     atomically (a temporary file beside it with mode 0600, then rename;
 //     the directory is created 0700), then current() changes and listeners
 //     run. Rejects with SettingsError whose code is invalid_body (not an
 //     object, unknown or empty keys), invalid_model, invalid_effort,
-//     invalid_agent, or settings_invalid when current().ok is false: a file
+//     invalid_agent, invalid_permission, or settings_invalid when current().ok is false: a file
 //     broken by hand is repaired or deleted by its owner, never overwritten
 //     by a save that would merge over the last good copy and erase the edit.
 //     Whether brief.agent names a real persona is the route's check
@@ -52,18 +56,22 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { isEffort } from './models.mjs';
+import { isPermission } from './permissions.mjs';
 import { AGENT_ID } from './registry.mjs';
 
 const MAX_BYTES = 64 * 1024;
 const MODEL_MAX = 64;
-const TOP_KEYS = new Set(['version', 'model', 'brief']);
+const TOP_KEYS = new Set(['version', 'model', 'brief', 'permission']);
 const MODEL_KEYS = new Set(['default', 'effort']);
 const BRIEF_KEYS = new Set(['agent']);
+const PERMISSION_KEYS = new Set(['default']);
+const SECTION_KEYS = { model: MODEL_KEYS, brief: BRIEF_KEYS, permission: PERMISSION_KEYS };
 
 export const DEFAULTS = Object.freeze({
   version: 1,
   model: Object.freeze({ default: null, effort: null }),
   brief: Object.freeze({ agent: null }),
+  permission: Object.freeze({ default: 'ask' }),
 });
 
 export class SettingsError extends Error {
@@ -219,11 +227,10 @@ export function createSettings({ path: file, log = () => {}, now = () => new Dat
 export function validatePatch(patch) {
   if (!isRecord(patch) || Object.keys(patch).length === 0) return 'invalid_body';
   for (const key of Object.keys(patch)) {
-    if (key !== 'model' && key !== 'brief') return 'invalid_body';
+    if (!Object.hasOwn(SECTION_KEYS, key)) return 'invalid_body';
     const section = patch[key];
     if (!isRecord(section) || Object.keys(section).length === 0) return 'invalid_body';
-    const allowed = key === 'model' ? MODEL_KEYS : BRIEF_KEYS;
-    for (const inner of Object.keys(section)) if (!allowed.has(inner)) return 'invalid_body';
+    for (const inner of Object.keys(section)) if (!SECTION_KEYS[key].has(inner)) return 'invalid_body';
   }
   const merged = merge(DEFAULTS, patch);
   const problem = validateDocument(merged);
@@ -252,6 +259,12 @@ function validateDocument(value) {
       return 'brief.agent must be null or an agent id';
     }
   }
+  if (value.permission !== undefined) {
+    if (!isRecord(value.permission)) return 'permission must be an object';
+    for (const key of Object.keys(value.permission)) if (!PERMISSION_KEYS.has(key)) return `unknown key "permission.${key}"`;
+    const { default: level } = value.permission;
+    if (level !== undefined && !isPermission(level)) return 'permission.default must be one of ask, auto, full';
+  }
   return null;
 }
 
@@ -259,6 +272,7 @@ function codeFor(problem) {
   if (problem.startsWith('model.default')) return 'invalid_model';
   if (problem.startsWith('model.effort')) return 'invalid_effort';
   if (problem.startsWith('brief.agent')) return 'invalid_agent';
+  if (problem.startsWith('permission.default')) return 'invalid_permission';
   return 'invalid_body';
 }
 
@@ -268,6 +282,7 @@ function normalize(value) {
     version: 1,
     model: { default: value.model?.default ?? null, effort: value.model?.effort ?? null },
     brief: { agent: value.brief?.agent ?? null },
+    permission: { default: value.permission?.default ?? DEFAULTS.permission.default },
   });
 }
 
@@ -276,6 +291,7 @@ function merge(base, patch) {
     version: 1,
     model: { ...base.model, ...(isRecord(patch?.model) ? patch.model : {}) },
     brief: { ...base.brief, ...(isRecord(patch?.brief) ? patch.brief : {}) },
+    permission: { ...base.permission, ...(isRecord(patch?.permission) ? patch.permission : {}) },
   };
 }
 

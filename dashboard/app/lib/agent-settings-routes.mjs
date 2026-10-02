@@ -3,13 +3,17 @@
 // file stays the one source of truth.
 //
 //   PUT  /api/agents/:id/settings  { name, role, group, description, cwd, model,
-//                                    effort, accepts, pinned, newGroup? }
+//                                    effort, accepts, pinned, permission?, newGroup? }
 //                                  -> 200 { ok: true, agent, note? }
 //   POST /api/agents               { id, ...the same }
 //                                  -> 201 { ok: true, agent }
 //
-// Every key is present in a body. `model` is null or a model id or alias;
-// `effort` null or one of models.mjs EFFORTS; `accepts` null or a list of
+// Every key but `permission` and `newGroup` is present in a body. `model`
+// is null or a model id or alias; `effort` null or one of models.mjs
+// EFFORTS; `permission` (optional, so a body from before the control
+// existed still saves) null or one of permissions.mjs PERMISSION_LEVELS,
+// where absent and null both mean the settings default and the written
+// entry carries no key; `accepts` null or a list of
 // agent ids, where null, an empty list, or every agent chosen all mean
 // everyone and the written entry carries no `accepts` key (never null);
 // `pinned` a boolean; `group` a group id; `newGroup` { id, name } adds that
@@ -20,8 +24,8 @@
 // order with its `routines` kept, so a dashboard write reads as a small
 // diff.
 //
-// Refusals, in this order: 400 invalid_body (a wrong shape or type), 404
-// no_such_agent, 409 not_editable (the agent is not a persona; the panel
+// Refusals, in this order: 400 invalid_body (a wrong shape or type), 400
+// invalid_permission (a permission that is not a level), 404 no_such_agent, 409 not_editable (the agent is not a persona; the panel
 // shows those read-only), 409 duplicate_id (create), 409 registry_invalid
 // with { error, problems } while the file on disk does not load (fix or
 // delete it by hand; a save would merge over the last good copy), 503
@@ -46,6 +50,7 @@
 
 import { HttpError, readJsonBody, sendJson } from './http.mjs';
 import { isEffort } from './models.mjs';
+import { isPermission } from './permissions.mjs';
 import { AGENT_ID, RegistryError } from './registry.mjs';
 
 const MODEL_MAX = 64;
@@ -58,6 +63,7 @@ export function createAgentSettingsRoutes({ registry, hub, log = () => {}, limit
     if (!canWrite()) throw new HttpError(404, 'not_found');
     const body = await readJsonBody(req, { limit: limits.agentBodyBytes });
     if (!validBody(body, false)) throw new HttpError(400, 'invalid_body');
+    if (!validPermission(body)) throw new HttpError(400, 'invalid_permission');
     const listed = hub.snapshot().agents.find((agent) => agent.id === id);
     if (!listed) throw new HttpError(404, 'no_such_agent');
     if (listed.kind !== 'persona') throw new HttpError(409, 'not_editable');
@@ -83,6 +89,7 @@ export function createAgentSettingsRoutes({ registry, hub, log = () => {}, limit
     if (!canWrite()) throw new HttpError(404, 'not_found');
     const body = await readJsonBody(req, { limit: limits.agentBodyBytes });
     if (!validBody(body, true)) throw new HttpError(400, 'invalid_body');
+    if (!validPermission(body)) throw new HttpError(400, 'invalid_permission');
     if (hub.snapshot().agents.some((agent) => agent.id === body.id)) throw new HttpError(409, 'duplicate_id');
     refuseUnloadable();
     if (shuttingDown()) throw new HttpError(503, 'shutting_down');
@@ -125,7 +132,7 @@ export function createAgentSettingsRoutes({ registry, hub, log = () => {}, limit
 // The shape check; values are the registry validator's to judge.
 function validBody(body, create) {
   if (!isRecord(body)) return false;
-  const allowed = new Set([...FIELDS, 'newGroup', ...(create ? ['id'] : [])]);
+  const allowed = new Set([...FIELDS, 'permission', 'newGroup', ...(create ? ['id'] : [])]);
   for (const key of Object.keys(body)) if (!allowed.has(key)) return false;
   for (const key of FIELDS) if (!(key in body)) return false;
   if (create && !(typeof body.id === 'string' && AGENT_ID.test(body.id))) return false;
@@ -143,14 +150,22 @@ function validBody(body, create) {
   return true;
 }
 
+// `permission` is its own check, after the shape, so a bad level has its
+// own refusal; absent and null both mean the settings default.
+function validPermission(body) {
+  return body.permission === undefined || body.permission === null || isPermission(body.permission);
+}
+
 function fieldsOf(body) {
   const fields = {};
   for (const key of FIELDS) fields[key] = body[key];
+  fields.permission = body.permission ?? null;
   return fields;
 }
 
 // One agent entry in the schema's key order. `accepts` is written only
-// when it narrows; `model`, `effort`, and `pinned` only when set.
+// when it narrows; `model`, `effort`, `permission`, and `pinned` only when
+// set.
 function entryFor(fields) {
   const entry = {
     id: fields.id,
@@ -164,6 +179,7 @@ function entryFor(fields) {
   if (fields.provider !== undefined) entry.provider = fields.provider;
   if (fields.model !== null && fields.model !== undefined) entry.model = fields.model;
   if (fields.effort !== null && fields.effort !== undefined) entry.effort = fields.effort;
+  if (fields.permission !== null && fields.permission !== undefined) entry.permission = fields.permission;
   if (Array.isArray(fields.accepts) && fields.accepts.length > 0) entry.accepts = [...fields.accepts];
   if (Array.isArray(fields.routines) && fields.routines.length > 0) entry.routines = [...fields.routines];
   if (fields.pinned === true) entry.pinned = true;
