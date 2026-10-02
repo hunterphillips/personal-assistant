@@ -119,7 +119,7 @@ test('send answers 202 without waiting for the turn', async (t) => {
 
 test('send maps adapter refusals to their statuses', async (t) => {
   const app = await startAgents(t);
-  for (const [code, status] of [['busy', 409], ['shutting_down', 503], ['invalid_text', 400]]) {
+  for (const [code, status] of [['busy', 409], ['shutting_down', 503], ['invalid_text', 400], ['invalid_permission', 400]]) {
     app.adapter.behavior.send = code;
     const response = await post(app, '/api/agents/cfo/send', { text: 'Again' });
     assert.deepEqual([response.status, response.json], [status, { error: code }], code);
@@ -307,10 +307,23 @@ test('the snapshot carries persona state and null state for other kinds', async 
   assert.deepEqual([byId.dev.state, byId.dev.lastError], ['unavailable', 'provider_unavailable']);
 });
 
-test('send hands the adapter the resolved model and effort as { model, effort }', async (t) => {
-  const app = await startAgents(t, { agents: [agent('cfo', { model: 'opus' })] });
+test('send hands the adapter the resolved model, effort, and permission level', async (t) => {
+  const app = await startAgents(t, { agents: [agent('cfo', { model: 'opus' }), agent('ops', { permission: 'full' })] });
   assert.equal((await post(app, '/api/agents/cfo/send', { text: 'Hi' })).status, 202);
-  assert.deepEqual(app.adapter.sendOptions, [{ model: 'opus', effort: null }]);
+  assert.deepEqual(app.adapter.sendOptions, [{ model: 'opus', effort: null, permission: 'ask' }]);
+  const ops = fakeAdapter();
+  t.after(() => ops.release());
+  // Another app, so the second turn is not refused by the first fake's held turn.
+  const second = await startApp(t, { ...status, registry: fakeRegistry([agent('ops', { permission: 'full' })]), adapters: { claude: ops }, store: { read: async () => [] } });
+  assert.equal((await post(second, '/api/agents/ops/send', { text: 'Hi' })).status, 202);
+  assert.deepEqual(ops.sendOptions, [{ model: null, effort: null, permission: 'full' }]);
+
+  // A persona that is not Claude's gets null, which the adapter reads as ask.
+  const codex = fakeAdapter();
+  t.after(() => codex.release());
+  const third = await startApp(t, { ...status, registry: fakeRegistry([agent('dev', { provider: 'codex', permission: 'full' })]), adapters: { codex }, store: { read: async () => [] } });
+  assert.equal((await post(third, '/api/agents/dev/send', { text: 'Hi' })).status, 202);
+  assert.deepEqual(codex.sendOptions, [{ model: null, effort: null, permission: null }]);
 });
 
 test('model records the thread\'s choice, answers the resolved pair, and validates its body', async (t) => {
@@ -526,13 +539,13 @@ test('send passes the mentioned agents through, drops ids the registry lacks, an
   const response = await post(app, '/api/agents/cfo/send', { text: 'Ask @DEV and @OPS.', mentions: ['dev', 'ops', 'nobody', 'dev'] });
   assert.equal(response.status, 202);
   assert.deepEqual(app.adapter.calls, [['send', 'cfo', 'Ask @DEV and @OPS.']]);
-  assert.deepEqual(app.adapter.sendOptions, [{ model: null, effort: null, mentions: ['dev', 'ops'] }]);
+  assert.deepEqual(app.adapter.sendOptions, [{ model: null, effort: null, permission: 'ask', mentions: ['dev', 'ops'] }]);
   app.adapter.calls.length = 0;
   app.adapter.sendOptions.length = 0;
 
   // Only unknown ids: the turn starts with no mentions at all.
   assert.equal((await post(app, '/api/agents/cfo/send', { text: 'Hi', mentions: ['nobody'] })).status, 202);
-  assert.deepEqual(app.adapter.sendOptions, [{ model: null, effort: null }]);
+  assert.deepEqual(app.adapter.sendOptions, [{ model: null, effort: null, permission: 'ask' }]);
   app.adapter.sendOptions.length = 0;
 
   for (const mentions of ['dev', { dev: true }, [7], ['not an id!'], Array.from({ length: 21 }, () => 'dev')]) {

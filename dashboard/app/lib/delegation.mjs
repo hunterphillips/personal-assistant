@@ -232,9 +232,11 @@ export function createDelegation({
 
     const prompt = `From ${nameOf(from)}, an agent in this system (not the user): ${message}`;
     const { id: model, effort } = hub.modelFor(target);
+    // The hop runs at the receiver's own level, never the sender's.
+    const permission = typeof hub.permissionFor === 'function' ? hub.permissionFor(target) : null;
     let turn;
     try {
-      turn = receiver.adapter.send(receiver.agent, message, { model, effort, from, chain: [...hops, from], prompt });
+      turn = receiver.adapter.send(receiver.agent, message, { model, effort, permission, from, chain: [...hops, from], prompt });
     } catch (error) {
       turn = Promise.reject(error);
     }

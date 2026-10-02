@@ -915,10 +915,29 @@ read-only fake) both routes are 404.
 - One turn per persona at a time. A second message while a turn is running
   is refused as `busy` before the SDK is called, because two resumes of one
   session both succeed and split its history.
-- Each turn resumes the stored session in the thread's pinned folder and
-  passes `permissionMode: 'default'`, so the global `auto` mode never
-  applies, and `maxTurns` 25. It also passes a `canUseTool` callback on
-  every turn; without one the SDK removes `AskUserQuestion`.
+- Each turn resumes the stored session in the thread's pinned folder with
+  `maxTurns` 25 and the SDK permission mode the agent's level maps to
+  (`permission` in the snapshot, the registry's level over the settings
+  default; `lib/permissions.mjs`), so the global `auto` mode never applies
+  on its own and the tools hook cannot change it:
+
+  | Level | `permissionMode` | Also |
+  | --- | --- | --- |
+  | `ask` | `default` | |
+  | `auto` | `auto` | |
+  | `full` | `bypassPermissions` | `allowDangerouslySkipPermissions: true` |
+
+  Ask raises a card for every tool outside the allow rules; Auto lets
+  Claude Code's classifier decide and raises a card only when it is unsure;
+  Full access never raises an approval card. A `canUseTool` callback is
+  passed at every level; without one the SDK removes `AskUserQuestion`,
+  and at Full access a question the model puts to Hunter still comes
+  through as a card. A delegated hop runs at the receiver's level. The
+  `persona_init` log line carries the mode the SDK took beside the level
+  requested; when they differ (Auto is per model, and
+  `permissions.disableAutoMode` can refuse it) one
+  `persona_permission_mismatch` line names both and the turn goes on. A
+  level that is not one of the three is refused `invalid_permission`.
 - Each turn runs on the model and effort the hub resolves for the agent
   (`model` in the snapshot, the thread's choice first): `model` and
   `effort` are passed to the SDK only when set, so a null leaves Claude
@@ -1034,6 +1053,9 @@ Only tool calls that reach `canUseTool` produce a card. These do not:
   through the usual checks.
 - The ask tool (`mcp__agents__ask`), which the daemon names in
   `allowedTools` on every turn. Its bounds are the daemon's, not a card.
+- Every tool, for an agent at Full access (Turns, above): the SDK skips
+  the permission checks, so no approval card is raised. A question the
+  model asks still shows.
 
 Subagents are not on this list. Their tool prompts reach the same callback
 (the SDK passes the subagent's `agentID` in the callback options), so they

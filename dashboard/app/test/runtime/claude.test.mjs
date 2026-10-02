@@ -665,6 +665,75 @@ test('model and effort are passed only when the turn sets them, never from the a
   assert.deepEqual(logs.filter((e) => e.event === 'persona_init').map((e) => e.effort), [null, 'high', 'low', null]);
 });
 
+test('the permission level maps onto the SDK mode; absent and null are ask; a bad level is refused before the first await', async (t) => {
+  const { adapter, query, logs } = await setup(t);
+  await adapter.send(AGENT, 'one');
+  await adapter.send(AGENT, 'two', { permission: null });
+  await adapter.send(AGENT, 'three', { permission: 'ask' });
+  await adapter.send(AGENT, 'four', { permission: 'auto' });
+  await adapter.send(AGENT, 'five', { permission: 'full' });
+  const modes = query.calls.map(({ options }) => [options.permissionMode, options.allowDangerouslySkipPermissions]);
+  assert.deepEqual(modes, [['default', undefined], ['default', undefined], ['default', undefined], ['auto', undefined], ['bypassPermissions', true]]);
+  for (const { options } of query.calls.slice(0, 4)) assert.equal('allowDangerouslySkipPermissions' in options, false);
+  for (const { options } of query.calls) assert.equal(typeof options.canUseTool, 'function', 'questions still come through at every level');
+  assert.deepEqual(logs.filter((e) => e.event === 'persona_init').map((e) => [e.permission, e.permissionMode]), [
+    ['ask', null], ['ask', null], ['ask', null], ['auto', null], ['full', null],
+  ]);
+  assert.equal(logs.some((e) => e.event === 'persona_permission_mismatch'), false, 'an init without a mode is not a mismatch');
+
+  for (const bad of ['bypass', 'Ask', '', 3, {}]) {
+    let rejected = null;
+    const turn = adapter.send(AGENT, 'six', { permission: bad });
+    turn.catch((error) => { rejected = error; });
+    assert.equal(adapter.state('cfo').state, 'idle', 'refused synchronously, no turn opened');
+    await turn.catch(() => {});
+    assert.equal(rejected?.code, 'invalid_permission', JSON.stringify(bad));
+  }
+  assert.equal(query.calls.length, 5);
+});
+
+test('an init whose permissionMode differs from the level requested logs one mismatch and the turn goes on', async (t) => {
+  const query = fakeQuery(async function* ({ options }) {
+    yield init('session-1', { permissionMode: options.permissionMode === 'auto' ? 'default' : options.permissionMode });
+    yield assistant('Fine.');
+    yield result();
+  });
+  const { adapter, events, logs } = await setup(t, { query });
+  await adapter.send(AGENT, 'one', { permission: 'auto' });
+  assert.deepEqual(logs.filter((e) => e.event === 'persona_permission_mismatch'), [
+    { event: 'persona_permission_mismatch', agentId: 'cfo', permission: 'auto', requested: 'auto', actual: 'default' },
+  ]);
+  assert.deepEqual(logs.filter((e) => e.event === 'persona_init').map((e) => e.permissionMode), ['default']);
+  assert.deepEqual(states(events), ['busy', 'idle']);
+  assert.equal(events.some((event) => event.type === 'error'), false);
+
+  await adapter.send(AGENT, 'two', { permission: 'full' });
+  await adapter.send(AGENT, 'three');
+  assert.equal(logs.filter((e) => e.event === 'persona_permission_mismatch').length, 1, 'a mode that matches is not logged');
+});
+
+test('Full access with an init that reports an API key is refused before any tool call', async (t) => {
+  let toolCalls = 0;
+  let signal;
+  const query = fakeQuery(async function* ({ options }) {
+    signal = options.abortController.signal;
+    yield init('session-1', { apiKeySource: 'ANTHROPIC_API_KEY', permissionMode: 'bypassPermissions' });
+    toolCalls += 1;
+    await options.canUseTool('Bash', BASH_INPUT, {});
+    yield assistant('This should never be shown.');
+    yield result();
+  });
+  const { adapter, events, logs } = await setup(t, { query });
+  await adapter.send(AGENT, 'Hi', { permission: 'full' });
+  assert.equal(signal.aborted, true);
+  assert.equal(toolCalls, 0);
+  assert.equal(events.some((event) => event.type === 'request'), false);
+  assert.deepEqual(states(events), ['busy', 'error']);
+  assert.equal(adapter.state('cfo').lastError, 'Refused: this turn would bill an API key (ANTHROPIC_API_KEY).');
+  assert.ok(logs.some((entry) => entry.event === 'persona_api_key_refused' && entry.source === 'ANTHROPIC_API_KEY'));
+  assert.equal(query.calls[0].options.permissionMode, 'bypassPermissions');
+});
+
 test('a model the CLI rejects ends the turn in error with its explanation as lastError', async (t) => {
   const explanation = "There's an issue with the selected model (not-a-model). It may not exist or you may not have access to it.";
   const query = fakeQuery(async function* () {
@@ -860,6 +929,7 @@ test('the tools hook adds mcpServers and allowedTools by name and cannot change 
       mcpServers: { agents: server },
       allowedTools: ['mcp__agents__ask'],
       permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
       canUseTool: null,
       cwd: '/elsewhere',
       resume: 'forged',
@@ -867,7 +937,7 @@ test('the tools hook adds mcpServers and allowedTools by name and cannot change 
     };
   };
   const { adapter, query } = await setup(t, { turnTools });
-  await adapter.send(AGENT, 'How is cash? @Brain', { mentions: ['brain'], chain: ['assistant'], from: 'assistant', prompt: 'From Assistant: How is cash? @Brain' });
+  await adapter.send(AGENT, 'How is cash? @Brain', { permission: 'auto', mentions: ['brain'], chain: ['assistant'], from: 'assistant', prompt: 'From Assistant: How is cash? @Brain' });
 
   assert.equal(seen.length, 1);
   assert.equal(seen[0].agent, AGENT);
@@ -882,7 +952,8 @@ test('the tools hook adds mcpServers and allowedTools by name and cannot change 
   const { options, prompt } = query.calls[0];
   assert.equal(options.mcpServers.agents, server);
   assert.deepEqual(options.allowedTools, ['mcp__agents__ask']);
-  assert.equal(options.permissionMode, 'default');
+  assert.equal(options.permissionMode, 'auto', 'the level the caller passed, not the hook\'s');
+  assert.equal('allowDangerouslySkipPermissions' in options, false);
   assert.equal(typeof options.canUseTool, 'function');
   assert.equal(options.cwd, '/invented/cfo');
   assert.equal('resume' in options, false);

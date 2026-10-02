@@ -100,6 +100,7 @@ test('a message to an agent that replies in time comes back inline, with the lin
   assert.deepEqual(context.chain, ['assistant']);
   assert.equal(context.prompt, 'From Assistant, an agent in this system (not the user): Is he over on equities? Two lines.');
   assert.ok('model' in context && 'effort' in context);
+  assert.equal(context.permission, 'ask', 'the receiver\'s level, the system default here');
   assert.deepEqual(logs.filter((entry) => entry.event.startsWith('delegation_')).map((entry) => [entry.event, entry.status ?? entry.reason ?? null]), [
     ['delegation_sent', null], ['delegation_finished', 'finished'],
   ]);
@@ -135,6 +136,17 @@ test('refusals come in order, each as one line and nothing sent', async (t) => {
   assert.deepEqual(logs.filter((entry) => entry.event === 'delegation_refused').map((entry) => entry.reason), [
     'unknown', 'not_an_agent', 'unavailable', 'not_allowed', 'cycle', 'depth', 'cycle',
   ]);
+});
+
+test('a hop runs at the receiver\'s permission level, not the sender\'s', async (t) => {
+  const agents = AGENTS.map((entry) => (entry.id === 'cfo' ? { ...entry, permission: 'full' } : entry.id === 'assistant' ? { ...entry, permission: 'auto' } : entry));
+  const { delegation, personas } = await setup(t, { agents });
+  const a = await delegation.ask({ from: 'assistant', chain: [], to: 'cfo', message: 'One' });
+  assert.equal(a.status, 'replied');
+  assert.equal(personas.sent.at(-1).context.permission, 'full');
+  const b = await delegation.ask({ from: 'cfo', chain: ['assistant'], to: 'watch', message: 'Two' });
+  assert.equal(b.status, 'replied');
+  assert.equal(personas.sent.at(-1).context.permission, 'ask', 'watch has no level of its own');
 });
 
 test('the chain allows two hops: the user asks A, A asks B, B asks C, C may not ask', async (t) => {

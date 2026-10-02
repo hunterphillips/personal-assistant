@@ -22,7 +22,7 @@
 // is 409 not_a_persona; a persona that is not started (unavailable) is 409
 // persona_unavailable. Adapter refusals (runtime/adapter.mjs) map to:
 // busy 409, no_such_request 409, not_supported 409, shutting_down 503,
-// invalid_model 400, invalid_effort 400 (model's body checks; also what the
+// invalid_model 400, invalid_effort 400, invalid_permission 400 (model's body checks; also what the
 // adapter would refuse),
 // unavailable 503, invalid_text 400, invalid_answer 400,
 // thread_reset_failed 500. send and new-thread answer 503 shutting_down
@@ -63,8 +63,10 @@
 //                          409 not_a_persona, 409 persona_unavailable)
 //   startTurn({ hub, log, shuttingDown }, id, text, { mentions }) -> Promise<void>
 //     503 shutting_down once closeStreams() has run, then personaFor(id),
-//     then adapter.send(agent, text, { model, effort, mentions }) with the
-//     model from hub.modelFor(id) and `mentions` the registry ids the
+//     then adapter.send(agent, text, { model, effort, permission, mentions })
+//     with the model from hub.modelFor(id), the level from
+//     hub.permissionFor(id) (null for an agent that is not a Claude
+//     persona), and `mentions` the registry ids the
 //     message names with @ (absent when none). Resolves as soon as the adapter has
 //     accepted the turn and rejects with the mapped HttpError when it
 //     refuses; a turn rejected after acceptance is logged as
@@ -105,6 +107,7 @@ const RUNTIME_STATUS = new Map([
   ['invalid_answer', 400],
   ['invalid_model', 400],
   ['invalid_effort', 400],
+  ['invalid_permission', 400],
   ['thread_reset_failed', 500],
 ]);
 
@@ -318,9 +321,12 @@ export async function startTurn({ hub, log, shuttingDown }, id, text, { mentions
   // contract; if one does, the rejection is logged, since no reply can
   // carry it.
   // The hub resolves { id, effort }; the adapter takes { model, effort }.
+  // The permission level rides beside them: the hub's for a Claude agent,
+  // null (which the adapter reads as ask) for any other.
   const resolved = typeof hub.modelFor === 'function' ? hub.modelFor(id) : null;
   const options = {
     ...(resolved ? { model: resolved.id, effort: resolved.effort } : {}),
+    ...(typeof hub.permissionFor === 'function' ? { permission: hub.permissionFor(id) } : {}),
     ...(Array.isArray(mentions) && mentions.length > 0 ? { mentions: [...mentions] } : {}),
   };
   const turn = adapter.send(agent, text, Object.keys(options).length > 0 ? options : undefined);

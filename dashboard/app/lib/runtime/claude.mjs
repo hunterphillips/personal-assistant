@@ -14,13 +14,15 @@
 //     runs a query. Rejects with a RuntimeError 'sdk_unavailable' (its cause
 //     is the import error) if the SDK cannot be loaded, and with the fs
 //     error if the pointer file cannot be read.
-//   send(agent, text, { model, effort, from, mentions, prompt, chain }) -> Promise<void>
+//   send(agent, text, { model, effort, permission, from, mentions, prompt, chain }) -> Promise<void>
 //     Starts one turn. Refusals reject with a RuntimeError whose code is
 //     'busy' (a turn or New thread is in flight; decided synchronously, before
 //     any await, so two sends can never both reach query() and fork the
-//     session), 'shutting_down' (close() has begun), 'invalid_agent', or
-//     'invalid_text'. Once accepted, the promise resolves when the turn ends
-//     and never rejects; failures arrive as `error` events.
+//     session), 'shutting_down' (close() has begun), 'invalid_agent',
+//     'invalid_text', or 'invalid_permission' (a `permission` that is not
+//     one of permissions.mjs PERMISSION_LEVELS, null, or absent). Once
+//     accepted, the promise resolves when the turn ends and never rejects;
+//     failures arrive as `error` events.
 //   answer(agent, requestId, answer) -> Promise<void>
 //     question: { answers: { [question text]: 'Label' | ['A', 'B'] } } (arrays
 //               are joined with ", "); { decision: 'deny' } declines it.
@@ -97,10 +99,18 @@
 // and the rest still run.
 //
 // Turn rules. Every query() passes the thread's cwd, the stored session id
-// as resume, permissionMode 'default' (so a global mode such as auto never
-// applies), maxTurns from limits.turnMaxTurns, the turn's AbortController,
-// and canUseTool on every turn (without it the SDK drops AskUserQuestion).
-// send(agent, text, { model, effort, from, mentions, prompt, chain }): `from` is the
+// as resume, the permissionMode the caller's `permission` level maps to
+// (permissions.mjs sdkModeFor: ask -> 'default', auto -> 'auto', full ->
+// 'bypassPermissions' with allowDangerouslySkipPermissions; null and absent
+// are ask, so a global mode such as auto never applies on its own, and the
+// tools hook cannot change it), maxTurns from limits.turnMaxTurns, the
+// turn's AbortController, and canUseTool on every turn (without it the SDK
+// drops AskUserQuestion; at Full access it still carries questions). The
+// init message's permissionMode is logged in persona_init; when it differs
+// from the mode requested (Auto is per model, and the user's
+// `permissions.disableAutoMode` can refuse it) one
+// persona_permission_mismatch line carries both and the turn goes on.
+// send(agent, text, { model, effort, permission, from, mentions, prompt, chain }): `from` is the
 // registry id of the agent that sent the text (absent for the user) and
 // `mentions` the ids it named with @; both are recorded on the user message
 // and carried by its event. `prompt`, when given, is what the SDK receives
@@ -157,6 +167,7 @@ import { randomUUID } from 'node:crypto';
 
 import { TIMEOUTS } from '../config.mjs';
 import { effortName, isEffort, modelName } from '../models.mjs';
+import { isPermission, sdkModeFor } from '../permissions.mjs';
 import { AGENT_ID } from '../registry.mjs';
 import { truncateUtf8 } from '../threads.mjs';
 import { RuntimeError } from './adapter.mjs';
@@ -337,7 +348,12 @@ export function createClaudeAdapter({
         permissionMode: message.permissionMode ?? null,
         model: message.model ?? null,
         effort: turn.effort ?? null,
+        permission: turn.permission,
       });
+      const requested = sdkModeFor(turn.permission).permissionMode;
+      if (typeof message.permissionMode === 'string' && message.permissionMode !== requested) {
+        log({ event: 'persona_permission_mismatch', agentId: entry.agentId, permission: turn.permission, requested, actual: message.permissionMode });
+      }
       const source = message.apiKeySource;
       if (typeof source === 'string' && !SUBSCRIPTION_SOURCES.has(source)) {
         turn.refusal = bound(`Refused: this turn would bill an API key (${source}).`);
@@ -440,7 +456,7 @@ export function createClaudeAdapter({
       const options = {
         cwd: entry.cwd,
         ...(entry.sessionId ? { resume: entry.sessionId } : {}),
-        permissionMode: 'default',
+        ...sdkModeFor(turn.permission),
         maxTurns: limits.turnMaxTurns,
         abortController: turn.controller,
         canUseTool: makeCanUseTool(entry, turn),
@@ -510,7 +526,7 @@ export function createClaudeAdapter({
       return { threadId: agent.id };
     },
 
-    send(agent, text, { model = null, effort = null, from = null, mentions = null, prompt = null, chain = null } = {}) {
+    send(agent, text, { model = null, effort = null, permission = null, from = null, mentions = null, prompt = null, chain = null } = {}) {
       try {
         checkAgent(agent);
       } catch (error) {
@@ -518,6 +534,7 @@ export function createClaudeAdapter({
       }
       if (closing) return Promise.reject(new RuntimeError('shutting_down'));
       if (typeof text !== 'string' || text.trim() === '') return Promise.reject(new RuntimeError('invalid_text'));
+      if (permission !== null && permission !== undefined && !isPermission(permission)) return Promise.reject(new RuntimeError('invalid_permission'));
       const entry = entryFor(agent.id);
       if (entry.turn || entry.resetting) return Promise.reject(new RuntimeError('busy'));
       entry.cwd ??= agent.cwd;
@@ -534,6 +551,7 @@ export function createClaudeAdapter({
         toolsCommitted: false,
         model: typeof model === 'string' && model !== '' ? model : null,
         effort: typeof effort === 'string' && effort !== '' ? effort : null,
+        permission: permission ?? 'ask',
         from: typeof from === 'string' && from !== '' ? from : null,
         mentions: Array.isArray(mentions) ? mentions.filter((id) => typeof id === 'string' && id !== '') : [],
         prompt: typeof prompt === 'string' && prompt.trim() !== '' ? prompt : null,
