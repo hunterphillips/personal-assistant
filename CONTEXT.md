@@ -77,7 +77,8 @@ Settings as a system default, per agent, and in the composer for a thread.
 
 **Registry**:
 The file that lists the agents. The one source of truth; written through
-the interface, never by hand in a session.
+the interface (an agent's settings, New agent), never by hand in a
+session. A hand edit between sessions still loads.
 _Avoid_: agents.json (in prose), manifest
 
 **Vault**:
