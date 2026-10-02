@@ -172,7 +172,7 @@
 //     (`summary` over `text` when the message carries one) and commits.
 //     A bookkeeping line (a delegation line) leaves lastMessage alone and
 //     sets lastLineAt to its `at` instead, so an open thread view knows to
-//     fetch again when a line lands outside the persona's own turn.
+//     fetch again when a line lands outside the agent's own turn.
 //     For a message from outside a turn: the morning brief notice
 //     (notices.mjs). Rejects when there is no store or the store refuses
 //     the message; an agentId that is not a listed persona still appends

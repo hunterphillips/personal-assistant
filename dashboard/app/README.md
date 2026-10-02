@@ -686,7 +686,7 @@ events. Each persona in `agents` carries:
   could not be read).
 - `costUsd`: null, or the session's running total.
 - `lastLineAt`: null, or when the daemon last wrote a line into the thread
-  outside the persona's own turn that is not its last message: a
+  outside the agent's own turn that is not its last message: a
   delegation line landing after a pending reply. The thread view fetches
   again when it changes.
 - `model` (Claude personas only): `{ id, effort, source, default, agent }`,
