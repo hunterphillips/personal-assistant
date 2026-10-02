@@ -28,9 +28,11 @@ from here.
   reads the vault's priorities with add and edit going through the
   Second brain agent, Health holds Settings (the default model, effort, and
   permission level, which agent receives the brief) and lists the launchd jobs and their
-  state. The design (the Assistant as the pinned
-  agent, delegation, models, and what comes next: routines as scheduled
-  prompts, Ideas) is
+  state. Routines, scheduled prompts the daemon runs itself as a turn in
+  the agent's thread at the agent's level, are stored and scheduled since
+  2026-10-02; their lists and form are the next build. The design (the
+  Assistant as the pinned agent, delegation, models, routines, and what
+  comes next: Ideas) is
   `thoughts/shared/plans/2026-09-30-assistant-system-design.md`. The app
   README and `docs/operations.md` hold routes, snapshot shape, helpers, and
   setup.
@@ -103,6 +105,8 @@ picks one up and ends by updating it.
 - `dashboard/prototype/`: a static design study with illustrative data; its
   own repository, ignored here.
 - `registry/agents.json`: the agent registry.
+- `routines/`: one file per routine, written by the dashboard and committed
+  like the registry; `runs/` beside them holds the runs logs, gitignored.
 - `daily-brief/`: contract, schema, curator rules, `bin/run-brief` and its
   prompts, `launchd/`, `watch/`. `contributions/` and `briefs/` are outputs,
   gitignored; `build.py` and `check-viewer.mjs` beside the briefs are code.
