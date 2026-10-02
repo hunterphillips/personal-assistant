@@ -14,7 +14,7 @@
 //     runs a query. Rejects with a RuntimeError 'sdk_unavailable' (its cause
 //     is the import error) if the SDK cannot be loaded, and with the fs
 //     error if the pointer file cannot be read.
-//   send(agent, text) -> Promise<void>
+//   send(agent, text, { model, effort, from, mentions, prompt }) -> Promise<void>
 //     Starts one turn. Refusals reject with a RuntimeError whose code is
 //     'busy' (a turn or New thread is in flight; decided synchronously, before
 //     any await, so two sends can never both reach query() and fork the
@@ -71,7 +71,9 @@
 //
 // Events, each { type, agentId, at, ... }:
 //   thread.state { state }                  on every change
-//   message      { role, text, truncated?, ...fields } user text on send,
+//   message      { role, text, truncated?, ...fields } user text on send
+//                                           (with from and mentions when the
+//                                           send carried them),
 //                                           assistant text per top-level
 //                                           assistant message (subagent
 //                                           messages are skipped), system
@@ -91,7 +93,12 @@
 // as resume, permissionMode 'default' (so a global mode such as auto never
 // applies), maxTurns from limits.turnMaxTurns, the turn's AbortController,
 // and canUseTool on every turn (without it the SDK drops AskUserQuestion).
-// send(agent, text, { model, effort }) takes the resolved pair for this turn
+// send(agent, text, { model, effort, from, mentions, prompt }): `from` is the
+// registry id of the agent that sent the text (absent for the user) and
+// `mentions` the ids it named with @; both are recorded on the user message
+// and carried by its event. `prompt`, when given, is what the SDK receives
+// in place of `text`, so the thread shows what was written while the model
+// gets the daemon's prefixed form (delegation.mjs). { model, effort } takes the resolved pair for this turn
 // (hub.modelFor decides it from thread, agent, and system settings); each is
 // passed only when set, so null leaves Claude Code's own default in force.
 // A model the CLI rejects comes back as a result with is_error whose text
@@ -362,7 +369,10 @@ export function createClaudeAdapter({
     let detail = null;
     let resumed = false;
     try {
-      await record(entry, 'user', text);
+      await record(entry, 'user', text, {
+        ...(turn.from ? { from: turn.from } : {}),
+        ...(turn.mentions.length > 0 ? { mentions: [...turn.mentions] } : {}),
+      });
       const run = await ensureQuery();
       if (!entry.loaded) await loadPointer(entry);
       if (turn.aborted) return;
@@ -378,7 +388,7 @@ export function createClaudeAdapter({
         ...(turn.model ? { model: turn.model } : {}),
         ...(turn.effort ? { effort: turn.effort } : {}),
       };
-      for await (const message of run({ prompt: text, options })) {
+      for await (const message of run({ prompt: turn.prompt ?? text, options })) {
         const problem = await handleMessage(entry, turn, message);
         if (turn.refusal) break;
         if (problem && !turn.aborted) failure = problem;
@@ -434,7 +444,7 @@ export function createClaudeAdapter({
       return { threadId: agent.id };
     },
 
-    send(agent, text, { model = null, effort = null } = {}) {
+    send(agent, text, { model = null, effort = null, from = null, mentions = null, prompt = null } = {}) {
       try {
         checkAgent(agent);
       } catch (error) {
@@ -455,6 +465,9 @@ export function createClaudeAdapter({
         stderr: '',
         model: typeof model === 'string' && model !== '' ? model : null,
         effort: typeof effort === 'string' && effort !== '' ? effort : null,
+        from: typeof from === 'string' && from !== '' ? from : null,
+        mentions: Array.isArray(mentions) ? mentions.filter((id) => typeof id === 'string' && id !== '') : [],
+        prompt: typeof prompt === 'string' && prompt.trim() !== '' ? prompt : null,
       };
       entry.turn = turn;
       turn.done = runTurn(entry, agent, text, turn);

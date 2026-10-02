@@ -44,8 +44,10 @@
 //                    longer; a question's input is always the whole object
 //                    with truncated false, since a question cut short cannot
 //                    be answered (the tool bounds its size anyway).
-//       lastMessage  null or { role, text, at }, text cut to limits.previewChars
-//                    (a message's `summary` stands in for its text when present)
+//       lastMessage  null or { role, text, at, from? }, text cut to limits.previewChars
+//                    (a message's `summary` stands in for its text when present;
+//                    `from` is the sending agent's id on a message another
+//                    agent sent)
 //       lastError    null or a string
 //       costUsd      null or the session's running total
 //     A Claude persona also has:
@@ -803,6 +805,7 @@ function preview(message, limits) {
     role: message.role,
     text: Array.from(text).slice(0, limits.previewChars).join(''),
     at: typeof message.at === 'string' ? message.at : null,
+    ...(typeof message.from === 'string' && message.from !== '' ? { from: message.from } : {}),
   };
 }
 

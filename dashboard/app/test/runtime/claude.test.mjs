@@ -794,3 +794,30 @@ test('setModel after close has begun is refused', async (t) => {
   await adapter.close();
   await assert.rejects(adapter.setModel(AGENT, { model: 'sonnet' }), { code: 'shutting_down' });
 });
+
+test('send records who sent the text and whom it mentions, and the SDK gets the prompt in place of the text', async (t) => {
+  const { adapter, store, events, query } = await setup(t);
+  await adapter.send(AGENT, 'Should he rebalance? @CFO', {
+    from: 'assistant', mentions: ['cfo', '', 7, 'brain'], prompt: 'From Assistant (not the user): Should he rebalance? @CFO',
+  });
+  const user = events.find((event) => event.type === 'message' && event.role === 'user');
+  assert.equal(user.text, 'Should he rebalance? @CFO');
+  assert.equal(user.from, 'assistant');
+  assert.deepEqual(user.mentions, ['cfo', 'brain']);
+  const cached = (await store.read('cfo'))[0];
+  assert.equal(cached.from, 'assistant');
+  assert.deepEqual(cached.mentions, ['cfo', 'brain']);
+  assert.equal(query.calls[0].prompt, 'From Assistant (not the user): Should he rebalance? @CFO');
+
+  // Without them, nothing is recorded and the text is the prompt.
+  await adapter.send(AGENT, 'Plain');
+  const second = events.filter((event) => event.type === 'message' && event.role === 'user')[1];
+  assert.equal('from' in second, false);
+  assert.equal('mentions' in second, false);
+  assert.equal(query.calls[1].prompt, 'Plain');
+  // A blank prompt is ignored; an empty mentions list is not recorded.
+  await adapter.send(AGENT, 'Third', { prompt: '  ', mentions: [] });
+  const third = events.filter((event) => event.type === 'message' && event.role === 'user')[2];
+  assert.equal('mentions' in third, false);
+  assert.equal(query.calls[2].prompt, 'Third');
+});

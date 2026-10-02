@@ -12,9 +12,13 @@
 //     'sdk_unavailable' when the rejection is a RuntimeError with that code
 //     (the provider's package could not be loaded) and 'start_failed'
 //     otherwise.
-//   send(agent, text, { model, effort } = {}) -> Promise<void>
+//   send(agent, text, { model, effort, from, mentions, prompt } = {}) -> Promise<void>
 //     Starts one turn on the given model id and effort level, each optional
-//     and passed to the provider only when set. See the refusal rule below. Once accepted, the promise
+//     and passed to the provider only when set. `from` is the registry id
+//     of the agent sending the text (absent for the user), `mentions` the
+//     ids it named with @, and `prompt` what the provider receives in place
+//     of `text`; a provider records `from` and `mentions` on the user
+//     message and may ignore `prompt`. See the refusal rule below. Once accepted, the promise
 //     resolves when the turn ends and never rejects; failures arrive as
 //     `error` events and in state().
 //   answer(agent, requestId, answer) -> Promise<void>

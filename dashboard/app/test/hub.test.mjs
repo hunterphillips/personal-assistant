@@ -782,3 +782,26 @@ test('at start, lastMessage skips bookkeeping lines at the end of the cache and 
   assert.deepEqual(persona(hub).lastMessage, { role: 'system', text: 'New thread', at: 'a' });
   hub.close();
 });
+
+test('lastMessage keeps the sender of a message another agent sent, on an event and from the cache', async () => {
+  const adapter = fakeAdapter();
+  const { hub } = makeHub({ adapters: { claude: adapter } });
+  await hub.start();
+  const AT1 = '2026-09-25T12:01:00.000Z';
+  adapter.emit('message', 'cfo', { role: 'user', text: 'Should he rebalance?', from: 'assistant', mentions: ['brain'] });
+  assert.deepEqual(persona(hub).lastMessage, { role: 'user', text: 'Should he ', at: AT1, from: 'assistant' });
+  adapter.emit('message', 'cfo', { role: 'assistant', text: 'No.' });
+  assert.deepEqual(persona(hub).lastMessage, { role: 'assistant', text: 'No.', at: AT1 });
+  // A delegation line is bookkeeping and leaves the preview alone.
+  adapter.emit('message', 'cfo', { role: 'system', kind: 'delegation', state: 'sent', to: 'brain', text: 'Messaged Second brain', summary: 'Messaged Second brain' });
+  assert.deepEqual(persona(hub).lastMessage, { role: 'assistant', text: 'No.', at: AT1 });
+  hub.close();
+
+  const cached = makeHub({ adapters: { claude: fakeAdapter() }, store: { read: async () => [
+    { role: 'user', text: 'From the Assistant.', at: 'a', from: 'assistant' },
+    { role: 'system', kind: 'delegation', state: 'sent', to: 'brain', text: 'Messaged Second brain', summary: 'Messaged Second brain', at: 'b' },
+  ] } });
+  await cached.hub.start();
+  assert.deepEqual(persona(cached.hub).lastMessage, { role: 'user', text: 'From the A', at: 'a', from: 'assistant' });
+  cached.hub.close();
+});
