@@ -18,7 +18,14 @@
 // the agent's settings from the registry in a panel beside the thread (a
 // sheet over it on a phone), with one line counting the agent's jobs and
 // linking to Health. The panel's open state lasts for the page's life: it
-// stays open as other agents are chosen, and a reload starts closed.
+// stays open as other agents are chosen, and a reload starts closed. For a
+// persona the panel is a form (name, role, group or a new group, description,
+// folder, model and effort, who may message it, pinned) that PUTs
+// /api/agents/<id>/settings; Save is off until a field changed, and a refusal
+// lists the validator's problems under the form. A project or system entry
+// stays read-only. "New agent" at the foot of the list opens the same form
+// empty, with an id slugged from the name, and POSTs /api/agents; the new
+// agent's thread opens once it is listed.
 //
 // The thread is fetched from /api/agents/<id>/thread when a persona opens
 // and again whenever the snapshot shows its last message or its turn
@@ -46,7 +53,7 @@
 
   var PINNED = 'pinned';
   var PROVIDERS = { claude: 'Claude', codex: 'Codex' };
-  var WATCHED = ['agents', 'groups', 'registry', 'sessions', 'codex', 'cmux'];
+  var WATCHED = ['agents', 'groups', 'registry', 'sessions', 'codex', 'cmux', 'settings'];
   var EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
   var EFFORT_NAMES = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
   var CODE_DEFAULT = 'Claude Code default';
@@ -62,6 +69,12 @@
   var SCROLL_END_PX = 80; // this close to the end counts as reading the newest message
   var NO_ANSWER = 'The dashboard did not respond.';
   var CHOOSE = 'Choose an agent to open its thread.';
+  var NEW_AGENT = 'New agent';
+  var NEW_GROUP = '__new__'; // the Group select's "New group…" value
+  var EVERYONE = '*'; // the Who may message list's first checkbox
+  var CODEX_NOTE = 'Codex, its own settings';
+  var FOLDER_NOTE = 'The folder applies when a new thread starts.';
+  var NOT_WRITTEN = 'The registry could not be written.';
 
   function element(tag, className, text) {
     var node = document.createElement(tag);
@@ -161,6 +174,38 @@
 
   // What a row or pane calls the entry: an agent's name, a Codex thread's
   // title, or the session's folder.
+  // A group or agent id from a name: lowercase, runs of anything else to
+  // one hyphen, none at the ends.
+  function slug(text) {
+    return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+
+  // The folder as typed, with a leading ~ expanded to the home folder.
+  function expandPath(text, home) {
+    var value = String(text || '').trim();
+    if (home && (value === '~' || value.indexOf('~/') === 0)) return home + value.slice(1);
+    return value;
+  }
+
+  // What the form says when a save is refused: the validator's problems
+  // without their "agent N (id): " prefix, or one sentence for the code.
+  function formProblems(result) {
+    if (!result) return [NO_ANSWER];
+    if (result.code === 'invalid_registry' && result.problems && result.problems.length > 0) {
+      return result.problems.map(function (problem) { return problem.replace(/^agent \d+ \([^)]*\): /, ''); });
+    }
+    switch (result.code) {
+      case 'duplicate_id': return ['An agent with that id exists.'];
+      case 'registry_invalid': return ['The registry file could not be read. Fix it by hand first.'];
+      case 'not_editable': return ['This entry is edited in the registry file.'];
+      case 'no_such_agent': return ['That agent is no longer registered.'];
+      case 'shutting_down': return ['The dashboard is restarting.'];
+      case 'not_found': return ['The dashboard cannot write the registry.'];
+      case 'payload_too_large': return ['That is too long.'];
+      default: return [NOT_WRITTEN];
+    }
+  }
+
   function displayName(entry) {
     if (!isSession(entry)) return entry.name;
     if (!isTerminal(entry) && typeof entry.title === 'string' && entry.title) return entry.title;
@@ -465,6 +510,8 @@
     var detailsFields = document.getElementById('agent-details-fields');
     var detailsDescription = document.getElementById('agent-details-description');
     var detailsJobs = document.getElementById('agent-details-jobs');
+    var detailsForm = document.getElementById('agent-form');
+    var newAgent = document.getElementById('agents-new');
     var newThread = document.getElementById('agent-new-thread');
     var openTerminal = document.getElementById('agent-open-terminal');
     var terminalLine = document.getElementById('agent-terminal-reason');
@@ -496,6 +543,13 @@
     var selectedId = null;
     var detailsOpen = false; // the settings panel is open, whichever agent is chosen
     var detailsKey = null; // what the panel was last built from
+    var creating = false; // the panel holds the New agent form
+    var formKey = null; // what the form was last built from
+    var formTarget = null; // 'edit:<id>' or 'create', for the form that is built
+    var formBaseline = null; // the form's values as built, for Save
+    var formNotice = []; // problems or a note under the form, until the next edit
+    var formNoticeIsNote = false;
+    var idTouched = false; // the New agent id was typed, so the name stops filling it
     var wide = window.matchMedia('(min-width: 720px)');
     var thread = { id: null, messages: null, loading: false, error: false, fresh: true, version: 0 };
     var renderedVersion = -1;
@@ -604,6 +658,7 @@
       }
       var sentence = sessionsSentence(state);
       if (sentence) groupsNode.appendChild(element('p', 'agents-message agents-sessions-message', sentence));
+      newAgent.hidden = !!(state.registry && state.registry.ok === false);
       if (focusedId) {
         var again = groupsNode.querySelector('[data-agent="' + CSS.escape(focusedId) + '"]');
         if (again) again.focus();
@@ -926,6 +981,36 @@
     // when the registry has no value, then its description and, when it has
     // jobs, how many with a link to Health. Rebuilt only when one of them
     // changed, so the keyboard stays on the link across other state.
+    // The panel: the New agent form, a persona's form, or a project's or
+    // system entry's values read-only.
+    function renderPanel(agent) {
+      if (creating) {
+        detailsKey = null;
+        detailsName.textContent = NEW_AGENT;
+        detailsFields.textContent = '';
+        detailsFields.hidden = true;
+        detailsDescription.hidden = true;
+        detailsJobs.hidden = true;
+        detailsForm.hidden = false;
+        renderForm(null);
+        return;
+      }
+      if (isPersona(agent)) {
+        detailsKey = null;
+        detailsName.textContent = agent.name;
+        detailsFields.textContent = '';
+        detailsFields.hidden = true;
+        detailsDescription.hidden = true;
+        detailsForm.hidden = false;
+        renderForm(agent);
+        renderJobs(agent);
+        return;
+      }
+      detailsForm.hidden = true;
+      detailsFields.hidden = false;
+      renderDetails(agent);
+    }
+
     function renderDetails(agent) {
       var pairs = [
         ['Role', agent.role],
@@ -943,7 +1028,10 @@
       }
       detailsDescription.textContent = agent.description || '';
       detailsDescription.hidden = !detailsDescription.textContent;
+      renderJobs(agent);
+    }
 
+    function renderJobs(agent) {
       var jobs = typeof agent.jobs === 'number' ? agent.jobs : 0;
       detailsJobs.textContent = '';
       detailsJobs.hidden = jobs === 0;
@@ -955,17 +1043,360 @@
       detailsJobs.appendChild(document.createTextNode('.'));
     }
 
+    // --- The settings form -------------------------------------------------
+
+    function control(name) {
+      return detailsForm.querySelector('[name="' + name + '"]');
+    }
+
+    function formField(label, node, id) {
+      var wrap = element('div', 'form-field');
+      var lab = element('label', 'form-label', label);
+      lab.htmlFor = id;
+      node.id = id;
+      wrap.appendChild(lab);
+      wrap.appendChild(node);
+      return wrap;
+    }
+
+    function textInput(name, value, maxLength) {
+      var node = element('input', 'form-input');
+      node.type = 'text';
+      node.name = name;
+      node.value = value || '';
+      node.autocomplete = 'off';
+      node.spellcheck = false;
+      if (maxLength) node.maxLength = maxLength;
+      return node;
+    }
+
+    function selectInput(name, options, value) {
+      var node = element('select', 'form-input form-select');
+      node.name = name;
+      for (var i = 0; i < options.length; i += 1) {
+        var option = element('option', null, options[i].name);
+        option.value = options[i].id;
+        if (options[i].id === value) option.selected = true;
+        node.appendChild(option);
+      }
+      return node;
+    }
+
+    function checkbox(name, value, label, checked) {
+      var wrap = element('label', 'form-check');
+      var box = element('input');
+      box.type = 'checkbox';
+      box.name = name;
+      box.value = value;
+      box.checked = !!checked;
+      wrap.appendChild(box);
+      wrap.appendChild(document.createTextNode(label));
+      return wrap;
+    }
+
+    // The registry's groups in its order, then any group an agent names that
+    // the list leaves out, then "New group…".
+    function groupOptions() {
+      var options = [];
+      var seen = {};
+      var listed = state.groups || [];
+      for (var i = 0; i < listed.length; i += 1) {
+        if (seen[listed[i].id]) continue;
+        seen[listed[i].id] = true;
+        options.push({ id: listed[i].id, name: listed[i].name });
+      }
+      var agents = state.agents || [];
+      for (var j = 0; j < agents.length; j += 1) {
+        var id = agents[j].group;
+        if (!id || seen[id]) continue;
+        seen[id] = true;
+        options.push({ id: id, name: groupName(id, listed) });
+      }
+      return options;
+    }
+
+    // The other personas, who could be given leave to message this one.
+    function otherPersonas(agent) {
+      return (state.agents || []).filter(function (other) {
+        return isPersona(other) && (!agent || other.id !== agent.id);
+      }).map(function (other) { return { id: other.id, name: other.name }; });
+    }
+
+    function defaultModelOption() {
+      var settings = state.settings && state.settings.model ? state.settings.model : {};
+      var name = settings.default ? modelNameOf(settings.default, state.models) : 'Claude Code';
+      return { id: '', name: 'Default (' + name + ')' };
+    }
+
+    function defaultEffortOption() {
+      var settings = state.settings && state.settings.model ? state.settings.model : {};
+      var name = settings.effort ? effortNameOf(settings.effort) : 'Claude Code';
+      return { id: '', name: 'Default (' + name + ')' };
+    }
+
+    // The form's values as the routes take them, plus what Save compares.
+    function formValues() {
+      var groupSelect = control('group');
+      var group = groupSelect ? groupSelect.value : '';
+      var groupNameField = control('groupName');
+      var newName = group === NEW_GROUP && groupNameField ? groupNameField.value.trim() : '';
+      var accepts = [];
+      var everyone = false;
+      var boxes = detailsForm.querySelectorAll('input[name="accepts"]');
+      for (var i = 0; i < boxes.length; i += 1) {
+        if (!boxes[i].checked) continue;
+        if (boxes[i].value === EVERYONE) everyone = true;
+        else accepts.push(boxes[i].value);
+      }
+      var model = control('model');
+      var effort = control('effort');
+      var idField = control('agentId');
+      var pinned = control('pinned');
+      return {
+        id: idField ? idField.value.trim() : null,
+        name: control('name').value,
+        role: control('role').value,
+        group: group === NEW_GROUP ? slug(newName) : group,
+        newGroup: group === NEW_GROUP ? { id: slug(newName), name: newName } : null,
+        description: control('description').value,
+        cwd: expandPath(control('cwd').value, state.home),
+        model: model && model.value ? model.value : null,
+        effort: effort && effort.value ? effort.value : null,
+        accepts: everyone || accepts.length === 0 ? null : accepts,
+        pinned: !!(pinned && pinned.checked),
+      };
+    }
+
+    function formDirty() {
+      return formBaseline !== null && JSON.stringify(formValues()) !== formBaseline;
+    }
+
+    // Save is on once a field changed; the group name shows for a new group;
+    // the problems or the note sit under the fields.
+    function syncForm() {
+      var groupSelect = control('group');
+      var nameField = detailsForm.querySelector('.form-field-group-name');
+      if (nameField) nameField.hidden = !groupSelect || groupSelect.value !== NEW_GROUP;
+      var save = detailsForm.querySelector('[data-form-action="save"]');
+      if (save) save.disabled = busy || !formDirty();
+      var list = detailsForm.querySelector('.form-problems');
+      var note = detailsForm.querySelector('.form-note-line');
+      list.textContent = '';
+      for (var i = 0; i < formNotice.length && !formNoticeIsNote; i += 1) list.appendChild(element('li', null, formNotice[i]));
+      list.hidden = formNoticeIsNote || formNotice.length === 0;
+      note.textContent = formNoticeIsNote && formNotice.length > 0 ? formNotice[0] : '';
+      note.hidden = !note.textContent;
+    }
+
+    // Builds the form for the agent (or, creating, for no one) when what it
+    // shows changed, unless it holds unsaved edits for the same agent.
+    function renderForm(agent) {
+      var target = creating ? 'create' : 'edit:' + agent.id;
+      var level = agent && agent.model && agent.model.agent ? agent.model.agent : { id: null, effort: null };
+      var key = JSON.stringify([
+        target,
+        agent ? [agent.name, agent.role, agent.group, agent.description, agent.cwd, level, agent.accepts, agent.pinned, agent.provider] : null,
+        groupOptions(), state.models, otherPersonas(agent), state.settings && state.settings.model, state.home,
+      ]);
+      if (key === formKey) {
+        syncForm();
+        return;
+      }
+      if (formKey !== null && target === formTarget && formDirty()) return;
+      formKey = key;
+      formTarget = target;
+
+      var groups = groupOptions();
+      var codex = !!agent && agent.provider === 'codex';
+      detailsForm.textContent = '';
+      detailsForm.appendChild(formField('Name', textInput('name', agent ? agent.name : '', 40), 'agent-form-name'));
+      if (creating) detailsForm.appendChild(formField('Id', textInput('agentId', '', 32), 'agent-form-id'));
+      detailsForm.appendChild(formField('Role', textInput('role', agent ? agent.role : '', 24), 'agent-form-role'));
+      var groupValue = agent ? agent.group : groups.length > 0 ? groups[0].id : NEW_GROUP;
+      detailsForm.appendChild(formField('Group', selectInput('group', groups.concat([{ id: NEW_GROUP, name: 'New group…' }]), groupValue), 'agent-form-group'));
+      var groupNameField = formField('Group name', textInput('groupName', '', 40), 'agent-form-group-name');
+      groupNameField.className += ' form-field-group-name';
+      detailsForm.appendChild(groupNameField);
+      var description = element('textarea', 'form-input');
+      description.name = 'description';
+      description.rows = 3;
+      description.maxLength = 300;
+      description.value = agent ? agent.description || '' : '';
+      detailsForm.appendChild(formField('Description', description, 'agent-form-description'));
+      detailsForm.appendChild(formField('Folder', textInput('cwd', agent ? shortPath(agent.cwd, state.home) : ''), 'agent-form-cwd'));
+      if (codex) {
+        detailsForm.appendChild(element('p', 'form-note form-note-codex', CODEX_NOTE));
+      } else {
+        var models = (state.models || []).map(function (model) { return { id: model.id, name: model.name }; });
+        detailsForm.appendChild(formField('Model', selectInput('model', [defaultModelOption()].concat(models), level.id || ''), 'agent-form-model'));
+        var efforts = EFFORTS.map(function (effort) { return { id: effort, name: effortNameOf(effort) }; });
+        detailsForm.appendChild(formField('Effort', selectInput('effort', [defaultEffortOption()].concat(efforts), level.effort || ''), 'agent-form-effort'));
+      }
+      var accepts = agent && Array.isArray(agent.accepts) && agent.accepts.length > 0 ? agent.accepts : null;
+      var who = element('fieldset', 'form-fieldset');
+      who.appendChild(element('legend', 'form-legend', 'Who may message'));
+      who.appendChild(checkbox('accepts', EVERYONE, 'Everyone', !accepts));
+      var others = otherPersonas(agent);
+      for (var i = 0; i < others.length; i += 1) {
+        who.appendChild(checkbox('accepts', others[i].id, others[i].name, !!accepts && accepts.indexOf(others[i].id) !== -1));
+      }
+      detailsForm.appendChild(who);
+      detailsForm.appendChild(checkbox('pinned', 'true', 'Pinned', !!agent && agent.pinned === true));
+      var problems = element('ul', 'form-problems');
+      problems.hidden = true;
+      detailsForm.appendChild(problems);
+      var note = element('p', 'form-note form-note-line');
+      note.hidden = true;
+      detailsForm.appendChild(note);
+      var actions = element('div', 'form-actions');
+      var save = element('button', 'button button-primary', creating ? 'Create' : 'Save');
+      save.type = 'submit';
+      save.setAttribute('data-form-action', 'save');
+      actions.appendChild(save);
+      actions.appendChild(button('button', 'Cancel', 'cancel-form'));
+      detailsForm.appendChild(actions);
+
+      formBaseline = creating ? '' : JSON.stringify(formValues());
+      syncForm();
+    }
+
+    // The body the routes take; a new group rides along as `newGroup`.
+    function formBody(values) {
+      var body = {
+        name: values.name,
+        role: values.role,
+        group: values.group,
+        description: values.description,
+        cwd: values.cwd,
+        model: values.model,
+        effort: values.effort,
+        accepts: values.accepts,
+        pinned: values.pinned,
+      };
+      if (values.newGroup) body.newGroup = values.newGroup;
+      if (creating) body.id = values.id;
+      return body;
+    }
+
+    // Saves the form: PUT for the open persona, POST for a new agent. The
+    // snapshot delta brings the change to the row, the header, and the
+    // form; a refusal lists why under the form.
+    function saveForm() {
+      if (busy) return;
+      var agent = selectedAgent();
+      var wasCreating = creating;
+      if (!wasCreating && (!isPersona(agent) || !formDirty())) return;
+      var values = formValues();
+      var body = formBody(values);
+      var method = wasCreating ? 'POST' : 'PUT';
+      var path = wasCreating ? '/api/agents' : routeBase(agent) + '/settings';
+      busy = true;
+      formNotice = [];
+      formNoticeIsNote = false;
+      syncForm();
+      call(method, path, body).then(function (result) {
+        busy = false;
+        var ok = !!(result && result.ok);
+        var current = wasCreating ? creating : agent.id === selectedId && !creating;
+        if (ok && !shell.isStreaming()) shell.requestState();
+        if (!current) {
+          renderThread();
+          return;
+        }
+        if (ok && wasCreating) {
+          creating = false;
+          formKey = null;
+          select(body.id, true);
+          return;
+        }
+        if (ok) {
+          formKey = null;
+          formNotice = result.note === 'cwd_applies_on_new_thread' ? [FOLDER_NOTE] : [];
+          formNoticeIsNote = true;
+        } else {
+          formNotice = formProblems(result);
+          formNoticeIsNote = false;
+        }
+        renderThread();
+        syncForm();
+      });
+    }
+
+    function startCreate() {
+      creating = true;
+      idTouched = false;
+      formKey = null;
+      formNotice = [];
+      formNoticeIsNote = false;
+      renderThread();
+      var first = control('name');
+      if (first) first.focus();
+    }
+
+    function cancelCreate() {
+      creating = false;
+      formKey = null;
+      formNotice = [];
+      formNoticeIsNote = false;
+      renderThread();
+      newAgent.focus();
+    }
+
+    // Everyone and the named agents exclude each other; no one chosen
+    // means everyone.
+    function onAcceptsChange(box) {
+      var boxes = detailsForm.querySelectorAll('input[name="accepts"]');
+      var any = false;
+      for (var i = 0; i < boxes.length; i += 1) {
+        if (box.value === EVERYONE && box.checked && boxes[i] !== box) boxes[i].checked = false;
+        else if (box.value !== EVERYONE && box.checked && boxes[i].value === EVERYONE) boxes[i].checked = false;
+        if (boxes[i].checked && boxes[i].value !== EVERYONE) any = true;
+      }
+      if (!any) {
+        for (var j = 0; j < boxes.length; j += 1) if (boxes[j].value === EVERYONE) boxes[j].checked = true;
+      }
+    }
+
+    // The thread column while New agent is open with no agent chosen.
+    function renderBlankMain() {
+      nameNode.textContent = NEW_AGENT;
+      chips.textContent = '';
+      cost.textContent = '';
+      description.textContent = '';
+      description.hidden = true;
+      detailsToggle.hidden = true;
+      detailsToggle.setAttribute('aria-expanded', 'false');
+      newThread.hidden = true;
+      confirmNode.hidden = true;
+      openTerminal.hidden = true;
+      terminalLine.textContent = '';
+      terminalLine.hidden = true;
+      notice.textContent = '';
+      notice.hidden = true;
+      status.hidden = true;
+      request.textContent = '';
+      request.hidden = true;
+      messagesNode.textContent = '';
+      renderedVersion = -1;
+      composer.hidden = true;
+      if (menuOpen) closeModelMenu(false);
+      foot.textContent = '';
+      foot.hidden = true;
+      failure.textContent = '';
+      failure.hidden = true;
+    }
+
     function renderThread() {
       var agent = selectedAgent();
-      view.classList.toggle('agents-open', !!selectedId);
+      view.classList.toggle('agents-open', !!selectedId || creating);
       renderMessage();
-      if (!selectedId) {
+      if (!selectedId && !creating) {
         empty.textContent = CHOOSE;
         empty.hidden = false;
         panel.hidden = true;
         return;
       }
-      if (!agent) {
+      if (!agent && !creating) {
         empty.textContent = SESSION_ID.test(selectedId) ? 'That session is not listed.' : 'No agent named ' + selectedId + ' is registered.';
         empty.hidden = false;
         panel.hidden = true;
@@ -973,6 +1404,13 @@
       }
       empty.hidden = true;
       panel.hidden = false;
+      if (!agent) {
+        // New agent with no thread open: the column holds only the form.
+        renderBlankMain();
+        details.hidden = false;
+        renderPanel(null);
+        return;
+      }
       var persona = isPersona(agent);
       var session = isSession(agent);
       var name = displayName(agent);
@@ -987,8 +1425,8 @@
 
       detailsToggle.hidden = session;
       detailsToggle.setAttribute('aria-expanded', detailsOpen && !session ? 'true' : 'false');
-      details.hidden = !detailsOpen || session;
-      if (!details.hidden) renderDetails(agent);
+      details.hidden = creating ? false : !detailsOpen || session;
+      if (!details.hidden) renderPanel(agent);
 
       newThread.hidden = !persona;
       newThread.disabled = busy || !persona || agent.state === 'unavailable' || turnOpen(agent);
@@ -1118,6 +1556,15 @@
     // so choosing the open row from `/agents` or `/?agent=` adds nothing.
     function select(id, push) {
       if (push && agentFromUrl() !== id) history.pushState(null, '', agentUrl(id));
+      if (creating) {
+        creating = false;
+        formKey = null;
+        formNotice = [];
+        if (id === selectedId) {
+          render();
+          return;
+        }
+      }
       if (id === selectedId) return;
       setSelected(id);
       render();
@@ -1125,10 +1572,10 @@
       if (isPersona(selectedAgent()) && wide.matches) input.focus();
     }
 
-    // Resolves with { ok, status, code, reason }, or null when the request
-    // itself failed.
-    function post(path, body) {
-      var init = { method: 'POST', cache: 'no-store', credentials: 'same-origin' };
+    // Resolves with { ok, status, code, reason, problems, note }, or null
+    // when the request itself failed.
+    function call(method, path, body) {
+      var init = { method: method, cache: 'no-store', credentials: 'same-origin' };
       if (body !== undefined) {
         init.headers = { 'content-type': 'application/json' };
         init.body = JSON.stringify(body);
@@ -1141,13 +1588,19 @@
             status: response.status,
             code: json && typeof json.error === 'string' ? json.error : null,
             reason: json && typeof json.reason === 'string' ? json.reason : null,
+            problems: json && Array.isArray(json.problems) ? json.problems.filter(function (p) { return typeof p === 'string'; }) : [],
+            note: json && typeof json.note === 'string' ? json.note : null,
           };
         }, function () {
-          return { ok: response.ok, status: response.status, code: null, reason: null };
+          return { ok: response.ok, status: response.status, code: null, reason: null, problems: [], note: null };
         });
       }, function () {
         return null;
       });
+    }
+
+    function post(path, body) {
+      return call('POST', path, body);
     }
 
     // Runs one persona or session action; the outcome lands in the state,
@@ -1379,16 +1832,53 @@
         case 'close-details':
           closeDetails();
           break;
+        case 'new-agent':
+          startCreate();
+          break;
+        case 'cancel-form':
+          if (creating) {
+            cancelCreate();
+          } else {
+            formKey = null;
+            formNotice = [];
+            renderThread();
+          }
+          break;
         default:
           break;
       }
     });
 
     function closeDetails() {
+      if (creating) {
+        cancelCreate();
+        return;
+      }
       detailsOpen = false;
       renderThread();
       detailsToggle.focus();
     }
+
+    detailsForm.addEventListener('submit', function (event) {
+      event.preventDefault();
+      saveForm();
+    });
+
+    function onFormEdit(event) {
+      var target = event.target;
+      if (!target || !target.name) return;
+      if (target.name === 'accepts' && event.type === 'change') onAcceptsChange(target);
+      if (creating && target.name === 'agentId' && event.type === 'input') idTouched = true;
+      if (creating && target.name === 'name' && !idTouched) {
+        var idField = control('agentId');
+        if (idField) idField.value = slug(target.value).slice(0, 32);
+      }
+      formNotice = [];
+      formNoticeIsNote = false;
+      syncForm();
+    }
+    detailsForm.addEventListener('input', onFormEdit);
+    detailsForm.addEventListener('change', onFormEdit);
 
     details.addEventListener('keydown', function (event) {
       if (event.key !== 'Escape') return;

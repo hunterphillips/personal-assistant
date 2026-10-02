@@ -44,6 +44,9 @@
           </div>
           <p class="agents-message" id="agents-message" hidden></p>
           <div id="agents-groups"></div>
+          <p class="agents-list-foot">
+            <button type="button" class="button" id="agents-new" data-agent-action="new-agent">New agent</button>
+          </p>
         </div>
         <div class="agent-thread" id="agent-thread">
           <p class="thread-empty" id="agent-empty" hidden></p>
@@ -113,6 +116,7 @@
               </div>
               <p class="details-name" id="agent-details-name"></p>
               <div class="request-details" id="agent-details-fields"></div>
+              <form class="details-form" id="agent-form" novalidate hidden></form>
               <p class="details-description" id="agent-details-description" hidden></p>
               <p class="details-jobs" id="agent-details-jobs" hidden></p>
             </aside>

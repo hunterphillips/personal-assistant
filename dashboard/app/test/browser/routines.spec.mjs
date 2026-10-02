@@ -199,15 +199,17 @@ test.describe('with seeded routines', () => {
     await expect(details).toBeVisible();
     await expect(details.getByRole('heading', { name: 'Settings' })).toBeVisible();
     await expect(details.locator('.details-name')).toHaveText('Second brain');
-    await expect(details.locator('.request-detail-label')).toHaveText(['Role', 'Group', 'Provider', 'Folder']);
-    await expect(details.locator('.request-detail-text')).toHaveText(['Notes', 'Personal', 'Claude', '~/second-brain']);
-    await expect(details.locator('.details-description')).toHaveText('Invented notes that keep themselves.');
+    await expect(details.locator('[name="role"]')).toHaveValue('Notes');
+    await expect(details.locator('[name="group"] option:checked')).toHaveText('Personal');
+    await expect(details.locator('[name="cwd"]')).toHaveValue('~/second-brain');
+    await expect(details.locator('[name="description"]')).toHaveValue('Invented notes that keep themselves.');
     await expect(details.locator('.details-jobs')).toHaveText('Second brain runs 3 jobs.');
     await expect(details.getByRole('link', { name: '3 jobs' })).toHaveAttribute('href', '/health');
 
     // Nothing about the jobs themselves renders here.
     await expect(details.locator('.routine-row, .badge')).toHaveCount(0);
-    await expect(details.getByRole('button')).toHaveCount(1);
+    await expect(details.getByRole('button')).toHaveCount(3);
+    await expect(details.getByRole('button', { name: 'Save' })).toBeDisabled();
     await expect(details.getByRole('button', { name: 'Close details' })).toBeVisible();
     expect(hub.routines.calls).toBe(0);
   });
@@ -258,8 +260,10 @@ test.describe('with seeded routines', () => {
     // Scribe has no jobs and a folder outside home.
     await agentRow(page, 'Scribe').click();
     await expect(details.locator('.details-name')).toHaveText('Scribe');
-    await expect(details.locator('.request-detail-text')).toHaveText(['Drafts', 'Work', 'Codex', '/elsewhere/scribe']);
-    await expect(details.locator('.details-description')).toHaveText('Invented, with no routines.');
+    await expect(details.locator('[name="role"]')).toHaveValue('Drafts');
+    await expect(details.locator('[name="cwd"]')).toHaveValue('/elsewhere/scribe');
+    await expect(details.locator('.form-note-codex')).toHaveText('Codex, its own settings');
+    await expect(details.locator('[name="description"]')).toHaveValue('Invented, with no routines.');
     await expect(details.locator('.details-jobs')).toBeHidden();
     await expect(details.getByRole('link')).toHaveCount(0);
 
@@ -512,7 +516,7 @@ test.describe('Settings', () => {
     expect(hub.requests('/api/settings')).toEqual([{ method: 'PUT', status: 200 }]);
     expect((await readFile(hub)).model).toEqual({ default: 'sonnet', effort: 'high' });
     expect(hub.state.snapshot().settings.model.default).toBe('sonnet');
-    expect(hub.state.snapshot().agents.find((a) => a.id === 'brain').model).toEqual({ id: 'sonnet', effort: 'high', source: 'system', default: { id: 'sonnet', effort: 'high' } });
+    expect(hub.state.snapshot().agents.find((a) => a.id === 'brain').model).toEqual({ id: 'sonnet', effort: 'high', source: 'system', default: { id: 'sonnet', effort: 'high' }, agent: { id: null, effort: null } });
     await expect(select(page, 'Default model')).toHaveValue('sonnet');
     await expect(status(page)).toBeHidden({ timeout: 5_000 });
 

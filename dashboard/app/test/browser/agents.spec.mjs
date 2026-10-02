@@ -11,10 +11,10 @@ const ago = (ms) => new Date(Date.now() - ms).toISOString();
 const AGENTS = [
   { id: 'cfo', name: 'CFO', role: 'Money', description: 'Invented.', group: 'work', kind: 'persona', provider: 'claude', cwd: '/invented/cfo',
     routines: ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'] },
-  { id: 'catchup', name: 'Catchup', role: 'Work', description: 'Invented work folder.', group: 'work', kind: 'project', provider: 'codex' },
-  { id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'claude' },
-  { id: 'dev', name: 'Dev', role: 'Code', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'codex' },
-  { id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented task board.', group: 'personal', kind: 'system' },
+  { id: 'catchup', name: 'Catchup', role: 'Work', description: 'Invented work folder.', group: 'work', kind: 'project', provider: 'codex', cwd: '/invented/catchup' },
+  { id: 'brain', name: 'Second brain', role: 'Notes', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'claude', cwd: '/invented/brain' },
+  { id: 'dev', name: 'Dev', role: 'Code', description: 'Invented.', group: 'personal', kind: 'persona', provider: 'codex', cwd: '/invented/dev' },
+  { id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented task board.', group: 'personal', kind: 'system', cwd: '/invented/focus' },
 ];
 
 // CFO's two jobs; the other agents have none.
@@ -134,8 +134,8 @@ test.describe('with seeded agents', () => {
     await expectView(page, 'agents', 'Agents');
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#agent-panel')).toBeHidden();
-    // Nothing sits above the groups.
-    await expect(page.locator('#agents-list > :visible')).toHaveText(['Agents', /^Work/]);
+    // Nothing sits above the groups; New agent sits under them.
+    await expect(page.locator('#agents-list > :visible')).toHaveText(['Agents', /^Work/, 'New agent']);
     await expect(page.locator('#agents-list .agent-row').first()).toHaveAttribute('data-agent', 'cfo');
     await expect(page.locator('#view-agents .routine-card')).toHaveCount(0);
     if (phone(page)) {
@@ -172,8 +172,14 @@ test.describe('with seeded agents', () => {
 
     await gear.click();
     const details = page.locator('#agent-details');
-    await expect(details.locator('.request-detail-text')).toHaveText(['Money', 'Work', 'Claude', '~/cfo']);
-    await expect(details.locator('.details-description')).toHaveText('Invented.');
+    await expect(details.locator('.details-name')).toHaveText('CFO');
+    await expect(details.locator('#agent-form .form-label')).toHaveText(['Name', 'Role', 'Group', 'Group name', 'Description', 'Folder', 'Model', 'Effort']);
+    await expect(details.locator('[name="name"]')).toHaveValue('CFO');
+    await expect(details.locator('[name="role"]')).toHaveValue('Money');
+    await expect(details.locator('[name="group"]')).toHaveValue('work');
+    await expect(details.locator('[name="description"]')).toHaveValue('Invented.');
+    await expect(details.locator('[name="cwd"]')).toHaveValue('~/cfo');
+    await expect(details.locator('.details-description')).toBeHidden();
     await expect(details.locator('.details-jobs')).toHaveText('CFO runs 2 jobs.');
     await expect(details.locator('.routine-row, .badge')).toHaveCount(0);
     await expect(messages(page)).toHaveCount(2);
@@ -664,7 +670,7 @@ test.describe('with seeded agents', () => {
     const heading = await page.locator('.agents-heading').boundingBox();
     const firstGroup = await page.locator('.agent-group-heading').first().boundingBox();
     const between = await page.locator('#agents-list > :visible').evaluateAll((nodes) => nodes.map((n) => n.className));
-    expect(between).toEqual(['agents-list-head', '']);
+    expect(between).toEqual(['agents-list-head', '', 'agents-list-foot']);
     expect(firstGroup.y).toBeGreaterThan(heading.y);
 
     await row(page, 'CFO').click();
@@ -710,7 +716,7 @@ const PINNED_AGENTS = [
   { id: 'assistant', name: 'Assistant', role: 'Assistant', description: 'I am the way in.', group: 'personal', kind: 'persona', provider: 'claude',
     cwd: '/invented/assistant', pinned: true, routines: ['com.invented.dashboard'] },
   ...AGENTS,
-  { id: 'kin', name: 'Kin', role: 'Family', description: 'Invented.', group: 'family', kind: 'persona', provider: 'claude' },
+  { id: 'kin', name: 'Kin', role: 'Family', description: 'Invented.', group: 'family', kind: 'persona', provider: 'claude', cwd: '/invented/kin' },
 ];
 const PINNED_ROUTINES = [...ROUTINES, {
   ...ROUTINES[0], label: 'com.invented.dashboard', agentId: 'assistant', agentName: 'Assistant', name: 'dashboard',
@@ -819,9 +825,13 @@ test.describe('with a pinned persona and a group the list leaves out', () => {
     await page.goto(`${hub.origin}/health`);
     await expectView(page, 'health', 'Health');
     await expect(page.locator('.routine-card .card-name')).toHaveText(['Assistant', 'CFO']);
+    // A role that only repeats the name is not a chip on the card either.
+    await expect(page.locator('.routine-card').nth(0).locator('.role-chip')).toHaveCount(0);
+    await expect(page.locator('.routine-card').nth(1).locator('.role-chip')).toHaveText('Money');
     await page.goto(`${hub.origin}/?agent=kin`);
     await page.locator('#agent-details-toggle').click();
-    await expect(page.locator('#agent-details .request-detail-text').nth(1)).toHaveText('Family');
+    await expect(page.locator('#agent-details [name="group"]')).toHaveValue('family');
+    await expect(page.locator('#agent-details [name="group"] option:checked')).toHaveText('Family');
   });
 });
 
@@ -1185,5 +1195,196 @@ test.describe('with a model picker under the composer', () => {
     await page.mouse.click(195, 300);
     await expect(menu(page)).toBeHidden();
     expect(hub.requests('/api/agents/cfo/model')).toEqual([]);
+  });
+});
+
+// The settings form and New agent, against the harness's in-memory
+// registry: a save validates with the real validator (any absolute path
+// counts as a folder) and lands in hub.registry.writes.
+test.describe('the settings form', () => {
+  test.use({ hubOptions: { build: () => seeded().build() } });
+  const form = (page) => page.locator('#agent-form');
+  const field = (page, name) => form(page).locator(`[name="${name}"]`);
+  const save = (page) => form(page).getByRole('button', { name: 'Save' });
+  const checks = (page) => form(page).locator('input[name="accepts"]');
+  async function openForm(page, hub, id) {
+    await page.goto(`${hub.origin}/?agent=${id}`);
+    await page.locator('#agent-details-toggle').click();
+    await expect(field(page, 'name')).toBeVisible();
+  }
+
+  test('Save is off until a field changes, and Cancel puts the values back', async ({ page, hub }) => {
+    await openForm(page, hub, 'cfo');
+    await expect(save(page)).toBeDisabled();
+    await expect(form(page).locator('.form-field-group-name')).toBeHidden();
+    await expect(field(page, 'model')).toHaveValue('');
+    await expect(field(page, 'model').locator('option:checked')).toHaveText('Default (Claude Code)');
+    await expect(field(page, 'effort').locator('option:checked')).toHaveText('Default (Claude Code)');
+    await expect(field(page, 'pinned')).not.toBeChecked();
+    await field(page, 'role').fill('Finance');
+    await expect(save(page)).toBeEnabled();
+    await form(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(field(page, 'role')).toHaveValue('Money');
+    await expect(save(page)).toBeDisabled();
+    expect(hub.registry.writes).toHaveLength(0);
+  });
+
+  test('editing the role and saving changes the header and the row', async ({ page, hub }) => {
+    await openForm(page, hub, 'cfo');
+    await field(page, 'role').fill('Finance');
+    await field(page, 'model').selectOption('sonnet');
+    await field(page, 'effort').selectOption('low');
+    await save(page).click();
+    await expect(page.locator('#agent-chips .role-chip')).toHaveText('Finance');
+    await expect(field(page, 'role')).toHaveValue('Finance');
+    await expect(save(page)).toBeDisabled();
+    await expect(form(page).locator('.form-problems')).toBeHidden();
+    expect(hub.registry.writes).toHaveLength(1);
+    const written = hub.registry.writes[0].agents.find((a) => a.id === 'cfo');
+    expect(written).toEqual({
+      id: 'cfo', name: 'CFO', role: 'Finance', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented/cfo',
+      provider: 'claude', model: 'sonnet', effort: 'low', routines: ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'],
+    });
+    if (!phone(page)) await expect(row(page, 'CFO').locator('.role-chip')).toHaveText('Finance');
+    // The composer follows the agent's level.
+    if (!phone(page)) await expect(page.locator('#agent-model-label')).toHaveText('Sonnet · Low');
+  });
+
+  test('a blank name is refused with the problem and changes nothing', async ({ page, hub }) => {
+    await openForm(page, hub, 'cfo');
+    await field(page, 'name').fill('');
+    await save(page).click();
+    await expect(form(page).locator('.form-problems li')).toHaveText(['name must be a non-empty string of at most 40 characters']);
+    await expect(page.locator('#agent-name')).toHaveText('CFO');
+    expect(hub.registry.writes).toHaveLength(0);
+    // The next edit clears the list.
+    await field(page, 'name').fill('C');
+    await expect(form(page).locator('.form-problems')).toBeHidden();
+  });
+
+  test('a changed folder is saved with ~ expanded and says when it applies', async ({ page, hub }) => {
+    await openForm(page, hub, 'cfo');
+    await field(page, 'cwd').fill('~/elsewhere');
+    await save(page).click();
+    await expect(form(page).locator('.form-note-line')).toHaveText('The folder applies when a new thread starts.');
+    const written = hub.registry.writes[0].agents.find((a) => a.id === 'cfo');
+    expect(written.cwd.endsWith('/elsewhere')).toBe(true);
+    expect(written.cwd.startsWith('/')).toBe(true);
+    await expect(field(page, 'cwd')).toHaveValue('~/elsewhere');
+  });
+
+  test('New group adds a heading, and a name that slugs to a listed group joins it', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openForm(page, hub, 'brain');
+    await field(page, 'group').selectOption('__new__');
+    await expect(form(page).locator('.form-field-group-name')).toBeVisible();
+    await field(page, 'groupName').fill('Side Projects');
+    await save(page).click();
+    // This registry lists no groups, so the new one is the first listed and
+    // the groups the agents name follow it.
+    await expect(page.locator('.agent-group-heading')).toHaveText(['Side Projects', 'Work', 'Personal']);
+    await expect(field(page, 'group')).toHaveValue('side-projects');
+    await expect(field(page, 'group').locator('option')).toHaveText(['Side Projects', 'Work', 'Personal', 'New group…']);
+    expect(hub.registry.writes[0].groups).toEqual([{ id: 'side-projects', name: 'Side Projects' }]);
+    expect(hub.registry.writes[0].agents.find((a) => a.id === 'brain').group).toBe('side-projects');
+
+    // A name that slugs to a group already listed joins it without a rename.
+    await field(page, 'group').selectOption('__new__');
+    await field(page, 'groupName').fill('Side projects');
+    await save(page).click();
+    await expect(field(page, 'group')).toHaveValue('side-projects');
+    await expect(form(page).locator('.form-field-group-name')).toBeHidden();
+    await expect(page.locator('.agent-group-heading')).toHaveText(['Side Projects', 'Work', 'Personal']);
+    expect(hub.registry.writes).toHaveLength(2);
+    expect(hub.registry.writes[1].groups).toEqual([{ id: 'side-projects', name: 'Side Projects' }]);
+  });
+
+  test('Everyone and the named agents exclude each other, and no one chosen is everyone', async ({ page, hub }) => {
+    await openForm(page, hub, 'cfo');
+    await expect(checks(page)).toHaveCount(3);
+    await expect(form(page).locator('.form-check')).toHaveText(['Everyone', 'Second brain', 'Dev', 'Pinned']);
+    await expect(checks(page).nth(0)).toBeChecked();
+    await checks(page).nth(1).check();
+    await expect(checks(page).nth(0)).not.toBeChecked();
+    await checks(page).nth(2).check();
+    await save(page).click();
+    await expect(save(page)).toBeDisabled();
+    expect(hub.registry.writes[0].agents.find((a) => a.id === 'cfo').accepts).toEqual(['brain', 'dev']);
+    await expect(checks(page).nth(1)).toBeChecked();
+
+    await checks(page).nth(0).check();
+    await expect(checks(page).nth(1)).not.toBeChecked();
+    await expect(checks(page).nth(2)).not.toBeChecked();
+    await checks(page).nth(0).click();
+    await expect(checks(page).nth(0)).toBeChecked();
+    await expect(save(page)).toBeEnabled();
+    await save(page).click();
+    await expect(save(page)).toBeDisabled();
+    expect('accepts' in hub.registry.writes[1].agents.find((a) => a.id === 'cfo')).toBe(false);
+  });
+
+  test("a Codex persona's form says Codex, its own settings", async ({ page, hub }) => {
+    await openForm(page, hub, 'dev');
+    await expect(form(page).locator('.form-note-codex')).toHaveText('Codex, its own settings');
+    await expect(field(page, 'model')).toHaveCount(0);
+    await expect(field(page, 'effort')).toHaveCount(0);
+    await expect(field(page, 'role')).toHaveValue('Code');
+  });
+
+  test('New agent fills the defaults, slugs the id from the name, and opens the new thread', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    const open = page.locator('#agents-new');
+    await expect(open).toHaveText('New agent');
+    if (phone(page)) await expect(page.locator('#agent-panel')).toBeHidden();
+    await open.click();
+    await expect(page.locator('#agent-details')).toBeVisible();
+    await expect(page.locator('#agent-details .details-name')).toHaveText('New agent');
+    await expect(field(page, 'name')).toBeFocused();
+    await expect(field(page, 'group')).toHaveValue('work');
+    await expect(field(page, 'model').locator('option:checked')).toHaveText('Default (Claude Code)');
+    await expect(field(page, 'effort').locator('option:checked')).toHaveText('Default (Claude Code)');
+    await expect(field(page, 'cwd')).toHaveValue('');
+    await expect(checks(page)).toHaveCount(4);
+    if (phone(page)) {
+      await expect(page.locator('#agents-list')).toBeHidden();
+      await expect(page.locator('#agent-name')).toHaveText('New agent');
+    }
+
+    await field(page, 'name').fill('Scout Two');
+    await expect(field(page, 'agentId')).toHaveValue('scout-two');
+    await field(page, 'role').fill('Files');
+    await field(page, 'description').fill('Reads my files.');
+    await field(page, 'cwd').fill('~/scout');
+    await form(page).getByRole('button', { name: 'Create' }).click();
+
+    await expect(page.locator('#agent-name')).toHaveText('Scout Two');
+    await expect(page).toHaveURL(`${hub.origin}/?agent=scout-two`);
+    await expect(page.locator('#agent-messages .thread-line')).toHaveText('No messages yet.');
+    await expect(page.locator('#agent-details')).toBeHidden();
+    if (!phone(page)) await expect(row(page, 'Scout Two').locator('.role-chip')).toHaveText('Files');
+    const written = hub.registry.writes[0].agents.at(-1);
+    expect(written).toMatchObject({ id: 'scout-two', name: 'Scout Two', role: 'Files', description: 'Reads my files.', group: 'work', kind: 'persona', provider: 'claude' });
+    expect(written.cwd.endsWith('/scout')).toBe(true);
+    expect('model' in written).toBe(false);
+    expect('accepts' in written).toBe(false);
+  });
+
+  test('a duplicate id is refused and Cancel leaves New agent', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await page.locator('#agents-new').click();
+    await field(page, 'name').fill('CFO');
+    await expect(field(page, 'agentId')).toHaveValue('cfo');
+    await field(page, 'agentId').fill('cfo');
+    await field(page, 'name').fill('CFO again');
+    await expect(field(page, 'agentId')).toHaveValue('cfo');
+    await field(page, 'role').fill('Money');
+    await field(page, 'description').fill('Twice.');
+    await field(page, 'cwd').fill('/invented/twice');
+    await form(page).getByRole('button', { name: 'Create' }).click();
+    await expect(form(page).locator('.form-problems li')).toHaveText(['An agent with that id exists.']);
+    await form(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('#agent-details')).toBeHidden();
+    await expect(page.locator('#agents-new')).toBeFocused();
+    expect(hub.registry.writes).toHaveLength(0);
   });
 });
