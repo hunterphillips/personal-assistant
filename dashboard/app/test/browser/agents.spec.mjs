@@ -1577,3 +1577,107 @@ test.describe('with a live exchange between agents', () => {
     await expect(page.locator('#agent-request .request-title')).toHaveText(QUESTION);
   });
 });
+
+test.describe('with the @ picker in the composer', () => {
+  // CFO's thread is open and idle; Second brain (waiting on a question) and Dev (a Codex agent) are the agents it can name.
+  test.use({ hubOptions: seeded() });
+
+  const input = (page) => page.locator('#agent-input');
+  const picker = (page) => page.locator('#agent-mention-menu');
+  const options = (page) => picker(page).locator('.mention-option');
+  const lastSent = (hub) => hub.personas.sent[hub.personas.sent.length - 1];
+
+  test('typing @ and letters offers the matching agents, Enter inserts the name, Enter again sends with the mention, and the bubble shows a pill', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(messages(page)).toHaveCount(2);
+    await expect(picker(page)).toBeHidden();
+    await expect(input(page)).toHaveAttribute('aria-expanded', 'false');
+
+    await input(page).fill('Ask @sec');
+    await expect(picker(page)).toBeVisible();
+    await expect(options(page).locator('.mention-option-name')).toHaveText(['Second brain']);
+    await expect(options(page).first()).toHaveAttribute('aria-selected', 'true');
+    await expect(options(page).first().locator('.role-chip')).toHaveText('Notes');
+    await expect(input(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(input(page)).toHaveAttribute('aria-activedescendant', 'agent-mention-brain');
+    expect((await options(page).first().boundingBox()).height).toBeGreaterThanOrEqual(44);
+
+    await input(page).press('Enter');
+    await expect(picker(page)).toBeHidden();
+    await expect(input(page)).toHaveValue('Ask @Second brain ');
+    await expect(input(page)).toBeFocused();
+    expect(hub.personas.sent).toEqual([]);
+
+    await input(page).pressSequentially('about the lease');
+    await expect(picker(page)).toBeHidden();
+    await input(page).press('Enter');
+    await expect(messages(page)).toHaveCount(3);
+    await expect(input(page)).toHaveValue('');
+    expect(lastSent(hub).text).toBe('Ask @Second brain about the lease');
+    expect(lastSent(hub).context.mentions).toEqual(['brain']);
+    const bubble = messages(page).nth(2);
+    await expect(bubble.locator('.thread-message-text')).toHaveText('Ask @Second brain about the lease');
+    await expect(bubble.locator('.mention')).toHaveText('@Second brain');
+    await expect(bubble.locator('.mention')).toHaveAttribute('data-mention', 'brain');
+  });
+
+  test('Down moves, Escape closes and Enter then sends, Shift+Enter breaks the line, and @ inside a word opens nothing', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(messages(page)).toHaveCount(2);
+
+    await input(page).fill('@');
+    // Every other agent with a thread, in the list's order; the open agent, the project folder, and the system entry are left out.
+    await expect(options(page).locator('.mention-option-name')).toHaveText(['Second brain', 'Dev']);
+    await expect(options(page).nth(0)).toHaveAttribute('aria-selected', 'true');
+    await input(page).press('ArrowDown');
+    await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+    await expect(input(page)).toHaveAttribute('aria-activedescendant', 'agent-mention-dev');
+    await input(page).press('ArrowDown');
+    await expect(options(page).nth(0)).toHaveAttribute('aria-selected', 'true');
+    await input(page).press('ArrowUp');
+    await input(page).press('Tab');
+    await expect(input(page)).toHaveValue('@Dev ');
+    await expect(picker(page)).toBeHidden();
+    await expect(input(page)).toBeFocused();
+
+    await input(page).fill('Hi @d');
+    await expect(picker(page)).toBeVisible();
+    await input(page).press('Escape');
+    await expect(picker(page)).toBeHidden();
+    await expect(input(page)).toHaveValue('Hi @d');
+    await input(page).press('Enter');
+    await expect(messages(page)).toHaveCount(3);
+    expect(lastSent(hub).text).toBe('Hi @d');
+    expect(lastSent(hub).context.mentions).toBeUndefined();
+    await expect(messages(page).nth(2).locator('.mention')).toHaveCount(0);
+
+    await input(page).fill('@d');
+    await expect(picker(page)).toBeVisible();
+    await input(page).press('Shift+Enter');
+    await expect(input(page)).toHaveValue('@d\n');
+    await expect(picker(page)).toBeHidden();
+    await expect(messages(page)).toHaveCount(3);
+
+    await input(page).fill('mail a@d');
+    await expect(picker(page)).toBeHidden();
+    await input(page).fill('@zzz');
+    await expect(picker(page)).toBeHidden();
+  });
+
+  test('a click or a tap on an option inserts the name', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(messages(page)).toHaveCount(2);
+    await input(page).fill('Tell @de');
+    await expect(options(page).locator('.mention-option-name')).toHaveText(['Dev']);
+    await options(page).first().click();
+    await expect(picker(page)).toBeHidden();
+    await expect(input(page)).toHaveValue('Tell @Dev ');
+    await expect(input(page)).toBeFocused();
+    expect(hub.personas.sent).toEqual([]);
+
+    await input(page).press('Enter');
+    await expect(messages(page)).toHaveCount(3);
+    expect(lastSent(hub).context.mentions).toEqual(['dev']);
+    await expect(messages(page).nth(2).locator('.mention')).toHaveText('@Dev');
+  });
+});

@@ -85,7 +85,8 @@
               <form class="composer" id="agent-composer" hidden>
                 <label class="composer-label" id="agent-input-label" for="agent-input"></label>
                 <div class="composer-row">
-                  <textarea class="composer-input" id="agent-input" rows="2"></textarea>
+                  <div class="mention-menu" id="agent-mention-menu" role="listbox" aria-label="Agents" hidden></div>
+                  <textarea class="composer-input" id="agent-input" rows="2" aria-autocomplete="list" aria-controls="agent-mention-menu" aria-expanded="false"></textarea>
                   <button type="submit" class="button button-primary" id="agent-send">Send</button>
                 </div>
                 <div class="composer-tools">

@@ -56,9 +56,11 @@
 //   personaFor(hub, id) -> { agent, adapter } of the started persona, or
 //                          throws the HttpError above (404 no_such_agent,
 //                          409 not_a_persona, 409 persona_unavailable)
-//   startTurn({ hub, log, shuttingDown }, id, text) -> Promise<void>
+//   startTurn({ hub, log, shuttingDown }, id, text, { mentions }) -> Promise<void>
 //     503 shutting_down once closeStreams() has run, then personaFor(id),
-//     then adapter.send(agent, text, hub.modelFor(id)). Resolves as soon as the adapter has
+//     then adapter.send(agent, text, { model, effort, mentions }) with the
+//     model from hub.modelFor(id) and `mentions` the registry ids the
+//     message names with @ (absent when none). Resolves as soon as the adapter has
 //     accepted the turn and rejects with the mapped HttpError when it
 //     refuses; a turn rejected after acceptance is logged as
 //     persona_turn_rejected. The caller validates `text` and sends the reply.
@@ -145,7 +147,8 @@ export function createAgentRoutes({ hub, store = null, cmux = null, registry = n
     const { text } = body;
     if (typeof text !== 'string' || text.trim() === '') throw new HttpError(400, 'invalid_text');
     if (Buffer.byteLength(text, 'utf8') > limits.sendTextBytes) throw new HttpError(413, 'payload_too_large');
-    await startTurn({ hub, log, shuttingDown }, id, text);
+    const mentions = mentionsIn(body, hub);
+    await startTurn({ hub, log, shuttingDown }, id, text, mentions.length > 0 ? { mentions } : undefined);
     sendJson(res, 202, { ok: true });
   }
 
@@ -287,7 +290,7 @@ export function personaFor(hub, id) {
   return persona;
 }
 
-export async function startTurn({ hub, log, shuttingDown }, id, text) {
+export async function startTurn({ hub, log, shuttingDown }, id, text, { mentions = null } = {}) {
   if (shuttingDown()) throw new HttpError(503, 'shutting_down');
   const { agent, adapter } = personaFor(hub, id);
   // The adapter refuses (busy, shutting_down, invalid_*) before its first
@@ -298,7 +301,11 @@ export async function startTurn({ hub, log, shuttingDown }, id, text) {
   // carry it.
   // The hub resolves { id, effort }; the adapter takes { model, effort }.
   const resolved = typeof hub.modelFor === 'function' ? hub.modelFor(id) : null;
-  const turn = adapter.send(agent, text, resolved ? { model: resolved.id, effort: resolved.effort } : undefined);
+  const options = {
+    ...(resolved ? { model: resolved.id, effort: resolved.effort } : {}),
+    ...(Array.isArray(mentions) && mentions.length > 0 ? { mentions: [...mentions] } : {}),
+  };
+  const turn = adapter.send(agent, text, Object.keys(options).length > 0 ? options : undefined);
   let accepted = false;
   turn.catch((error) => {
     if (accepted) log({ event: 'persona_turn_rejected', agentId: id, error: error?.code ?? error?.name ?? 'unknown' });
@@ -309,6 +316,20 @@ export async function startTurn({ hub, log, shuttingDown }, id, text) {
     throw runtimeRefusal(error);
   }
   accepted = true;
+}
+
+// The agents a message names with @, from the body's optional `mentions`:
+// an array of at most MENTIONS_MAX registry ids, or 400 invalid_mentions.
+// Ids the registry does not list are dropped, not refused: the client
+// matched them against the snapshot it had, which may be a moment stale.
+const MENTIONS_MAX = 20;
+function mentionsIn(body, hub) {
+  if (!('mentions' in body)) return [];
+  const { mentions } = body;
+  if (!Array.isArray(mentions) || mentions.length > MENTIONS_MAX) throw new HttpError(400, 'invalid_mentions');
+  if (!mentions.every((id) => typeof id === 'string' && AGENT_ID.test(id))) throw new HttpError(400, 'invalid_mentions');
+  const known = new Set(hub.snapshot().agents.map((agent) => agent.id));
+  return [...new Set(mentions.filter((id) => known.has(id)))];
 }
 
 function runtimeRefusal(error) {

@@ -467,6 +467,66 @@
     }
   }
 
+  // The ids of the agents `text` names with @: "@" then an agent's display
+  // name or id as a whole token (case-insensitive, not followed by a word
+  // character), the longest name winning where one is a prefix of another
+  // ("@Focus scanner" is that agent, not Focus), in order of first
+  // appearance, each once. Code spans and fenced blocks are skipped, as
+  // the pill pass skips them. `agents` is the snapshot's list; only
+  // agents with a thread (personas) count.
+  function mentionIds(text, agents) {
+    var names = [];
+    var ids = {};
+    var list = agents || [];
+    for (var i = 0; i < list.length; i += 1) {
+      var agent = list[i];
+      if (!agent || !isPersona(agent) || typeof agent.id !== 'string' || !agent.id) continue;
+      var words = [agent.id];
+      if (typeof agent.name === 'string' && agent.name.trim()) words.push(agent.name.trim());
+      for (var j = 0; j < words.length; j += 1) {
+        var key = words[j].toLowerCase();
+        if (ids[key] === undefined) {
+          ids[key] = agent.id;
+          names.push(words[j]);
+        }
+      }
+    }
+    if (names.length === 0 || typeof text !== 'string' || text.indexOf('@') === -1) return [];
+    names.sort(function (a, b) { return b.length - a.length; });
+    var escaped = names.map(function (word) { return word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); });
+    var pattern = new RegExp('(^|[^\\w@])@(' + escaped.join('|') + ')(?![\\w-])', 'gi');
+    var prose = text.replace(/```[\s\S]*?(```|$)/g, ' ').replace(/`[^`\n]*`/g, ' ');
+    var found = [];
+    var match;
+    while ((match = pattern.exec(prose)) !== null) {
+      var id = ids[match[2].toLowerCase()];
+      if (id && found.indexOf(id) === -1) found.push(id);
+    }
+    return found;
+  }
+
+  // The agents the composer offers after "@": every persona but the one
+  // whose thread is open, in the Agents list's order (pinned first, then
+  // the groups), narrowed to those whose name, id, role, or a word of the
+  // name starts with `query` (case-insensitive). An empty query offers all.
+  function mentionCandidates(agents, groupList, excludeId, query) {
+    var ordered = [];
+    var list = groups(agents, [], groupList);
+    for (var g = 0; g < list.length; g += 1) {
+      for (var e = 0; e < list[g].entries.length; e += 1) {
+        var agent = list[g].entries[e].agent;
+        if (agent && isPersona(agent) && agent.id !== excludeId) ordered.push(agent);
+      }
+    }
+    var q = String(query || '').trim().toLowerCase();
+    if (!q) return ordered;
+    return ordered.filter(function (agent) {
+      var name = String(agent.name || '').toLowerCase();
+      var fields = [name, String(agent.id || '').toLowerCase(), String(agent.role || '').toLowerCase()].concat(name.split(/\s+/));
+      return fields.some(function (field) { return field && field.indexOf(q) === 0; });
+    });
+  }
+
   // The row's state line for a persona or a session, or null. A Codex
   // thread whose turn is open is still answerable here, so its turn wins
   // over a closed terminal; a closed terminal is all there is to say
@@ -580,6 +640,7 @@
     var modelList = document.getElementById('agent-model-list');
     var effortRow = document.getElementById('agent-effort-row');
     var modelReset = document.getElementById('agent-model-reset');
+    var mentionMenu = document.getElementById('agent-mention-menu');
 
     var state = null;
     var visible = false;
@@ -605,6 +666,7 @@
     var drafts = {}; // unsent composer text by agent id, for agents not selected
     var menuOpen = false; // the model picker is open for the selected agent
     var menuKey = null; // what the picker was last built from
+    var mention = null; // the open @ picker: { start, candidates, index }, or null
     var tick = null;
 
     // The open agent or session, or null.
@@ -1639,6 +1701,7 @@
     // Puts the current draft away and brings out the chosen agent's.
     function setSelected(id) {
       if (menuOpen) closeModelMenu(false);
+      closeMentionMenu();
       if (selectedId) drafts[selectedId] = input.value;
       selectedId = id;
       input.value = (id && drafts[id]) || '';
@@ -1847,12 +1910,15 @@
     function sendMessage() {
       var agent = selectedAgent();
       if (!isPersona(agent) || send.disabled) return;
+      closeMentionMenu();
       var text = input.value.trim();
       if (!text) {
         input.focus();
         return;
       }
-      act(agent, 'send', { text: text }, function (ok) {
+      var mentions = mentionIds(text, state && state.agents);
+      var body = mentions.length > 0 ? { text: text, mentions: mentions } : { text: text };
+      act(agent, 'send', body, function (ok) {
         if (ok) input.value = '';
         input.focus();
       });
@@ -2041,11 +2107,130 @@
       closeModelMenu(false);
     });
 
+    // The @ picker. While the caret follows "@" at a word start (the start
+    // of the text or after whitespace, with no line break since), a listbox
+    // over the input offers the agents that match what was typed after it.
+    // Up and Down move, Enter or Tab chooses, Escape closes; a click or a
+    // tap chooses too. Choosing replaces "@letters" with "@Name ".
+    function mentionToken() {
+      var caret = input.selectionStart;
+      if (typeof caret !== 'number' || caret !== input.selectionEnd) return null;
+      var before = input.value.slice(0, caret);
+      var at = before.lastIndexOf('@');
+      if (at === -1) return null;
+      if (at > 0 && !/\s/.test(before.charAt(at - 1))) return null;
+      var query = before.slice(at + 1);
+      if (query.indexOf('\n') !== -1) return null;
+      return { start: at, query: query };
+    }
+
+    function updateMentionMenu() {
+      var agent = selectedAgent();
+      var token = isPersona(agent) && !input.disabled ? mentionToken() : null;
+      if (!token) return closeMentionMenu();
+      var candidates = mentionCandidates(state && state.agents, state && state.groups, agent.id, token.query);
+      if (candidates.length === 0) return closeMentionMenu();
+      var keep = mention && mention.start === token.start ? mention.candidates[mention.index] : null;
+      var index = 0;
+      if (keep) {
+        for (var i = 0; i < candidates.length; i += 1) if (candidates[i].id === keep.id) index = i;
+      }
+      mention = { start: token.start, candidates: candidates, index: index };
+      renderMentionMenu();
+    }
+
+    function renderMentionMenu() {
+      mentionMenu.textContent = '';
+      for (var i = 0; i < mention.candidates.length; i += 1) {
+        var agent = mention.candidates[i];
+        var option = element('button', 'mention-option');
+        option.type = 'button';
+        option.id = 'agent-mention-' + agent.id;
+        option.setAttribute('role', 'option');
+        option.setAttribute('data-agent', agent.id);
+        option.setAttribute('aria-selected', i === mention.index ? 'true' : 'false');
+        option.appendChild(element('span', 'mention-option-name', agent.name));
+        if (roleChip(agent)) option.appendChild(chip('role-chip', agent.role));
+        mentionMenu.appendChild(option);
+      }
+      mentionMenu.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      input.setAttribute('aria-activedescendant', 'agent-mention-' + mention.candidates[mention.index].id);
+    }
+
+    function closeMentionMenu() {
+      if (!mention) return;
+      mention = null;
+      mentionMenu.hidden = true;
+      mentionMenu.textContent = '';
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
+    }
+
+    function moveMention(step) {
+      var count = mention.candidates.length;
+      mention.index = (mention.index + step + count) % count;
+      renderMentionMenu();
+    }
+
+    function chooseMention(agent) {
+      if (!mention || !agent) return;
+      var caret = input.selectionStart;
+      var inserted = '@' + agent.name + ' ';
+      input.value = input.value.slice(0, mention.start) + inserted + input.value.slice(caret);
+      var next = mention.start + inserted.length;
+      closeMentionMenu();
+      input.focus();
+      input.setSelectionRange(next, next);
+    }
+
+    input.addEventListener('input', updateMentionMenu);
+    input.addEventListener('click', updateMentionMenu);
+    input.addEventListener('blur', function () {
+      // A press on an option keeps the focus here (mousedown below), so a
+      // blur means the keyboard went somewhere else.
+      closeMentionMenu();
+    });
+
+    mentionMenu.addEventListener('mousedown', function (event) {
+      if (event.target.closest('button')) event.preventDefault();
+    });
+    mentionMenu.addEventListener('click', function (event) {
+      var option = event.target.closest('.mention-option');
+      if (!option || !mention) return;
+      var id = option.getAttribute('data-agent');
+      for (var i = 0; i < mention.candidates.length; i += 1) {
+        if (mention.candidates[i].id === id) return chooseMention(mention.candidates[i]);
+      }
+    });
+
     input.addEventListener('keydown', function (event) {
-      if (event.key !== 'Enter' || event.isComposing) return;
+      if (event.isComposing) return;
+      if (mention) {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          moveMention(event.key === 'ArrowDown' ? 1 : -1);
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeMentionMenu();
+          return;
+        }
+        if ((event.key === 'Enter' && !event.shiftKey && !event.altKey) || event.key === 'Tab') {
+          event.preventDefault();
+          chooseMention(mention.candidates[mention.index]);
+          return;
+        }
+      }
+      if (event.key !== 'Enter') return;
       if (event.shiftKey || event.altKey) return;
       event.preventDefault();
       sendMessage();
+    });
+    // Moving the caret with the keyboard can leave or enter an @ token.
+    input.addEventListener('keyup', function (event) {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End') updateMentionMenu();
     });
 
     // Turning a phone into a desk with nothing chosen opens the pinned
@@ -2104,6 +2289,8 @@
     previewText: previewText,
     agentName: agentName,
     delegationParts: delegationParts,
+    mentionIds: mentionIds,
+    mentionCandidates: mentionCandidates,
     stateLine: stateLine,
     formatInput: formatInput,
     displayName: displayName,

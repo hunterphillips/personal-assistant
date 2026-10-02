@@ -428,3 +428,24 @@ test('without a writable registry the settings routes are not there', async (t) 
   assert.equal((await put(app, '/api/agents/cfo/settings', settingsBody())).status, 404);
   assert.equal((await post(app, '/api/agents', { id: 'x', ...settingsBody() })).status, 404);
 });
+
+test('send passes the mentioned agents through, drops ids the registry lacks, and refuses a malformed list', async (t) => {
+  const app = await startAgents(t);
+  const response = await post(app, '/api/agents/cfo/send', { text: 'Ask @DEV and @OPS.', mentions: ['dev', 'ops', 'nobody', 'dev'] });
+  assert.equal(response.status, 202);
+  assert.deepEqual(app.adapter.calls, [['send', 'cfo', 'Ask @DEV and @OPS.']]);
+  assert.deepEqual(app.adapter.sendOptions, [{ model: null, effort: null, mentions: ['dev', 'ops'] }]);
+  app.adapter.calls.length = 0;
+  app.adapter.sendOptions.length = 0;
+
+  // Only unknown ids: the turn starts with no mentions at all.
+  assert.equal((await post(app, '/api/agents/cfo/send', { text: 'Hi', mentions: ['nobody'] })).status, 202);
+  assert.deepEqual(app.adapter.sendOptions, [{ model: null, effort: null }]);
+  app.adapter.sendOptions.length = 0;
+
+  for (const mentions of ['dev', { dev: true }, [7], ['not an id!'], Array.from({ length: 21 }, () => 'dev')]) {
+    const refused = await post(app, '/api/agents/cfo/send', { text: 'Hi', mentions });
+    assert.deepEqual([refused.status, refused.json], [400, { error: 'invalid_mentions' }], JSON.stringify(mentions));
+  }
+  assert.deepEqual(app.adapter.sendOptions, []);
+});

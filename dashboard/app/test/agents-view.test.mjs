@@ -293,3 +293,48 @@ test('delegationParts gives each state its sentence with the agent as a linkable
   assert.deepEqual(parts({ state: 'refused', reason: 'odd', to: 'cfo', text: 'CFO said no.' }), ['CFO said no.']);
   assert.deepEqual(parts({ state: 'sent', text: 'Messaged someone' }), ['Messaged someone']);
 });
+
+const MENTION_AGENTS = [
+  { id: 'assistant', name: 'Assistant', role: 'Assistant', kind: 'persona', provider: 'claude', group: 'personal', pinned: true },
+  { id: 'cfo', name: 'CFO', role: 'Money', kind: 'persona', provider: 'claude', group: 'work' },
+  { id: 'brain', name: 'Second brain', role: 'Notes', kind: 'persona', provider: 'claude', group: 'personal' },
+  { id: 'focus', name: 'Focus', role: 'Tasks', kind: 'persona', provider: 'claude', group: 'personal' },
+  { id: 'scanner', name: 'Focus scanner', role: 'Scans', kind: 'persona', provider: 'claude', group: 'personal' },
+  { id: 'dev', name: 'Dev', role: 'Code', kind: 'persona', provider: 'codex', group: 'personal' },
+  { id: 'catchup', name: 'Catchup', role: 'Work', kind: 'project', provider: 'codex', group: 'work' },
+];
+
+test('mentionIds finds @Name and @id tokens, case-insensitive, longest name first, once each, in order', () => {
+  const ids = (text) => plain(view.mentionIds(text, MENTION_AGENTS));
+  assert.deepEqual(ids('Ask @CFO and @Second brain, then @cfo again.'), ['cfo', 'brain']);
+  assert.deepEqual(ids('@second BRAIN knows; so does @Cfo.'), ['brain', 'cfo']);
+  assert.deepEqual(ids('Tell @Focus scanner to run.'), ['scanner']);
+  assert.deepEqual(ids('Tell @Focus to run, and @Focus scanner too.'), ['focus', 'scanner']);
+  assert.deepEqual(ids('mail me at hunter@cfo.example and @brain'), ['brain']);
+  assert.deepEqual(ids('Nothing here.'), []);
+  assert.deepEqual(ids('@Nobody knows and @CF is short.'), []);
+  // A token must end: "@CFOs" is not CFO; "@CFO," and "@CFO." are.
+  assert.deepEqual(ids('@CFOs are many'), []);
+  assert.deepEqual(ids('@CFO, @CFO.'), ['cfo']);
+  // Only agents with a thread count; a project folder has none.
+  assert.deepEqual(ids('@Catchup please'), []);
+  // Code is skipped, as the pill pass skips it.
+  assert.deepEqual(ids('Run `@CFO` in code, but ask @brain'), ['brain']);
+  assert.deepEqual(ids('```\n@CFO\n```\n@Dev'), ['dev']);
+  assert.deepEqual(ids('', MENTION_AGENTS), []);
+  assert.deepEqual(plain(view.mentionIds('@CFO', [])), []);
+});
+
+test('mentionCandidates lists the other personas in list order and narrows on name, id, role, or a name word', () => {
+  const groupList = [{ id: 'work', name: 'Work' }, { id: 'personal', name: 'Personal' }];
+  const names = (excludeId, query) => plain(view.mentionCandidates(MENTION_AGENTS, groupList, excludeId, query).map((a) => a.id));
+  // Pinned first, then the groups in the registry's order; the open agent and project folders are left out.
+  assert.deepEqual(names('assistant', ''), ['cfo', 'brain', 'focus', 'scanner', 'dev']);
+  assert.deepEqual(names('cfo', ''), ['assistant', 'brain', 'focus', 'scanner', 'dev']);
+  assert.deepEqual(names('assistant', 'c'), ['cfo', 'dev']); // CFO by name, Dev by its role "Code"
+  assert.deepEqual(names('assistant', 'CF'), ['cfo']);
+  assert.deepEqual(names('assistant', 'brain'), ['brain']); // a word of "Second brain"
+  assert.deepEqual(names('assistant', 'focus s'), ['scanner']);
+  assert.deepEqual(names('assistant', 'zzz'), []);
+  assert.deepEqual(plain(view.mentionCandidates([], groupList, null, '')), []);
+});
