@@ -93,8 +93,8 @@ picks one up and ends by updating it.
 
 ## Structure
 
-- `dashboard/app/`: the daemon. Two runtime dependencies (the Claude Agent
-  SDK and `ws`); run `npm ci` after pulling. `var/` is local state.
+- `dashboard/app/`: the daemon. Three runtime dependencies (the Claude Agent
+  SDK, `ws`, and `zod`); run `npm ci` after pulling. `var/` is local state.
 - `dashboard/prototype/`: a static design study with illustrative data; its
   own repository, ignored here.
 - `registry/agents.json`: the agent registry.

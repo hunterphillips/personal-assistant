@@ -100,6 +100,8 @@ Back up `var/` to keep the session pointers. `POST /api/agents/<id>/new-thread` 
 
 A persona turn is interrupted 30 minutes after it starts (`TIMEOUTS.turnMaxMs`), and that clock keeps running while the persona waits on an answer: a question raised 10 minutes in leaves 20 minutes to answer it. The persona then shows `turn_timeout` as its last error until its next turn. Changing a persona's `cwd` in the registry keeps its session pointer and its working folder until a new thread starts; New thread moves the persona to the new folder.
 
+Agents message each other through the ask tool every turn carries (README, Delegation). An agent's `accepts` in the registry, edited from its settings, is what bounds who may message it; a message to an agent with a turn open is refused as busy, and a reply that takes longer than five seconds (`TIMEOUTS.delegationWaitMs`) lands in the sender's thread as a line when it arrives and is prepended to the sender's next turn. Replies waiting for that turn live in memory only: a restart drops them, and the lines in the thread remain. The log's `delegation_*` entries say what was asked of whom and how it ended.
+
 ## Running Codex sessions through the dashboard
 
 The dashboard follows Codex threads on one shared `codex app-server` that you own from a terminal; it never starts that server itself. Both helpers read `DASHBOARD_CODEX_DIR` (default `var/codex`).

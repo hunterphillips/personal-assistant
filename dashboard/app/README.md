@@ -111,10 +111,10 @@ snapshot; concurrent requests share one check. It stays for one release.
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
                "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
                "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
-               "lastError": null, "costUsd": 0.42, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null }, "agent": { "id": "opus", "effort": null } }, "accepts": null },
+               "lastError": null, "costUsd": 0.42, "lastLineAt": null, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null }, "agent": { "id": "opus", "effort": null } }, "accepts": null },
              { "id": "assistant", "name": "Assistant", "role": "Assistant", "description": "...", "group": "personal", "kind": "persona",
                "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "provider": "claude", "pinned": true,
-               "state": "idle", "pending": null, "lastMessage": null, "lastError": null, "costUsd": null,
+               "state": "idle", "pending": null, "lastMessage": null, "lastError": null, "costUsd": null, "lastLineAt": null,
                "model": { "id": null, "effort": null, "source": "default", "default": { "id": null, "effort": null }, "agent": { "id": null, "effort": null } }, "accepts": null }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
                  "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
@@ -564,8 +564,8 @@ message with `kind: 'delegation'` is a centered line about an exchange
 between agents, its `state` one of `sent` ("Messaged CFO"), `busy`,
 `refused` (with `reason`), `waiting`, `failed`, or `finished`, the last a
 collapsed "CFO replied: <summary>" row that opens to the reply; the agent's
-name links to its thread. Nothing posts these yet (phase 3's next piece
-does); the view renders what the store holds. Every message, and the brief notice's memo, renders
+name links to its thread. The daemon posts them as the ask tool runs
+(Delegation, below). Every message, and the brief notice's memo, renders
 its Markdown (`public/markdown.js`): paragraphs with their line breaks,
 headings, bulleted and numbered lists nested by indent, bold, italic,
 inline code, fenced code blocks, blockquotes, rules, and http, https, and
@@ -685,6 +685,10 @@ events. Each persona in `agents` carries:
   could not be loaded; run `npm ci`), or `start_failed` (its session pointer
   could not be read).
 - `costUsd`: null, or the session's running total.
+- `lastLineAt`: null, or when the daemon last wrote a line into the thread
+  outside the persona's own turn that is not its last message: a
+  delegation line landing after a pending reply. The thread view fetches
+  again when it changes.
 - `model` (Claude personas only): `{ id, effort, source, default, agent }`,
   what the next turn runs on. `id` is a model id or alias or null, `effort` one
   of `low`, `medium`, `high`, `xhigh`, `max`, or null; null means Claude
@@ -697,7 +701,8 @@ events. Each persona in `agents` carries:
   is the registry's own `model` and `effort`, null where the entry sets
   none; the settings form edits that pair.
 - `accepts` (personas): the registry's `accepts` list, or null for
-  everyone. The settings form edits it; nothing enforces it yet.
+  everyone. The settings form edits it, and the ask tool enforces it
+  (Delegation, below).
 
 The snapshot's `settings` is the settings file's view (`lib/settings.mjs`,
 below): `ok` false with `error` when the file could not be read, and the
@@ -919,6 +924,57 @@ read-only fake) both routes are 404.
   turns get up to 30 seconds to finish, and any still running are aborted
   and given 2 seconds to end.
 
+### Delegation
+
+Every Claude agent's turn carries one in-process MCP server, `agents`,
+with one tool, `ask({ to, message })` (`lib/delegation.mjs`). The adapter
+attaches it through its `turnTools` hook (`lib/runtime/claude.mjs`): the
+hook's result is copied by name, `mcpServers` and `allowedTools`, never
+spread, so it cannot change `permissionMode` or anything else about the
+turn. The tool's description lists the other agents that take messages
+from the sender (`accepts` absent or null means everyone), with each one's
+id, name, role, and description. The sender is the agent whose turn is
+running; the tool's arguments cannot name another.
+
+- The message runs as a turn of the receiver through its own adapter. The
+  receiver's thread shows it as written, with `from` the sender's id, and
+  the model gets `From <sender>, an agent in this system (not the user):
+  <message>`. Replies the receiver gives are its own messages in its
+  thread; the sender's thread gets lines.
+- Lines in the sender's thread are system messages with
+  `kind: 'delegation'`, `state`, `to`, `text`, `summary`, and
+  `delegationId` (a refusal carries `reason` instead): `sent` ("Messaged
+  CFO"), `busy` (the receiver has a turn open), `waiting` (the receiver
+  raised a question or approval; the card lives in the receiver's thread
+  and the line links there), `finished` (`text` is the reply, `summary`
+  its first sentence; the view prefixes "CFO replied:"), `failed` (the
+  turn ended with no text after an error, an interrupt, or a timeout), and
+  `refused` with reason `unknown`, `not_an_agent` (a project folder),
+  `unavailable`, `not_allowed`, `cycle` (the receiver is the sender or
+  already in the chain), or `depth`. The sentences are the ones the view
+  renders; a line never becomes the row's preview.
+- The checks run in that order: unknown, not an agent, unavailable,
+  accepts, cycle, depth; then the receiver's adapter refuses `busy`
+  before any await.
+- The tool waits `delegationWaitMs` for the receiver's turn to end and
+  answers with the reply text. Past that it answers
+  `pending: <delegationId>. <name> will answer in this thread.`; the
+  finished or failed line posts when the turn ends, and the reply is kept
+  for the sender's next own turn (a turn the user starts, never a hop from
+  another agent), for the session the ask was made in (New thread drops
+  it), at most `delegationPendingReplies` newest. That turn's prompt
+  starts with "Replies that arrived since your last turn:" and one
+  `From <name> (<delegationId>): <reply>` per reply, then the user's text;
+  the thread shows only the text. The replies count as delivered once the
+  turn's init arrives; a turn that fails before it offers them again.
+- When the user's message mentions agents, the prompt ends with
+  "Agents mentioned: <Name> (id `<id>`), ..." so the model has each id.
+- Nothing here throws into the SDK: a line the store refuses or any other
+  failure is logged as `delegation_error` and answered as a sentence. The
+  log also carries `delegation_sent`, `delegation_refused` (reason), and
+  `delegation_finished` (status, `waitedMs`, `inline`). A hook that throws
+  is logged as `persona_tools_error` and the turn runs without the tool.
+
 ### What runs without a card
 
 Only tool calls that reach `canUseTool` produce a card. These do not:
@@ -930,6 +986,8 @@ Only tool calls that reach `canUseTool` produce a card. These do not:
 - File reads inside the working directory and read-only shell commands.
 - Skills. The Skill tool never asks, though tools a skill then calls go
   through the usual checks.
+- The ask tool (`mcp__agents__ask`), which the daemon names in
+  `allowedTools` on every turn. Its bounds are the daemon's, not a card.
 
 Subagents are not on this list. Their tool prompts reach the same callback
 (the SDK passes the subagent's `agentID` in the callback options), so they
@@ -954,6 +1012,11 @@ directory.
 | `TIMEOUTS.drainMs` | 30 seconds | Wait for running turns at shutdown |
 | `TIMEOUTS.abortGraceMs` | 2 seconds | Wait for aborted turns to end after the drain |
 | `TIMEOUTS.turnMaxMs` | 30 minutes | A persona turn, time waiting on an answer included, is interrupted after this |
+| `LIMITS.delegationDepth` | 2 | Agents a message may pass through before the sender: the user asks A, A may ask B, B may ask C, C may not ask |
+| `LIMITS.delegationMessageChars` | 4000 | Characters of one ask tool message |
+| `LIMITS.delegationReplyChars` | 4000 | Characters of a reply handed back to the sender's turn or prepended to its next prompt |
+| `LIMITS.delegationPendingReplies` | 5 | Replies carried into the sender's next turn |
+| `TIMEOUTS.delegationWaitMs` | 5 seconds | How long the ask tool waits for the receiver before answering pending |
 | `LIMITS.codexThreads` | 20 | Codex threads listed and followed; past that the oldest idle unbound thread is dropped |
 | `LIMITS.codexFrameBytes` | 1 MiB | One frame from the Codex app-server; a larger one is dropped |
 | `TIMEOUTS.codexPollMs` | 3 seconds | How often the Codex adapter checks `owner.json` and the daemon checks `bindings.json` |
