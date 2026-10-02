@@ -35,7 +35,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/brief/latest` | Latest brief metadata. |
 | `GET /embedded/brief/<date>?revision=<revision>` | One brief viewer. |
 | `POST /api/brief/feedback` | Saves feedback for one brief. |
-| `POST /api/agents/<id>/send` | Sends `{"text": "..."}` to a persona; 202 once the turn has started (below). |
+| `POST /api/agents/<id>/send` | Sends `{"text": "...", "mentions": [...]}` to a persona (`mentions`, the agent ids the text names with @, is optional); 202 once the turn has started (below). |
 | `POST /api/agents/<id>/answer` | Answers the persona's open question or approval. |
 | `POST /api/agents/<id>/interrupt` | Stops the persona's turn. |
 | `POST /api/agents/<id>/new-thread` | Starts the persona on a new session. |
@@ -601,6 +601,18 @@ changing the model." under the composer. New thread drops the choice. At
 phone width the picker is a sheet along the bottom. A Codex agent shows
 "Codex, its own settings" in its place.
 
+Typing `@` at the start of a word in the input opens a list over it of
+the other agents that take messages, in the Agents list's order, narrowed
+as letters follow (by name, id, role, or a word of the name). Up and Down
+move, Enter or Tab chooses, Escape closes, and a click or tap chooses;
+the chosen name goes in as `@CFO ` and Enter then sends as usual. On send
+the view works out which agents the text names (`@Name` or `@id` as a
+whole token, case-insensitive, the longest name winning, code skipped)
+and posts them as `mentions`, so the bubble shows them as pills and the
+agent's prompt names them. A mention is a reference, not a delivery: the
+agent decides whether to message the agent named. On a phone the list
+sits over the input the same way, so what is typed stays in view.
+
 ### Health view
 
 The Health view, at `/health` and the last entry on the rail, opens with
@@ -733,7 +745,7 @@ exact `Origin`, JSON for `send` and `answer`, no body for `interrupt` and
 
 | Route | Success | Refusals |
 | --- | --- | --- |
-| `POST send` `{"text": "..."}` | 202 `{"ok": true}` | 400 `invalid_body` (JSON that is not an object), 400 `invalid_text` (missing or blank), 413 `payload_too_large` over 16 KiB of text or 32 KiB of body, 409 `busy`, 503 `shutting_down` |
+| `POST send` `{"text": "...", "mentions"?: ["cfo"]}` | 202 `{"ok": true}` | 400 `invalid_body` (JSON that is not an object), 400 `invalid_text` (missing or blank), 400 `invalid_mentions` (not an array of at most 20 agent ids; ids the registry does not list are dropped, not refused), 413 `payload_too_large` over 16 KiB of text or 32 KiB of body, 409 `busy`, 503 `shutting_down` |
 | `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 413 `payload_too_large` over 32 KiB, 409 `no_such_request` |
 | `POST interrupt` | 200 `{"ok": true}` | |
 | `POST new-thread` | 200 `{"ok": true}` | 409 `busy`, 503 `shutting_down`, 500 `thread_reset_failed` |
