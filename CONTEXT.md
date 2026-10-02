@@ -14,9 +14,11 @@ are agents.
 _Avoid_: persona, domain, domain persona, domain system, bot
 
 **Assistant**:
-The agent pinned above the others. Hunter talks to it by default; it reads
-anything and hands judgment to the agent that owns it.
-_Avoid_: orchestrator, chief of staff, router, system
+The agent Hunter pins and talks to by default. Its prompt makes it a
+generalist: it reads anything and hands judgment to the agent that owns
+it. Otherwise an agent like any other; any agent can be pinned, and more
+than one can be.
+_Avoid_: orchestrator, chief of staff, router, system, main agent
 
 **Group**:
 A heading agents are listed under, such as Work or Personal. Any name;
@@ -67,8 +69,9 @@ unavailable, and Settings.
 _Avoid_: status, ops, admin
 
 **Settings**:
-Where defaults live: the system's default model and effort, and, per agent,
-its own name, description, folder, model, and who may message it.
+Where defaults live: the system's default model and effort, which agent
+receives the brief, and, per agent, its own name, description, folder,
+model, and who may message it (everyone unless Hunter narrows it).
 _Avoid_: config, configuration, preferences
 
 **Model**:
