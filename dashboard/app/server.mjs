@@ -1,7 +1,8 @@
 // Entry point: load configuration, load the agent registry and the Codex
 // terminal bindings, compose the jobs view, thread store, runtime
 // adapters (Claude for personas, Codex for the shared app-server's threads),
-// the cmux client, state hub, the Goals, Feed, and feed instructions
+// the cmux client, the routine store (loaded before the hub, so its
+// snapshot lists them), state hub, the Goals, Feed, and feed instructions
 // readers, the settings store, the brief notices, and app, start the
 // personas, seed the settings file on first start, post any brief notice
 // not yet in the thread of the agent the settings name, listen on
@@ -37,6 +38,7 @@ import { createGoals } from './lib/goals.mjs';
 import { createHub } from './lib/hub.mjs';
 import { createNotices } from './lib/notices.mjs';
 import { createRegistry } from './lib/registry.mjs';
+import { createRoutines } from './lib/routines.mjs';
 import { createJobs } from './lib/jobs.mjs';
 import { createSettings } from './lib/settings.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
@@ -107,9 +109,13 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   });
   const settings = createSettings({ path: config.settingsPath, log: logEntry });
   await settings.load();
+  const routines = createRoutines({ dir: config.routinesDir, limits: config.limits, log: logEntry });
+  await routines.load();
   const hub = createHub({
     registry,
     jobs,
+    routines,
+    timeZone: config.timeZone,
     focus,
     brief,
     timeouts: config.timeouts,
@@ -134,7 +140,9 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     limits: config.limits,
     log: logEntry,
   });
-  const app = createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, registry, log: logEntry });
+  const app = createApp({
+    config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, registry, routines, log: logEntry,
+  });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;
   server.requestTimeout = config.timeouts.requestMs;

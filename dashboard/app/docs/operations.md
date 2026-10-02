@@ -142,6 +142,10 @@ The Agents view and the persona runtime read the agent registry from `personal-a
 
 Goals needs a `second-brain` persona in the registry and reads its notes from that persona's cwd. The Feed reads `feed/items/` at the umbrella root (`DASHBOARD_FEED_DIR`) and `daily-brief/watch/relevance.md` (`DASHBOARD_FEED_INSTRUCTIONS`); its Discuss and its Feed instructions composer need a `watch` persona.
 
+## Routines
+
+Routines, the scheduled prompts the daemon runs itself, are files under `personal-assistant/routines/` (`DASHBOARD_ROUTINES_DIR`, default `../../routines` from the app directory), one `<id>.json` each, written by the daemon through the dashboard and tracked in the umbrella repository like the registry. The daemon reads the directory once at start; a file it cannot read is logged `routine_invalid` and left alone, and the directory is created, user-only, on the first write. Each routine's runs are an append-only log at `routines/runs/<id>.jsonl`, kept to the newest 200 lines and ignored by git; deleting a routine deletes its log. Back up `routines/` with the registry; a lost runs log costs only the run history and the catch-up marker, so the next tick treats the routine as new.
+
 ## cmux
 
 The dashboard reads cmux's terminals and agent sessions over cmux's own socket. cmux's default socket mode admits only processes cmux started, so the daemon cannot connect until this is done once. Verified on 2026-09-28 with cmux 0.64.25; the app was quit throughout.

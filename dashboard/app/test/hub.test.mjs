@@ -77,8 +77,9 @@ function makeHub(overrides = {}) {
     cmux: overrides.cmux ?? null,
     adaptersDisabled: overrides.adaptersDisabled ?? null,
     settings: overrides.settings ?? null,
+    routines: overrides.routines ?? null,
     log: (entry) => logs.push(entry),
-    now: () => new Date('2026-09-25T12:00:00.000Z'),
+    now: () => new Date(overrides.now ?? '2026-09-25T12:00:00.000Z'),
   });
   const deltas = [];
   hub.subscribe((delta) => deltas.push(delta));
@@ -102,7 +103,7 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
   assert.deepEqual(snapshot.agents, [
     {
       id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
-      provider: 'claude', state: 'unavailable', pending: null, forwarded: [], lastMessage: null, lastError: null, costUsd: null, lastLineAt: null,
+      provider: 'claude', state: 'unavailable', pending: null, forwarded: [], needsYou: false, lastMessage: null, lastError: null, costUsd: null, lastLineAt: null,
       model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } },
       permission: { level: 'ask', source: 'system', agent: null, default: 'ask' }, accepts: null,
     },
@@ -227,7 +228,7 @@ test('a registry change bumps the revision with a registry and agents patch', ()
   const { hub, deltas } = makeHub({ registry });
   registry.emit(registryState([agent('cfo'), agent('ops', { kind: 'system', provider: undefined })]));
   assert.equal(hub.snapshot().revision, 2);
-  assert.deepEqual(deltas.map((d) => [d.revision, Object.keys(d.patch).sort()]), [[2, ['agents', 'groups', 'registry']]]);
+  assert.deepEqual(deltas.map((d) => [d.revision, Object.keys(d.patch).sort()]), [[2, ['agents', 'groups', 'registry', 'routines']]]);
   assert.deepEqual(deltas[0].patch.groups, []);
   assert.deepEqual(deltas[0].patch.agents.map((a) => a.id), ['cfo', 'ops']);
   assert.equal('provider' in deltas[0].patch.agents[1], false);
@@ -439,7 +440,7 @@ test('start seeds a persona from its adapter and the last cached message', async
   assert.deepEqual(adapter.calls, [['start', 'cfo']]);
   assert.deepEqual(persona(hub), {
     id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
-    provider: 'claude', state: 'error', pending: null, forwarded: [], lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
+    provider: 'claude', state: 'error', pending: null, forwarded: [], needsYou: false, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
     lastError: 'Invented failure', costUsd: 0.5, lastLineAt: null,
     model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } },
     permission: { level: 'ask', source: 'system', agent: null, default: 'ask' }, accepts: null,
@@ -977,4 +978,115 @@ test('lastMessage keeps the sender of a message another agent sent, on an event 
   await cached.hub.start();
   assert.deepEqual(persona(cached.hub).lastMessage, { role: 'user', text: 'From the A', at: 'a', from: 'assistant' });
   cached.hub.close();
+});
+
+// A routine store stand-in: current() answers the given routines sorted by
+// name, lastRun() the given run lines, and set() changes either and
+// notifies, as a write would.
+function fakeRoutineStore(routines = [], lastRuns = {}) {
+  const listeners = new Set();
+  let items = [...routines];
+  let runs = { ...lastRuns };
+  return {
+    current: () => [...items].sort((a, b) => a.name.localeCompare(b.name)),
+    lastRun: (id) => runs[id] ?? null,
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    set({ routines: next = items, lastRuns: nextRuns = runs } = {}) {
+      items = [...next];
+      runs = { ...nextRuns };
+      for (const fn of listeners) fn();
+    },
+  };
+}
+
+const ROUTINE = Object.freeze({
+  version: 1, id: 'daily-drift', name: 'Daily drift', agent: 'cfo', instruction: 'Compute drift.',
+  schedule: { cron: '30 6 * * 1-5', text: 'Weekdays at 6:30' }, active: true, created: '2026-09-20T12:00:00.000Z', updated: '2026-09-20T12:00:00.000Z',
+});
+
+test('the snapshot lists routines in agent order with nextAt in Chicago time and the newest run, and nextAt is null when inactive or the agent is not a Claude persona', () => {
+  const registry = fakeRegistry(registryState([agent('cfo'), agent('scribe', { provider: 'codex' }), agent('ops', { kind: 'system', provider: undefined })]));
+  const lastRun = { run: 'r1', occurrence: '2026-09-25T11:30:00.000Z', trigger: 'schedule', startedAt: '2026-09-25T11:30:02.000Z', endedAt: '2026-09-25T11:31:00.000Z', outcome: 'finished' };
+  const routines = fakeRoutineStore([
+    { ...ROUTINE, id: 'weekly', name: 'Weekly review', schedule: { cron: '0 18 * * 5', text: 'Every Friday at 18:00' }, active: false },
+    { ...ROUTINE, id: 'notes', name: 'Notes', agent: 'scribe' },
+    { ...ROUTINE, id: 'pings', name: 'Pings', agent: 'ops' },
+    ROUTINE,
+  ], { 'daily-drift': lastRun });
+  // Friday 2026-09-25 07:00 CDT: the next weekday 6:30 is Monday.
+  const { hub } = makeHub({ registry, routines });
+  const { items } = hub.snapshot().routines;
+  assert.deepEqual(items.map((r) => [r.id, r.nextAt, r.lastRun]), [
+    ['daily-drift', '2026-09-28T11:30:00.000Z', lastRun],
+    ['weekly', null, null],
+    ['notes', null, null],
+    ['pings', null, null],
+  ]);
+  assert.deepEqual(Object.keys(items[0]), ['id', 'name', 'agent', 'instruction', 'schedule', 'active', 'created', 'updated', 'nextAt', 'lastRun']);
+  assert.deepEqual(items[0].schedule, { cron: '30 6 * * 1-5', text: 'Weekdays at 6:30' });
+  assert.ok(Object.isFrozen(hub.snapshot().routines) && Object.isFrozen(items[0]) && Object.isFrozen(items[0].lastRun));
+});
+
+test('a store change bumps the revision with a routines patch, and a registry change that drops the agent clears nextAt', () => {
+  const registry = fakeRegistry(registryState([agent('cfo'), agent('brain')]));
+  const routines = fakeRoutineStore([ROUTINE]);
+  const { hub, deltas } = makeHub({ registry, routines });
+  routines.set({ routines: [ROUTINE, { ...ROUTINE, id: 'brain-notes', name: 'Notes', agent: 'brain' }] });
+  assert.deepEqual(deltas.map((d) => [d.revision, Object.keys(d.patch)]), [[2, ['routines']]]);
+  assert.deepEqual(hub.snapshot().routines.items.map((r) => r.id), ['daily-drift', 'brain-notes']);
+  // The same routines again: nothing moved, no bump.
+  routines.set();
+  assert.equal(deltas.length, 1);
+  registry.emit(registryState([agent('brain')]));
+  assert.deepEqual(deltas.at(-1).patch.routines.items.map((r) => [r.id, r.nextAt]), [['brain-notes', '2026-09-28T11:30:00.000Z'], ['daily-drift', null]]);
+});
+
+test('needsYou follows the newest run and clears on a message Hunter writes, not one from another agent or a routine', async () => {
+  const adapter = fakeAdapter();
+  const registry = fakeRegistry(registryState([agent('cfo'), agent('brain')]));
+  const waiting = { run: 'r1', occurrence: '2026-09-25T11:30:00.000Z', trigger: 'schedule', startedAt: '2026-09-25T11:30:02.000Z', endedAt: '2026-09-25T11:31:00.000Z', outcome: 'waiting' };
+  const routines = fakeRoutineStore([ROUTINE], { 'daily-drift': waiting });
+  const { hub, deltas } = makeHub({ adapters: { claude: adapter }, registry, routines });
+  await hub.start();
+  assert.equal(persona(hub).needsYou, true);
+  assert.equal(persona(hub, 'brain').needsYou, false);
+  adapter.emit('message', 'cfo', { role: 'user', text: 'From the Assistant.', from: 'assistant' });
+  assert.equal(persona(hub).needsYou, true);
+  adapter.emit('message', 'cfo', { role: 'user', text: 'Routine "Daily drift": compute drift.', routine: { id: 'daily-drift', name: 'Daily drift' } });
+  assert.equal(persona(hub).needsYou, true);
+  const before = deltas.length;
+  adapter.emit('message', 'cfo', { role: 'user', text: 'Looks fine, carry on.' });
+  assert.equal(persona(hub).needsYou, false);
+  assert.ok(deltas.length > before);
+  // A run that ends waiting later than his message raises it again; runEnded() recomputes.
+  routines.set({ lastRuns: { 'daily-drift': { ...waiting, run: 'r2', endedAt: '2026-09-25T12:02:00.000Z' } } });
+  assert.equal(persona(hub).needsYou, true);
+  routines.lastRun = () => ({ ...waiting, run: 'r3', endedAt: '2026-09-25T12:03:00.000Z', outcome: 'finished' });
+  const revision = hub.snapshot().revision;
+  hub.runEnded('daily-drift');
+  assert.equal(persona(hub).needsYou, false);
+  assert.equal(hub.snapshot().routines.items[0].lastRun.run, 'r3');
+  assert.deepEqual(Object.keys(deltas.at(-1).patch).sort(), ['agents', 'routines']);
+  assert.equal(hub.snapshot().revision, revision + 1);
+  hub.close();
+});
+
+test('needsYou at start reads the last message Hunter wrote from the cache, skipping messages from agents and routines', async () => {
+  const waiting = { run: 'r1', occurrence: '2026-09-25T11:30:00.000Z', trigger: 'schedule', startedAt: '2026-09-25T11:30:02.000Z', endedAt: '2026-09-25T11:31:00.000Z', outcome: 'waiting' };
+  const routines = fakeRoutineStore([ROUTINE], { 'daily-drift': waiting });
+  const answered = makeHub({ adapters: { claude: fakeAdapter() }, routines, store: { read: async () => [
+    { role: 'user', text: 'Hunter wrote this.', at: '2026-09-25T11:40:00.000Z' },
+    { role: 'user', text: 'Routine "Daily drift": compute drift.', at: '2026-09-25T11:50:00.000Z', routine: { id: 'daily-drift', name: 'Daily drift' } },
+  ] } });
+  await answered.hub.start();
+  assert.equal(persona(answered.hub).needsYou, false);
+  answered.hub.close();
+  const unanswered = makeHub({ adapters: { claude: fakeAdapter() }, routines, store: { read: async () => [
+    { role: 'user', text: 'Hunter wrote this.', at: '2026-09-25T11:20:00.000Z' },
+    { role: 'user', text: 'From the Assistant.', at: '2026-09-25T11:45:00.000Z', from: 'assistant' },
+    { role: 'assistant', text: 'A reply.', at: '2026-09-25T11:46:00.000Z' },
+  ] } });
+  await unanswered.hub.start();
+  assert.equal(persona(unanswered.hub).needsYou, true);
+  unanswered.hub.close();
 });

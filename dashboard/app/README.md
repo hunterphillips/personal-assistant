@@ -55,6 +55,12 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/feed/instructions` | The feed's criteria file, read as prose (below). |
 | `POST /api/feed/instructions/propose` | Sends a change to the criteria to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
 | `PUT /api/settings` | Saves a partial patch of the settings (default model and effort, which agent receives the brief, the default permission level) and answers the whole document (below). |
+| `GET /api/routines` | The routines as the snapshot lists them (below). |
+| `POST /api/routines` | Adds a routine from `{"name", "agent", "instruction", "schedule", "active"}`, `schedule` a cron line; 201 with the stored routine (below). |
+| `PUT /api/routines/<id>` | Rewrites a routine from the same five keys and answers it. |
+| `DELETE /api/routines/<id>` | Removes the routine and its runs log; `{"ok": true}`. |
+| `GET /api/routines/<id>/runs` | The routine's newest ten runs, newest first (below). |
+| `POST /api/routines/<id>/run` | Runs the routine now, outside its schedule; 202 once the turn has started, 503 `not_yet` until the scheduler is wired. |
 
 `/focus/`, `/reading/`, `/brief/`, `/feed/`, `/agents/`, `/goals/`, and `/health/` redirect to the
 paths without the slash. A known path
@@ -67,6 +73,7 @@ what `lib/app.mjs` expects from it.
 - `lib/app.mjs` routes requests, checks Host and Origin, logs, and serves the shell, assets, health, status, state, and jobs refresh.
 - `lib/agent-routes.mjs` serves the persona routes under `/api/agents/` and the session routes under `/api/sessions/`.
 - `lib/goals-routes.mjs` serves the Goals routes over `lib/goals.mjs`, which reads the vault.
+- `lib/routine-routes.mjs` serves the routine routes over `lib/routines.mjs`, the routine files and their runs logs, and `lib/schedule.mjs`, the cron subset and its occurrences in Chicago time.
 - `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store, and `lib/feed-instructions.mjs`, which reads the criteria file.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
@@ -110,12 +117,12 @@ snapshot; concurrent requests share one check. It stays for one release.
   "groups": [{ "id": "work", "name": "Work" }, { "id": "personal", "name": "Personal" }],
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
                "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
-               "state": "idle", "pending": null, "forwarded": [], "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
+               "state": "idle", "pending": null, "forwarded": [], "needsYou": false, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
                "lastError": null, "costUsd": 0.42, "lastLineAt": null, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null }, "agent": { "id": "opus", "effort": null } },
                "permission": { "level": "full", "source": "agent", "agent": "full", "default": "ask" }, "accepts": null },
              { "id": "assistant", "name": "Assistant", "role": "Assistant", "description": "...", "group": "personal", "kind": "persona",
                "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "provider": "claude", "pinned": true,
-               "state": "idle", "pending": null, "forwarded": [], "lastMessage": null, "lastError": null, "costUsd": null, "lastLineAt": null,
+               "state": "idle", "pending": null, "forwarded": [], "needsYou": false, "lastMessage": null, "lastError": null, "costUsd": null, "lastLineAt": null,
                "model": { "id": null, "effort": null, "source": "default", "default": { "id": null, "effort": null }, "agent": { "id": null, "effort": null } },
                "permission": { "level": "ask", "source": "system", "agent": null, "default": "ask" }, "accepts": null }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
@@ -129,6 +136,10 @@ snapshot; concurrent requests share one check. It stays for one release.
   "codex": { "available": true },
   "cmux": { "available": true },
   "jobs": { "refreshedAt": "<ISO>", "focusAvailable": true, "refreshing": false, "error": null, "items": [] },
+  "routines": { "items": [{ "id": "daily-drift", "name": "Daily drift", "agent": "cfo", "instruction": "...",
+                            "schedule": { "cron": "30 6 * * 1-5", "text": "Weekdays at 6:30" }, "active": true,
+                            "created": "<ISO>", "updated": "<ISO>", "nextAt": "<ISO>",
+                            "lastRun": { "run": "<uuid>", "occurrence": "<ISO>", "trigger": "schedule", "startedAt": "<ISO>", "endedAt": "<ISO>", "outcome": "finished" } }] },
   "settings": { "ok": true, "error": null, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" }, "permission": { "default": "ask" } },
   "models": [{ "id": "fable", "name": "Fable" }, { "id": "opus", "name": "Opus" }, { "id": "sonnet", "name": "Sonnet" }, { "id": "haiku", "name": "Haiku" }] }
 ```
@@ -183,6 +194,39 @@ has begun shutting down, a new stream request gets 503 `shutting_down`.
 control ran, not that the refresh worked; a failed refresh shows up in the
 state as `jobs.error`. A successful `POST /api/pause` or `/api/resume` also starts
 a jobs refresh.
+
+### Routines
+
+A routine is a scheduled prompt to one agent, kept as a file the daemon
+writes (`lib/routines.mjs`, one `<id>.json` under `routines/` at the repo
+root, `DASHBOARD_ROUTINES_DIR`). `routines.items` lists them in registry
+agent order, then by name. Each item carries:
+
+- `id`: a slug of the name when it was created (`daily-drift`), with a
+  four-character suffix when that slug was taken. It never changes.
+- `name`, `agent` (the registry id), `instruction` (the prompt the run
+  sends), `active`.
+- `schedule`: `{ cron, text }`. `cron` is the normalized five-field line
+  (`lib/schedule.mjs`; minute, hour, day of the month, month, day of the
+  week; steps of five minutes or more, lists, ranges, and weekday names),
+  and `text` the daemon's words for it, "Weekdays at 6:30".
+- `created`, `updated`: `updated` moves on every save, an Active toggle
+  included.
+- `nextAt`: the next occurrence in America/Chicago (`TIME_ZONE` in
+  `lib/config.mjs`), or null while the routine is inactive or its agent is
+  not a Claude persona.
+- `lastRun`: the newest run from the routine's log, or null. A run is
+  `{ run, occurrence, trigger, startedAt, endedAt?, outcome?, cards? }`:
+  `trigger` is `schedule`, `catchup`, or `test`, `outcome` is `finished`,
+  `waiting`, `failed`, `busy`, or `interrupted`; a `busy` line has no
+  `run`, and a missed line is `{ outcome: "missed", count, from, to }`.
+  The scheduler writes these lines (Routines under Personas).
+
+The items change on a write through the routes, on a registry change (an
+agent that leaves takes its routines' `nextAt` with it), and when a run
+ends; each is one revision with a `routines` patch, plus `agents` when a
+persona's `needsYou` moved. `GET /api/routines/<id>/runs` reads the newest
+ten runs from the log, newest first, as `lastRun` is shaped.
 
 ### Daily Brief
 
@@ -701,6 +745,10 @@ events. Each persona in `agents` carries:
   changes this agent's `state` or `pending`. It is dropped when the request
   resolves (any outcome), when the owner's turn fails, when the registry
   drops either agent, and by New thread on this thread.
+- `needsYou`: true when a routine of this agent last ended `waiting`, on a
+  card never answered, and nothing has been written in the thread since
+  by Hunter himself (a user message with neither `from` nor `routine`).
+  Derived from the runs log and the thread, never stored.
 - `lastMessage`: null, or `{ role, text, at, from? }` with the first 200
   characters (a brief notice's `summary` stands in for its text; `from` is
   the sending agent's id when another agent sent the message). At
@@ -1510,6 +1558,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
 | `DASHBOARD_THREADS_DIR` | `var/threads` | Persona session pointers and message caches. Resolved from this directory; created on the first write. |
 | `DASHBOARD_SETTINGS_PATH` | `var/settings.json` | The settings file the interface writes (below). Resolved from this directory; written on first start. |
+| `DASHBOARD_ROUTINES_DIR` | `../../routines` | The routine files and, under `runs/`, their logs. Resolved from this directory; created on the first write. |
 | `DASHBOARD_CODEX_DIR` | `var/codex` | The Codex socket, `owner.json`, `bindings.json` and its `bindings.lock`, and the `waiting/` markers, shared with `bin/codex-serve` and `bin/codex-new`. Resolved from this directory. |
 | `DASHBOARD_CMUX_SOCKET_PATH_FILE` | `~/.local/state/cmux/last-socket-path` | File cmux writes its socket path to while it runs. Missing means cmux is not running. |
 | `DASHBOARD_CMUX_PASSWORD_FILE` | `~/.local/state/cmux/socket-control-password` | The cmux socket password, where cmux keeps it. Read on each call, never logged. |
@@ -1518,7 +1567,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 The server always binds `127.0.0.1`. PUT and POST requests must send an
 `Origin` that matches the request's Host, and JSON unless they are one of the
 bodyless Focus controls. Focus request bodies are capped at
-1,000,000 bytes and feedback at 128 KiB. An oversized body gets a 413 as soon
+1,000,000 bytes, feedback at 128 KiB, and a routine at 16 KiB. An oversized body gets a 413 as soon
 as the limit is crossed, with `Connection: close`; the server then discards at
 most 2 MiB more of the upload, for at most 2 seconds, before cutting the
 connection. The event stream limits (`LIMITS.eventStreams`, 8;
@@ -1532,7 +1581,8 @@ text and, for a failure before init, the CLI's last 2 KiB of stderr),
 `persona_turn_aborted`, `persona_turn_timeout`, `persona_cwd_changed`, and
 `thread_resume_failed`, the Codex events listed under Codex sessions, the
 hub's `sessions_refresh_error` (an error code), `hub_listener_error`, and
-`thread_cache_error`, the bindings reader's `bindings_error` and
+`thread_cache_error`, the routine store's `routine_invalid` (a file it
+skipped) and the routes' `routine_write_error`, the bindings reader's `bindings_error` and
 `bindings_listener_error`, and the cmux events
 `cmux_auth_failed`, `cmux_inventory_error`, `cmux_frame_too_large`,
 `cmux_surface_list_shape`, `cmux_record_skipped`, `cmux_cli_missing`, and

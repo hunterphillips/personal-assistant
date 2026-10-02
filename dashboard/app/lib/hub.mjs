@@ -1,13 +1,13 @@
 // State hub: one in-memory snapshot of what the dashboard knows (Focus
 // health, the latest brief, the agent registry, persona state, coding
-// sessions and the cmux terminals behind them, and jobs), with a
+// sessions and the cmux terminals behind them, jobs, and routines), with a
 // revision that bumps on every change and a subscriber list for the event
 // stream. It owns no persistence and no refresh timers; callers decide when
 // to refresh. Its only timers are the persona turn wall clocks.
 //
-// createHub({ registry, jobs, focus, brief, timeouts, limits, adapters,
-//             store, bindings, cmux, adaptersDisabled, settings, models, home,
-//             log, now }) returns:
+// createHub({ registry, jobs, routines, schedule, timeZone, focus, brief,
+//             timeouts, limits, adapters, store, bindings, cmux,
+//             adaptersDisabled, settings, models, home, log, now }) returns:
 //
 //   snapshot() -> frozen
 //     { revision,                 // integer, starts at 1, +1 on every change
@@ -30,6 +30,9 @@
 //       codex: { available } | { available: false, reason },
 //       cmux: { available, stale? } | { available: false, reason },
 //       jobs: { refreshedAt, focusAvailable, refreshing, error, items },
+//       routines: { items: [{ id, name, agent, instruction,
+//                             schedule: { cron, text }, active, created,
+//                             updated, nextAt, lastRun }] },
 //       settings: { ok, error, model: { default, effort }, brief: { agent },
 //                   permission: { default } },
 //       models: [{ id, name }] }
@@ -52,6 +55,13 @@
 //                    agent sent)
 //       lastError    null or a string
 //       costUsd      null or the session's running total
+//       needsYou     true when a routine of this agent last ended `waiting`
+//                    (a card it raised went unanswered) and Hunter has not
+//                    written in the thread since; derived from the store,
+//                    never stored. Hunter's own message (a user message
+//                    with neither `from` nor `routine`) clears it; the hub
+//                    keeps `lastOwnMessageAt` per persona from `message`
+//                    events, seeded from the thread cache at start.
 //     A Claude persona also has:
 //       model        { id, effort, source, default }: what its next turn
 //                    runs on. id is a model id or alias or null, effort one
@@ -76,6 +86,14 @@
 //     `settings` is the settings store's view (settings.mjs): `ok` false
 //     with `error` when the file could not be read, the last good values
 //     either way. `models` is the model table (models.mjs) for the views.
+//     `routines.items` are the routine store's routines (routines.mjs), in
+//     registry agent order (an agent the registry does not list last, by
+//     id) then by name, each with `nextAt`, the next occurrence
+//     (schedule.mjs next() in `timeZone`) or null when the routine is
+//     inactive or its agent is not a Claude persona, and `lastRun`, the
+//     store's newest folded run or null. Rebuilt on the store's onChange,
+//     on a registry change, and by runEnded(). Without a `routines` store
+//     the list is empty.
 //     `sessions` is the union of every adapter's sessions() (adapter.mjs),
 //     threads the dashboard follows but does not own, and the Claude
 //     terminals cmux has registered (`cmux`, runtime/cmux.mjs), newest
@@ -141,7 +159,7 @@
 //   subscribe(fn) -> unsubscribe
 //     fn({ revision, patch }) runs after every bump; `patch` holds only the
 //     top-level content keys that changed (focus, brief, registry, agents,
-//     sessions, codex, cmux, jobs), never revision or updatedAt. A throwing listener is logged
+//     sessions, codex, cmux, jobs, routines), never revision or updatedAt. A throwing listener is logged
 //     as { event: 'hub_listener_error', error } and the rest still run.
 //
 //   start() -> Promise<void>
@@ -186,6 +204,11 @@
 //
 //   persona(id) -> { agent, adapter } | null
 //     The registry agent (with cwd) and its adapter, for a started persona.
+//
+//   runEnded(routineId)
+//     Rebuilds `routines` (the routine's lastRun and nextAt) and the agent
+//     views (the owner's needsYou) after the scheduler wrote a run line;
+//     also called when a run starts.
 //
 //   modelFor(agentId) -> { id, effort }
 //     The pair the agent's next turn runs on, resolved as the agent view's
@@ -241,8 +264,9 @@
 
 import os from 'node:os';
 
-import { LIMITS, TIMEOUTS } from './config.mjs';
+import { LIMITS, TIMEOUTS, TIME_ZONE } from './config.mjs';
 import { MODELS } from './models.mjs';
+import * as defaultSchedule from './schedule.mjs';
 import { DEFAULTS as SETTINGS_DEFAULTS } from './settings.mjs';
 import { truncateUtf8 } from './threads.mjs';
 
@@ -251,11 +275,14 @@ const REVISION = /^[0-9a-f]{64}$/;
 const STATE_WORD = /^[a-z_]{1,40}$/;
 
 export function createHub({
-  registry, jobs, focus, brief, timeouts, limits = LIMITS, adapters = {}, store = null, bindings = null, cmux = null,
-  adaptersDisabled = null, settings = null, models = MODELS, home = os.homedir(), log = () => {}, now = () => new Date(),
+  registry, jobs, routines = null, schedule = defaultSchedule, timeZone = TIME_ZONE, focus, brief, timeouts, limits = LIMITS,
+  adapters = {}, store = null, bindings = null, cmux = null, adaptersDisabled = null, settings = null, models = MODELS,
+  home = os.homedir(), log = () => {}, now = () => new Date(),
 }) {
   const listeners = new Set();
   const settingsCurrent = () => settingsView(settings ? settings.current() : null);
+  const views = (current = registry.current()) => agentViews(current, personas, settingsCurrent(), routines);
+  const routinesCurrent = () => routinesView(registry.current(), routines, schedule, timeZone, now());
   const turnMaxMs = timeouts.turnMaxMs ?? TIMEOUTS.turnMaxMs;
   // agentId -> runtime entry for each registry persona (see personaEntry).
   const personas = new Map();
@@ -268,11 +295,12 @@ export function createHub({
     home,
     focus: { available: null },
     brief: { state: 'unknown' },
-    ...registryFields(registry.current(), personas, settingsCurrent()),
+    ...registryFields(registry.current(), views),
     sessions: [],
     codex: codexStatus(adapters, adaptersDisabled),
     cmux: cmuxStatus(cmux),
     jobs: { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] },
+    routines: routinesCurrent(),
     settings: settingsCurrent(),
     models: models.map((model) => ({ id: model.id, name: model.name })),
   });
@@ -295,8 +323,18 @@ export function createHub({
   }
 
   function commitAgents() {
-    const agents = agentViews(registry.current(), personas, settingsCurrent());
+    const agents = views();
     if (!sameJson(agents, state.agents)) commit({ agents });
+  }
+
+  // Routines and the agent views that read them (needsYou), in one bump.
+  function commitRoutines() {
+    const patch = {};
+    const current = routinesCurrent();
+    if (!sameJson(current, state.routines)) patch.routines = current;
+    const agents = views();
+    if (!sameJson(agents, state.agents)) patch.agents = agents;
+    if (Object.keys(patch).length > 0) commit(patch);
   }
 
   function commitSessions() {
@@ -355,7 +393,7 @@ export function createHub({
       if (personas.get(agent.id) === entry) entry.lastError = reason;
       return;
     }
-    const lastMessage = await lastCachedMessage(agent.id);
+    const cached = await lastCachedMessage(agent.id);
     if (closed || personas.get(agent.id) !== entry) return;
     const seeded = adapter.state(agent.id);
     entry.ready = true;
@@ -363,19 +401,23 @@ export function createHub({
     entry.pending = projectRequest(seeded.pending, limits);
     entry.lastError = seeded.lastError ?? null;
     entry.costUsd = seeded.costUsd ?? null;
-    entry.lastMessage ??= lastMessage;
+    entry.lastMessage ??= cached.lastMessage;
+    entry.lastOwnMessageAt ??= cached.lastOwnMessageAt;
     if (entry.state === 'busy' || entry.state === 'waiting') armTurnTimer(entry);
   }
 
+  // The thread cache's last preview-worthy message and the time of Hunter's
+  // own last message, each null when there is none.
   async function lastCachedMessage(agentId) {
-    if (!store) return null;
+    if (!store) return { lastMessage: null, lastOwnMessageAt: null };
     try {
       const messages = await store.read(agentId);
       const last = messages.findLast(updatesPreview);
-      return last ? preview(last, limits) : null;
+      const own = messages.findLast(isOwnMessage);
+      return { lastMessage: last ? preview(last, limits) : null, lastOwnMessageAt: typeof own?.at === 'string' ? own.at : null };
     } catch (error) {
       log({ event: 'thread_cache_error', agentId, error: error?.message ?? String(error) });
-      return null;
+      return { lastMessage: null, lastOwnMessageAt: null };
     }
   }
 
@@ -458,6 +500,7 @@ export function createHub({
       }
       case 'message':
         if (updatesPreview(event)) entry.lastMessage = preview(event, limits);
+        if (isOwnMessage(event) && typeof event.at === 'string') entry.lastOwnMessageAt = event.at;
         break;
       case 'request':
         entry.pending = projectRequest(event, limits);
@@ -490,16 +533,20 @@ export function createHub({
         if (!closed) commitAgents();
       });
     }
-    commit(registryFields(current, personas, settingsCurrent()));
+    commit({ ...registryFields(current, views), routines: routinesCurrent() });
     if (started && !closed) commitSessions();
   });
+
+  const unsubscribeRoutines = routines && typeof routines.onChange === 'function' ? routines.onChange(() => {
+    if (!closed) commitRoutines();
+  }) : () => {};
 
   const unsubscribeSettings = settings && typeof settings.onChange === 'function' ? settings.onChange(() => {
     if (closed) return;
     const patch = {};
     const view = settingsCurrent();
     if (!sameJson(view, state.settings)) patch.settings = view;
-    const agents = agentViews(registry.current(), personas, view);
+    const agents = views();
     if (!sameJson(agents, state.agents)) patch.agents = agents;
     if (Object.keys(patch).length > 0) commit(patch);
   }) : () => {};
@@ -617,6 +664,10 @@ export function createHub({
       return { agent: entry.agent, adapter: entry.adapter };
     },
 
+    runEnded() {
+      if (!closed) commitRoutines();
+    },
+
     requestOwner(agentId, requestId) {
       const relay = relays.get(requestId);
       return relay && relay.origin === agentId ? relay.owner : null;
@@ -673,6 +724,7 @@ export function createHub({
       unsubscribeRegistry();
       unsubscribeBindings();
       unsubscribeSettings();
+      unsubscribeRoutines();
       for (const unsubscribe of adapterUnsubscribes.splice(0)) unsubscribe();
       for (const entry of personas.values()) {
         clearTimeout(entry.timer);
@@ -686,16 +738,67 @@ export function createHub({
 function personaEntry(agent, adapter) {
   return {
     agent, adapter, ready: false, state: 'unavailable', pending: null, forwarded: [], lastMessage: null,
-    lastError: null, costUsd: null, lastLineAt: null, timer: null,
+    lastError: null, costUsd: null, lastLineAt: null, lastOwnMessageAt: null, timer: null,
   };
 }
 
-function registryFields(current, personas, settingsState) {
+function registryFields(current, views) {
   return {
     registry: { ok: current?.ok === true, error: current?.error ?? null, loadedAt: current?.loadedAt ?? null },
     groups: (current?.groups ?? []).map((group) => ({ id: group.id, name: group.name })),
-    agents: agentViews(current, personas, settingsState),
+    agents: views(current),
   };
+}
+
+// The snapshot's `routines`: the store's routines in registry agent order
+// then by name, each with its next occurrence and newest run.
+function routinesView(current, store, schedule, zone, now) {
+  if (!store) return { items: [] };
+  const agents = current?.agents ?? [];
+  const order = new Map(agents.map((agent, index) => [agent.id, index]));
+  const claude = new Set(agents.filter((agent) => agent.kind === 'persona' && agent.provider === 'claude').map((agent) => agent.id));
+  const items = store.current().map((routine) => {
+    const cron = routine.active && claude.has(routine.agent) ? schedule.parseCron(routine.schedule.cron) : null;
+    const nextAt = cron ? schedule.next(cron, now, zone) : null;
+    return {
+      id: routine.id,
+      name: routine.name,
+      agent: routine.agent,
+      instruction: routine.instruction,
+      schedule: { cron: routine.schedule.cron, text: routine.schedule.text },
+      active: routine.active,
+      created: routine.created,
+      updated: routine.updated,
+      nextAt: nextAt ? nextAt.toISOString() : null,
+      lastRun: store.lastRun(routine.id),
+    };
+  });
+  items.sort((a, b) => {
+    const byAgent = (order.get(a.agent) ?? Infinity) - (order.get(b.agent) ?? Infinity);
+    if (byAgent !== 0) return byAgent;
+    if (a.agent !== b.agent) return a.agent < b.agent ? -1 : 1;
+    return a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1);
+  });
+  return { items };
+}
+
+// Whether a routine of the agent last ended waiting on a card Hunter never
+// answered, and he has not written in the thread since.
+function needsYou(agentId, entry, store) {
+  if (!store) return false;
+  const since = entry?.lastOwnMessageAt ?? '';
+  for (const routine of store.current()) {
+    if (routine.agent !== agentId) continue;
+    const last = store.lastRun(routine.id);
+    if (last?.outcome === 'waiting' && typeof last.endedAt === 'string' && last.endedAt > since) return true;
+  }
+  return false;
+}
+
+// Hunter's own message in a thread: a user message neither another agent
+// nor a routine sent.
+function isOwnMessage(message) {
+  return message?.role === 'user' && !message.from && !message.routine;
 }
 
 // The snapshot's `settings`: the store's view, or the defaults when the hub
@@ -752,7 +855,7 @@ function resolvePermission(agent, settingsState) {
   return { level: settingsState.permission.default, source: 'system' };
 }
 
-function agentViews(current, personas, settingsState) {
+function agentViews(current, personas, settingsState, routines = null) {
   return (current?.agents ?? []).map((agent) => {
     const view = {
       id: agent.id,
@@ -774,6 +877,7 @@ function agentViews(current, personas, settingsState) {
     view.state = entry?.state ?? 'unavailable';
     view.pending = entry?.pending ?? null;
     view.forwarded = entry ? entry.forwarded.map((item) => ({ ...item })) : [];
+    view.needsYou = needsYou(agent.id, entry, routines);
     view.lastMessage = entry?.lastMessage ?? null;
     view.lastError = entry?.lastError ?? null;
     view.costUsd = entry?.costUsd ?? null;

@@ -11,6 +11,8 @@
 //                               (default ../../daily-brief/watch/relevance.md)
 //   DASHBOARD_FOCUS_ORIGIN      Focus server, http:// loopback only (default http://127.0.0.1:4242)
 //   DASHBOARD_REGISTRY_PATH     agent registry JSON file (default ../../registry/agents.json)
+//   DASHBOARD_ROUTINES_DIR      the routine files and their runs log (default ../../routines,
+//                               beside registry/; need not exist)
 //   DASHBOARD_LAUNCH_AGENTS_DIR directory holding launchd plists (default ~/Library/LaunchAgents)
 //   DASHBOARD_THREADS_DIR       persona session pointers and message caches (default var/threads)
 //   DASHBOARD_SETTINGS_PATH     the settings file the interface writes (default var/settings.json;
@@ -36,6 +38,10 @@ const DEFAULT_BRIEFS_DIR = '../../daily-brief/briefs';
 const DEFAULT_FEED_DIR = '../../feed/items';
 const DEFAULT_FEED_INSTRUCTIONS = '../../daily-brief/watch/relevance.md';
 const DEFAULT_REGISTRY_PATH = '../../registry/agents.json';
+const DEFAULT_ROUTINES_DIR = '../../routines';
+// Routine schedules run on this clock, following its changes. A constant
+// until someone else runs the daemon (no configurability ahead of need).
+export const TIME_ZONE = 'America/Chicago';
 const DEFAULT_THREADS_DIR = 'var/threads';
 const DEFAULT_SETTINGS_PATH = 'var/settings.json';
 export const DEFAULT_CODEX_DIR = 'var/codex';
@@ -68,6 +74,14 @@ export const LIMITS = Object.freeze({
   delegationMessageChars: 4000, // characters of one ask tool message
   delegationReplyChars: 4000, // characters of a reply handed back to the sender's turn, or prepended to its next prompt
   delegationPendingReplies: 5, // replies carried into the sender's next turn
+  routineBodyBytes: 16 * 1024, // one POST or PUT /api/routines body
+  routineNameChars: 60, // a routine's name
+  routineInstructionChars: 4000, // a routine's instruction
+  routineRunLines: 200, // lines kept in one routine's runs log
+  routineRunsShown: 10, // runs GET /api/routines/:id/runs answers
+  routineMissedMax: 100, // missed occurrences counted before the count is capped
+  routineCatchupDays: 7, // how far back a routine's marker may reach on start
+  routinesMax: 100, // routine files
 });
 
 export const TIMEOUTS = Object.freeze({
@@ -94,6 +108,7 @@ export const TIMEOUTS = Object.freeze({
   cmuxRequestMs: 5_000, // the cmux auth handshake, and separately each socket request
   cmuxSessionsMs: 5_000, // budget for one `cmux sessions list --json`
   cmuxStaleMs: 5 * 60_000, // a cached cmux inventory is served stale for at most this long
+  routineTickMs: 30_000, // the scheduler asks what is due this often (scheduler.mjs)
 });
 
 export class ConfigError extends Error {
@@ -113,6 +128,7 @@ export function loadConfig(env = process.env) {
   const feedDir = parsePath(env.DASHBOARD_FEED_DIR, DEFAULT_FEED_DIR);
   const feedInstructionsPath = parsePath(env.DASHBOARD_FEED_INSTRUCTIONS, DEFAULT_FEED_INSTRUCTIONS);
   const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, DEFAULT_REGISTRY_PATH);
+  const routinesDir = parsePath(env.DASHBOARD_ROUTINES_DIR, DEFAULT_ROUTINES_DIR);
   // The default is already absolute, so path.resolve keeps it as-is; only a
   // relative override is resolved from APP_ROOT.
   const launchAgentsDir = parsePath(env.DASHBOARD_LAUNCH_AGENTS_DIR, path.join(os.homedir(), 'Library', 'LaunchAgents'));
@@ -151,6 +167,8 @@ export function loadConfig(env = process.env) {
     feedDir,
     feedInstructionsPath,
     registryPath,
+    routinesDir,
+    timeZone: TIME_ZONE,
     launchAgentsDir,
     threadsDir,
     settingsPath,

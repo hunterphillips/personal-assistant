@@ -8,12 +8,15 @@
 // routes are agent-routes.mjs, the Goals routes goals-routes.mjs over the
 // injected `goals` (goals.mjs), the Feed routes feed-routes.mjs over the
 // injected `feed` (feed.mjs) and `feedInstructions` (feed-instructions.mjs),
-// and the event stream is events.mjs; this module builds them and
-// dispatches to them. Without `goals`, /api/goals and /api/goals/propose
-// answer 404 not_found; without `feed` or `feedInstructions`, /api/feed and
-// the routes under it do.
+// the routine routes routine-routes.mjs over the injected `routines` store
+// (routines.mjs) and `scheduler` (scheduler.mjs), and the event stream is
+// events.mjs; this module builds them and dispatches to them. Without
+// `goals`, /api/goals and /api/goals/propose answer 404 not_found; without
+// `feed` or `feedInstructions`, /api/feed and the routes under it do, and
+// without `routines` so does everything under /api/routines.
 //
-// createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, log })
+// createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, registry,
+//             routines, scheduler, log })
 // returns a (req, res) handler and opens nothing; server.mjs owns listening.
 // `notices` (notices.mjs, optional) is handed to the event stream, which
 // reconciles the brief notice on each connect and runs its timer while a
@@ -30,6 +33,7 @@ import { ASSETS } from './assets.mjs';
 import { createEvents } from './events.mjs';
 import { createFeedRoutes } from './feed-routes.mjs';
 import { createGoalsRoutes } from './goals-routes.mjs';
+import { createRoutineRoutes } from './routine-routes.mjs';
 import { createSettingsRoutes } from './settings-routes.mjs';
 import { isCalendarDate } from './hub.mjs';
 import {
@@ -105,7 +109,7 @@ export function defaultLog(entry) {
 
 export function createApp({
   config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, feedInstructions = null, notices = null,
-  settings = null, registry = null, log = defaultLog,
+  settings = null, registry = null, routines = null, scheduler = null, log = defaultLog,
 }) {
   if (!hub) throw new TypeError('createApp requires a hub');
   const allowedHosts = new Set(config.allowedHosts);
@@ -125,6 +129,9 @@ export function createApp({
       feed, instructions: feedInstructions, hub, log, limits: config.limits, shuttingDown: isShuttingDown,
     })
     : null;
+  const routineRoutes = routines
+    ? createRoutineRoutes({ routines, hub, scheduler, log, limits: config.limits, shuttingDown: isShuttingDown })
+    : null;
 
   function matchRoute(pathname) {
     const exact = EXACT_ROUTES.get(pathname);
@@ -135,6 +142,8 @@ export function createApp({
     }
     const agentRoute = agents.match(pathname);
     if (agentRoute) return agentRoute;
+    const routineRoute = routineRoutes?.match(pathname);
+    if (routineRoute) return routineRoute;
     if (pathname.startsWith('/embedded/brief/')) {
       const date = pathname.slice('/embedded/brief/'.length);
       if (isCalendarDate(date)) {
@@ -151,7 +160,10 @@ export function createApp({
     if (!origin || !allowedOrigins.has(origin) || new URL(origin).host !== req.headers.host.toLowerCase()) {
       throw new HttpError(403, 'forbidden_origin');
     }
-    if (route.bodyless) {
+    // `bodyless` is true for the whole route, or the list of its methods
+    // that take no body (a route whose PUT has one and whose DELETE has not).
+    const bodyless = Array.isArray(route.bodyless) ? route.bodyless.includes(req.method) : route.bodyless === true;
+    if (bodyless) {
       if (req.headers['transfer-encoding'] !== undefined) throw new HttpError(400, 'body_not_allowed');
       if (declaredLengthExceeds(req, 0)) throw new HttpError(413, 'payload_too_large');
       return;
@@ -251,6 +263,8 @@ export function createApp({
         return agents.serve(req, res, route);
       case 'agents-create':
         return agents.serveCreate(req, res);
+      case 'routine':
+        return routineRoutes.serve(req, res, route);
       case 'brief-feedback': {
         const body = await readJsonBody(req, { limit: config.limits.feedbackBodyBytes });
         return brief.handleFeedback(req, res, body);
