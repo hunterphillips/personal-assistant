@@ -25,9 +25,18 @@
 //         "cwd": "/absolute/path",   // must exist and be a directory
 //         "provider": "claude",      // "claude" | "codex"; required for
 //                                    // persona/project, absent for system
-//         "model": "claude-sonnet",  // optional, non-empty, <= 64 chars;
+//         "model": "sonnet",         // optional, non-empty, <= 64 chars;
 //                                    // allowed for persona/project, a
 //                                    // problem when given for system
+//         "effort": "high",          // optional, one of models.mjs EFFORTS;
+//                                    // a problem when given for system
+//         "accepts": ["assistant"],  // optional, persona only: who may
+//                                    // message it, as registry ids (at
+//                                    // most 100, each an agent in this
+//                                    // file, none itself, no duplicates);
+//                                    // absent or null means everyone. Read
+//                                    // by delegation (design phase 3);
+//                                    // nothing enforces it yet
 //         "routines": ["com.hunter.cfo.daily"], // optional, default [];
 //                                    // each /^[A-Za-z0-9][A-Za-z0-9.-]*$/,
 //                                    // unique across the whole registry
@@ -48,6 +57,10 @@
 // read with `stat`/`readFile`, which follow symlinks, and its content is
 // still size-capped (256 KiB, checked both from `stat` and again from the
 // bytes actually read) and strictly validated before any of it is trusted.
+//
+// The dashboard writes this file too (agent settings and new agents,
+// agent-routes.mjs), through write() below; a hand edit is still fine, and
+// unknown top-level keys survive a dashboard write.
 //
 // createRegistry({ path, pollMs = 5_000, log = () => {} }) returns:
 //
@@ -85,6 +98,34 @@
 //     `log({ event: 'registry_listener_error', error })`; it does not stop
 //     start() from resolving or the other listeners from running.
 //
+//   write(mutate) -> Promise<{ agents, groups }>
+//     Rewrites the file through `mutate(document)`, which receives a copy of
+//     the parsed file (or { version: 1, groups: [], agents: [] } when the
+//     file is missing) and returns the new document. Single-flight: a
+//     second write waits for the first. Refuses RegistryError
+//     'registry_invalid' (problems: [current().error]) while the file on
+//     disk does not load, except when it is missing: a hand-broken file is
+//     fixed by hand, never overwritten by a save merged over the last good
+//     copy; a missing file is created by a mutation whose result is a valid
+//     non-empty registry. Invalid JSON on disk refuses
+//     'registry_invalid_json'. The candidate is validated whole; a failure
+//     rejects RegistryError 'invalid_registry' with the problem list and
+//     writes nothing. The candidate itself (not the validator's normalized
+//     output) is written as 2-space JSON to a temporary file beside the
+//     target with the target's mode (0644 for a new file), renamed over it,
+//     and loaded at once, so current() and listeners update before the
+//     promise resolves and the next poll does not load it a second time.
+//     Resolves with the loaded { agents, groups }.
+//
+// validateDocument(parsed, { isDirectory } = {}) -> { ok, agents, groups, problems, error }
+//   The validation load() applies, for a caller that holds a parsed
+//   document (the writer, and test fakes); `isDirectory(path)` replaces the
+//   file system check on cwd, so a fake registry can validate invented
+//   folders while the real one keeps the rule.
+//
+// RegistryError: code ('registry_invalid', 'registry_invalid_json',
+//   'invalid_registry') and problems (strings).
+//
 // Failure behavior: a missing file, an unreadable file, invalid JSON,
 // validation problems, or a file over the 256 KiB size cap all keep the last
 // good agents, set ok: false and error to a one-line message, and call
@@ -94,8 +135,11 @@
 // 'registry_missing'.
 
 import { statSync } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { open, readFile, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
+
+import { isEffort } from './models.mjs';
 
 const MAX_BYTES = 256 * 1024;
 const MAX_AGENTS = 100;
@@ -105,10 +149,21 @@ const ROUTINE_LABEL = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
 const MAX_GROUPS = 20;
 const KINDS = new Set(['persona', 'project', 'system']);
 const PROVIDERS = new Set(['claude', 'codex']);
+const MAX_ACCEPTS = 100;
 const AGENT_KEYS = new Set([
-  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'routines', 'pinned',
+  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'accepts', 'routines', 'pinned',
 ]);
 const GROUP_KEYS = new Set(['id', 'name']);
+const EMPTY_DOCUMENT = Object.freeze({ version: 1, groups: [], agents: [] });
+
+export class RegistryError extends Error {
+  constructor(code, problems = []) {
+    super(problems.length > 0 ? `${code}: ${problems.join('; ')}` : code);
+    this.name = 'RegistryError';
+    this.code = code;
+    this.problems = problems;
+  }
+}
 
 export function createRegistry({ path: registryPath, pollMs = 5_000, log = () => {} }) {
   let state = freezeState({ ok: false, agents: [], groups: [], error: null, loadedAt: null, path: registryPath });
@@ -117,6 +172,7 @@ export function createRegistry({ path: registryPath, pollMs = 5_000, log = () =>
   let timer = null;
   let firstLoad = null;
   let inFlight = null;
+  let writing = Promise.resolve();
   const listeners = new Set();
 
   async function load() {
@@ -172,9 +228,65 @@ export function createRegistry({ path: registryPath, pollMs = 5_000, log = () =>
     await load();
   }
 
+  // One write: read, mutate, validate, replace, load. See the header.
+  async function writeOnce(mutate) {
+    if (!state.ok && state.error !== 'registry_missing') throw new RegistryError('registry_invalid', [state.error]);
+    let raw = null;
+    let mode = 0o644;
+    try {
+      const stats = await stat(registryPath);
+      mode = stats.mode & 0o777;
+      raw = await readFile(registryPath, 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    let document;
+    if (raw === null) {
+      document = structuredClone(EMPTY_DOCUMENT);
+    } else {
+      try {
+        document = JSON.parse(raw);
+      } catch {
+        throw new RegistryError('registry_invalid_json');
+      }
+    }
+    const candidate = mutate(document);
+    const result = validateDocument(candidate);
+    if (!result.ok) throw new RegistryError('invalid_registry', result.problems);
+
+    const dir = path.dirname(registryPath);
+    const tmp = path.join(dir, `.${path.basename(registryPath)}.${randomBytes(6).toString('hex')}.tmp`);
+    const handle = await open(tmp, 'wx', mode);
+    try {
+      await handle.writeFile(`${JSON.stringify(candidate, null, 2)}\n`, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    try {
+      await rename(tmp, registryPath);
+    } catch (error) {
+      await unlink(tmp).catch(() => {});
+      throw error;
+    }
+    try {
+      const stats = await stat(registryPath);
+      lastSeen = { mtimeMs: stats.mtimeMs, size: stats.size };
+    } catch {
+      lastSeen = { missing: true };
+    }
+    await load();
+    return { agents: state.agents, groups: state.groups };
+  }
+
   return {
     current() {
       return state;
+    },
+    write(mutate) {
+      const run = writing.then(() => writeOnce(mutate));
+      writing = run.then(() => {}, () => {});
+      return run;
     },
     async start() {
       if (timer) return firstLoad;
@@ -234,12 +346,16 @@ async function readAndValidate(registryPath) {
   } catch {
     return { ok: false, error: 'registry_invalid_json' };
   }
+  const result = validateDocument(parsed);
+  return result.ok ? { ok: true, agents: result.agents, groups: result.groups } : { ok: false, error: result.error };
+}
 
+export function validateDocument(parsed, { isDirectory: checkDirectory = isDirectory } = {}) {
   const problems = [];
   const groups = validateGroups(parsed, problems);
-  const agents = validateRegistry(parsed, problems);
-  if (problems.length > 0) return { ok: false, error: problems.join('; ') };
-  return { ok: true, agents, groups };
+  const agents = validateRegistry(parsed, problems, checkDirectory);
+  if (problems.length > 0) return { ok: false, agents: [], groups: [], problems, error: problems.join('; ') };
+  return { ok: true, agents, groups, problems: [], error: null };
 }
 
 // The optional top-level "groups" list. Missing means []; anything else
@@ -287,7 +403,7 @@ function validateGroups(value, problems) {
   return groups;
 }
 
-function validateRegistry(value, problems) {
+function validateRegistry(value, problems, checkDirectory) {
   if (!isRecord(value)) {
     problems.push('registry: must be a JSON object');
     return [];
@@ -307,9 +423,11 @@ function validateRegistry(value, problems) {
   const ids = new Map(); // id -> index of first agent that claimed it
   const routineLabels = new Map(); // label -> "agent <index> (<id>)" that first claimed it
   const agents = [];
+  const entries = [];
   value.agents.forEach((entry, index) => {
-    const agent = validateAgent(entry, index, problems);
+    const agent = validateAgent(entry, index, problems, checkDirectory);
     if (!agent) return;
+    entries.push([agent, index]);
 
     if (ids.has(agent.id)) {
       problems.push(`agent ${index} (${agent.id}): id duplicates agent ${ids.get(agent.id)}`);
@@ -326,10 +444,23 @@ function validateRegistry(value, problems) {
     agents.push(agent);
   });
 
-  return agents.map((agent) => Object.freeze({ ...agent, routines: Object.freeze([...agent.routines]) }));
+  // `accepts` names agents in this same file, never the agent itself.
+  for (const [agent, index] of entries) {
+    if (!agent.accepts) continue;
+    for (const id of agent.accepts) {
+      if (id === agent.id) problems.push(`agent ${index} (${agent.id}): accepts must not name the agent itself`);
+      else if (!ids.has(id)) problems.push(`agent ${index} (${agent.id}): accepts names no agent "${id}"`);
+    }
+  }
+
+  return agents.map((agent) => Object.freeze({
+    ...agent,
+    routines: Object.freeze([...agent.routines]),
+    ...(agent.accepts ? { accepts: Object.freeze([...agent.accepts]) } : {}),
+  }));
 }
 
-function validateAgent(entry, index, problems) {
+function validateAgent(entry, index, problems, checkDirectory = isDirectory) {
   if (!isRecord(entry)) {
     problems.push(`agent ${index}: must be an object`);
     return null;
@@ -365,7 +496,7 @@ function validateAgent(entry, index, problems) {
   }
   if (typeof entry.cwd !== 'string' || !path.isAbsolute(entry.cwd)) {
     fail('cwd must be an absolute path');
-  } else if (!isDirectory(entry.cwd)) {
+  } else if (!checkDirectory(entry.cwd)) {
     fail('cwd must exist and be a directory');
   }
 
@@ -380,6 +511,29 @@ function validateAgent(entry, index, problems) {
       fail('model must be absent when kind is "system"');
     } else if (typeof entry.model !== 'string' || entry.model.length === 0 || entry.model.length > 64) {
       fail('model must be a non-empty string of at most 64 characters');
+    }
+  }
+
+  if (entry.effort !== undefined) {
+    if (entry.kind === 'system') {
+      fail('effort must be absent when kind is "system"');
+    } else if (!isEffort(entry.effort)) {
+      fail('effort must be one of low, medium, high, xhigh, max');
+    }
+  }
+
+  let accepts = null;
+  if (entry.accepts !== undefined && entry.accepts !== null) {
+    if (entry.kind !== 'persona') {
+      fail('accepts is only for a persona');
+    } else if (!Array.isArray(entry.accepts) || !entry.accepts.every((id) => typeof id === 'string' && ID.test(id))) {
+      fail('accepts must be an array of agent ids');
+    } else if (entry.accepts.length > MAX_ACCEPTS) {
+      fail(`accepts must have at most ${MAX_ACCEPTS} entries`);
+    } else if (new Set(entry.accepts).size !== entry.accepts.length) {
+      fail('accepts must not repeat an id');
+    } else {
+      accepts = [...entry.accepts];
     }
   }
 
@@ -413,6 +567,8 @@ function validateAgent(entry, index, problems) {
     cwd: entry.cwd,
     ...(entry.kind === 'system' ? {} : { provider: entry.provider }),
     ...(entry.model !== undefined ? { model: entry.model } : {}),
+    ...(entry.effort !== undefined ? { effort: entry.effort } : {}),
+    ...(accepts ? { accepts } : {}),
     ...(entry.pinned === true ? { pinned: true } : {}),
     routines,
   };
