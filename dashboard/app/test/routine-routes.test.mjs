@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import { LIMITS } from '../lib/config.mjs';
 import { createRoutines } from '../lib/routines.mjs';
 import { SCHEDULE_SENTENCE } from '../lib/routine-routes.mjs';
+import { createScheduler } from '../lib/scheduler.mjs';
+import { fakePersonas } from './support/browser-server.mjs';
 import { fakeRegistry, request, startApp, tempDir } from './support/harness.mjs';
 
 const AGENTS = [
@@ -146,4 +148,47 @@ test('without a routine store every routine route is 404', async (t) => {
   assert.equal((await send(app, 'GET', '/api/routines')).status, 404);
   assert.equal((await send(app, 'POST', '/api/routines', BODY)).status, 404);
   assert.deepEqual(app.hub.snapshot().routines, { items: [] });
+});
+
+const settle = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('a test run answers 202 and sends at the agent\'s level with the routine; 409 busy writes no line; an agent not started is 409 agent_unavailable', async (t) => {
+  const dir = path.join(await tempDir(t), 'routines');
+  const routines = createRoutines({ dir, limits: LIMITS, now: () => new Date('2026-10-03T12:00:00.000Z') });
+  await routines.load();
+  const store = { read: async () => [], append: async () => {} };
+  const personas = fakePersonas({ assistant: { startFails: true } }, store);
+  t.after(() => personas.adapter.close());
+  const agents = AGENTS.map((agent) => (agent.id === 'cfo' ? { ...agent, model: 'sonnet', permission: 'auto' } : agent));
+  const app = await startApp(t, {
+    registry: fakeRegistry(agents), routines, adapters: { claude: personas.adapter }, store,
+    scheduler: (hub) => createScheduler({ routines, hub, now: () => new Date('2026-10-03T12:00:00.000Z'), randomUUID: () => 'run-1' }),
+  });
+  personas.hold('cfo');
+  assert.equal((await send(app, 'POST', '/api/routines', { ...BODY, instruction: 'Compute drift.' })).status, 201);
+  assert.equal((await send(app, 'POST', '/api/routines', { ...BODY, name: 'Assistant check', agent: 'assistant' })).status, 201);
+
+  const run = await send(app, 'POST', '/api/routines/daily-drift/run');
+  assert.deepEqual([run.status, run.json], [202, { ok: true }]);
+  assert.deepEqual(personas.sent, [{ id: 'cfo', text: 'Compute drift.', context: {
+    model: 'sonnet', effort: null, permission: 'auto', routine: { id: 'daily-drift', name: 'Daily drift' },
+    prompt: 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.\n\nYou may ask other agents, and your reply is what this run leaves behind.',
+  } }]);
+  await settle();
+  assert.deepEqual(routines.runs('daily-drift'), [{ run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-03T12:00:00.000Z' }]);
+  assert.equal(app.hub.snapshot().agents.find((agent) => agent.id === 'cfo').state, 'busy');
+
+  const busy = await send(app, 'POST', '/api/routines/daily-drift/run');
+  assert.deepEqual([busy.status, busy.json.error], [409, 'busy']);
+  assert.equal(routines.runs('daily-drift').length, 1, 'a refused test run writes no line');
+  assert.equal(personas.sent.length, 1);
+
+  const unavailable = await send(app, 'POST', '/api/routines/assistant-check/run');
+  assert.deepEqual([unavailable.status, unavailable.json.error], [409, 'agent_unavailable']);
+  assert.deepEqual(routines.runs('assistant-check'), []);
+
+  personas.reply('cfo', 'Drift is fine.');
+  await settle();
+  assert.equal(routines.runs('daily-drift')[0].outcome, 'finished');
+  assert.equal((await send(app, 'GET', '/api/routines/daily-drift/runs')).json.runs[0].outcome, 'finished');
 });

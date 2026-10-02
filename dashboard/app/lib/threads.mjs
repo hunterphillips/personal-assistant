@@ -13,6 +13,10 @@
 //   <dir>/<agentId>.jsonl   one message per line, mode 0600:
 //                           { role: 'user'|'assistant'|'system', text, at,
 //                             truncated?: true, ...other JSON fields }
+//                           A user message carries `from` (the agent that
+//                           sent it) or `routine` ({ id, name }, the routine
+//                           whose run sent it), never both; one with
+//                           neither is Hunter's own.
 //
 // createThreadStore({ dir, limits, log }) returns:
 //

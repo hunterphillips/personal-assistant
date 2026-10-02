@@ -12,7 +12,7 @@
 //     'sdk_unavailable' when the rejection is a RuntimeError with that code
 //     (the provider's package could not be loaded) and 'start_failed'
 //     otherwise.
-//   send(agent, text, { model, effort, permission, from, mentions, prompt, chain } = {}) -> Promise<void>
+//   send(agent, text, { model, effort, permission, from, mentions, prompt, chain, routine } = {}) -> Promise<void>
 //     Starts one turn on the given model id and effort level, each optional
 //     and passed to the provider only when set, at the given permission
 //     level (permissions.mjs; null and absent mean ask). `from` is the registry id

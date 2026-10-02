@@ -4,6 +4,8 @@ import { test } from 'node:test';
 
 import { LIMITS, TIMEOUTS } from '../lib/config.mjs';
 import { ASK_TOOL, createDelegation } from '../lib/delegation.mjs';
+import { createRoutines } from '../lib/routines.mjs';
+import { createScheduler } from '../lib/scheduler.mjs';
 import { createThreadStore } from '../lib/threads.mjs';
 import { fakePersonas } from './support/browser-server.mjs';
 import { fakeRegistry, request, startApp, tempDir } from './support/harness.mjs';
@@ -40,7 +42,7 @@ const fakeSdk = async () => ({
   createSdkMcpServer: ({ name, version, tools }) => ({ type: 'sdk', name, version, instance: { tools } }),
 });
 
-async function setup(t, { agents = AGENTS, seed = {}, waitMs = 2_000, limits = {}, now = () => new Date(), ids = null } = {}) {
+async function setup(t, { agents = AGENTS, seed = {}, waitMs = 2_000, limits = {}, now = () => new Date(), ids = null, routines = null } = {}) {
   const dir = path.join(await tempDir(t), 'threads');
   const registry = fakeRegistry(agents);
   const store = createThreadStore({ dir, limits: { messageTextBytes: 8192, threadCacheMessages: 50, threadCacheBytes: 64 * 1024, ...limits } });
@@ -67,11 +69,13 @@ async function setup(t, { agents = AGENTS, seed = {}, waitMs = 2_000, limits = {
       randomUUID: () => (ids ? ids[counter++] : `d-${++counter}`),
       importSdk: fakeSdk,
     }),
+    routines,
+    scheduler: routines ? (hub) => createScheduler({ routines, hub, log: (entry) => logs.push(entry), now, randomUUID: () => 'run-1' }) : null,
   });
   t.after(() => personas.adapter.close());
   const thread = async (id) => (await store.read(id)).map(({ at, ...rest }) => rest);
   const lines = async (id) => (await thread(id)).filter((entry) => entry.kind === 'delegation');
-  return { app, delegation: app.delegation, personas, registry, store, logs, thread, lines, hub: app.hub };
+  return { app, delegation: app.delegation, personas, registry, store, logs, thread, lines, hub: app.hub, scheduler: app.scheduler };
 }
 
 const settle = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -532,4 +536,49 @@ test('through the routes: A asks B, B raises, the card is answered from A, and t
   assert.deepEqual((await lines('assistant')).map((line) => line.state), ['sent', 'waiting', 'finished']);
   assert.deepEqual((await thread('assistant')).at(-1), { role: 'assistant', text: 'Reply: answered' });
   assert.equal(personas.sent.length, 2);
+});
+
+test('a routine run on A asks B, B raises, the card is forwarded to A and recorded on the run, an answer from A resolves it, the reply lands, and the run ends finished', async (t) => {
+  const routines = createRoutines({ dir: path.join(await tempDir(t), 'routines'), limits: LIMITS, now: () => new Date('2026-10-03T12:00:00.000Z') });
+  await routines.load();
+  const { app, personas, thread, lines, hub, scheduler, logs } = await setup(t, {
+    seed: { assistant: { delegate: { to: 'cfo', text: 'Check the ledger.', raise: { kind: 'approval', toolName: 'Bash', input: { command: 'ls' } } } } },
+    routines, now: () => new Date('2026-10-03T12:00:00.000Z'),
+  });
+  await routines.create({ name: 'Ledger check', agent: 'assistant', instruction: 'Ask CFO to check the ledger.', schedule: { cron: '0 9 * * *' }, active: true });
+  assert.deepEqual(await scheduler.testRun('ledger-check'), { ok: true });
+  await settle(200);
+  const view = (id) => hub.snapshot().agents.find((a) => a.id === id);
+  assert.deepEqual([view('assistant').state, view('cfo').state], ['busy', 'waiting']);
+  const [card] = view('assistant').forwarded;
+  assert.deepEqual([card.agent, card.kind, card.toolName], ['cfo', 'approval', 'Bash']);
+  assert.deepEqual((await lines('assistant')).map((line) => line.state), ['sent', 'waiting']);
+  assert.deepEqual((await thread('assistant')).filter((line) => line.kind === 'routine'), [{
+    role: 'system', kind: 'routine', state: 'waiting', routine: { id: 'ledger-check', name: 'Ledger check' }, agent: 'cfo', toolName: 'Bash',
+    summary: 'CFO is waiting for you during Ledger check.', text: '{"command":"ls"}',
+  }]);
+  assert.equal((await thread('assistant'))[0].text, 'Ask CFO to check the ledger.');
+  assert.equal(personas.sent[0].context.routine.id, 'ledger-check');
+  assert.equal('endedAt' in routines.runs('ledger-check')[0], false);
+  assert.equal(view('assistant').needsYou, false, 'the card is still open; the run has not ended');
+
+  const answered = await request(app, 'POST', '/api/agents/assistant/answer', {
+    headers: { origin: app.origin, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: card.requestId, decision: 'allow' }),
+  });
+  assert.equal(answered.status, 200);
+  await settle(300);
+  assert.deepEqual(view('assistant').forwarded, []);
+  assert.deepEqual([view('assistant').state, view('cfo').state], ['idle', 'idle']);
+  assert.deepEqual(await thread('cfo'), [
+    { role: 'user', text: 'Check the ledger.', from: 'assistant' },
+    { role: 'assistant', text: 'Reply: answered' },
+  ]);
+  assert.deepEqual((await thread('assistant')).at(-1), { role: 'assistant', text: 'Reply: answered' });
+  assert.deepEqual((await lines('assistant')).map((line) => line.state), ['sent', 'waiting', 'finished']);
+  assert.deepEqual(routines.runs('ledger-check'), [{
+    run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-03T12:00:00.000Z', endedAt: '2026-10-03T12:00:00.000Z', outcome: 'finished',
+    cards: [{ agent: 'cfo', kind: 'approval', toolName: 'Bash', summary: '{"command":"ls"}', resolved: 'answered' }],
+  }]);
+  assert.equal(view('assistant').needsYou, false);
+  assert.deepEqual(logs.filter((entry) => entry.event === 'routine_run').map(({ routineId, agentId, trigger, outcome }) => [routineId, agentId, trigger, outcome]), [['ledger-check', 'assistant', 'test', 'finished']]);
 });

@@ -1,5 +1,5 @@
-// Routine routes over routines.mjs (the store) and, once phase 4 wires it,
-// scheduler.mjs (test run):
+// Routine routes over routines.mjs (the store) and scheduler.mjs (the test
+// run):
 //   GET    /api/routines            -> 200 { routines } as the snapshot lists
 //                                     them (hub.mjs `routines.items`)
 //   POST   /api/routines            { name, agent, instruction, schedule, active }
@@ -24,7 +24,7 @@
 // then 500 routine_write_failed (logged as routine_write_error). A test
 // run answers 409 busy when the agent has a turn open and 409
 // agent_unavailable when it is not started, with no line written, and 503
-// not_yet while no scheduler is wired. Bodies are capped at
+// not_yet when no scheduler was given (tests). Bodies are capped at
 // limits.routineBodyBytes (413 payload_too_large).
 //
 // createRoutineRoutes({ routines, hub, scheduler, log, limits, shuttingDown })

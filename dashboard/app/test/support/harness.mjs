@@ -271,13 +271,16 @@ export async function startApp(t, {
   });
   if (!hub) await stateHub.start();
   const delegationService = typeof delegation === 'function' ? delegation(stateHub) : null;
+  // `scheduler` may be the scheduler itself or a function of the hub, as `delegation` is.
+  const schedulerService = typeof scheduler === 'function' ? scheduler(stateHub) : scheduler;
+  if (schedulerService) t.after(() => schedulerService.stop());
   for (const adapter of Object.values(adapters ?? {})) adapter?.setDelegation?.(delegationService);
   const goalsReader = goals === undefined ? createGoals({ registry, limits: config.limits, log }) : goals;
   const feedReader = feed === undefined ? createFeed({ dir: config.feedDir, limits: config.limits, log }) : feed;
   const instructionsReader = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log });
   const handler = createApp({
     config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader,
-    feedInstructions: instructionsReader, notices, settings, registry, routines, scheduler, log,
+    feedInstructions: instructionsReader, notices, settings, registry, routines, scheduler: schedulerService, log,
   });
   server.on('request', handler);
   t.after(() => {
@@ -288,7 +291,7 @@ export async function startApp(t, {
   const authority = `127.0.0.1:${port}`;
   return {
     port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, jobs: jobsModule, routines, settings, handler,
-    delegation: delegationService,
+    delegation: delegationService, scheduler: schedulerService,
   };
 }
 

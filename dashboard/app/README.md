@@ -60,7 +60,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `PUT /api/routines/<id>` | Rewrites a routine from the same five keys and answers it. |
 | `DELETE /api/routines/<id>` | Removes the routine and its runs log; `{"ok": true}`. |
 | `GET /api/routines/<id>/runs` | The routine's newest ten runs, newest first (below). |
-| `POST /api/routines/<id>/run` | Runs the routine now, outside its schedule; 202 once the turn has started, 503 `not_yet` until the scheduler is wired. |
+| `POST /api/routines/<id>/run` | Runs the routine now, outside its schedule; 202 once the turn has started, 409 `busy` or `agent_unavailable` when it cannot (below). |
 
 `/focus/`, `/reading/`, `/brief/`, `/feed/`, `/agents/`, `/goals/`, and `/health/` redirect to the
 paths without the slash. A known path
@@ -73,7 +73,7 @@ what `lib/app.mjs` expects from it.
 - `lib/app.mjs` routes requests, checks Host and Origin, logs, and serves the shell, assets, health, status, state, and jobs refresh.
 - `lib/agent-routes.mjs` serves the persona routes under `/api/agents/` and the session routes under `/api/sessions/`.
 - `lib/goals-routes.mjs` serves the Goals routes over `lib/goals.mjs`, which reads the vault.
-- `lib/routine-routes.mjs` serves the routine routes over `lib/routines.mjs`, the routine files and their runs logs, and `lib/schedule.mjs`, the cron subset and its occurrences in Chicago time.
+- `lib/routine-routes.mjs` serves the routine routes over `lib/routines.mjs`, the routine files and their runs logs, and `lib/schedule.mjs`, the cron subset and its occurrences in Chicago time; `lib/scheduler.mjs` runs them.
 - `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store, and `lib/feed-instructions.mjs`, which reads the criteria file.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
@@ -973,6 +973,9 @@ read-only fake) both routes are 404.
 - One turn per persona at a time. A second message while a turn is running
   is refused as `busy` before the SDK is called, because two resumes of one
   session both succeed and split its history.
+- A routine's run is sent as the composer's message is: the same options,
+  mode, and tools, at the agent's own level, with `routine: { id, name }`
+  on the user message as its only mark (Routines, below).
 - Each turn resumes the stored session in the thread's pinned folder with
   `maxTurns` 25 and the SDK permission mode the agent's level maps to
   (`permission` in the snapshot, the registry's level over the settings
@@ -1097,6 +1100,55 @@ running; the tool's arguments cannot name another.
   log also carries `delegation_sent`, `delegation_refused` (reason), and
   `delegation_finished` (status, `waitedMs`, `inline`). A hook that throws
   is logged as `persona_tools_error` and the turn runs without the tool.
+
+### Routines
+
+A routine (Routines under State, above) runs as a send to its agent, the
+instruction as the message, through `lib/scheduler.mjs`. The model gets
+`Routine "<name>" (a scheduled run, not the user): <instruction>` and one
+sentence that it may ask other agents and that its reply is what the run
+leaves behind; the thread shows the instruction as a user message with
+`routine: { id, name }` on it, never `from`. Nothing else differs from a
+message Hunter sends: the turn runs on the model and effort the hub
+resolves for the agent, at the agent's permission level, with the ask
+tool, and a card it raises is the agent's own `pending`, answered as any
+other; a hop's card is forwarded to the agent's thread as any delegation's
+is. The `persona_init` log line carries `routine: <id>`.
+
+The scheduler ticks every 30 seconds (`TIMEOUTS.routineTickMs`). For each
+active routine whose agent is a Claude persona, the marker is the newest
+of the runs log's newest occurrence, the routine's `updated`, and seven
+days ago (`LIMITS.routineCatchupDays`); when the latest occurrence at or
+before now is after the marker, the occurrences between them become one
+`missed` line (`count` up to `LIMITS.routineMissedMax`, with `capped`
+when the cap stopped it) and the latest runs, with `trigger` `schedule`
+when it is under a minute old and `catchup` when the daemon was down for
+it. A run leaves one line whatever happens, so a busy or failed fire
+still moves the marker; an edit or a reactivation bumps `updated`, so
+nothing from before it is due. Runs the last process left open are
+closed as `interrupted` when the daemon starts. `POST
+/api/routines/<id>/run` is a run outside the schedule, `trigger` `test`
+with `occurrence` null, so it never moves the marker; it answers 409
+`busy` while the agent has a turn open and 409 `agent_unavailable` when
+it is not started, writing nothing.
+
+Each run's outcome: `finished` when the turn ended with every card
+answered, `waiting` when a card was raised and not answered (it expired,
+the turn was interrupted, or it was still open when the turn ended),
+`failed` when the turn errored or the agent was not started
+(`detail: agent_unavailable`), `busy` when the agent had a turn open at
+the occurrence, and `interrupted` when the daemon stopped mid-run. The
+end line lists the cards as `{ agent, kind, toolName, summary, resolved }`.
+On the first card of a run the scheduler posts one line to the agent's
+thread, `{ role: "system", kind: "routine", state: "waiting", routine,
+agent, toolName, summary, text }`, "CFO is waiting for you during Daily
+drift." with the input's first 120 characters as `text`; it is
+bookkeeping (`lastLineAt`), never the row's preview. A run that ended
+`waiting` sets the agent's `needsYou` until Hunter writes in the thread.
+The log line `routine_run` carries the routine, agent, trigger, outcome,
+and duration; `routine_log_error` and `routine_line_error` a run line or
+thread line the store refused; `routine_tick_error` a tick that threw.
+None carries the instruction, the prompt, or a tool input.
 
 ### What runs without a card
 
@@ -1582,7 +1634,9 @@ text and, for a failure before init, the CLI's last 2 KiB of stderr),
 `thread_resume_failed`, the Codex events listed under Codex sessions, the
 hub's `sessions_refresh_error` (an error code), `hub_listener_error`, and
 `thread_cache_error`, the routine store's `routine_invalid` (a file it
-skipped) and the routes' `routine_write_error`, the bindings reader's `bindings_error` and
+skipped), the routes' `routine_write_error`, the scheduler's
+`routine_run`, `routine_log_error`, `routine_line_error`, and
+`routine_tick_error`, the bindings reader's `bindings_error` and
 `bindings_listener_error`, and the cmux events
 `cmux_auth_failed`, `cmux_inventory_error`, `cmux_frame_too_large`,
 `cmux_surface_list_shape`, `cmux_record_skipped`, `cmux_cli_missing`, and

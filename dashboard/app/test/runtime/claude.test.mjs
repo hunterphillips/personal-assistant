@@ -1039,3 +1039,40 @@ test('the hook result is committed once init is seen and rolled back when the tu
   assert.deepEqual(states(noisy.events), ['busy', 'idle']);
   assert.ok(noisy.logs.some((entry) => entry.event === 'persona_tools_error' && entry.method === 'commit'));
 });
+
+test('a routine send records the routine on the user message and never a sender, runs with the options of a plain send at the same level, and names the routine on init', async (t) => {
+  const { adapter, store, events, query, logs } = await setup(t);
+  const routine = { id: 'daily-drift', name: 'Daily drift' };
+  await adapter.send(AGENT, 'Compute drift.', { permission: 'auto', model: 'opus', effort: 'high', routine, prompt: 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.' });
+  await adapter.send(AGENT, 'Compute drift.', { permission: 'auto', model: 'opus', effort: 'high' });
+  const [first, second] = events.filter((event) => event.type === 'message' && event.role === 'user');
+  assert.deepEqual(first.routine, routine);
+  assert.equal('from' in first, false);
+  assert.equal('routine' in second, false);
+  const cached = await store.read('cfo');
+  assert.deepEqual(cached[0].routine, routine);
+  assert.equal('routine' in cached[2], false);
+  assert.equal(query.calls[0].prompt, 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.');
+  // The same options, the routine's turn and the plain one, function by function (the second resumes the session the first began).
+  const shape = ({ resume, ...options }) => Object.fromEntries(Object.entries(options).map(([key, value]) => [key, typeof value === 'function' ? 'function' : value]));
+  assert.deepEqual(shape(query.calls[0].options), shape(query.calls[1].options));
+  assert.deepEqual([query.calls[0].options.resume, query.calls[1].options.resume], [undefined, 'session-1']);
+  assert.equal(query.calls[0].options.permissionMode, 'auto');
+  assert.deepEqual(logs.filter((e) => e.event === 'persona_init').map((e) => e.routine), ['daily-drift', null]);
+
+  // A sender given beside a routine is dropped: the turn is the routine's.
+  await adapter.send(AGENT, 'Again.', { routine, from: 'assistant' });
+  const third = events.filter((event) => event.type === 'message' && event.role === 'user')[2];
+  assert.deepEqual(third.routine, routine);
+  assert.equal('from' in third, false);
+  // A routine that is not { id, name } is refused before any turn starts.
+  for (const bad of ['daily-drift', { id: 'x' }, { id: '', name: 'x' }, { id: 'x', name: 7 }, []]) {
+    let rejected = null;
+    const turn = adapter.send(AGENT, 'Bad.', { routine: bad });
+    turn.catch((error) => { rejected = error; });
+    assert.equal(adapter.state('cfo').state, 'idle', 'refused synchronously, no turn opened');
+    await turn.catch(() => {});
+    assert.equal(rejected?.code, 'invalid_routine', JSON.stringify(bad));
+  }
+  assert.equal(query.calls.length, 3);
+});

@@ -2,10 +2,12 @@
 // terminal bindings, compose the jobs view, thread store, runtime
 // adapters (Claude for personas, Codex for the shared app-server's threads),
 // the cmux client, the routine store (loaded before the hub, so its
-// snapshot lists them), state hub, the Goals, Feed, and feed instructions
+// snapshot lists them) and the scheduler that runs them, state hub, the Goals, Feed, and feed instructions
 // readers, the settings store, the brief notices, and app, start the
 // personas, seed the settings file on first start, post any brief notice
-// not yet in the thread of the agent the settings name, listen on
+// not yet in the thread of the agent the settings name, start the
+// scheduler (which closes runs the last process left open and catches
+// up), listen on
 // 127.0.0.1, and shut down within a bounded window on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
 // runs main(). A missing or invalid registry does not stop startup; the hub
 // reports it.
@@ -15,7 +17,8 @@
 // every persona is unavailable with lastError 'api_key_in_env'. Persona
 // turns must bill the subscription, never an API key.
 //
-// Shutdown order: stop the notice timer, end event streams and refuse new sends (closeStreams),
+// Shutdown order: stop the scheduler (no new runs; in-flight runs are left
+// to the next start to close), stop the notice timer, end event streams and refuse new sends (closeStreams),
 // close each adapter (Claude drains running turns for up to drainMs, then
 // aborts the rest and waits abortGraceMs for them; Codex closes its socket),
 // close the cmux client's socket, close the hub, stop the registry and
@@ -39,6 +42,7 @@ import { createHub } from './lib/hub.mjs';
 import { createNotices } from './lib/notices.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { createRoutines } from './lib/routines.mjs';
+import { createScheduler } from './lib/scheduler.mjs';
 import { createJobs } from './lib/jobs.mjs';
 import { createSettings } from './lib/settings.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
@@ -129,6 +133,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     log: logEntry,
   });
   delegation = createDelegation({ hub, registry, limits: config.limits, timeouts: config.timeouts, log: logEntry });
+  const scheduler = createScheduler({ routines, hub, zone: config.timeZone, timeouts: config.timeouts, limits: config.limits, log: logEntry });
   const goals = createGoals({ registry, limits: config.limits, log: logEntry });
   const feed = createFeed({ dir: config.feedDir, limits: config.limits, log: logEntry });
   const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log: logEntry });
@@ -141,7 +146,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     log: logEntry,
   });
   const app = createApp({
-    config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, registry, routines, log: logEntry,
+    config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, registry, routines, scheduler, log: logEntry,
   });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;
@@ -149,6 +154,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   server.keepAliveTimeout = config.timeouts.keepAliveMs;
 
   const shutdownState = async () => {
+    scheduler.stop();
     notices.stop();
     app.closeStreams();
     await Promise.all(Object.values(adapters).map((adapter) => adapter.close()));
@@ -163,6 +169,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   await hub.start();
   // The brief notice waiting since the last run, if any; never fatal.
   await notices.reconcile();
+  await scheduler.start();
   try {
     await new Promise((resolve, reject) => {
       server.once('error', reject);

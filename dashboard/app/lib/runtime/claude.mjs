@@ -19,8 +19,9 @@
 //     'busy' (a turn or New thread is in flight; decided synchronously, before
 //     any await, so two sends can never both reach query() and fork the
 //     session), 'shutting_down' (close() has begun), 'invalid_agent',
-//     'invalid_text', or 'invalid_permission' (a `permission` that is not
-//     one of permissions.mjs PERMISSION_LEVELS, null, or absent). Once
+//     'invalid_text', 'invalid_permission' (a `permission` that is not
+//     one of permissions.mjs PERMISSION_LEVELS, null, or absent), or
+//     'invalid_routine' (a `routine` that is not { id, name }). Once
 //     accepted, the promise resolves when the turn ends and never rejects;
 //     failures arrive as `error` events.
 //   answer(agent, requestId, answer) -> Promise<void>
@@ -110,10 +111,14 @@
 // from the mode requested (Auto is per model, and the user's
 // `permissions.disableAutoMode` can refuse it) one
 // persona_permission_mismatch line carries both and the turn goes on.
-// send(agent, text, { model, effort, permission, from, mentions, prompt, chain }): `from` is the
+// send(agent, text, { model, effort, permission, from, mentions, prompt, chain, routine }): `from` is the
 // registry id of the agent that sent the text (absent for the user) and
 // `mentions` the ids it named with @; both are recorded on the user message
-// and carried by its event. `prompt`, when given, is what the SDK receives
+// and carried by its event. `routine` is { id, name } when the text is a
+// routine's instruction (scheduler.mjs), recorded on the user message as
+// `routine` and never beside `from`, kept on the turn, and logged on
+// persona_init as `routine: <id>`; the options, the mode, canUseTool, and
+// the tools hook are those of any other turn at the same level. `prompt`, when given, is what the SDK receives
 // in place of `text`, so the thread shows what was written while the model
 // gets the daemon's prefixed form (delegation.mjs). `chain` is the list of
 // agents the message passed through before the sender; it is not recorded,
@@ -349,6 +354,7 @@ export function createClaudeAdapter({
         model: message.model ?? null,
         effort: turn.effort ?? null,
         permission: turn.permission,
+        routine: turn.routine?.id ?? null,
       });
       const requested = sdkModeFor(turn.permission).permissionMode;
       if (typeof message.permissionMode === 'string' && message.permissionMode !== requested) {
@@ -444,6 +450,7 @@ export function createClaudeAdapter({
     let resumed = false;
     try {
       await record(entry, 'user', text, {
+        ...(turn.routine ? { routine: turn.routine } : {}),
         ...(turn.from ? { from: turn.from } : {}),
         ...(turn.mentions.length > 0 ? { mentions: [...turn.mentions] } : {}),
       });
@@ -526,7 +533,7 @@ export function createClaudeAdapter({
       return { threadId: agent.id };
     },
 
-    send(agent, text, { model = null, effort = null, permission = null, from = null, mentions = null, prompt = null, chain = null } = {}) {
+    send(agent, text, { model = null, effort = null, permission = null, from = null, mentions = null, prompt = null, chain = null, routine = null } = {}) {
       try {
         checkAgent(agent);
       } catch (error) {
@@ -535,6 +542,7 @@ export function createClaudeAdapter({
       if (closing) return Promise.reject(new RuntimeError('shutting_down'));
       if (typeof text !== 'string' || text.trim() === '') return Promise.reject(new RuntimeError('invalid_text'));
       if (permission !== null && permission !== undefined && !isPermission(permission)) return Promise.reject(new RuntimeError('invalid_permission'));
+      if (routine !== null && routine !== undefined && !isRoutineRef(routine)) return Promise.reject(new RuntimeError('invalid_routine'));
       const entry = entryFor(agent.id);
       if (entry.turn || entry.resetting) return Promise.reject(new RuntimeError('busy'));
       entry.cwd ??= agent.cwd;
@@ -552,7 +560,9 @@ export function createClaudeAdapter({
         model: typeof model === 'string' && model !== '' ? model : null,
         effort: typeof effort === 'string' && effort !== '' ? effort : null,
         permission: permission ?? 'ask',
-        from: typeof from === 'string' && from !== '' ? from : null,
+        routine: routine ? { id: routine.id, name: routine.name } : null,
+        // A routine's turn is the routine's, never another agent's.
+        from: !routine && typeof from === 'string' && from !== '' ? from : null,
         mentions: Array.isArray(mentions) ? mentions.filter((id) => typeof id === 'string' && id !== '') : [],
         prompt: typeof prompt === 'string' && prompt.trim() !== '' ? prompt : null,
         chain: Array.isArray(chain) ? chain.filter((id) => typeof id === 'string' && id !== '') : [],
@@ -764,4 +774,10 @@ function bound(text) {
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// The routine a send is attributed to: { id, name }, both non-empty strings.
+function isRoutineRef(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && typeof value.id === 'string' && value.id !== '' && typeof value.name === 'string' && value.name !== '';
 }

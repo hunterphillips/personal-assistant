@@ -1090,3 +1090,22 @@ test('needsYou at start reads the last message Hunter wrote from the cache, skip
   assert.equal(persona(unanswered.hub).needsYou, true);
   unanswered.hub.close();
 });
+
+test('the routine line a run posts sets lastLineAt and leaves the preview alone', async () => {
+  const adapter = fakeAdapter();
+  const appended = [];
+  const store = { read: async () => [{ role: 'assistant', text: 'Earlier reply.', at: 'a' }], append: async (id, message) => { appended.push([id, message]); } };
+  const { hub, deltas } = makeHub({ adapters: { claude: adapter }, store });
+  await hub.start();
+  const before = hub.snapshot().revision;
+  const line = await hub.notify('cfo', {
+    role: 'system', kind: 'routine', state: 'waiting', routine: { id: 'daily-drift', name: 'Daily drift' }, agent: 'cfo',
+    toolName: 'Bash', summary: 'CFO is waiting for you during Daily drift.', text: '{"command":"ls"}',
+  });
+  assert.equal(line.at, '2026-09-25T12:00:00.000Z');
+  assert.deepEqual(appended, [['cfo', line]]);
+  assert.equal(persona(hub).lastLineAt, '2026-09-25T12:00:00.000Z');
+  assert.deepEqual(persona(hub).lastMessage, { role: 'assistant', text: 'Earlier re', at: 'a' });
+  assert.equal(hub.snapshot().revision, before + 1);
+  assert.deepEqual(Object.keys(deltas.at(-1).patch), ['agents']);
+});
