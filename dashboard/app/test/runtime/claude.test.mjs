@@ -112,7 +112,7 @@ test('a turn emits state, messages, and usage, writes the pointer, and caches th
     { role: 'assistant', text: 'Hello from the persona.' },
   ]);
   assert.deepEqual(adapter.state('cfo'), {
-    state: 'idle', pending: null, lastError: null, sessionId: 'session-1', costUsd: 0.25, cwd: '/invented/cfo',
+    state: 'idle', pending: null, lastError: null, sessionId: 'session-1', costUsd: 0.25, cwd: '/invented/cfo', model: null,
   });
 
   const { prompt, options } = query.calls[0];
@@ -300,7 +300,7 @@ test('interrupt aborts the turn, resolves the pending request as interrupted, an
   assert.equal(events.find((event) => event.type === 'resolved').outcome, 'interrupted');
   assert.equal(events.some((event) => event.type === 'error'), false);
   assert.deepEqual(adapter.state('cfo'), {
-    state: 'idle', pending: null, lastError: null, sessionId: 'session-1', costUsd: null, cwd: '/invented/cfo',
+    state: 'idle', pending: null, lastError: null, sessionId: 'session-1', costUsd: null, cwd: '/invented/cfo', model: null,
   });
   await adapter.interrupt(AGENT);
 });
@@ -686,4 +686,111 @@ test('invalid agents and empty text are refused before any turn starts', async (
   await assert.rejects(adapter.answer(AGENT, 'nope', { decision: 'allow' }), { code: 'no_such_request' });
   assert.equal(query.calls.length, 0);
   assert.equal(adapter.kind, 'claude');
+});
+
+test('setModel keeps the thread\'s choice in the pointer and the entry, says so in the thread, and a key absent keeps its field', async (t) => {
+  const { adapter, store, events, logs } = await setup(t);
+  await adapter.start(AGENT);
+  assert.equal(adapter.state('cfo').model, null);
+
+  // A choice before any session: the pointer holds it with a null session.
+  await adapter.setModel(AGENT, { model: 'sonnet' });
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: null, createdAt: AT, model: 'sonnet' });
+  assert.deepEqual(adapter.state('cfo').model, { id: 'sonnet', effort: null });
+  assert.deepEqual(events.filter((e) => e.type === 'message').map(({ role, kind, model, effort, text }) => ({ role, kind, model, effort, text })), [
+    { role: 'system', kind: 'model', model: 'sonnet', effort: null, text: 'Now on Sonnet.' },
+  ]);
+  assert.deepEqual(logs.filter((l) => l.event === 'persona_model'), [{ event: 'persona_model', agentId: 'cfo', model: 'sonnet', effort: null }]);
+
+  // Effort alone keeps the model; the line names both.
+  await adapter.setModel(AGENT, { effort: 'low' });
+  assert.deepEqual(adapter.state('cfo').model, { id: 'sonnet', effort: 'low' });
+  assert.equal(events.filter((e) => e.type === 'message').at(-1).text, 'Now on Sonnet, low effort.');
+
+  // The session id from a turn joins the pair in the pointer, and the turn
+  // runs on whatever send() is given (the hub resolves it from state().model).
+  await adapter.send(AGENT, 'Hi', { model: 'sonnet', effort: 'low' });
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT, model: 'sonnet', effort: 'low' });
+  const cached = (await store.read('cfo')).map(({ role, kind, text }) => ({ role, kind, text }));
+  assert.deepEqual(cached.slice(0, 2), [
+    { role: 'system', kind: 'model', text: 'Now on Sonnet.' },
+    { role: 'system', kind: 'model', text: 'Now on Sonnet, low effort.' },
+  ]);
+
+  // Dropping the model alone leaves the effort; dropping both says so.
+  await adapter.setModel(AGENT, { model: null });
+  assert.deepEqual(adapter.state('cfo').model, { id: null, effort: 'low' });
+  assert.equal(events.filter((e) => e.type === 'message').at(-1).text, 'Now at low effort.');
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT, effort: 'low' });
+  await adapter.setModel(AGENT, { effort: null });
+  assert.equal(adapter.state('cfo').model, null);
+  assert.equal(events.filter((e) => e.type === 'message').at(-1).text, "Back to the agent's default.");
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT });
+
+  // An unknown id shows as itself; a long effort name reads in lower case.
+  await adapter.setModel(AGENT, { model: 'claude-x-9', effort: 'xhigh' });
+  assert.equal(events.filter((e) => e.type === 'message').at(-1).text, 'Now on claude-x-9, extra high effort.');
+});
+
+test('a model chosen alone passes no effort to the turn, and the pair given to send() reaches the query', async (t) => {
+  const { adapter, query } = await setup(t);
+  await adapter.send(AGENT, 'Hi', { model: 'sonnet' });
+  assert.equal(query.calls.at(-1).options.model, 'sonnet');
+  assert.equal('effort' in query.calls.at(-1).options, false);
+  await adapter.send(AGENT, 'Again', { model: 'sonnet', effort: 'low' });
+  assert.equal(query.calls.at(-1).options.effort, 'low');
+});
+
+test('setModel refuses a bad choice, a busy turn, and a reset in flight, and is refused by them in turn', async (t) => {
+  const release = gate();
+  let calls = 0;
+  const query = fakeQuery(async function* () {
+    calls += 1;
+    yield init();
+    if (calls === 1) await release.promise;
+    yield result();
+  });
+  const { adapter, store } = await setup(t, { query });
+  await assert.rejects(adapter.setModel(AGENT, { model: '' }), { code: 'invalid_model' });
+  await assert.rejects(adapter.setModel(AGENT, { model: 'x'.repeat(65) }), { code: 'invalid_model' });
+  await assert.rejects(adapter.setModel(AGENT, { model: 7 }), { code: 'invalid_model' });
+  await assert.rejects(adapter.setModel(AGENT, { effort: 'extreme' }), { code: 'invalid_effort' });
+  await assert.rejects(adapter.setModel({ ...AGENT, id: 'Bad Id' }, { model: 'sonnet' }), { code: 'invalid_agent' });
+
+  const turn = adapter.send(AGENT, 'Hi');
+  await assert.rejects(adapter.setModel(AGENT, { model: 'sonnet' }), { code: 'busy' });
+  release.open();
+  await turn;
+
+  // While setModel writes, a send and a New thread are busy; once done the
+  // choice stands.
+  const change = adapter.setModel(AGENT, { model: 'haiku' });
+  await assert.rejects(adapter.send(AGENT, 'during change'), { code: 'busy' });
+  await assert.rejects(adapter.newThread(AGENT), { code: 'busy' });
+  await change;
+  assert.deepEqual(adapter.state('cfo').model, { id: 'haiku', effort: null });
+
+  // And a reset in flight refuses setModel.
+  const reset = adapter.newThread(AGENT);
+  await assert.rejects(adapter.setModel(AGENT, { model: 'sonnet' }), { code: 'busy' });
+  await reset;
+  assert.equal(adapter.state('cfo').model, null);
+  assert.equal(await store.readPointer('cfo'), null);
+});
+
+test('a fresh adapter reads the thread\'s choice back from the pointer, and adopting a session keeps it', async (t) => {
+  const { adapter, store } = await setup(t);
+  await store.writePointer('cfo', { sessionId: 'session-0', createdAt: AT, model: 'opus', effort: 'max' });
+  await adapter.start(AGENT);
+  assert.deepEqual(adapter.state('cfo').model, { id: 'opus', effort: 'max' });
+  await adapter.send(AGENT, 'Hi');
+  // init says session-1, which replaces session-0 and keeps the pair.
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT, model: 'opus', effort: 'max' });
+  assert.deepEqual(adapter.state('cfo').model, { id: 'opus', effort: 'max' });
+});
+
+test('setModel after close has begun is refused', async (t) => {
+  const { adapter } = await setup(t);
+  await adapter.close();
+  await assert.rejects(adapter.setModel(AGENT, { model: 'sonnet' }), { code: 'shutting_down' });
 });

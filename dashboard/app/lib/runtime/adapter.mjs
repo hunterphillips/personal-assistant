@@ -23,14 +23,25 @@
 //   interrupt(agent) -> Promise<void>
 //     Aborts the turn in flight and resolves once it has ended; a no-op when
 //     no turn is running.
+//   setModel(agent, { model?, effort? }) -> Promise<void>   (optional)
+//     Records the thread's own model and effort for its next turns: a key
+//     present replaces that field (a string, or null to inherit again), a
+//     key absent keeps it. Rejects 'busy' while a turn runs or a reset is
+//     in flight, 'shutting_down', 'invalid_model', 'invalid_effort'. The
+//     hub reads the choice back from state().model when it resolves the
+//     pair for send(). A provider without it (Codex) has no per-thread
+//     choice.
 //   newThread(agent) -> Promise<void>
-//     Forgets the persona's session so the next turn starts a fresh one.
-//     Rejects 'busy' while a turn runs, 'shutting_down' after close() has
-//     begun, and 'thread_reset_failed' when the files cannot be cleared.
-//   state(agentId) -> { state, pending, lastError, sessionId, costUsd, cwd? }
+//     Forgets the persona's session so the next turn starts a fresh one,
+//     with any thread model choice. Rejects 'busy' while a turn runs,
+//     'shutting_down' after close() has begun, and 'thread_reset_failed'
+//     when the files cannot be cleared.
+//   state(agentId) -> { state, pending, lastError, sessionId, costUsd, cwd?, model? }
 //     state is 'idle' | 'busy' | 'waiting' | 'error'. pending is the oldest
 //     open request ({ requestId, kind, toolName, input, at }) or null. cwd,
-//     when the provider has one, is the folder the thread is pinned to.
+//     when the provider has one, is the folder the thread is pinned to;
+//     model, when the provider has setModel, is the thread's choice
+//     { id, effort } or null.
 //   subscribe(fn) -> unsubscribe
 //   close() -> Promise<void>
 //     Refuses new turns, drains or aborts the running ones, and resolves

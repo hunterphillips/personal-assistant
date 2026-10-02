@@ -512,7 +512,7 @@ test.describe('Settings', () => {
     expect(hub.requests('/api/settings')).toEqual([{ method: 'PUT', status: 200 }]);
     expect((await readFile(hub)).model).toEqual({ default: 'sonnet', effort: 'high' });
     expect(hub.state.snapshot().settings.model.default).toBe('sonnet');
-    expect(hub.state.snapshot().agents.find((a) => a.id === 'brain').model).toEqual({ id: 'sonnet', effort: 'high', source: 'system' });
+    expect(hub.state.snapshot().agents.find((a) => a.id === 'brain').model).toEqual({ id: 'sonnet', effort: 'high', source: 'system', default: { id: 'sonnet', effort: 'high' } });
     await expect(select(page, 'Default model')).toHaveValue('sonnet');
     await expect(status(page)).toBeHidden({ timeout: 5_000 });
 

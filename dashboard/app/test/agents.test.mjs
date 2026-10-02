@@ -21,16 +21,23 @@ function agent(id, extra = {}) {
 // turn open until release() is called.
 function fakeAdapter() {
   let release;
+  const listeners = new Set();
   const adapter = {
     calls: [],
     behavior: {},
     turn: new Promise((resolve) => { release = resolve; }),
     release: () => release(),
     start: async () => ({}),
-    state: () => ({ state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null }),
-    subscribe: () => () => {},
-    send(agentValue, text) {
+    state: () => ({ state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null, model: adapter.choice }),
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    sendOptions: [],
+    choice: null,
+    send(agentValue, text, options) {
       adapter.calls.push(['send', agentValue.id, text]);
+      adapter.sendOptions.push(options);
       const code = adapter.behavior.send;
       if (code) return Promise.reject(new RuntimeError(code));
       return adapter.turn;
@@ -46,6 +53,20 @@ function fakeAdapter() {
     async newThread(agentValue) {
       adapter.calls.push(['newThread', agentValue.id]);
       if (adapter.behavior.newThread) throw new RuntimeError(adapter.behavior.newThread);
+    },
+    setModel(agentValue, choice) {
+      adapter.calls.push(['setModel', agentValue.id, choice]);
+      if (adapter.behavior.setModel) return Promise.reject(new RuntimeError(adapter.behavior.setModel));
+      adapter.choice = {
+        id: 'model' in choice ? choice.model : adapter.choice?.id ?? null,
+        effort: 'effort' in choice ? choice.effort : adapter.choice?.effort ?? null,
+      };
+      if (adapter.choice.id === null && adapter.choice.effort === null) adapter.choice = null;
+      // As the real adapter does: the thread line is the event the hub
+      // recomputes the model view on.
+      const event = { type: 'message', agentId: agentValue.id, at: 'now', role: 'system', kind: 'model', model: adapter.choice?.id ?? null, effort: adapter.choice?.effort ?? null, text: 'Now on …' };
+      for (const fn of listeners) fn(event);
+      return Promise.resolve();
     },
   };
   return adapter;
@@ -225,4 +246,43 @@ test('the snapshot carries persona state and null state for other kinds', async 
   assert.deepEqual(byId.cfo.lastMessage, { role: 'assistant', text: 'Hello', at: '2026-09-25T12:00:01.000Z' });
   assert.equal(byId.ops.state, null);
   assert.deepEqual([byId.dev.state, byId.dev.lastError], ['unavailable', 'provider_unavailable']);
+});
+
+test('send hands the adapter the resolved model and effort as { model, effort }', async (t) => {
+  const app = await startAgents(t, { agents: [agent('cfo', { model: 'opus' })] });
+  assert.equal((await post(app, '/api/agents/cfo/send', { text: 'Hi' })).status, 202);
+  assert.deepEqual(app.adapter.sendOptions, [{ model: 'opus', effort: null }]);
+});
+
+test('model records the thread\'s choice, answers the resolved pair, and validates its body', async (t) => {
+  const app = await startAgents(t, { agents: [agent('cfo', { model: 'opus' }), agent('dev', { kind: 'persona', provider: 'codex' })] });
+  const chosen = await post(app, '/api/agents/cfo/model', { model: 'sonnet' });
+  assert.deepEqual([chosen.status, chosen.json], [200, { ok: true, model: { id: 'sonnet', effort: null, source: 'thread' } }]);
+  assert.deepEqual(app.adapter.calls, [['setModel', 'cfo', { model: 'sonnet' }]]);
+  // The snapshot shows the thread level once the adapter has recorded it
+  // (the real adapter emits a message; the fake is read on the next commit).
+  const effort = await post(app, '/api/agents/cfo/model', { effort: 'low' });
+  assert.deepEqual(effort.json.model, { id: 'sonnet', effort: 'low', source: 'thread' });
+  assert.deepEqual(app.adapter.calls.at(-1), ['setModel', 'cfo', { effort: 'low' }]);
+  const reset = await post(app, '/api/agents/cfo/model', { model: null, effort: null });
+  assert.deepEqual(reset.json.model, { id: 'opus', effort: null, source: 'agent' });
+
+  for (const [body, code] of [[[], 'invalid_body'], [{}, 'invalid_body'], [{ text: 'x' }, 'invalid_body'], [{ model: 'sonnet', text: 'x' }, 'invalid_body'],
+    [{ model: '' }, 'invalid_model'], [{ model: 7 }, 'invalid_model'], [{ model: 'x'.repeat(65) }, 'invalid_model'],
+    [{ effort: 'extreme' }, 'invalid_effort'], [{ effort: 3 }, 'invalid_effort']]) {
+    const response = await post(app, '/api/agents/cfo/model', body);
+    assert.deepEqual([response.status, response.json], [400, { error: code }], JSON.stringify(body));
+  }
+  for (const [code, status] of [['busy', 409], ['shutting_down', 503], ['invalid_model', 400]]) {
+    app.adapter.behavior.setModel = code;
+    const response = await post(app, '/api/agents/cfo/model', { model: 'haiku' });
+    assert.deepEqual([response.status, response.json], [status, { error: code }], code);
+  }
+  app.adapter.behavior.setModel = null;
+
+  // A Codex persona has no per-thread choice from here.
+  const codex = await post(app, '/api/agents/dev/model', { model: 'sonnet' });
+  assert.deepEqual([codex.status, codex.json], [409, { error: 'persona_unavailable' }]);
+  app.handler.closeStreams();
+  assert.equal((await post(app, '/api/agents/cfo/model', { model: 'haiku' })).status, 503);
 });

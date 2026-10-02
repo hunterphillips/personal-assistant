@@ -337,7 +337,7 @@ test('first start seeds the settings file with the brief going to the pinned Cla
   assert.deepEqual(logs.filter((e) => e.event === 'settings_seeded'), [{ event: 'settings_seeded', agent: 'assistant' }]);
   const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
   assert.deepEqual(state.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: 'assistant' } });
-  assert.deepEqual(state.agents.find((a) => a.id === 'cfo').model, { id: null, effort: null, source: 'default' });
+  assert.deepEqual(state.agents.find((a) => a.id === 'cfo').model, { id: null, effort: null, source: 'default', default: { id: null, effort: null } });
   await dashboard.close();
 
   // A second start finds the file and leaves it alone, even after an edit.
@@ -348,7 +348,7 @@ test('first start seeds the settings file with the brief going to the pinned Cla
   const next = await (await fetch(`http://127.0.0.1:${again.config.port}/api/state`)).json();
   assert.deepEqual(next.settings.model, { default: 'haiku', effort: 'max' });
   assert.equal(next.settings.brief.agent, 'cfo');
-  assert.deepEqual(next.agents.find((a) => a.id === 'cfo').model, { id: 'haiku', effort: 'max', source: 'system' });
+  assert.deepEqual(next.agents.find((a) => a.id === 'cfo').model, { id: 'haiku', effort: 'max', source: 'system', default: { id: 'haiku', effort: 'max' } });
 });
 
 test('with no pinned Claude persona the seed names no one, and the notice waits for a target', async (t) => {

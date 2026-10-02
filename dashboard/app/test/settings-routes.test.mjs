@@ -34,7 +34,7 @@ test('PUT saves a partial patch, answers the whole document, and the snapshot fo
   const snapshot = app.hub.snapshot();
   assert.equal(snapshot.revision, before + 1);
   assert.deepEqual(snapshot.settings.model, { default: 'sonnet', effort: 'high' });
-  assert.deepEqual(snapshot.agents.find((a) => a.id === 'cfo').model, { id: 'sonnet', effort: 'high', source: 'system' });
+  assert.deepEqual(snapshot.agents.find((a) => a.id === 'cfo').model, { id: 'sonnet', effort: 'high', source: 'system', default: { id: 'sonnet', effort: 'high' } });
 
   const cleared = await put(app, { model: { default: null }, brief: { agent: null } });
   assert.equal(cleared.status, 200);

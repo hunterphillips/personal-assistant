@@ -3,21 +3,30 @@
 // Providers own transcripts; losing the pointer means the persona starts a
 // fresh session, and losing the cache only empties the thread view.
 //
-//   <dir>/<agentId>.json    { "sessionId": "...", "createdAt": "<ISO>" }
+//   <dir>/<agentId>.json    { "sessionId": "..." | null, "createdAt": "<ISO>",
+//                             "model"?: "...", "effort"?: "..." }
 //                           written atomically (exclusive temp file, fsync,
-//                           rename), mode 0600
+//                           rename), mode 0600. `model` and `effort` are the
+//                           thread's own choice (runtime/claude.mjs setModel);
+//                           a pointer may hold a choice before any session
+//                           exists (sessionId null) but never neither.
 //   <dir>/<agentId>.jsonl   one message per line, mode 0600:
 //                           { role: 'user'|'assistant'|'system', text, at,
 //                             truncated?: true, ...other JSON fields }
 //
 // createThreadStore({ dir, limits, log }) returns:
 //
-//   readPointer(agentId) -> Promise<{ sessionId, createdAt } | null>
+//   readPointer(agentId) -> Promise<{ sessionId, createdAt, model?, effort? } | null>
 //     null when the file is missing, or when it is not a valid pointer
 //     (logged as { event: 'thread_pointer_invalid', agentId }). Any other
 //     read error rejects, so a caller never mistakes an unreadable pointer
-//     for no pointer and forks a new session over it.
-//   writePointer(agentId, { sessionId, createdAt }) -> Promise<void>
+//     for no pointer and forks a new session over it. `model` is kept when
+//     it is a string of at most 64 characters and `effort` when it is one
+//     of models.mjs EFFORTS; anything else reads as absent.
+//   writePointer(agentId, { sessionId, createdAt, model?, effort? }) -> Promise<void>
+//     Rejects 'invalid_pointer' for a bad session id, a session id of null
+//     with neither field, a model that is not a string of 1 to 64
+//     characters, or an effort outside EFFORTS. Null fields are dropped.
 //   clearPointer(agentId) -> Promise<void>      missing is fine
 //   append(agentId, message) -> Promise<void>
 //     Text over limits.messageTextBytes (UTF-8) is cut on a character
@@ -45,10 +54,12 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { createKeyedQueue } from './feedback.mjs';
+import { isEffort } from './models.mjs';
 import { AGENT_ID } from './registry.mjs';
 
 const ROLES = new Set(['user', 'assistant', 'system']);
 const SESSION_ID_MAX = 256;
+const MODEL_MAX = 64;
 const POINTER_MAX_BYTES = 4 * 1024;
 
 export class ThreadStoreError extends Error {
@@ -150,7 +161,7 @@ export function createThreadStore({ dir, limits, log = () => {} }) {
     async writePointer(agentId, pointer) {
       fileFor(agentId, '.json');
       if (!isPointer(pointer)) throw new ThreadStoreError('invalid_pointer');
-      const body = `${JSON.stringify({ sessionId: pointer.sessionId, createdAt: pointer.createdAt })}\n`;
+      const body = `${JSON.stringify(pointerRecord(pointer))}\n`;
       await queue(`pointer:${agentId}`, async () => {
         await ensureDir();
         await atomicWrite(root, `${agentId}.json`, body);
@@ -207,12 +218,37 @@ function parsePointer(raw) {
   } catch {
     return null;
   }
-  return isPointer(value) ? { sessionId: value.sessionId, createdAt: value.createdAt } : null;
+  if (!isRecord(value) || typeof value.createdAt !== 'string') return null;
+  // A stored choice that no longer validates (an effort the SDK dropped, say)
+  // reads as absent rather than spoiling the pointer.
+  const read = {
+    sessionId: value.sessionId,
+    createdAt: value.createdAt,
+    model: isModelId(value.model) ? value.model : null,
+    effort: isEffort(value.effort) ? value.effort : null,
+  };
+  return isPointer(read) ? pointerRecord(read) : null;
+}
+
+// The fields a pointer file carries: null model and effort are dropped.
+function pointerRecord(pointer) {
+  const record = { sessionId: pointer.sessionId ?? null, createdAt: pointer.createdAt };
+  if (isModelId(pointer.model)) record.model = pointer.model;
+  if (isEffort(pointer.effort)) record.effort = pointer.effort;
+  return record;
+}
+
+function isModelId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= MODEL_MAX;
 }
 
 function isPointer(value) {
-  return isRecord(value) && typeof value.sessionId === 'string' && value.sessionId.length > 0 &&
-    value.sessionId.length <= SESSION_ID_MAX && typeof value.createdAt === 'string';
+  if (!isRecord(value) || typeof value.createdAt !== 'string') return false;
+  if (value.model !== undefined && value.model !== null && !isModelId(value.model)) return false;
+  if (value.effort !== undefined && value.effort !== null && !isEffort(value.effort)) return false;
+  const hasChoice = isModelId(value.model) || isEffort(value.effort);
+  if (value.sessionId === null || value.sessionId === undefined) return hasChoice;
+  return typeof value.sessionId === 'string' && value.sessionId.length > 0 && value.sessionId.length <= SESSION_ID_MAX;
 }
 
 function parseMessages(text) {

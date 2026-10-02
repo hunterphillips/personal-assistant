@@ -63,6 +63,43 @@ test('an invalid pointer is refused on write', async (t) => {
   await assert.rejects(store.writePointer('cfo', { createdAt: AT }), { code: 'invalid_pointer' });
 });
 
+test('a pointer carries the thread\'s model and effort, with or without a session', async (t) => {
+  const { dir, store } = await setup(t);
+  await store.writePointer('cfo', { sessionId: 'session-1', createdAt: AT, model: 'sonnet', effort: 'low' });
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT, model: 'sonnet', effort: 'low' });
+  assert.deepEqual(JSON.parse(await readFile(path.join(dir, 'cfo.json'), 'utf8')), { sessionId: 'session-1', createdAt: AT, model: 'sonnet', effort: 'low' });
+
+  // Either field alone; null is dropped from the file.
+  await store.writePointer('cfo', { sessionId: 'session-1', createdAt: AT, model: 'sonnet', effort: null });
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT, model: 'sonnet' });
+  assert.equal('effort' in JSON.parse(await readFile(path.join(dir, 'cfo.json'), 'utf8')), false);
+  await store.writePointer('cfo', { sessionId: 'session-1', createdAt: AT, effort: 'max' });
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT, effort: 'max' });
+
+  // A choice before any session exists.
+  await store.writePointer('cfo', { sessionId: null, createdAt: AT, model: 'haiku' });
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: null, createdAt: AT, model: 'haiku' });
+
+  // Neither a session nor a choice is not a pointer; a bad choice is refused.
+  await assert.rejects(store.writePointer('cfo', { sessionId: null, createdAt: AT }), { code: 'invalid_pointer' });
+  await assert.rejects(store.writePointer('cfo', { sessionId: 'session-1', createdAt: AT, effort: 'extreme' }), { code: 'invalid_pointer' });
+  await assert.rejects(store.writePointer('cfo', { sessionId: 'session-1', createdAt: AT, model: 'x'.repeat(65) }), { code: 'invalid_pointer' });
+  await assert.rejects(store.writePointer('cfo', { sessionId: 'session-1', createdAt: AT, model: 7 }), { code: 'invalid_pointer' });
+
+  // Clearing drops the choice with the session.
+  await store.clearPointer('cfo');
+  assert.equal(await store.readPointer('cfo'), null);
+});
+
+test('a stored effort that no longer validates reads as absent, and a bare choice without a session still reads', async (t) => {
+  const { dir, store } = await setup(t);
+  await store.writePointer('cfo', { sessionId: 'session-1', createdAt: AT });
+  await writeFile(path.join(dir, 'cfo.json'), JSON.stringify({ sessionId: 'session-1', createdAt: AT, model: 'sonnet', effort: 'extreme' }));
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT, model: 'sonnet' });
+  await writeFile(path.join(dir, 'cfo.json'), JSON.stringify({ sessionId: null, createdAt: AT, effort: 'extreme' }));
+  assert.equal(await store.readPointer('cfo'), null);
+});
+
 test('appended messages read back in order with their extra fields', async (t) => {
   const { dir, store } = await setup(t);
   assert.deepEqual(await store.read('cfo'), []);

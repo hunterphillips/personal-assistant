@@ -49,13 +49,16 @@
 //       lastError    null or a string
 //       costUsd      null or the session's running total
 //     A Claude persona also has:
-//       model        { id, effort, source }: what its next turn runs on.
-//                    id is a model id or alias or null, effort one of
-//                    models.mjs EFFORTS or null; null means Claude Code's own
-//                    default. source names the level that set either field:
-//                    'thread' (a choice on the thread; none yet), 'agent'
-//                    (the registry's `model`), 'system' (settings), or
-//                    'default' when neither is set anywhere.
+//       model        { id, effort, source, default }: what its next turn
+//                    runs on. id is a model id or alias or null, effort one
+//                    of models.mjs EFFORTS or null; null means Claude Code's
+//                    own default. source names the level that set either
+//                    field: 'thread' (the thread's own choice, read from the
+//                    adapter's state().model), 'agent' (the registry's
+//                    `model`), 'system' (settings), or 'default' when
+//                    nothing is set anywhere. `default` is { id, effort }
+//                    resolved without the thread level: what New thread
+//                    returns to, so a view can mark it.
 //       accepts      the registry's `accepts` list or null (everyone)
 //     `settings` is the settings store's view (settings.mjs): `ok` false
 //     with `error` when the file could not be read, the last good values
@@ -150,8 +153,9 @@
 //
 //   modelFor(agentId) -> { id, effort }
 //     The pair the agent's next turn runs on, resolved as the agent view's
-//     `model` is; { id: null, effort: null } for an agent that is not a
-//     Claude persona. The routes pass it to adapter.send.
+//     `model` is (thread over agent over system); { id: null, effort: null }
+//     for an agent that is not a Claude persona. The routes pass it to
+//     adapter.send as { model, effort }.
 //
 //   notify(agentId, message) -> Promise<message>
 //     Appends `message` ({ role, text, ...fields }, `at` defaulting to now)
@@ -530,7 +534,7 @@ export function createHub({
     modelFor(agentId) {
       const agent = (registry.current()?.agents ?? []).find((item) => item.id === agentId);
       if (!agent || agent.kind !== 'persona' || agent.provider !== 'claude') return { id: null, effort: null };
-      const { id, effort } = resolveModel(agent, null, settingsCurrent());
+      const { id, effort } = resolveModel(agent, threadChoice(personas.get(agentId)), settingsCurrent());
       return { id, effort };
     },
 
@@ -603,10 +607,20 @@ function settingsView(current) {
   };
 }
 
-// What a Claude persona's next turn runs on. `thread` is a choice made on
-// the thread ({ model?, effort? }), none yet; the registry's `model` is the
-// agent level; the settings are the system level. The id and the effort
-// resolve separately, and `source` is the highest level that set either.
+// The thread's own choice as the adapter holds it ({ id, effort } from
+// state().model), or null for a persona that is not started or whose
+// provider has no per-thread choice.
+function threadChoice(entry) {
+  if (!entry?.ready || !entry.adapter) return null;
+  const choice = entry.adapter.state(entry.agent.id)?.model;
+  return choice && typeof choice === 'object' ? { model: choice.id ?? null, effort: choice.effort ?? null } : null;
+}
+
+// What a Claude persona's next turn runs on. `thread` is the thread's own
+// choice ({ model, effort }, either null) or null; the registry's `model`
+// is the agent level; the settings are the system level. The id and the
+// effort resolve separately, and `source` is the highest level that set
+// either.
 function resolveModel(agent, thread, settingsState) {
   const levels = [
     ['thread', thread?.model ?? null, thread?.effort ?? null],
@@ -651,7 +665,8 @@ function agentViews(current, personas, settingsState) {
     view.lastError = entry?.lastError ?? null;
     view.costUsd = entry?.costUsd ?? null;
     if (agent.provider === 'claude') {
-      view.model = resolveModel(agent, null, settingsState);
+      const base = resolveModel(agent, null, settingsState);
+      view.model = { ...resolveModel(agent, threadChoice(entry), settingsState), default: { id: base.id, effort: base.effort } };
       view.accepts = Array.isArray(agent.accepts) ? [...agent.accepts] : null;
     }
     return view;

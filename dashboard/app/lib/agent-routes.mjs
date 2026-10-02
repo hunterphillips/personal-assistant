@@ -3,12 +3,19 @@
 //                    turn; the handler never waits for the turn itself.
 //   POST answer      { requestId, answers } or { requestId, decision } -> 200
 //   POST interrupt   bodyless -> 200; the abort is not awaited
+//   POST model       { model?, effort? } -> 200 { ok, model: { id, effort, source } }
+//                    the thread's own choice for its next turns; a key
+//                    present replaces that field (null inherits again), a
+//                    key absent keeps it. Claude personas only: a Codex
+//                    persona is 409 not_supported.
 //   POST new-thread  bodyless -> 200 once both thread files are cleared
 //   GET  thread      { messages } from store.read(id)
 // An id not in the registry is 404 no_such_agent; an agent of another kind
 // is 409 not_a_persona; a persona that is not started (unavailable) is 409
 // persona_unavailable. Adapter refusals (runtime/adapter.mjs) map to:
 // busy 409, no_such_request 409, not_supported 409, shutting_down 503,
+// invalid_model 400, invalid_effort 400 (model's body checks; also what the
+// adapter would refuse),
 // unavailable 503, invalid_text 400, invalid_answer 400,
 // thread_reset_failed 500. send and new-thread answer 503 shutting_down
 // themselves once the app's closeStreams() has run.
@@ -54,6 +61,7 @@
 
 import { AGENT_ID } from './registry.mjs';
 import { HttpError, readJsonBody, sendJson } from './http.mjs';
+import { isEffort } from './models.mjs';
 
 const PREFIX = '/api/agents/';
 const SESSION_PREFIX = '/api/sessions/';
@@ -63,6 +71,7 @@ export const SESSION_ROUTE_ID = /^(?:codex|claude):[A-Za-z0-9][A-Za-z0-9._-]{0,1
 // action -> route. `methods` lists what is allowed; anything else is 405.
 const ACTIONS = new Map([
   ['send', { methods: ['POST'] }],
+  ['model', { methods: ['POST'] }],
   ['answer', { methods: ['POST'] }],
   ['interrupt', { methods: ['POST'], bodyless: true }],
   ['new-thread', { methods: ['POST'], bodyless: true }],
@@ -70,7 +79,7 @@ const ACTIONS = new Map([
   ['open-terminal', { methods: ['POST'], bodyless: true }],
 ]);
 const SESSION_ACTIONS = new Set(['answer', 'interrupt', 'thread', 'open-terminal']);
-const PERSONA_ACTIONS = new Set(['send', 'answer', 'interrupt', 'new-thread', 'thread']);
+const PERSONA_ACTIONS = new Set(['send', 'model', 'answer', 'interrupt', 'new-thread', 'thread']);
 
 // Adapter refusal code -> HTTP status.
 const RUNTIME_STATUS = new Map([
@@ -81,10 +90,13 @@ const RUNTIME_STATUS = new Map([
   ['unavailable', 503],
   ['invalid_text', 400],
   ['invalid_answer', 400],
+  ['invalid_model', 400],
+  ['invalid_effort', 400],
   ['thread_reset_failed', 500],
 ]);
 
 const REQUEST_ID_MAX = 128;
+const MODEL_MAX = 64;
 const ACCEPTED = Symbol('accepted');
 
 export function createAgentRoutes({ hub, store = null, cmux = null, log, limits, shuttingDown }) {
@@ -127,6 +139,32 @@ export function createAgentRoutes({ hub, store = null, cmux = null, log, limits,
     if (Buffer.byteLength(text, 'utf8') > limits.sendTextBytes) throw new HttpError(413, 'payload_too_large');
     await startTurn({ hub, log, shuttingDown }, id, text);
     sendJson(res, 202, { ok: true });
+  }
+
+  // The thread's model and effort for its next turns. A key present
+  // replaces that field (null inherits again); a key absent keeps it.
+  async function serveModel(req, res, id) {
+    if (shuttingDown()) throw new HttpError(503, 'shutting_down');
+    const body = await readJsonBody(req, { limit: bodyBytes() });
+    if (!isRecord(body)) throw new HttpError(400, 'invalid_body');
+    const keys = Object.keys(body);
+    if (keys.length === 0 || keys.some((key) => key !== 'model' && key !== 'effort')) throw new HttpError(400, 'invalid_body');
+    if ('model' in body && body.model !== null && !(typeof body.model === 'string' && body.model !== '' && body.model.length <= MODEL_MAX)) {
+      throw new HttpError(400, 'invalid_model');
+    }
+    if ('effort' in body && body.effort !== null && !isEffort(body.effort)) throw new HttpError(400, 'invalid_effort');
+    const { agent, adapter } = personaOf(id);
+    if (agent.provider !== 'claude' || typeof adapter.setModel !== 'function') throw new HttpError(409, 'not_supported');
+    const choice = {};
+    if ('model' in body) choice.model = body.model;
+    if ('effort' in body) choice.effort = body.effort;
+    try {
+      await adapter.setModel(agent, choice);
+    } catch (error) {
+      throw runtimeRefusal(error);
+    }
+    const view = hub.snapshot().agents.find((listed) => listed.id === id)?.model ?? null;
+    sendJson(res, 200, { ok: true, model: view ? { id: view.id, effort: view.effort, source: view.source } : null });
   }
 
   async function serveAnswer(req, res, id, target) {
@@ -210,6 +248,8 @@ export function createAgentRoutes({ hub, store = null, cmux = null, log, limits,
     switch (action) {
       case 'send':
         return serveSend(req, res, id);
+      case 'model':
+        return serveModel(req, res, id);
       case 'answer':
         return serveAnswer(req, res, id, target);
       case 'interrupt':
@@ -246,7 +286,9 @@ export async function startTurn({ hub, log, shuttingDown }, id, text) {
   // turn without waiting for the turn. An accepted turn never rejects by
   // contract; if one does, the rejection is logged, since no reply can
   // carry it.
-  const turn = adapter.send(agent, text, typeof hub.modelFor === 'function' ? hub.modelFor(id) : undefined);
+  // The hub resolves { id, effort }; the adapter takes { model, effort }.
+  const resolved = typeof hub.modelFor === 'function' ? hub.modelFor(id) : null;
+  const turn = adapter.send(agent, text, resolved ? { model: resolved.id, effort: resolved.effort } : undefined);
   let accepted = false;
   turn.catch((error) => {
     if (accepted) log({ event: 'persona_turn_rejected', agentId: id, error: error?.code ?? error?.name ?? 'unknown' });

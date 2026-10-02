@@ -29,19 +29,38 @@
 //     'invalid_answer' for anything else.
 //   interrupt(agent) -> Promise<void>
 //     Aborts the turn in flight and waits for it to end; a no-op when idle.
+//   setModel(agent, { model?, effort? }) -> Promise<void>
+//     The thread's own choice for its next turns. A key that is present
+//     replaces that field (a string, or null to drop the thread's choice
+//     and inherit); a key that is absent keeps the thread's current value.
+//     Rejects synchronously 'busy' while a turn is in flight or New thread
+//     is clearing (the pair applies at a turn's start, so a change mid-turn
+//     would be a lie), 'shutting_down', 'invalid_model' (not a string of 1
+//     to 64 characters), 'invalid_effort' (not in models.mjs EFFORTS), or
+//     'invalid_agent'. Otherwise writes the pointer with the pair and the
+//     current session id (null before the first turn), keeps the pair in
+//     the entry (state().model), and records a system message
+//     { kind: 'model', model, effort, text } whose text reads "Now on
+//     Sonnet." / "Now at low effort." / "Now on Sonnet, low effort." /
+//     "Back to the agent's default." (names from models.mjs; an unknown id
+//     shows as itself). The hub resolves the pair for the next send from
+//     state().model; the adapter itself applies only what send() is given.
 //   newThread(agent) -> Promise<void>
 //     Rejects 'busy' while a turn is in flight, 'shutting_down' once close()
 //     has begun (so a drain never loses the pointer), and
 //     'thread_reset_failed' (a RuntimeError whose cause is the fs error) if
-//     the pointer or cache cannot be cleared. Otherwise clears both, then emits thread.state idle
+//     the pointer or cache cannot be cleared. Otherwise clears both (the
+//     thread's model choice goes with the pointer), then emits thread.state idle
 //     and a system message 'New thread' (also written to the fresh cache).
 //     The idle emission is a boundary marker: it is sent even when the
 //     state was already idle, so views can reset the thread.
-//   state(agentId) -> { state, pending, lastError, sessionId, costUsd, cwd }
+//   state(agentId) -> { state, pending, lastError, sessionId, costUsd, cwd, model }
 //     state: 'idle' | 'busy' | 'waiting' | 'error'; pending is the oldest
 //     open request ({ requestId, kind, toolName, input, at }) or null;
 //     costUsd is the last total_cost_usd seen, a running session total; cwd
-//     is the folder the thread is pinned to (null before the first start).
+//     is the folder the thread is pinned to (null before the first start);
+//     model is the thread's own choice { id, effort } (either may be null)
+//     or null when the thread has none.
 //   subscribe(fn) -> unsubscribe
 //   close() -> Promise<void>
 //     Refuses new sends and aborts at once any turn waiting on an answer
@@ -52,9 +71,12 @@
 //
 // Events, each { type, agentId, at, ... }:
 //   thread.state { state }                  on every change
-//   message      { role, text, truncated? } user text on send, assistant text
-//                                           per top-level assistant message
-//                                           (subagent messages are skipped);
+//   message      { role, text, truncated?, ...fields } user text on send,
+//                                           assistant text per top-level
+//                                           assistant message (subagent
+//                                           messages are skipped), system
+//                                           lines ('New thread'; setModel's
+//                                           { kind: 'model', model, effort });
 //                                           text is bounded to
 //                                           limits.messageTextBytes
 //   request      { requestId, kind: 'question' | 'approval', toolName, input }
@@ -103,11 +125,13 @@
 import { randomUUID } from 'node:crypto';
 
 import { TIMEOUTS } from '../config.mjs';
+import { effortName, isEffort, modelName } from '../models.mjs';
 import { AGENT_ID } from '../registry.mjs';
 import { truncateUtf8 } from '../threads.mjs';
 import { RuntimeError } from './adapter.mjs';
 
 const ERROR_TEXT_MAX = 500;
+const MODEL_MAX = 64;
 const STDERR_MAX = 2048;
 const DENIED = 'Denied from the dashboard';
 const INTERRUPTED = 'Interrupted from the dashboard';
@@ -161,6 +185,8 @@ export function createClaudeAdapter({
         resetting: false,
         pending: new Map(),
         cwd: null,
+        model: null,
+        effort: null,
       };
       entries.set(agentId, entry);
     }
@@ -187,26 +213,46 @@ export function createClaudeAdapter({
   async function loadPointer(entry) {
     const pointer = await store.readPointer(entry.agentId);
     entry.sessionId = pointer?.sessionId ?? null;
+    entry.model = pointer?.model ?? null;
+    entry.effort = pointer?.effort ?? null;
     entry.loaded = true;
+  }
+
+  // The pointer as the entry holds it: the session and the thread's choice.
+  function pointerOf(entry, sessionId = entry.sessionId) {
+    return { sessionId, createdAt: now().toISOString(), model: entry.model, effort: entry.effort };
   }
 
   async function adoptSession(entry, sessionId) {
     if (typeof sessionId !== 'string' || sessionId === '' || sessionId === entry.sessionId) return;
     entry.sessionId = sessionId;
     try {
-      await store.writePointer(entry.agentId, { sessionId, createdAt: now().toISOString() });
+      await store.writePointer(entry.agentId, pointerOf(entry, sessionId));
     } catch (error) {
       log({ event: 'thread_pointer_error', agentId: entry.agentId, error: error?.message ?? String(error) });
     }
   }
 
+  // The thread's choice { id, effort }, or null when it has none.
+  function choiceOf(entry) {
+    return entry.model === null && entry.effort === null ? null : { id: entry.model, effort: entry.effort };
+  }
+
+  // What the thread line says about a choice.
+  function modelLine(model, effort) {
+    if (model === null && effort === null) return "Back to the agent's default.";
+    const effortText = effort === null ? '' : `${effortName(effort).toLowerCase()} effort`;
+    if (model === null) return `Now at ${effortText}.`;
+    return effort === null ? `Now on ${modelName(model)}.` : `Now on ${modelName(model)}, ${effortText}.`;
+  }
+
   // Appends a message to the cache, then emits it, so a listener that reads
   // the thread on the event finds the message there. The cache is display
   // only, so a failed append is logged and the message is emitted anyway.
-  async function record(entry, role, text) {
+  async function record(entry, role, text, fields = {}) {
     const bounded = truncateUtf8(text, limits.messageTextBytes);
     const at = now().toISOString();
-    const message = { role, text: bounded.text, at, ...(bounded.truncated ? { truncated: true } : {}) };
+    const message = { ...fields, role, text: bounded.text, at, ...(bounded.truncated ? { truncated: true } : {}) };
     try {
       await store.append(entry.agentId, message);
     } catch (error) {
@@ -430,6 +476,44 @@ export function createClaudeAdapter({
       await turn.done;
     },
 
+    setModel(agent, choice = {}) {
+      try {
+        checkAgent(agent);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      if (closing) return Promise.reject(new RuntimeError('shutting_down'));
+      const hasModel = isRecord(choice) && choice.model !== undefined;
+      const hasEffort = isRecord(choice) && choice.effort !== undefined;
+      if (hasModel && choice.model !== null && !(typeof choice.model === 'string' && choice.model !== '' && choice.model.length <= MODEL_MAX)) {
+        return Promise.reject(new RuntimeError('invalid_model'));
+      }
+      if (hasEffort && choice.effort !== null && !isEffort(choice.effort)) return Promise.reject(new RuntimeError('invalid_effort'));
+      const entry = entryFor(agent.id);
+      if (entry.turn || entry.resetting) return Promise.reject(new RuntimeError('busy'));
+      entry.cwd ??= agent.cwd;
+      // Held like a turn so a send or New thread meanwhile is refused busy
+      // rather than racing the pointer write.
+      entry.resetting = true;
+      return (async () => {
+        try {
+          if (!entry.loaded) await loadPointer(entry);
+          if (hasModel) entry.model = choice.model;
+          if (hasEffort) entry.effort = choice.effort;
+          try {
+            if (entry.sessionId === null && choiceOf(entry) === null) await store.clearPointer(entry.agentId);
+            else await store.writePointer(entry.agentId, pointerOf(entry));
+          } catch (error) {
+            log({ event: 'thread_pointer_error', agentId: entry.agentId, error: error?.message ?? String(error) });
+          }
+          log({ event: 'persona_model', agentId: entry.agentId, model: entry.model, effort: entry.effort });
+        } finally {
+          entry.resetting = false;
+        }
+        await record(entry, 'system', modelLine(entry.model, entry.effort), { kind: 'model', model: entry.model, effort: entry.effort });
+      })();
+    },
+
     newThread(agent) {
       try {
         checkAgent(agent);
@@ -445,6 +529,8 @@ export function createClaudeAdapter({
           try {
             await store.clearPointer(entry.agentId);
             entry.sessionId = null;
+            entry.model = null;
+            entry.effort = null;
             entry.loaded = true;
             entry.costUsd = null;
             entry.lastError = null;
@@ -465,7 +551,7 @@ export function createClaudeAdapter({
 
     state(agentId) {
       const entry = entries.get(agentId);
-      if (!entry) return { state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null, cwd: null };
+      if (!entry) return { state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null, cwd: null, model: null };
       const oldest = entry.pending.values().next().value;
       return {
         state: entry.state,
@@ -474,6 +560,7 @@ export function createClaudeAdapter({
         sessionId: entry.sessionId,
         costUsd: entry.costUsd,
         cwd: entry.cwd,
+        model: choiceOf(entry),
       };
     },
 
