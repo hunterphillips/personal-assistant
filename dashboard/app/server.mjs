@@ -28,6 +28,7 @@ import path from 'node:path';
 import { createApp, defaultLog } from './lib/app.mjs';
 import { createBindings } from './lib/bindings.mjs';
 import { createBriefRoutes } from './lib/brief-adapter.mjs';
+import { createDelegation } from './lib/delegation.mjs';
 import { createFeed } from './lib/feed.mjs';
 import { createFeedInstructions } from './lib/feed-instructions.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
@@ -46,10 +47,12 @@ import { createThreadStore } from './lib/threads.mjs';
 const API_KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 
 // The Codex adapter is always created: it watches for the owner file itself
-// and follows nothing until bin/codex-serve has written one.
-function defaultAdapters({ config, store, log, bindings }) {
+// and follows nothing until bin/codex-serve has written one. `turnTools`
+// is the Claude adapter's per-turn hook; the server points it at the
+// delegation service once the hub exists (delegation.mjs).
+function defaultAdapters({ config, store, log, bindings, turnTools = null }) {
   return {
-    claude: createClaudeAdapter({ store, config, log }),
+    claude: createClaudeAdapter({ store, config, log, turnTools }),
     codex: createCodexAdapter({
       ownerFile: path.join(config.codexDir, 'owner.json'),
       bound: () => bindings.current().keys(),
@@ -62,7 +65,7 @@ function defaultAdapters({ config, store, log, bindings }) {
 
 // Starts the dashboard and resolves once it is listening. Rejects on invalid
 // configuration or a port already in use; it never picks another port.
-// `createAdapters({ config, store, log, bindings })` returns the adapters by provider;
+// `createAdapters({ config, store, log, bindings, turnTools })` returns the adapters by provider;
 // tests pass fakes. It is not called when an API key is in `env`. `timeouts`
 // overrides entries of the configured timeouts; tests shorten polls with it.
 export async function startDashboard({ env = process.env, log, createAdapters = defaultAdapters, timeouts = null } = {}) {
@@ -83,10 +86,14 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   const store = createThreadStore({ dir: config.threadsDir, limits: config.limits, log: logEntry });
   const apiKeyInEnv = API_KEY_VARS.some((name) => typeof env[name] === 'string' && env[name] !== '');
   let adapters = {};
+  // Assigned once the hub exists; the adapters are created first because
+  // the hub takes them, and the hook is only called from a turn.
+  let delegation = null;
+  const turnTools = (agent, context) => (delegation ? delegation.toolsFor(agent, context) : null);
   if (apiKeyInEnv) {
     logEntry({ event: 'adapters_disabled', reason: 'api_key_in_env' });
   } else {
-    adapters = createAdapters({ config, store, log: logEntry, bindings });
+    adapters = createAdapters({ config, store, log: logEntry, bindings, turnTools });
   }
   // The cmux client is not a model runtime, so the cost guard leaves it be.
   // It reads nothing until the first refresh.
@@ -115,6 +122,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     settings,
     log: logEntry,
   });
+  delegation = createDelegation({ hub, registry, limits: config.limits, timeouts: config.timeouts, log: logEntry });
   const goals = createGoals({ registry, limits: config.limits, log: logEntry });
   const feed = createFeed({ dir: config.feedDir, limits: config.limits, log: logEntry });
   const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log: logEntry });

@@ -12,7 +12,10 @@
 // state hub itself. Personas run on a fake Claude adapter over a real thread
 // store in the temporary directory (see fakePersonas): a send is answered by
 // an invented reply unless the persona is held, and `personas` lets a test
-// raise a question or approval, reply, or hold a turn open. Coding
+// raise a question or approval, reply, or hold a turn open. The real
+// delegation service (delegation.mjs) sits over the hub, and a persona
+// seeded with `delegate` asks another agent through it on each of the
+// user's turns, so the lines render without the SDK. Coding
 // sessions come from a fake Codex adapter (`codex`, see fakeCodex) and a
 // fake cmux client over a seeded inventory (`cmux`, harness.mjs), with
 // terminal bindings from `bindings`; none is present unless seeded. Goals
@@ -39,6 +42,7 @@ import path from 'node:path';
 
 import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
+import { createDelegation } from '../../lib/delegation.mjs';
 import { createFeed } from '../../lib/feed.mjs';
 import { createFeedInstructions } from '../../lib/feed-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
@@ -99,7 +103,7 @@ export { focusSourceAvailable };
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, routines: routinesSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
-  vault = null, feed = null, instructions = null, settings: settingsSeed = null,
+  vault = null, feed = null, instructions = null, settings: settingsSeed = null, delegationWaitMs = null,
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
     throw new Error('startHub: the vault option adds second-brain; remove it from agents.');
@@ -145,7 +149,7 @@ export async function startHub({
     const settingsPath = path.join(root, 'settings.json');
     if (settingsSeed === 'broken') await writeFile(settingsPath, '{ not json');
     else if (settingsSeed) await writeFile(settingsPath, JSON.stringify({ version: 1, ...settingsSeed }));
-    const config = loadConfig({
+    const loaded = loadConfig({
       DASHBOARD_PORT: String(plainPort),
       DASHBOARD_PUBLIC_ORIGIN: `https://localhost:${securePort}`,
       DASHBOARD_BRIEFS_DIR: briefsDir,
@@ -154,6 +158,10 @@ export async function startHub({
       DASHBOARD_FOCUS_ORIGIN: focusOrigin,
       DASHBOARD_SETTINGS_PATH: settingsPath,
     });
+    // A shorter ask wait lets a test see the pending sentence.
+    const config = delegationWaitMs === null
+      ? loaded
+      : Object.freeze({ ...loaded, timeouts: Object.freeze({ ...loaded.timeouts, delegationWaitMs }) });
     const settings = createSettings({ path: config.settingsPath });
     await settings.load();
     if (!settingsSeed) {
@@ -180,6 +188,8 @@ export async function startHub({
       config, focus: focusRoutes, brief: briefRoutes, registry, routines, adapters, store, bindings, cmux, settings, home,
     });
     await hub.start();
+    const delegation = createDelegation({ hub, registry, limits: config.limits, timeouts: config.timeouts });
+    personas.adapter.setDelegation(delegation);
     if (routinesSeed) {
       await hub.refreshRoutines();
       routines.calls = 0;
@@ -249,6 +259,7 @@ export async function startHub({
       registry,
       routines,
       personas,
+      delegation,
       codex,
       cmux,
       bindings,
@@ -363,22 +374,32 @@ function controlledRoutines({ items = [], focusAvailable = null, refreshedAt = n
 // A Claude adapter stand-in that keeps each persona's state in memory and
 // writes messages to the real thread store, emitting the events the hub
 // expects. send() refuses 'busy' while a turn is open; otherwise it goes
-// busy, records the user message, and after a short delay replies
-// "Reply: <text>" and goes idle, unless the persona is held. answer()
-// resolves the pending request and continues the turn the same way.
+// busy, records the user message (with `from` and `mentions` when the
+// context carries them, as the real adapter does), and after a short delay
+// replies "Reply: <text>" and goes idle, unless the persona is held. A
+// persona seeded with `delegate: { to, text }` instead asks that agent
+// through the delegation service on each turn that is the user's own
+// (context.from absent) and replies "Reply: <what the tool answered>", as
+// the model would after calling the tool. answer() resolves the pending
+// request and continues the turn the same way.
 // Controls on the returned object:
 //   hold(id)                       later turns stay busy until reply()
 //   reply(id, text)                ends the open turn with that reply
 //   raise(id, { kind, toolName, input })  puts the busy persona on a request
 //   fail(id, message)              ends the open turn with an error
+//   say(id, text)                  adds assistant text to the open turn without ending it
 //   calls                          [['send', id, text], ['answer', id, requestId, answer], ...]
-function fakePersonas(seed, store) {
+//   sent                           [{ id, text, context }] for every send, context as given
+//   adapter.setDelegation(service) the service `delegate` seeds ask through
+export function fakePersonas(seed, store) {
   const listeners = new Set();
   const entries = new Map();
   const held = new Set();
   const calls = [];
+  const sent = [];
   const timers = new Set();
   let nextRequest = 1;
+  let delegation = null;
   const at = () => new Date().toISOString();
 
   function entry(id) {
@@ -448,6 +469,13 @@ function fakePersonas(seed, store) {
     timers.add(timer);
   }
 
+  // The seeded ask, made as the tool handler would, then the reply.
+  async function delegateTurn(id, delegate, context) {
+    if (!delegation) throw new Error('fakePersonas: a delegate seed needs setDelegation()');
+    const outcome = await delegation.ask({ from: id, chain: context.chain ?? [], to: delegate.to, message: delegate.text });
+    if (entry(id).state === 'busy' && !held.has(id)) await finish(id, `Reply: ${outcome.text}`);
+  }
+
   const adapter = {
     kind: 'claude',
     async start(agent) {
@@ -466,15 +494,27 @@ function fakePersonas(seed, store) {
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
-    send(agent, text) {
+    send(agent, text, context = {}) {
       calls.push(['send', agent.id, text]);
+      sent.push({ id: agent.id, text, context });
       const current = entry(agent.id);
       if (current.state === 'busy' || current.state === 'waiting') return Promise.reject(new RuntimeError('busy'));
       const ended = new Promise((resolve) => { current.turn = resolve; });
       current.lastError = null;
       setState(agent.id, 'busy');
-      say(agent.id, 'user', text).then(() => continueTurn(agent.id, text));
+      const fields = {
+        ...(typeof context.from === 'string' && context.from !== '' ? { from: context.from } : {}),
+        ...(Array.isArray(context.mentions) && context.mentions.length > 0 ? { mentions: [...context.mentions] } : {}),
+      };
+      const delegate = seed[agent.id]?.delegate;
+      say(agent.id, 'user', text, fields).then(() => {
+        if (delegate && !context.from) return delegateTurn(agent.id, delegate, context);
+        return continueTurn(agent.id, text);
+      });
       return ended;
+    },
+    setDelegation(service) {
+      delegation = service;
     },
     async answer(agent, requestId, answer) {
       calls.push(['answer', agent.id, requestId, answer]);
@@ -529,8 +569,10 @@ function fakePersonas(seed, store) {
   return {
     adapter,
     calls,
+    sent,
     hold: (id) => held.add(id),
     reply: (id, text) => finish(id, text),
+    say: (id, text) => say(id, 'assistant', text),
     raise(id, request) {
       const current = entry(id);
       current.pending = { requestId: `req-${nextRequest++}`, at: at(), ...request };

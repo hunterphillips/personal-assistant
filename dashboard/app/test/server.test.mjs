@@ -262,6 +262,30 @@ async function readThread(dashboard, id = 'assistant') {
   return (await response.json()).messages;
 }
 
+test('startDashboard hands the Claude adapter a tools hook that gives every turn the ask tool over the real SDK', async (t) => {
+  const env = await testEnv(t);
+  await writeRegistry(env, [await assistantEntry(t), await personaEntry(t, 'cfo')]);
+  let hook = null;
+  const dashboard = await startDashboard({
+    env,
+    log: () => {},
+    createAdapters: ({ turnTools }) => {
+      hook = turnTools;
+      return { claude: idleAdapter() };
+    },
+  });
+  t.after(() => dashboard.close());
+  assert.equal(typeof hook, 'function');
+  const tools = await hook({ id: 'assistant' }, { text: 'Hi', prompt: 'Hi', from: null, chain: [], mentions: ['cfo'], turnId: 't-1' });
+  assert.deepEqual(tools.allowedTools, ['mcp__agents__ask']);
+  assert.equal(tools.mcpServers.agents.type, 'sdk');
+  assert.equal(tools.mcpServers.agents.name, 'agents');
+  assert.ok(tools.mcpServers.agents.instance, 'a real McpServer instance');
+  assert.equal(tools.prompt, 'Hi\n\nAgents mentioned: CFO (id `cfo`)');
+  assert.equal(typeof tools.commit, 'function');
+  assert.equal(typeof tools.rollback, 'function');
+});
+
 test('booting with an unposted notice file posts it once into the Assistant thread', async (t) => {
   const env = await testEnv(t);
   await writeRegistry(env, [await assistantEntry(t)]);

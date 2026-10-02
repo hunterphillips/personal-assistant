@@ -233,13 +233,16 @@ export function fakeCmux(inventory = null) {
 // test reads the real store; pass null for an app without the Feed routes.
 // The feed instructions reader reads DASHBOARD_FEED_INSTRUCTIONS, which is
 // likewise a missing path in a temporary directory unless `env` names it.
+// `delegation(hub)` is optional: a factory for the delegation service
+// (delegation.mjs), called once the hub exists; its result is handed to
+// every adapter that has setDelegation() and returned as `delegation`.
 // `notices` (notices.mjs) is optional and goes to the event stream.
 // `settings` defaults to a fakeSettings() shared by the hub and the PUT
 // route; pass null for an app without the settings route. `configure` may
 // adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), routines, hub, adapters, store, bindings, cmux = null, goals, feed,
-  notices = null, settings = fakeSettings(), configure = (c) => c,
+  notices = null, settings = fakeSettings(), configure = (c) => c, delegation = null,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
@@ -265,6 +268,8 @@ export async function startApp(t, {
     ...(settings ? { settings } : {}),
   });
   if (!hub) await stateHub.start();
+  const delegationService = typeof delegation === 'function' ? delegation(stateHub) : null;
+  for (const adapter of Object.values(adapters ?? {})) adapter?.setDelegation?.(delegationService);
   const goalsReader = goals === undefined ? createGoals({ registry, limits: config.limits, log }) : goals;
   const feedReader = feed === undefined ? createFeed({ dir: config.feedDir, limits: config.limits, log }) : feed;
   const instructionsReader = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log });
@@ -279,7 +284,10 @@ export async function startApp(t, {
     return closeServer(server);
   });
   const authority = `127.0.0.1:${port}`;
-  return { port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, routines: routinesModule, settings, handler };
+  return {
+    port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, routines: routinesModule, settings, handler,
+    delegation: delegationService,
+  };
 }
 
 // Sends one request. `headers.host` defaults to the app authority; pass

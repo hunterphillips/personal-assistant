@@ -753,6 +753,37 @@ test('a thread\'s own choice beats the agent and system levels, field by field, 
   hub.close();
 });
 
+test('a delegation line never becomes the row preview, live or at start', async () => {
+  const adapter = fakeAdapter();
+  const { hub } = makeHub({ adapters: { claude: adapter } });
+  await hub.start();
+  adapter.emit('message', 'cfo', { role: 'assistant', text: 'Cash is fine.' });
+  const kept = { role: 'assistant', text: 'Cash is fi', at: '2026-09-25T12:01:00.000Z' };
+  assert.deepEqual(persona(hub).lastMessage, kept);
+  for (const line of [
+    { state: 'sent', to: 'brain', delegationId: 'd-1', text: 'Messaged BRAIN', summary: 'Messaged BRAIN' },
+    { state: 'waiting', to: 'brain', delegationId: 'd-1', text: 'BRAIN is waiting for you.', summary: 'BRAIN is waiting for you.' },
+    { state: 'finished', to: 'brain', delegationId: 'd-1', text: 'Three notes. All current.', summary: 'Three notes.' },
+    { state: 'refused', reason: 'cycle', to: 'cfo', text: 'CFO is already in this exchange.', summary: 'CFO is already in this exchange.' },
+  ]) {
+    adapter.emit('message', 'cfo', { role: 'system', kind: 'delegation', ...line });
+    assert.deepEqual(persona(hub).lastMessage, kept, line.state);
+  }
+  hub.close();
+
+  const cached = makeHub({
+    adapters: { claude: fakeAdapter() },
+    store: { read: async () => [
+      { role: 'assistant', text: 'Cash is fine.', at: 'a' },
+      { role: 'system', kind: 'delegation', state: 'sent', to: 'brain', delegationId: 'd-1', text: 'Messaged BRAIN', summary: 'Messaged BRAIN', at: 'b' },
+      { role: 'system', kind: 'delegation', state: 'finished', to: 'brain', delegationId: 'd-1', text: 'Three notes.', summary: 'Three notes.', at: 'c' },
+    ] },
+  });
+  await cached.hub.start();
+  assert.deepEqual(persona(cached.hub).lastMessage, { role: 'assistant', text: 'Cash is fi', at: 'a' });
+  cached.hub.close();
+});
+
 test('at start, lastMessage skips bookkeeping lines at the end of the cache and keeps the brief notice and New thread', async () => {
   const cached = (messages) => makeHub({ adapters: { claude: fakeAdapter() }, store: { read: async () => messages } });
   let { hub } = cached([
