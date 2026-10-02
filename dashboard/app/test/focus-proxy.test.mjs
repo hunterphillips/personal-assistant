@@ -588,6 +588,7 @@ test('fetchStatus returns null for a reply over the JSON size limit', async (t) 
 // Focus's own status and scan controls, called by its page at absolute paths.
 const CONTROLS = [
   ['GET', '/api/status', 200, 'application/json; charset=utf-8', '{"paused":false,"running":[]}'],
+  ['GET', '/api/candidates', 200, 'application/json; charset=utf-8', '{"sources":[]}'],
   ['POST', '/api/pause', 200, 'application/json; charset=utf-8', '{"paused":true,"running":[]}'],
   ['POST', '/api/resume', 500, 'text/plain; charset=utf-8', 'launchctl refused'],
   ['POST', '/api/refresh', 202, 'application/json; charset=utf-8', '{"paused":false,"running":["gmail"]}'],
@@ -735,7 +736,7 @@ test('isolated Focus: the launchd scripts are the fixture\'s own stubs', isolate
 
 // Every absolute API path the Focus page calls must be one the dashboard
 // forwards, or it would 404 inside the frame.
-const FORWARDED_FOCUS_PATHS = new Set(['/api/focus', '/api/status', '/api/pause', '/api/resume', '/api/refresh']);
+const FORWARDED_FOCUS_PATHS = new Set(['/api/focus', '/api/status', '/api/candidates', '/api/pause', '/api/resume', '/api/refresh']);
 
 test('isolated Focus: every API path the page calls is forwarded', isolated, async (t) => {
   const focus = await startIsolatedFocus(t);

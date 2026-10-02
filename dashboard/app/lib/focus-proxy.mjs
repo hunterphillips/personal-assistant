@@ -26,6 +26,7 @@
 //     Focus's own status and scan controls, which its page calls by absolute
 //     path, forwarded to the same upstream path (CONTROL_ROUTES):
 //       GET  /api/status    JSON status
+//       GET  /api/candidates JSON: each scanner's latest candidates + verdict
 //       POST /api/pause     200 JSON status, or 500 text/plain
 //       POST /api/resume    200 JSON status, or 500 text/plain
 //       POST /api/refresh   202 JSON status, or 409 JSON when already refreshing
@@ -83,6 +84,7 @@ const STATUS_PATH = '/api/status';
 // The only other upstream paths, each with its one allowed method.
 export const CONTROL_ROUTES = new Map([
   ['/api/status', 'GET'],
+  ['/api/candidates', 'GET'],
   ['/api/pause', 'POST'],
   ['/api/resume', 'POST'],
   ['/api/refresh', 'POST'],

@@ -78,6 +78,7 @@ const EXACT_ROUTES = new Map([
   // absolute paths and forwarded to the same upstream path. The POSTs carry
   // no body, so they need Origin but not a JSON content type.
   ['/api/status', { name: 'focus-control', methods: ['GET'] }],
+  ['/api/candidates', { name: 'focus-control', methods: ['GET'] }],
   ['/api/pause', { name: 'focus-control', methods: ['POST'], bodyless: true }],
   ['/api/resume', { name: 'focus-control', methods: ['POST'], bodyless: true }],
   ['/api/refresh', { name: 'focus-control', methods: ['POST'], bodyless: true }],
