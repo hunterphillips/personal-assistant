@@ -55,11 +55,14 @@
 //                    own default. source names the level that set either
 //                    field: 'thread' (the thread's own choice, read from the
 //                    adapter's state().model), 'agent' (the registry's
-//                    `model`), 'system' (settings), or 'default' when
-//                    nothing is set anywhere. `default` is { id, effort }
-//                    resolved without the thread level: what New thread
-//                    returns to, so a view can mark it.
-//       accepts      the registry's `accepts` list or null (everyone)
+//                    `model` or `effort`), 'system' (settings), or 'default'
+//                    when nothing is set anywhere. `default` is { id,
+//                    effort } resolved without the thread level: what New
+//                    thread returns to, so a view can mark it. `agent` is
+//                    the registry's own { id, effort } (either null), for a
+//                    form that edits them.
+//       accepts      the registry's `accepts` list or null (everyone), on
+//                    every persona
 //     `settings` is the settings store's view (settings.mjs): `ok` false
 //     with `error` when the file could not be read, the last good values
 //     either way. `models` is the model table (models.mjs) for the views.
@@ -627,7 +630,7 @@ function threadChoice(entry) {
 function resolveModel(agent, thread, settingsState) {
   const levels = [
     ['thread', thread?.model ?? null, thread?.effort ?? null],
-    ['agent', typeof agent.model === 'string' && agent.model !== '' ? agent.model : null, null],
+    ['agent', typeof agent.model === 'string' && agent.model !== '' ? agent.model : null, typeof agent.effort === 'string' ? agent.effort : null],
     ['system', settingsState.model.default, settingsState.model.effort],
   ];
   let id = null;
@@ -669,7 +672,13 @@ function agentViews(current, personas, settingsState) {
     view.costUsd = entry?.costUsd ?? null;
     if (agent.provider === 'claude') {
       const base = resolveModel(agent, null, settingsState);
-      view.model = { ...resolveModel(agent, threadChoice(entry), settingsState), default: { id: base.id, effort: base.effort } };
+      view.model = {
+        ...resolveModel(agent, threadChoice(entry), settingsState),
+        default: { id: base.id, effort: base.effort },
+        agent: { id: typeof agent.model === 'string' && agent.model !== '' ? agent.model : null, effort: typeof agent.effort === 'string' ? agent.effort : null },
+      };
+    }
+    if (agent.provider !== undefined) {
       view.accepts = Array.isArray(agent.accepts) ? [...agent.accepts] : null;
     }
     return view;

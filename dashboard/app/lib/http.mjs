@@ -1,14 +1,17 @@
 // Response and request-body helpers shared by the router and route modules.
-// Every JSON error body is { "error": "<code>" }; no messages or stacks.
+// Every JSON error body is { "error": "<code>" }, plus the fields of an
+// HttpError's `detail` when a route adds them (the registry validator's
+// `problems`); no messages or stacks.
 
 import { Transform } from 'node:stream';
 
 export class HttpError extends Error {
-  constructor(status, code) {
+  constructor(status, code, detail = null) {
     super(code);
     this.name = 'HttpError';
     this.status = status;
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -167,13 +170,13 @@ function lingerAfterEarlyReply(req, res) {
 // cut the connection so the client sees a failure instead of a truncated
 // success. If the request body is still arriving, the reply closes the
 // connection after a bounded drain (see lingerAfterEarlyReply).
-export function sendError(res, status, code, { headers = {}, head = false } = {}) {
+export function sendError(res, status, code, { headers = {}, head = false, detail = null } = {}) {
   if (res.headersSent) {
     res.destroy();
     return;
   }
   if (hasUnreadBody(res.req)) lingerAfterEarlyReply(res.req, res);
-  sendJson(res, status, { error: code }, { headers, head });
+  sendJson(res, status, { error: code, ...(detail ?? {}) }, { headers, head });
 }
 
 // Buffers the whole request body. Rejects with HttpError(413) as soon as the

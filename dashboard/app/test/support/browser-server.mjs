@@ -46,6 +46,7 @@ import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
 import { RuntimeError } from '../../lib/runtime/adapter.mjs';
 import { createNotices } from '../../lib/notices.mjs';
+import { RegistryError, validateDocument } from '../../lib/registry.mjs';
 import { createSettings } from '../../lib/settings.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } from './harness.mjs';
@@ -206,7 +207,7 @@ export async function startHub({
     });
     const newHandler = () => createApp({
       config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, feedInstructions,
-      notices, settings, log: () => {},
+      notices, settings, registry, log: () => {},
     });
     let handler = newHandler();
     cleanups.push(async () => {
@@ -293,7 +294,8 @@ function controlledRegistry({ ok = true, error = null, agents = [], groups = [] 
   });
   let fields = { ok, error, agents, groups };
   let current = build(fields);
-  return {
+  const fake = {
+    writes: [],
     current: () => current,
     onChange(fn) {
       listeners.add(fn);
@@ -304,9 +306,26 @@ function controlledRegistry({ ok = true, error = null, agents = [], groups = [] 
       current = build(fields);
       for (const fn of listeners) fn(current);
     },
+    // Applies the mutation in memory the way registry.mjs does, validating
+    // with the real validateDocument except that any absolute path counts
+    // as a folder, since the seeded agents live in invented folders.
+    // `writes` keeps each candidate document a test can read back.
+    async write(mutate) {
+      if (!current.ok && current.error !== 'registry_missing') throw new RegistryError('registry_invalid', [current.error]);
+      const document = structuredClone({ version: 1, groups: [...current.groups], agents: current.agents.map((agent) => ({ ...agent })) });
+      const candidate = mutate(document);
+      const result = validateDocument(candidate, { isDirectory: (target) => path.isAbsolute(target) });
+      if (!result.ok) throw new RegistryError('invalid_registry', result.problems);
+      fake.writes.push(candidate);
+      fields = { ok: true, error: null, agents: result.agents, groups: result.groups };
+      current = build(fields);
+      for (const fn of listeners) fn(current);
+      return { agents: result.agents, groups: result.groups };
+    },
     start: async () => current,
     stop() {},
   };
+  return fake;
 }
 
 // Routines that run no subprocess. `calls` counts refreshes; the fields may

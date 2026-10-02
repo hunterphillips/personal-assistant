@@ -14,6 +14,7 @@ import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
 import { createHub } from '../../lib/hub.mjs';
+import { RegistryError, validateDocument } from '../../lib/registry.mjs';
 import { DEFAULTS as SETTINGS_DEFAULTS, SettingsError, validatePatch } from '../../lib/settings.mjs';
 
 export async function listen(server) {
@@ -60,9 +61,42 @@ export async function startSyntheticFocus(t) {
 }
 
 // A registry that never reads a file: current() returns `agents` as loaded.
-export function fakeRegistry(agents = []) {
-  const current = Object.freeze({ ok: true, agents, error: null, loadedAt: '2026-01-01T00:00:00.000Z', path: '/invented/agents.json' });
-  return { current: () => current, onChange: () => () => {}, start: async () => current, stop() {} };
+// write(mutate) applies the mutation in memory, validating with the real
+// validateDocument except that any absolute path counts as a folder (test
+// agents live in invented folders); `writes` keeps each candidate document.
+// set(fields) changes current() and notifies, as a reload would.
+export function fakeRegistry(agents = [], { groups = [], ok = true, error = null } = {}) {
+  const listeners = new Set();
+  let current = Object.freeze({ ok, agents, groups, error, loadedAt: ok ? '2026-01-01T00:00:00.000Z' : null, path: '/invented/agents.json' });
+  const notify = () => {
+    for (const fn of [...listeners]) fn(current);
+  };
+  const fake = {
+    writes: [],
+    current: () => current,
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    set(fields) {
+      current = Object.freeze({ ...current, ...fields });
+      notify();
+    },
+    async write(mutate) {
+      if (!current.ok && current.error !== 'registry_missing') throw new RegistryError('registry_invalid', [current.error]);
+      const document = structuredClone({ version: 1, groups: [...current.groups], agents: current.agents.map((agent) => ({ ...agent })) });
+      const candidate = mutate(document);
+      const result = validateDocument(candidate, { isDirectory: (target) => path.isAbsolute(target) });
+      if (!result.ok) throw new RegistryError('invalid_registry', result.problems);
+      fake.writes.push(candidate);
+      current = Object.freeze({ ok: true, agents: result.agents, groups: result.groups, error: null, loadedAt: new Date().toISOString(), path: current.path });
+      notify();
+      return { agents: result.agents, groups: result.groups };
+    },
+    start: async () => current,
+    stop() {},
+  };
+  return fake;
 }
 
 // Routines that run no subprocess; `calls` counts refreshes.
@@ -236,7 +270,7 @@ export async function startApp(t, {
   const instructionsReader = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log });
   const handler = createApp({
     config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader,
-    feedInstructions: instructionsReader, notices, settings, log,
+    feedInstructions: instructionsReader, notices, settings, registry, log,
   });
   server.on('request', handler);
   t.after(() => {
