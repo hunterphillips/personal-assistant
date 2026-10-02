@@ -1,8 +1,14 @@
 {
   "version": 1,
   "groups": [
-    { "id": "work", "name": "Work" },
-    { "id": "personal", "name": "Personal" }
+    {
+      "id": "work",
+      "name": "Work"
+    },
+    {
+      "id": "personal",
+      "name": "Personal"
+    }
   ],
   "agents": [
     {
@@ -14,7 +20,9 @@
       "kind": "persona",
       "cwd": "/Users/hunterphillips/workspace/work/investing/cfo",
       "provider": "claude",
-      "routines": ["com.hunter.cfo.daily"]
+      "routines": [
+        "com.hunter.cfo.daily"
+      ]
     },
     {
       "id": "focus",
@@ -58,7 +66,9 @@
       "kind": "persona",
       "cwd": "/Users/hunterphillips/workspace/personal-assistant",
       "provider": "claude",
-      "routines": []
+      "routines": [
+        "com.personal-assistant.watch"
+      ]
     },
     {
       "id": "nowgentic",
@@ -69,7 +79,9 @@
       "kind": "project",
       "cwd": "/Users/hunterphillips/workspace/work/nowgentic",
       "provider": "claude",
-      "routines": ["com.hunter.catchup.daily"]
+      "routines": [
+        "com.hunter.catchup.daily"
+      ]
     },
     {
       "id": "assistant",
@@ -81,7 +93,9 @@
       "cwd": "/Users/hunterphillips/workspace/personal-assistant",
       "provider": "claude",
       "pinned": true,
-      "routines": ["com.personal-assistant.dashboard"]
+      "routines": [
+        "com.personal-assistant.dashboard"
+      ]
     }
   ]
 }
