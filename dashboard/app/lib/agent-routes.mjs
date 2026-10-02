@@ -47,7 +47,7 @@
 //                          409 not_a_persona, 409 persona_unavailable)
 //   startTurn({ hub, log, shuttingDown }, id, text) -> Promise<void>
 //     503 shutting_down once closeStreams() has run, then personaFor(id),
-//     then adapter.send(agent, text). Resolves as soon as the adapter has
+//     then adapter.send(agent, text, hub.modelFor(id)). Resolves as soon as the adapter has
 //     accepted the turn and rejects with the mapped HttpError when it
 //     refuses; a turn rejected after acceptance is logged as
 //     persona_turn_rejected. The caller validates `text` and sends the reply.
@@ -246,7 +246,7 @@ export async function startTurn({ hub, log, shuttingDown }, id, text) {
   // turn without waiting for the turn. An accepted turn never rejects by
   // contract; if one does, the rejection is logged, since no reply can
   // carry it.
-  const turn = adapter.send(agent, text);
+  const turn = adapter.send(agent, text, typeof hub.modelFor === 'function' ? hub.modelFor(id) : undefined);
   let accepted = false;
   turn.catch((error) => {
     if (accepted) log({ event: 'persona_turn_rejected', agentId: id, error: error?.code ?? error?.name ?? 'unknown' });

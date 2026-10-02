@@ -14,6 +14,7 @@ import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
 import { createHub } from '../../lib/hub.mjs';
+import { DEFAULTS as SETTINGS_DEFAULTS, SettingsError, validatePatch } from '../../lib/settings.mjs';
 
 export async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -96,14 +97,63 @@ export function fakeBindings(initial = new Map()) {
   };
 }
 
-// Builds a hub over the given focus and brief, with fake registry and
-// routines unless real ones are passed, and no persona adapters unless given.
+// A settings store that never touches a file: current() answers DEFAULTS
+// merged with `initial`, update() validates as the real store does and
+// notifies, `fail(error)` makes it answer ok false (as an unreadable file
+// would) until the next update, and `updates` records every patch.
+export function fakeSettings(initial = {}, { ok = true, error = null } = {}) {
+  const listeners = new Set();
+  const merge = (base, patch) => Object.freeze({
+    version: 1,
+    model: Object.freeze({ ...base.model, ...(patch?.model ?? {}) }),
+    brief: Object.freeze({ ...base.brief, ...(patch?.brief ?? {}) }),
+  });
+  let settings = merge(SETTINGS_DEFAULTS, initial);
+  let state = Object.freeze({ ok, settings, error, loadedAt: '2026-01-01T00:00:00.000Z', path: '/invented/settings.json' });
+  const notify = () => {
+    for (const fn of [...listeners]) fn(state);
+  };
+  const fake = {
+    updates: [],
+    current: () => state,
+    async load() {},
+    async update(patch) {
+      const problem = validatePatch(patch);
+      if (problem) throw new SettingsError(problem);
+      if (!state.ok) throw new SettingsError('settings_invalid', state.error);
+      fake.updates.push(patch);
+      settings = merge(settings, patch);
+      state = Object.freeze({ ...state, settings });
+      notify();
+      return settings;
+    },
+    async seed(values) {
+      settings = merge(SETTINGS_DEFAULTS, values);
+      state = Object.freeze({ ...state, ok: true, error: null, settings });
+      notify();
+      return true;
+    },
+    fail(message) {
+      state = Object.freeze({ ...state, ok: false, error: message });
+      notify();
+    },
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+  };
+  return fake;
+}
+
+// Builds a hub over the given focus and brief, with fake registry,
+// routines, and settings unless real ones are passed, and no persona
+// adapters unless given.
 export function createTestHub({
   config, focus, brief, registry = fakeRegistry(), routines = fakeRoutines(), adapters = {}, store = null, bindings = null,
-  cmux = null, home = '/invented', log = () => {},
+  cmux = null, settings = fakeSettings(), home = '/invented', log = () => {},
 }) {
   return createHub({
-    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, home, log,
+    registry, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, home, log,
   });
 }
 
@@ -150,10 +200,12 @@ export function fakeCmux(inventory = null) {
 // The feed instructions reader reads DASHBOARD_FEED_INSTRUCTIONS, which is
 // likewise a missing path in a temporary directory unless `env` names it.
 // `notices` (notices.mjs) is optional and goes to the event stream.
-// `configure` may adjust config.
+// `settings` defaults to a fakeSettings() shared by the hub and the PUT
+// route; pass null for an app without the settings route. `configure` may
+// adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), routines, hub, adapters, store, bindings, cmux = null, goals, feed,
-  notices = null, configure = (c) => c,
+  notices = null, settings = fakeSettings(), configure = (c) => c,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
@@ -176,6 +228,7 @@ export async function startApp(t, {
   const routinesModule = routines ?? fakeRoutines();
   const stateHub = hub ?? createTestHub({
     config, focus: focusRoutes, brief: briefRoutes, registry, routines: routinesModule, adapters, store, bindings, cmux, log,
+    ...(settings ? { settings } : {}),
   });
   if (!hub) await stateHub.start();
   const goalsReader = goals === undefined ? createGoals({ registry, limits: config.limits, log }) : goals;
@@ -183,7 +236,7 @@ export async function startApp(t, {
   const instructionsReader = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log });
   const handler = createApp({
     config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader,
-    feedInstructions: instructionsReader, notices, log,
+    feedInstructions: instructionsReader, notices, settings, log,
   });
   server.on('request', handler);
   t.after(() => {
@@ -192,7 +245,7 @@ export async function startApp(t, {
     return closeServer(server);
   });
   const authority = `127.0.0.1:${port}`;
-  return { port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, routines: routinesModule, handler };
+  return { port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, routines: routinesModule, settings, handler };
 }
 
 // Sends one request. `headers.host` defaults to the app authority; pass

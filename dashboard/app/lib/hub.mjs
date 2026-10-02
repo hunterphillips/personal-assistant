@@ -6,7 +6,8 @@
 // to refresh. Its only timers are the persona turn wall clocks.
 //
 // createHub({ registry, routines, focus, brief, timeouts, limits, adapters,
-//             store, bindings, cmux, adaptersDisabled, home, log, now }) returns:
+//             store, bindings, cmux, adaptersDisabled, settings, models, home,
+//             log, now }) returns:
 //
 //   snapshot() -> frozen
 //     { revision,                 // integer, starts at 1, +1 on every change
@@ -19,15 +20,17 @@
 //       registry: { ok, error, loadedAt },
 //       groups: [{ id, name }],    // the registry's group list, in order
 //       agents: [{ id, name, role, description, group, kind, cwd, jobs,
-//                  provider?, model?, pinned?, state, pending?, lastMessage?,
-//                  lastError?, costUsd? }],
+//                  provider?, pinned?, state, pending?, lastMessage?,
+//                  lastError?, costUsd?, model?, accepts? }],
 //       sessions: [{ id, provider, threadId, cwd, projectId, title, state,
 //                    pending, lastMessage, lastError, updatedAt, binding }
 //                  | { id, provider: 'claude', kind: 'terminal', cwd, projectId,
 //                      state, updatedAt, binding }],
 //       codex: { available } | { available: false, reason },
 //       cmux: { available, stale? } | { available: false, reason },
-//       routines: { refreshedAt, focusAvailable, refreshing, error, items } }
+//       routines: { refreshedAt, focusAvailable, refreshing, error, items },
+//       settings: { ok, error, model: { default, effort }, brief: { agent } },
+//       models: [{ id, name }] }
 //     An agent's cwd is the registry's, or null, and jobs is how many
 //     launchd labels its registry routines name; agents never carry the
 //     routines themselves. Each object in it is frozen.
@@ -45,6 +48,18 @@
 //                    (a message's `summary` stands in for its text when present)
 //       lastError    null or a string
 //       costUsd      null or the session's running total
+//     A Claude persona also has:
+//       model        { id, effort, source }: what its next turn runs on.
+//                    id is a model id or alias or null, effort one of
+//                    models.mjs EFFORTS or null; null means Claude Code's own
+//                    default. source names the level that set either field:
+//                    'thread' (a choice on the thread; none yet), 'agent'
+//                    (the registry's `model`), 'system' (settings), or
+//                    'default' when neither is set anywhere.
+//       accepts      the registry's `accepts` list or null (everyone)
+//     `settings` is the settings store's view (settings.mjs): `ok` false
+//     with `error` when the file could not be read, the last good values
+//     either way. `models` is the model table (models.mjs) for the views.
 //     `sessions` is the union of every adapter's sessions() (adapter.mjs),
 //     threads the dashboard follows but does not own, and the Claude
 //     terminals cmux has registered (`cmux`, runtime/cmux.mjs), newest
@@ -133,6 +148,11 @@
 //   persona(id) -> { agent, adapter } | null
 //     The registry agent (with cwd) and its adapter, for a started persona.
 //
+//   modelFor(agentId) -> { id, effort }
+//     The pair the agent's next turn runs on, resolved as the agent view's
+//     `model` is; { id: null, effort: null } for an agent that is not a
+//     Claude persona. The routes pass it to adapter.send.
+//
 //   notify(agentId, message) -> Promise<message>
 //     Appends `message` ({ role, text, ...fields }, `at` defaulting to now)
 //     to the agent's thread through the store, so the daemon stays the
@@ -154,6 +174,8 @@
 //                 adapters, clears the turn timers, and drops all subscribers. It does not close
 //                 the adapters; the server does that first.
 //
+// A settings change (settings.onChange) replaces `settings` and `agents`.
+//
 // A registry change (registry.onChange) replaces `registry` and `agents`
 // and, after start(), rebuilds `sessions` (their projectId may change);
 // newly listed personas are started and removed ones dropped,
@@ -171,6 +193,8 @@
 import os from 'node:os';
 
 import { LIMITS, TIMEOUTS } from './config.mjs';
+import { MODELS } from './models.mjs';
+import { DEFAULTS as SETTINGS_DEFAULTS } from './settings.mjs';
 import { truncateUtf8 } from './threads.mjs';
 
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -179,9 +203,10 @@ const STATE_WORD = /^[a-z_]{1,40}$/;
 
 export function createHub({
   registry, routines, focus, brief, timeouts, limits = LIMITS, adapters = {}, store = null, bindings = null, cmux = null,
-  adaptersDisabled = null, home = os.homedir(), log = () => {}, now = () => new Date(),
+  adaptersDisabled = null, settings = null, models = MODELS, home = os.homedir(), log = () => {}, now = () => new Date(),
 }) {
   const listeners = new Set();
+  const settingsCurrent = () => settingsView(settings ? settings.current() : null);
   const turnMaxMs = timeouts.turnMaxMs ?? TIMEOUTS.turnMaxMs;
   // agentId -> runtime entry for each registry persona (see personaEntry).
   const personas = new Map();
@@ -194,11 +219,13 @@ export function createHub({
     home,
     focus: { available: null },
     brief: { state: 'unknown' },
-    ...registryFields(registry.current(), personas),
+    ...registryFields(registry.current(), personas, settingsCurrent()),
     sessions: [],
     codex: codexStatus(adapters, adaptersDisabled),
     cmux: cmuxStatus(cmux),
     routines: { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] },
+    settings: settingsCurrent(),
+    models: models.map((model) => ({ id: model.id, name: model.name })),
   });
   let statusRun = null;
   let routinesRun = null;
@@ -219,7 +246,7 @@ export function createHub({
   }
 
   function commitAgents() {
-    const agents = agentViews(registry.current(), personas);
+    const agents = agentViews(registry.current(), personas, settingsCurrent());
     if (!sameJson(agents, state.agents)) commit({ agents });
   }
 
@@ -373,9 +400,19 @@ export function createHub({
         if (!closed) commitAgents();
       });
     }
-    commit(registryFields(current, personas));
+    commit(registryFields(current, personas, settingsCurrent()));
     if (started && !closed) commitSessions();
   });
+
+  const unsubscribeSettings = settings && typeof settings.onChange === 'function' ? settings.onChange(() => {
+    if (closed) return;
+    const patch = {};
+    const view = settingsCurrent();
+    if (!sameJson(view, state.settings)) patch.settings = view;
+    const agents = agentViews(registry.current(), personas, view);
+    if (!sameJson(agents, state.agents)) patch.agents = agents;
+    if (Object.keys(patch).length > 0) commit(patch);
+  }) : () => {};
 
   async function runStatus() {
     const budget = timeouts.statusMs;
@@ -490,6 +527,13 @@ export function createHub({
       return { agent: entry.agent, adapter: entry.adapter };
     },
 
+    modelFor(agentId) {
+      const agent = (registry.current()?.agents ?? []).find((item) => item.id === agentId);
+      if (!agent || agent.kind !== 'persona' || agent.provider !== 'claude') return { id: null, effort: null };
+      const { id, effort } = resolveModel(agent, null, settingsCurrent());
+      return { id, effort };
+    },
+
     async notify(agentId, message) {
       if (!store) throw new Error('no_store');
       const record = { ...message, at: typeof message?.at === 'string' ? message.at : now().toISOString() };
@@ -521,6 +565,7 @@ export function createHub({
       closed = true;
       unsubscribeRegistry();
       unsubscribeBindings();
+      unsubscribeSettings();
       for (const unsubscribe of adapterUnsubscribes.splice(0)) unsubscribe();
       for (const entry of personas.values()) {
         clearTimeout(entry.timer);
@@ -538,15 +583,50 @@ function personaEntry(agent, adapter) {
   };
 }
 
-function registryFields(current, personas) {
+function registryFields(current, personas, settingsState) {
   return {
     registry: { ok: current?.ok === true, error: current?.error ?? null, loadedAt: current?.loadedAt ?? null },
     groups: (current?.groups ?? []).map((group) => ({ id: group.id, name: group.name })),
-    agents: agentViews(current, personas),
+    agents: agentViews(current, personas, settingsState),
   };
 }
 
-function agentViews(current, personas) {
+// The snapshot's `settings`: the store's view, or the defaults when the hub
+// runs without a store (tests, or a daemon built without one).
+function settingsView(current) {
+  const settings = current?.settings ?? SETTINGS_DEFAULTS;
+  return {
+    ok: current ? current.ok === true : true,
+    error: current?.error ?? null,
+    model: { default: settings.model?.default ?? null, effort: settings.model?.effort ?? null },
+    brief: { agent: settings.brief?.agent ?? null },
+  };
+}
+
+// What a Claude persona's next turn runs on. `thread` is a choice made on
+// the thread ({ model?, effort? }), none yet; the registry's `model` is the
+// agent level; the settings are the system level. The id and the effort
+// resolve separately, and `source` is the highest level that set either.
+function resolveModel(agent, thread, settingsState) {
+  const levels = [
+    ['thread', thread?.model ?? null, thread?.effort ?? null],
+    ['agent', typeof agent.model === 'string' && agent.model !== '' ? agent.model : null, null],
+    ['system', settingsState.model.default, settingsState.model.effort],
+  ];
+  let id = null;
+  let effort = null;
+  let source = 'default';
+  for (const [name, levelId, levelEffort] of levels) {
+    const setsId = id === null && levelId !== null;
+    const setsEffort = effort === null && levelEffort !== null;
+    if ((setsId || setsEffort) && source === 'default') source = name;
+    if (setsId) id = levelId;
+    if (setsEffort) effort = levelEffort;
+  }
+  return { id, effort, source };
+}
+
+function agentViews(current, personas, settingsState) {
   return (current?.agents ?? []).map((agent) => {
     const view = {
       id: agent.id,
@@ -559,7 +639,6 @@ function agentViews(current, personas) {
       jobs: Array.isArray(agent.routines) ? agent.routines.length : 0,
     };
     if (agent.provider !== undefined) view.provider = agent.provider;
-    if (agent.model !== undefined) view.model = agent.model;
     if (agent.pinned === true) view.pinned = true;
     if (agent.kind !== 'persona') {
       view.state = null;
@@ -571,6 +650,10 @@ function agentViews(current, personas) {
     view.lastMessage = entry?.lastMessage ?? null;
     view.lastError = entry?.lastError ?? null;
     view.costUsd = entry?.costUsd ?? null;
+    if (agent.provider === 'claude') {
+      view.model = resolveModel(agent, null, settingsState);
+      view.accepts = Array.isArray(agent.accepts) ? [...agent.accepts] : null;
+    }
     return view;
   });
 }

@@ -10,8 +10,8 @@ import { tempDir } from './support/harness.mjs';
 
 const NOW = '2026-09-30T11:06:00.000Z';
 
-// A hub stand-in: `started` says whether the Assistant counts as started;
-// notify records and appends through the real store.
+// A hub stand-in: `started` says whether the target agent counts as
+// started; notify records and appends through the real store.
 function fakeHub(store, { started = true } = {}) {
   const hub = {
     started,
@@ -32,14 +32,15 @@ function fakeHub(store, { started = true } = {}) {
   return hub;
 }
 
-async function setup(t, { started = true, limits = LIMITS } = {}) {
+async function setup(t, { started = true, limits = LIMITS, target = 'assistant' } = {}) {
   const briefsDir = await tempDir(t);
   const threadsDir = path.join(await tempDir(t), 'threads');
   const store = createThreadStore({ dir: threadsDir, limits });
   const hub = fakeHub(store, { started });
   const logs = [];
+  const targets = { current: target };
   const notices = createNotices({
-    briefsDir, threadsDir, hub, limits, log: (entry) => logs.push(entry), now: () => new Date(NOW),
+    briefsDir, threadsDir, hub, target: () => targets.current, limits, log: (entry) => logs.push(entry), now: () => new Date(NOW),
   });
   t.after(() => notices.stop());
   const writeNotice = (date, fields = {}) => writeFile(
@@ -47,8 +48,36 @@ async function setup(t, { started = true, limits = LIMITS } = {}) {
     JSON.stringify({ date, state: 'ready', opening: `Opening for ${date}. More follows.`, memo: `## Money\n\nMemo for ${date}.`, ...fields }),
   );
   const posted = async () => JSON.parse(await readFile(path.join(threadsDir, POSTED_FILE), 'utf8'));
-  return { briefsDir, threadsDir, store, hub, logs, notices, writeNotice, posted };
+  return { briefsDir, threadsDir, store, hub, logs, notices, writeNotice, posted, targets };
 }
+
+test('no target posts nothing, logs no_target, and a target set later gets the notice once', async (t) => {
+  const { hub, notices, logs, writeNotice, threadsDir, targets } = await setup(t, { target: null });
+  await writeNotice('2026-09-30');
+  await notices.reconcile();
+  assert.equal(hub.notified.length, 0);
+  assert.deepEqual(logs.filter((e) => e.event === 'notice_skipped'), [
+    { event: 'notice_skipped', agentId: null, date: '2026-09-30', state: 'ready', reason: 'no_target' },
+  ]);
+  await assert.rejects(stat(path.join(threadsDir, POSTED_FILE)), { code: 'ENOENT' });
+
+  targets.current = 'assistant';
+  await notices.reconcile();
+  await notices.reconcile();
+  assert.deepEqual(hub.notified.map((m) => [m.agentId, m.date]), [['assistant', '2026-09-30']]);
+});
+
+test('a changed target receives the next notice, and the posted file keys on date, not agent', async (t) => {
+  const { hub, notices, writeNotice, targets, posted } = await setup(t);
+  hub.persona = (id) => (id === 'assistant' || id === 'cfo' ? { agent: { id }, adapter: {} } : null);
+  await writeNotice('2026-09-30');
+  await notices.reconcile();
+  targets.current = 'cfo';
+  await writeNotice('2026-10-01');
+  await notices.reconcile();
+  assert.deepEqual(hub.notified.map((m) => [m.agentId, m.date]), [['assistant', '2026-09-30'], ['cfo', '2026-10-01']]);
+  assert.deepEqual((await posted()).posted, { '2026-09-30': ['ready'], '2026-10-01': ['ready'] });
+});
 
 test('reconcile posts one message per unposted notice, oldest first, newest two dates only', async (t) => {
   const { hub, notices, writeNotice, store, posted } = await setup(t);
@@ -222,7 +251,7 @@ test('a missing briefs directory posts nothing and does not throw', async (t) =>
   const store = createThreadStore({ dir: threadsDir, limits: LIMITS });
   const hub = fakeHub(store);
   const logs = [];
-  const notices = createNotices({ briefsDir, threadsDir, hub, log: (entry) => logs.push(entry) });
+  const notices = createNotices({ briefsDir, threadsDir, hub, target: () => 'assistant', log: (entry) => logs.push(entry) });
   await notices.reconcile();
   assert.equal(hub.notified.length, 0);
   assert.deepEqual(logs, []);
@@ -247,7 +276,7 @@ test('the threads directory is created for the posted file when the store has no
   const briefsDir = await tempDir(t);
   const threadsDir = path.join(await tempDir(t), 'nested', 'threads');
   const hub = { persona: () => ({}), notified: [], async notify(agentId, message) { hub.notified.push(message); } };
-  const notices = createNotices({ briefsDir, threadsDir, hub });
+  const notices = createNotices({ briefsDir, threadsDir, hub, target: () => 'assistant' });
   await mkdir(briefsDir, { recursive: true });
   await writeFile(path.join(briefsDir, 'notice-2026-09-30.json'), JSON.stringify({ date: '2026-09-30', state: 'ready', opening: 'Hi.' }));
   await notices.reconcile();

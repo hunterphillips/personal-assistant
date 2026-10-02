@@ -76,6 +76,7 @@ function makeHub(overrides = {}) {
     store: overrides.store ?? null,
     cmux: overrides.cmux ?? null,
     adaptersDisabled: overrides.adaptersDisabled ?? null,
+    settings: overrides.settings ?? null,
     log: (entry) => logs.push(entry),
     now: () => new Date('2026-09-25T12:00:00.000Z'),
   });
@@ -102,10 +103,91 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
     {
       id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
       provider: 'claude', state: 'unavailable', pending: null, lastMessage: null, lastError: null, costUsd: null,
+      model: { id: null, effort: null, source: 'default' }, accepts: null,
     },
   ]);
   assert.deepEqual(snapshot.routines, { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] });
+  assert.deepEqual(snapshot.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null } });
+  assert.deepEqual(snapshot.models.map((m) => m.id), ['fable', 'opus', 'sonnet', 'haiku']);
   assert.ok(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.agents[0]) && Object.isFrozen(snapshot.routines));
+  assert.ok(Object.isFrozen(snapshot.settings) && Object.isFrozen(snapshot.models));
+});
+
+// A settings store stand-in: current() answers the given values and
+// `set(patch)` changes them and notifies, as an update would.
+function fakeSettingsStore(initial = {}, { ok = true, error = null } = {}) {
+  const listeners = new Set();
+  let settings = { version: 1, model: { default: null, effort: null, ...initial.model }, brief: { agent: null, ...initial.brief } };
+  let state = { ok, error, settings };
+  return {
+    current: () => state,
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    set(patch, meta = {}) {
+      settings = { version: 1, model: { ...settings.model, ...patch.model }, brief: { ...settings.brief, ...patch.brief } };
+      state = { ok: meta.ok ?? true, error: meta.error ?? null, settings };
+      for (const fn of listeners) fn(state);
+    },
+    listenerCount: () => listeners.size,
+  };
+}
+
+test('a Claude persona\'s model resolves agent over system, each field on its own, and names the level', () => {
+  const settings = fakeSettingsStore({ model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' } });
+  const registry = fakeRegistry(registryState([
+    agent('cfo'),
+    agent('ops', { model: 'opus' }),
+    agent('scribe', { provider: 'codex' }),
+    agent('tool', { kind: 'system', provider: undefined }),
+  ]));
+  const { hub } = makeHub({ registry, settings });
+  const view = (id) => hub.snapshot().agents.find((a) => a.id === id);
+  assert.deepEqual(view('cfo').model, { id: 'sonnet', effort: 'low', source: 'system' });
+  assert.deepEqual(view('ops').model, { id: 'opus', effort: 'low', source: 'agent' });
+  assert.equal('model' in view('scribe'), false);
+  assert.equal('model' in view('tool'), false);
+  assert.equal('accepts' in view('scribe'), false);
+  assert.deepEqual(hub.snapshot().settings, {
+    ok: true, error: null, model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' },
+  });
+  assert.deepEqual(hub.modelFor('cfo'), { id: 'sonnet', effort: 'low' });
+  assert.deepEqual(hub.modelFor('ops'), { id: 'opus', effort: 'low' });
+  assert.deepEqual(hub.modelFor('scribe'), { id: null, effort: null });
+  assert.deepEqual(hub.modelFor('nobody'), { id: null, effort: null });
+
+  // Nothing set anywhere: Claude Code's default, and the adapter gets nulls.
+  settings.set({ model: { default: null, effort: null } });
+  assert.deepEqual(view('cfo').model, { id: null, effort: null, source: 'default' });
+  assert.deepEqual(view('ops').model, { id: 'opus', effort: null, source: 'agent' });
+  assert.deepEqual(hub.modelFor('cfo'), { id: null, effort: null });
+});
+
+test('a settings change commits settings and the agent views that moved, and nothing when neither did', () => {
+  const settings = fakeSettingsStore();
+  const { hub, deltas } = makeHub({ settings });
+  settings.set({ model: { effort: 'high' } });
+  assert.equal(hub.snapshot().revision, 2);
+  assert.deepEqual(deltas.map((d) => Object.keys(d.patch).sort()), [['agents', 'settings']]);
+  assert.deepEqual(deltas[0].patch.agents[0].model, { id: null, effort: 'high', source: 'system' });
+  assert.equal(deltas[0].patch.settings.model.effort, 'high');
+
+  settings.set({ brief: { agent: 'cfo' } });
+  assert.deepEqual(Object.keys(deltas[1].patch), ['settings']);
+  assert.equal(hub.snapshot().settings.brief.agent, 'cfo');
+
+  settings.set({ brief: { agent: 'cfo' } });
+  assert.equal(deltas.length, 2);
+
+  // An unreadable file keeps the last good values and says so.
+  settings.set({}, { ok: false, error: 'settings_invalid_json' });
+  assert.deepEqual(hub.snapshot().settings, {
+    ok: false, error: 'settings_invalid_json', model: { default: null, effort: 'high' }, brief: { agent: 'cfo' },
+  });
+
+  hub.close();
+  assert.equal(settings.listenerCount(), 0);
 });
 
 test('a registry change bumps the revision with a registry and agents patch', () => {
@@ -326,7 +408,7 @@ test('start seeds a persona from its adapter and the last cached message', async
   assert.deepEqual(persona(hub), {
     id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
     provider: 'claude', state: 'error', pending: null, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
-    lastError: 'Invented failure', costUsd: 0.5,
+    lastError: 'Invented failure', costUsd: 0.5, model: { id: null, effort: null, source: 'default' }, accepts: null,
   });
   assert.equal(persona(hub, 'ops').state, null);
   assert.equal('pending' in persona(hub, 'ops'), false);

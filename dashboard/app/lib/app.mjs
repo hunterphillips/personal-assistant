@@ -13,7 +13,7 @@
 // answer 404 not_found; without `feed` or `feedInstructions`, /api/feed and
 // the routes under it do.
 //
-// createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, log })
+// createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, log })
 // returns a (req, res) handler and opens nothing; server.mjs owns listening.
 // `notices` (notices.mjs, optional) is handed to the event stream, which
 // reconciles the brief notice on each connect and runs its timer while a
@@ -30,6 +30,7 @@ import { ASSETS } from './assets.mjs';
 import { createEvents } from './events.mjs';
 import { createFeedRoutes } from './feed-routes.mjs';
 import { createGoalsRoutes } from './goals-routes.mjs';
+import { createSettingsRoutes } from './settings-routes.mjs';
 import { isCalendarDate } from './hub.mjs';
 import {
   HttpError,
@@ -88,6 +89,7 @@ const EXACT_ROUTES = new Map([
   ['/api/feed/discuss', { name: 'feed-discuss', methods: ['POST'] }],
   ['/api/feed/instructions', { name: 'feed-instructions', methods: ['GET'] }],
   ['/api/feed/instructions/propose', { name: 'feed-instructions-propose', methods: ['POST'] }],
+  ['/api/settings', { name: 'settings', methods: ['PUT'] }],
 ]);
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -101,7 +103,7 @@ export function defaultLog(entry) {
 
 export function createApp({
   config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, feedInstructions = null, notices = null,
-  log = defaultLog,
+  settings = null, log = defaultLog,
 }) {
   if (!hub) throw new TypeError('createApp requires a hub');
   const allowedHosts = new Set(config.allowedHosts);
@@ -112,6 +114,9 @@ export function createApp({
   const agents = createAgentRoutes({ hub, store, cmux, log, limits: config.limits, shuttingDown: isShuttingDown });
   const goalsRoutes = goals
     ? createGoalsRoutes({ goals, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
+    : null;
+  const settingsRoutes = settings
+    ? createSettingsRoutes({ settings, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
     : null;
   const feedRoutes = feed && feedInstructions
     ? createFeedRoutes({
@@ -252,6 +257,9 @@ export function createApp({
       case 'goals-propose':
         if (!goalsRoutes) throw new HttpError(404, 'not_found');
         return goalsRoutes.servePropose(req, res);
+      case 'settings':
+        if (!settingsRoutes) throw new HttpError(404, 'not_found');
+        return settingsRoutes.serveUpdate(req, res);
       case 'feed':
         if (!feedRoutes) throw new HttpError(404, 'not_found');
         return feedRoutes.serveRead(res);

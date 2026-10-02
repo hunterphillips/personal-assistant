@@ -1,29 +1,33 @@
 // The morning notice: the brief run writes notice-<date>.json beside the
 // viewer ({ date, state: 'ready' | 'failed', opening, memo? }, build.py and
-// run-brief), and this module posts each one into the Assistant's thread
-// once per date and state. The run never calls the daemon; the daemon reads
+// run-brief), and this module posts each one into the thread of the agent
+// the settings name (brief.agent, settings.mjs) once per date and state. The run never calls the daemon; the daemon reads
 // the file on start, on each event stream connect, and once a minute while
 // a stream is open (events.mjs drives the timer), so a page left open
 // through 06:05 still sees the line.
 //
-// createNotices({ briefsDir, threadsDir, hub, agentId, limits, log, now })
-// returns:
+// createNotices({ briefsDir, threadsDir, hub, target, limits, log, now })
+// returns; `target()` answers the agent id to post to, or null for no one,
+// and is asked once per reconcile that has something to post:
 //
 //   reconcile() -> Promise<void>
 //     Lists notice-<date>.json in briefsDir, keeps the newest two dates by
 //     name (an older unposted notice is ignored on purpose: a week of
 //     downtime posts two lines, not seven), reads each, and posts every
 //     (date, state) pair not yet in <threadsDir>/brief-notices.json, oldest
-//     date first, through hub.notify(agentId, message). The message is
+//     date first, through hub.notify(target(), message). The message is
 //     { role: 'system', kind: 'brief', date, state, summary, text, at }:
 //     `summary` is the opening's first sentence cut to SUMMARY_CHARS, and
 //     `text` the memo for a ready notice (the opening when it has none) or
 //     the opening for a failed one; the store cuts text to
 //     limits.messageTextBytes. A pair is recorded after its append
 //     succeeds; the posted file is written atomically (mode 600).
-//     Concurrent callers share one run. When hub.persona(agentId) is null
-//     (the agent has not started, or its adapter is missing) nothing is
-//     posted, `notice_skipped` is logged, and the next reconcile retries. A
+//     Concurrent callers share one run. When target() is null nothing is
+//     posted and `notice_skipped` is logged with reason 'no_target'; when
+//     hub.persona(target()) is null (the agent has not started, or its
+//     adapter is missing) likewise with reason 'agent_not_started'; the
+//     next reconcile retries either, so a target set later gets the day's
+//     notice. A
 //     malformed or oversized file is logged as `notice_invalid` and skipped,
 //     never deleted; a missing briefs directory posts nothing. Never rejects:
 //     a failed read, append, or record is logged as `notice_error`.
@@ -47,7 +51,7 @@ const STATES = new Set(['ready', 'failed']);
 const KEEP_DATES = 2;
 
 export function createNotices({
-  briefsDir, threadsDir, hub, agentId = 'assistant', limits = LIMITS, log = () => {}, now = () => new Date(),
+  briefsDir, threadsDir, hub, target = () => null, limits = LIMITS, log = () => {}, now = () => new Date(),
 }) {
   const briefsRoot = path.resolve(briefsDir);
   const postedFile = path.join(path.resolve(threadsDir), POSTED_FILE);
@@ -67,10 +71,16 @@ export function createNotices({
     const dates = await listDates();
     if (dates.length === 0) return;
     const posted = await readPosted();
+    let agentId;
     for (const date of dates) {
       const notice = await readNotice(date);
       if (!notice) continue;
       if (posted[date]?.includes(notice.state)) continue;
+      agentId ??= target();
+      if (typeof agentId !== 'string' || agentId === '') {
+        log({ event: 'notice_skipped', agentId: null, date, state: notice.state, reason: 'no_target' });
+        return;
+      }
       if (!hub.persona(agentId)) {
         log({ event: 'notice_skipped', agentId, date, state: notice.state, reason: 'agent_not_started' });
         return;

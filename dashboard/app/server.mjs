@@ -2,9 +2,10 @@
 // terminal bindings, compose the routines view, thread store, runtime
 // adapters (Claude for personas, Codex for the shared app-server's threads),
 // the cmux client, state hub, the Goals, Feed, and feed instructions
-// readers, the brief notices, and app, start the personas, post any brief
-// notice not yet in the Assistant's thread, listen on 127.0.0.1, and shut
-// down within a bounded window on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
+// readers, the settings store, the brief notices, and app, start the
+// personas, seed the settings file on first start, post any brief notice
+// not yet in the thread of the agent the settings name, listen on
+// 127.0.0.1, and shut down within a bounded window on SIGTERM/SIGINT. Importing this module does nothing; `node server.mjs`
 // runs main(). A missing or invalid registry does not stop startup; the hub
 // reports it.
 //
@@ -36,6 +37,7 @@ import { createHub } from './lib/hub.mjs';
 import { createNotices } from './lib/notices.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { createRoutines } from './lib/routines.mjs';
+import { createSettings } from './lib/settings.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
 import { createCmux } from './lib/runtime/cmux.mjs';
 import { createCodexAdapter } from './lib/runtime/codex.mjs';
@@ -96,6 +98,8 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     timeouts: config.timeouts,
     limits: config.limits,
   });
+  const settings = createSettings({ path: config.settingsPath, log: logEntry });
+  await settings.load();
   const hub = createHub({
     registry,
     routines,
@@ -108,15 +112,21 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     bindings,
     cmux,
     adaptersDisabled: apiKeyInEnv ? 'api_key_in_env' : null,
+    settings,
     log: logEntry,
   });
   const goals = createGoals({ registry, limits: config.limits, log: logEntry });
   const feed = createFeed({ dir: config.feedDir, limits: config.limits, log: logEntry });
   const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log: logEntry });
   const notices = createNotices({
-    briefsDir: config.briefsDir, threadsDir: config.threadsDir, hub, limits: config.limits, log: logEntry,
+    briefsDir: config.briefsDir,
+    threadsDir: config.threadsDir,
+    hub,
+    target: () => settings.current().settings.brief.agent,
+    limits: config.limits,
+    log: logEntry,
   });
-  const app = createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, log: logEntry });
+  const app = createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, log: logEntry });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;
   server.requestTimeout = config.timeouts.requestMs;
@@ -133,6 +143,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   };
 
   await Promise.all([registry.start(), bindings.start()]);
+  await seedSettings({ settings, registry, log: logEntry });
   await hub.start();
   // The brief notice waiting since the last run, if any; never fatal.
   await notices.reconcile();
@@ -152,6 +163,21 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   let closing;
   const close = () => (closing ??= shutdownState().then(() => closeServer(server, config.timeouts.shutdownMs)));
   return { server, config, close };
+}
+
+// First start: when there is no settings file yet, write the defaults with
+// the brief going to the first pinned Claude persona the registry lists (or
+// no one), so no agent id lives in code. A present file is left alone, and
+// a failure to write is logged, never fatal: the daemon runs on defaults.
+async function seedSettings({ settings, registry, log }) {
+  const agents = registry.current()?.agents ?? [];
+  const target = agents.find((agent) => agent.kind === 'persona' && agent.provider === 'claude' && agent.pinned === true) ?? null;
+  try {
+    const wrote = await settings.seed({ brief: { agent: target?.id ?? null } });
+    if (wrote) log({ event: 'settings_seeded', agent: target?.id ?? null });
+  } catch (error) {
+    log({ event: 'settings_seed_error', error: error?.message ?? String(error) });
+  }
 }
 
 // How long main() gives the orderly shutdown before it forces the exit: the

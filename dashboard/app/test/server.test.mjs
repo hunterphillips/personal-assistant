@@ -5,7 +5,7 @@ import net from 'node:net';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { stat, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { TIMEOUTS } from '../lib/config.mjs';
@@ -35,6 +35,7 @@ async function testEnv(t) {
     DASHBOARD_CMUX_SOCKET_PATH_FILE: path.join(await tempDir(t), 'no-cmux-socket'),
     DASHBOARD_CMUX_PASSWORD_FILE: path.join(await tempDir(t), 'no-cmux-password'),
     DASHBOARD_CMUX_CLI: path.join(await tempDir(t), 'no-cmux'),
+    DASHBOARD_SETTINGS_PATH: path.join(await tempDir(t), 'settings.json'),
   };
 }
 
@@ -321,6 +322,64 @@ test('a notice written while a stream is open is posted by the timer, once; thre
   await stream.next(2_000);
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.deepEqual((await readThread(dashboard)).map((m) => m.date), ['2026-09-30', '2026-09-30', '2026-10-02', '2026-10-03']);
+});
+
+test('first start seeds the settings file with the brief going to the pinned Claude persona, and a present file is kept', async (t) => {
+  const env = await testEnv(t);
+  await writeRegistry(env, [await personaEntry(t), await assistantEntry(t)]);
+  const logs = [];
+  const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => dashboard.close());
+  assert.deepEqual(JSON.parse(await readFile(env.DASHBOARD_SETTINGS_PATH, 'utf8')), {
+    version: 1, model: { default: null, effort: null }, brief: { agent: 'assistant' },
+  });
+  assert.equal((await stat(env.DASHBOARD_SETTINGS_PATH)).mode & 0o777, 0o600);
+  assert.deepEqual(logs.filter((e) => e.event === 'settings_seeded'), [{ event: 'settings_seeded', agent: 'assistant' }]);
+  const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
+  assert.deepEqual(state.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: 'assistant' } });
+  assert.deepEqual(state.agents.find((a) => a.id === 'cfo').model, { id: null, effort: null, source: 'default' });
+  await dashboard.close();
+
+  // A second start finds the file and leaves it alone, even after an edit.
+  await writeFile(env.DASHBOARD_SETTINGS_PATH, JSON.stringify({ version: 1, model: { default: 'haiku', effort: 'max' }, brief: { agent: 'cfo' } }));
+  const again = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => again.close());
+  assert.equal(logs.filter((e) => e.event === 'settings_seeded').length, 1);
+  const next = await (await fetch(`http://127.0.0.1:${again.config.port}/api/state`)).json();
+  assert.deepEqual(next.settings.model, { default: 'haiku', effort: 'max' });
+  assert.equal(next.settings.brief.agent, 'cfo');
+  assert.deepEqual(next.agents.find((a) => a.id === 'cfo').model, { id: 'haiku', effort: 'max', source: 'system' });
+});
+
+test('with no pinned Claude persona the seed names no one, and the notice waits for a target', async (t) => {
+  const env = await testEnv(t);
+  await writeRegistry(env, [await personaEntry(t)]);
+  await writeNotice(env, '2026-09-30');
+  const logs = [];
+  const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => dashboard.close());
+  assert.deepEqual(JSON.parse(await readFile(env.DASHBOARD_SETTINGS_PATH, 'utf8')).brief, { agent: null });
+  assert.deepEqual(logs.filter((e) => e.event === 'settings_seeded'), [{ event: 'settings_seeded', agent: null }]);
+  assert.ok(logs.some((e) => e.event === 'notice_skipped' && e.reason === 'no_target'));
+  assert.deepEqual(await readThread(dashboard, 'cfo'), []);
+
+  // Pointing the brief at the persona through the route posts it on the next reconcile.
+  const put = await fetch(`http://127.0.0.1:${dashboard.config.port}/api/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${dashboard.config.port}` },
+    body: JSON.stringify({ brief: { agent: 'cfo' } }),
+  });
+  assert.equal(put.status, 200);
+  assert.equal((await put.json()).settings.brief.agent, 'cfo');
+  assert.equal(JSON.parse(await readFile(env.DASHBOARD_SETTINGS_PATH, 'utf8')).brief.agent, 'cfo');
+  const app = { port: dashboard.config.port, authority: `127.0.0.1:${dashboard.config.port}` };
+  const stream = await openEvents(app);
+  t.after(() => stream.close());
+  await stream.next();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const messages = await readThread(dashboard, 'cfo');
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].kind, 'brief');
 });
 
 test('a notice waits for the Assistant when its adapter fails to start, and no persona means no post', async (t) => {
