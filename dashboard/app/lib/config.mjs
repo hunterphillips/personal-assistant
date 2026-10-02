@@ -13,6 +13,8 @@
 //   DASHBOARD_REGISTRY_PATH     agent registry JSON file (default ../../registry/agents.json)
 //   DASHBOARD_LAUNCH_AGENTS_DIR directory holding launchd plists (default ~/Library/LaunchAgents)
 //   DASHBOARD_THREADS_DIR       persona session pointers and message caches (default var/threads)
+//   DASHBOARD_SETTINGS_PATH     the settings file the interface writes (default var/settings.json;
+//                               need not exist)
 //   DASHBOARD_CODEX_DIR         the Codex owner file, socket, and terminal bindings written by
 //                               bin/codex-serve and bin/codex-new (default var/codex)
 //   DASHBOARD_CMUX_SOCKET_PATH_FILE  file cmux writes its socket path to while running
@@ -35,6 +37,7 @@ const DEFAULT_FEED_DIR = '../../feed/items';
 const DEFAULT_FEED_INSTRUCTIONS = '../../daily-brief/watch/relevance.md';
 const DEFAULT_REGISTRY_PATH = '../../registry/agents.json';
 const DEFAULT_THREADS_DIR = 'var/threads';
+const DEFAULT_SETTINGS_PATH = 'var/settings.json';
 export const DEFAULT_CODEX_DIR = 'var/codex';
 const DEFAULT_CMUX_CLI = '/Applications/cmux.app/Contents/Resources/bin/cmux';
 const BIND_HOST = '127.0.0.1';
@@ -59,6 +62,7 @@ export const LIMITS = Object.freeze({
   feedFileBytes: 256 * 1024, // one feed run file read by the Feed view
   feedFiles: 30, // newest feed run files read
   feedInstructionsBytes: 64 * 1024, // the feed's criteria file read by the Feed view
+  settingsBodyBytes: 4 * 1024, // one PUT /api/settings body
 });
 
 export const TIMEOUTS = Object.freeze({
@@ -107,6 +111,7 @@ export function loadConfig(env = process.env) {
   // relative override is resolved from APP_ROOT.
   const launchAgentsDir = parsePath(env.DASHBOARD_LAUNCH_AGENTS_DIR, path.join(os.homedir(), 'Library', 'LaunchAgents'));
   const threadsDir = parsePath(env.DASHBOARD_THREADS_DIR, DEFAULT_THREADS_DIR);
+  const settingsPath = parsePath(env.DASHBOARD_SETTINGS_PATH, DEFAULT_SETTINGS_PATH);
   const codexDir = codexDirFrom(env);
   const cmuxSocketPathFile = parsePath(env.DASHBOARD_CMUX_SOCKET_PATH_FILE,
     path.join(os.homedir(), '.local', 'state', 'cmux', 'last-socket-path'));
@@ -142,6 +147,7 @@ export function loadConfig(env = process.env) {
     registryPath,
     launchAgentsDir,
     threadsDir,
+    settingsPath,
     codexDir,
     cmuxSocketPathFile,
     cmuxPasswordFile,
