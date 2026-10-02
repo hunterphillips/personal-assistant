@@ -286,3 +286,145 @@ test('model records the thread\'s choice, answers the resolved pair, and validat
   app.handler.closeStreams();
   assert.equal((await post(app, '/api/agents/cfo/model', { model: 'haiku' })).status, 503);
 });
+
+// --- agent settings and New agent --------------------------------------------
+
+function put(app, path, body, headers = {}) {
+  return request(app, 'PUT', path, {
+    headers: { origin: app.origin, 'content-type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
+function settingsBody(overrides = {}) {
+  return {
+    name: 'CFO', role: 'Money', group: 'work', description: 'Invented.', cwd: '/invented', model: null, effort: null, accepts: null, pinned: false,
+    ...overrides,
+  };
+}
+
+async function startEditable(t, agents = [agent('cfo'), agent('assistant', { pinned: true }), agent('ops', { kind: 'system', provider: undefined }), agent('dev', { kind: 'persona', provider: 'codex' })]) {
+  const registry = fakeRegistry(agents, { groups: [{ id: 'work', name: 'Work' }] });
+  const adapter = fakeAdapter();
+  const app = await startApp(t, { ...status, registry, adapters: { claude: adapter }, store: { read: async () => [] } });
+  t.after(() => adapter.release());
+  return { ...app, registry, adapter };
+}
+
+test('settings PUT rewrites the entry in schema order, keeps routines, omits accepts for everyone, and answers the stored agent', async (t) => {
+  const app = await startEditable(t, [agent('cfo', { routines: ['com.hunter.cfo.daily'] }), agent('assistant', { pinned: true })]);
+  const response = await put(app, '/api/agents/cfo/settings', settingsBody({
+    name: 'Money desk', role: 'Finance', description: 'The money picture.', model: 'sonnet', effort: 'low', accepts: ['assistant'], pinned: true,
+  }));
+  assert.equal(response.status, 200);
+  assert.equal(response.json.ok, true);
+  assert.equal(response.json.note, undefined);
+  assert.deepEqual(response.json.agent, {
+    id: 'cfo', name: 'Money desk', role: 'Finance', description: 'The money picture.', group: 'work', kind: 'persona', cwd: '/invented',
+    provider: 'claude', model: 'sonnet', effort: 'low', accepts: ['assistant'], pinned: true, routines: ['com.hunter.cfo.daily'],
+  });
+  assert.deepEqual(Object.keys(app.registry.writes[0].agents[0]), ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'accepts', 'routines', 'pinned']);
+
+  // The snapshot follows in one revision, with the agent level visible.
+  const { agents } = (await request(app, 'GET', '/api/state')).json;
+  const cfo = agents.find((a) => a.id === 'cfo');
+  assert.deepEqual([cfo.name, cfo.pinned, cfo.accepts], ['Money desk', true, ['assistant']]);
+  assert.deepEqual(cfo.model, { id: 'sonnet', effort: 'low', source: 'agent', default: { id: 'sonnet', effort: 'low' }, agent: { id: 'sonnet', effort: 'low' } });
+
+  // Everyone, as null or as an empty list, writes no accepts key.
+  for (const accepts of [null, []]) {
+    const again = await put(app, '/api/agents/cfo/settings', settingsBody({ accepts }));
+    assert.equal(again.status, 200);
+    assert.equal('accepts' in app.registry.writes.at(-1).agents[0], false);
+    assert.equal('accepts' in again.json.agent, false);
+  }
+});
+
+test('settings PUT notes a folder change, adds a new group, and joins an existing one by id', async (t) => {
+  const app = await startEditable(t);
+  const moved = await put(app, '/api/agents/cfo/settings', settingsBody({ cwd: '/invented/elsewhere' }));
+  assert.deepEqual([moved.status, moved.json.note, moved.json.agent.cwd], [200, 'cwd_applies_on_new_thread', '/invented/elsewhere']);
+
+  const grouped = await put(app, '/api/agents/cfo/settings', settingsBody({ cwd: '/invented/elsewhere', group: 'family', newGroup: { id: 'family', name: 'Family' } }));
+  assert.equal(grouped.status, 200);
+  assert.equal(grouped.json.note, undefined);
+  assert.deepEqual(app.registry.current().groups, [{ id: 'work', name: 'Work' }, { id: 'family', name: 'Family' }]);
+  assert.deepEqual((await request(app, 'GET', '/api/state')).json.groups, [{ id: 'work', name: 'Work' }, { id: 'family', name: 'Family' }]);
+
+  const joined = await put(app, '/api/agents/cfo/settings', settingsBody({ cwd: '/invented/elsewhere', group: 'work', newGroup: { id: 'work', name: 'Work again' } }));
+  assert.equal(joined.status, 200);
+  assert.deepEqual(app.registry.current().groups.map((g) => g.name), ['Work', 'Family'], 'a matching slug joins the group, no rename');
+});
+
+test('settings PUT refuses bad shapes, unknown and non-persona agents, validator problems, and an unloadable registry', async (t) => {
+  const app = await startEditable(t);
+  for (const body of [[], {}, settingsBody({ extra: 1 }), settingsBody({ pinned: 'yes' }), settingsBody({ model: '' }), settingsBody({ effort: 'extreme' }),
+    settingsBody({ accepts: 'assistant' }), settingsBody({ group: 'x', newGroup: { id: 'y', name: 'Y' } }), (() => { const b = settingsBody(); delete b.role; return b; })()]) {
+    const response = await put(app, '/api/agents/cfo/settings', body);
+    assert.deepEqual([response.status, response.json], [400, { error: 'invalid_body' }], JSON.stringify(body));
+  }
+  assert.deepEqual((await put(app, '/api/agents/nobody/settings', settingsBody())).json, { error: 'no_such_agent' });
+  assert.deepEqual((await put(app, '/api/agents/ops/settings', settingsBody())).json, { error: 'not_editable' });
+  assert.equal((await put(app, '/api/agents/ops/settings', settingsBody())).status, 409);
+  assert.equal((await put(app, '/api/agents/cfo/settings', settingsBody(), { origin: 'http://evil.example' })).status, 403);
+  assert.equal((await request(app, 'POST', '/api/agents/cfo/settings', { headers: { origin: app.origin } })).status, 405);
+
+  const blank = await put(app, '/api/agents/cfo/settings', settingsBody({ name: '', cwd: 'relative/path' }));
+  assert.equal(blank.status, 400);
+  assert.equal(blank.json.error, 'invalid_registry');
+  assert.deepEqual(blank.json.problems, [
+    'agent 0 (cfo): name must be a non-empty string of at most 40 characters',
+    'agent 0 (cfo): cwd must be an absolute path',
+  ]);
+  // The cross-checks run once the entry's own fields pass.
+  assert.deepEqual((await put(app, '/api/agents/cfo/settings', settingsBody({ accepts: ['cfo', 'nobody'] }))).json.problems, [
+    'agent 0 (cfo): accepts must not name the agent itself',
+    'agent 0 (cfo): accepts names no agent "nobody"',
+  ]);
+  assert.equal(app.registry.writes.length, 0);
+
+  app.registry.set({ ok: false, error: 'agent 1 (x): role must be a non-empty string of at most 24 characters' });
+  const broken = await put(app, '/api/agents/cfo/settings', settingsBody());
+  assert.deepEqual([broken.status, broken.json], [409, { error: 'registry_invalid', problems: ['agent 1 (x): role must be a non-empty string of at most 24 characters'] }]);
+
+  app.registry.set({ ok: true, error: null });
+  app.handler.closeStreams();
+  assert.deepEqual((await put(app, '/api/agents/cfo/settings', settingsBody())).json, { error: 'shutting_down' });
+});
+
+test('POST /api/agents creates a Claude persona with the defaults, starts it, and refuses a duplicate id', async (t) => {
+  const app = await startEditable(t);
+  const body = { id: 'scout', ...settingsBody({ name: 'Scout', role: 'Files', description: 'Reads my files.', cwd: '/invented/scout' }) };
+  const created = await post(app, '/api/agents', body);
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.json, {
+    ok: true,
+    agent: { id: 'scout', name: 'Scout', role: 'Files', description: 'Reads my files.', group: 'work', kind: 'persona', cwd: '/invented/scout', provider: 'claude', routines: [] },
+  });
+  const written = app.registry.writes[0].agents.at(-1);
+  assert.deepEqual(written, { id: 'scout', name: 'Scout', role: 'Files', description: 'Reads my files.', group: 'work', kind: 'persona', cwd: '/invented/scout', provider: 'claude' });
+
+  // The hub started it through the registry change and lists it idle.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const scout = (await request(app, 'GET', '/api/state')).json.agents.find((a) => a.id === 'scout');
+  assert.equal(scout.state, 'idle');
+  assert.deepEqual(scout.model, { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } });
+
+  assert.deepEqual((await post(app, '/api/agents', body)).json, { error: 'duplicate_id' });
+  assert.equal((await post(app, '/api/agents', body)).status, 409);
+  for (const bad of [{ ...body, id: 'Bad Id' }, settingsBody(), { ...body, kind: 'system' }, { ...body, provider: 'codex' }]) {
+    assert.deepEqual((await post(app, '/api/agents', bad)).json, { error: 'invalid_body' }, JSON.stringify(bad));
+  }
+  const problems = await post(app, '/api/agents', { ...body, id: 'other', role: '' });
+  assert.deepEqual([problems.status, problems.json.error, problems.json.problems.length], [400, 'invalid_registry', 1]);
+  assert.equal((await post(app, '/api/agents', body, { origin: 'http://evil.example' })).status, 403);
+  assert.equal((await request(app, 'GET', '/api/agents')).status, 405);
+});
+
+test('without a writable registry the settings routes are not there', async (t) => {
+  const registry = { ...fakeRegistry([agent('cfo')]) };
+  delete registry.write;
+  const app = await startApp(t, { ...status, registry, adapters: { claude: fakeAdapter() }, store: { read: async () => [] } });
+  assert.equal((await put(app, '/api/agents/cfo/settings', settingsBody())).status, 404);
+  assert.equal((await post(app, '/api/agents', { id: 'x', ...settingsBody() })).status, 404);
+});

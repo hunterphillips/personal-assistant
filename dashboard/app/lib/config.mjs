@@ -63,6 +63,7 @@ export const LIMITS = Object.freeze({
   feedFiles: 30, // newest feed run files read
   feedInstructionsBytes: 64 * 1024, // the feed's criteria file read by the Feed view
   settingsBodyBytes: 4 * 1024, // one PUT /api/settings body
+  agentBodyBytes: 16 * 1024, // one PUT /api/agents/:id/settings or POST /api/agents body
 });
 
 export const TIMEOUTS = Object.freeze({

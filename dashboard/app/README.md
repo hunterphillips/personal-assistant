@@ -41,6 +41,8 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/agents/<id>/new-thread` | Starts the persona on a new session. |
 | `POST /api/agents/<id>/model` | Sets the model and effort the persona's thread runs on: `{"model": "sonnet"}`, `{"effort": "low"}`, or both; null for a key returns it to the agent's default (below). |
 | `GET /api/agents/<id>/thread` | The persona's cached messages. |
+| `PUT /api/agents/<id>/settings` | Rewrites a persona's registry entry (name, role, group, description, folder, model, effort, who may message it, pinned) and answers the stored entry (below). |
+| `POST /api/agents` | Adds a Claude persona to the registry from the same fields plus `id`; 201 with the stored entry (below). |
 | `POST /api/sessions/<id>/answer` | Answers a Codex thread's open question or approval (below). |
 | `POST /api/sessions/<id>/interrupt` | Stops the Codex thread's running turn. |
 | `GET /api/sessions/<id>/thread` | The Codex thread's recent messages, read from the app-server. |
@@ -109,11 +111,11 @@ snapshot; concurrent requests share one check. It stays for one release.
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
                "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
                "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
-               "lastError": null, "costUsd": 0.42, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null } }, "accepts": null },
+               "lastError": null, "costUsd": 0.42, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null }, "agent": { "id": "opus", "effort": null } }, "accepts": null },
              { "id": "assistant", "name": "Assistant", "role": "Assistant", "description": "...", "group": "personal", "kind": "persona",
                "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "provider": "claude", "pinned": true,
                "state": "idle", "pending": null, "lastMessage": null, "lastError": null, "costUsd": null,
-               "model": { "id": null, "effort": null, "source": "default", "default": { "id": null, "effort": null } }, "accepts": null }],
+               "model": { "id": null, "effort": null, "source": "default", "default": { "id": null, "effort": null }, "agent": { "id": null, "effort": null } }, "accepts": null }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
                  "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
                  "pending": { "requestId": "2", "kind": "question", "toolName": "requestUserInput", "input": { "...": "..." }, "truncated": false },
@@ -510,11 +512,39 @@ on the gear; on a phone, opening it puts the keyboard on the chevron. It
 stays open while other agents are chosen and is closed after a reload; the
 state is kept in memory only.
 
-Under "Settings" come the agent's name, then Role, Group (the registry's
-name for it), Provider ("Claude" or "Codex"), and Folder (the snapshot's
-`cwd` with the home directory as `~`), each left out with its label when
-the registry has no value, then the registry description as written, and
-the jobs sentence (see Routines). Nothing in it is editable.
+For a persona the panel is a form over its registry entry: Name, Role,
+Group (the registry's groups, then the groups agents name that the file
+leaves out, then "New group…", which shows a Group name field; the group's
+id is the name slugged, lowercase with runs of anything else as one
+hyphen, and a slug already listed joins that group), Description, Folder
+(the registry `cwd` with the home directory as `~`, expanded on save),
+Model and Effort (each a select whose first option is "Default (Sonnet)"
+or "Default (Claude Code)", the system default from Settings, then the
+model table or the five levels; a Codex persona reads "Codex, its own
+settings" in their place), Who may message (checkboxes: "Everyone" first,
+then the other personas; Everyone and the names exclude each other, and
+none chosen is everyone), and Pinned. Save is off until a field changed
+and sends one `PUT /api/agents/<id>/settings`; Cancel puts the values
+back. The row, the header, and the form follow the registry change through
+the snapshot. A refused save lists the validator's problems under the form
+("name must be a non-empty string of at most 40 characters") until the
+next edit; a saved folder change adds "The folder applies when a new thread
+starts." The jobs sentence (see Routines) follows the form. Edits made
+elsewhere while the form holds unsaved changes leave the form alone.
+
+A project or system entry stays read-only: Role, Group, Provider, and
+Folder, each left out with its label when the registry has no value, then
+the description as written, and the jobs sentence.
+
+"New agent", at the foot of the list, opens the same form empty in the
+panel (on a phone it covers the list's place; on a desk it opens beside
+whatever thread is open, or beside an empty column headed "New agent"):
+Name, an Id that fills from the name until it is typed, Role, the first
+listed group, Description, an empty Folder, the system defaults for Model
+and Effort, Everyone, and not pinned. Create posts `POST /api/agents`; on
+201 the new agent's thread opens with "No messages yet." Cancel, the
+chevron, Escape, or choosing a row leaves the form. The button is hidden
+while the registry cannot be read.
 
 A thread shows no job rows. Under the description the panel counts the
 agent's launchd jobs in one sentence, "CFO runs 1 job.", linking to
@@ -644,17 +674,19 @@ events. Each persona in `agents` carries:
   could not be loaded; run `npm ci`), or `start_failed` (its session pointer
   could not be read).
 - `costUsd`: null, or the session's running total.
-- `model` (Claude personas only): `{ id, effort, source, default }`, what
-  the next turn runs on. `id` is a model id or alias or null, `effort` one
+- `model` (Claude personas only): `{ id, effort, source, default, agent }`,
+  what the next turn runs on. `id` is a model id or alias or null, `effort` one
   of `low`, `medium`, `high`, `xhigh`, `max`, or null; null means Claude
   Code's own default. Each resolves on its own: the thread's own choice
   over the registry's `model` over the settings' `model.default`, and the
   thread's choice over the settings' `model.effort` for effort. `source`
   names the level that set either: `thread`, `agent`, `system`, or
   `default` when none did. `default` is the pair without the thread's
-  choice, what New thread or "Use the agent's default" returns to.
-- `accepts` (Claude personas only): the registry's `accepts` list, or null
-  for everyone. Nothing reads it yet.
+  choice, what New thread or "Use the agent's default" returns to. `agent`
+  is the registry's own `model` and `effort`, null where the entry sets
+  none; the settings form edits that pair.
+- `accepts` (personas): the registry's `accepts` list, or null for
+  everyone. The settings form edits it; nothing enforces it yet.
 
 The snapshot's `settings` is the settings file's view (`lib/settings.mjs`,
 below): `ok` false with `error` when the file could not be read, and the
@@ -790,6 +822,43 @@ than the three), 400 `invalid_model` (not null or 1 to 64 characters), 400
 `no_such_agent` (names no Claude persona in the registry; null is allowed),
 409 `settings_invalid`, 503 `shutting_down`, 500 `settings_write_failed`
 (logged as `settings_write_error`).
+
+### Registry writes
+
+`PUT /api/agents/<id>/settings` and `POST /api/agents`
+(`lib/agent-settings-routes.mjs`) are the two routes that write the
+registry file, through `registry.write(mutate)` in `lib/registry.mjs`. A
+body carries every field: `name`, `role`, `group`, `description`, `cwd`
+(absolute), `model` (null or an id or alias), `effort` (null or a level),
+`accepts` (null or a list of agent ids; null, an empty list, and every
+agent chosen all mean everyone and write no key), `pinned` (boolean), and
+for a create `id`; `newGroup: { id, name }` adds a group whose id no
+listed group has (one that does joins it) and `group` must equal its id.
+A created agent is kind `persona` on `claude`; project and system entries
+are still hand edits. The entry is written in the schema's key order with
+its `routines` kept, and the whole file as 2-space JSON with a trailing
+newline, so a dashboard write reads as a small diff; unrelated top-level
+keys are kept. The write is atomic (a temp file beside the registry,
+renamed over it, with the file's mode kept), the registry reloads at
+once, and the hub picks the change up through `registry.onChange`: an
+edited agent lands in one snapshot revision, a new one in two
+(unavailable, then idle once its adapter has started). Writes are
+serialized. A missing file is created by the first valid write (mode
+0644); a file that does not load is not written over.
+
+Refusals, in order: 400 `invalid_body`, 404 `no_such_agent`, 409
+`not_editable` (not a persona), 409 `duplicate_id` (create), 409
+`registry_invalid` with `{ "problems": [...] }` while the file on disk
+does not load (fix or delete it by hand), 503 `shutting_down`, then 400
+`invalid_registry` with `{ "problems": [...] }` when the validator refuses
+the result (each string names the field and the rule; the only error body
+in the app that carries detail, since the form shows the reason), and 500
+`registry_write_failed` (logged as `registry_write_error`). The body is
+capped at `limits.agentBodyBytes` (16 KiB; 413 `payload_too_large`). A
+changed `cwd` applies when the agent's next thread starts, since the
+adapter pins a thread's folder; the response then carries `"note":
+"cwd_applies_on_new_thread"`. Without a writable registry (tests pass a
+read-only fake) both routes are 404.
 
 ### Turns
 

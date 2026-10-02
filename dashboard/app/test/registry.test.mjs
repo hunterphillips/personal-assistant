@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { rename, writeFile } from 'node:fs/promises';
+import { chmod, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { createRegistry } from '../lib/registry.mjs';
+import { RegistryError, createRegistry, validateDocument } from '../lib/registry.mjs';
 import { tempDir } from './support/harness.mjs';
 
 async function write(dir, value) {
@@ -485,4 +485,176 @@ test('start() called twice does not arm a second poll', async (t) => {
 
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(calls.length, 1);
+});
+
+// --- effort, accepts, validateDocument, write -------------------------------
+
+test('effort is accepted on a persona, must be an SDK level, and is absent for a system agent', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir, { effort: 'low' })] });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+  assert.equal(registry.current().agents[0].effort, 'low');
+
+  const bad = createRegistry({ path: await write(dir, { version: 1, agents: [baseAgent(dir, { effort: 'extreme' })] }), pollMs: 10_000 });
+  await bad.start();
+  t.after(() => bad.stop());
+  assert.match(bad.current().error, /effort must be one of/);
+
+  const systemDir = await tempDir(t);
+  const system = createRegistry({
+    path: await write(systemDir, {
+      version: 1,
+      agents: [{ id: 'ops', name: 'Ops', role: 'System', description: 'x', group: 'personal', kind: 'system', cwd: systemDir, effort: 'high' }],
+    }),
+    pollMs: 10_000,
+  });
+  await system.start();
+  t.after(() => system.stop());
+  assert.match(system.current().error, /effort must be absent/);
+});
+
+test('accepts names other agents in the file; absent and null both load as everyone', async (t) => {
+  const dir = await tempDir(t);
+  const other = baseAgent(dir, { id: 'assistant', name: 'Assistant' });
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir, { accepts: ['assistant'] }), { ...other, accepts: null }] });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+  const [cfo, assistant] = registry.current().agents;
+  assert.deepEqual(cfo.accepts, ['assistant']);
+  assert.equal(Object.isFrozen(cfo.accepts), true);
+  assert.equal('accepts' in assistant, false);
+
+  const cases = [
+    [[baseAgent(dir, { accepts: ['nobody'] })], /accepts names no agent "nobody"/],
+    [[baseAgent(dir, { accepts: ['cfo'] })], /must not name the agent itself/],
+    [[baseAgent(dir, { accepts: ['assistant', 'assistant'] }), other], /must not repeat/],
+    [[baseAgent(dir, { accepts: Array.from({ length: 101 }, (_, i) => `a${i}`) })], /at most 100/],
+    [[baseAgent(dir, { accepts: 'assistant' }), other], /array of agent ids/],
+    [[{ ...baseAgent(dir, { id: 'proj', kind: 'project', accepts: ['cfo'] }) }, baseAgent(dir)], /only for a persona/],
+  ];
+  for (const [agents, pattern] of cases) {
+    const caseDir = await tempDir(t);
+    const bad = createRegistry({ path: await write(caseDir, { version: 1, agents: agents.map((a) => ({ ...a, cwd: caseDir })) }), pollMs: 10_000 });
+    await bad.start();
+    t.after(() => bad.stop());
+    assert.equal(bad.current().ok, false, pattern.source);
+    assert.match(bad.current().error, pattern);
+  }
+});
+
+test('validateDocument reports problems and takes a directory check of its own', async (t) => {
+  const dir = await tempDir(t);
+  const good = validateDocument({ version: 1, groups: [{ id: 'work', name: 'Work' }], agents: [baseAgent(dir)] });
+  assert.equal(good.ok, true);
+  assert.deepEqual(good.problems, []);
+  assert.equal(good.groups[0].name, 'Work');
+
+  const invented = validateDocument({ version: 1, agents: [baseAgent('/invented/cfo')] });
+  assert.equal(invented.ok, false);
+  assert.deepEqual(invented.problems, ['agent 0 (cfo): cwd must exist and be a directory']);
+  const overridden = validateDocument({ version: 1, agents: [baseAgent('/invented/cfo')] }, { isDirectory: () => true });
+  assert.equal(overridden.ok, true);
+
+  const empty = validateDocument({ version: 1, agents: [] });
+  assert.deepEqual(empty.problems, ['registry: agents must be a non-empty array']);
+});
+
+test('write refuses an invalid document and leaves the file byte-identical', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir)], note: 'kept' });
+  const before = await readFile(file);
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  await assert.rejects(
+    registry.write((document) => ({ ...document, agents: [{ ...document.agents[0], name: '' }] })),
+    (error) => error instanceof RegistryError && error.code === 'invalid_registry'
+      && error.problems.length === 1 && /name must be/.test(error.problems[0]),
+  );
+  assert.deepEqual(await readFile(file), before);
+  assert.equal((await readdir(dir)).length, 1, 'no temporary file left behind');
+});
+
+test('write replaces the file atomically with the candidate as 2-space JSON, keeps its mode and unknown keys, and loads at once', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir)], note: 'kept' });
+  await chmod(file, 0o640);
+  const registry = createRegistry({ path: file, pollMs: 20 });
+  const loads = [];
+  registry.onChange((state) => loads.push(state.agents.map((a) => a.name)));
+  await registry.start();
+  t.after(() => registry.stop());
+
+  const result = await registry.write((document) => ({
+    ...document,
+    agents: [{ ...document.agents[0], name: 'Money desk', accepts: null }, baseAgent(dir, { id: 'assistant', name: 'Assistant', effort: 'high' })],
+  }));
+  assert.deepEqual(result.agents.map((a) => a.name), ['Money desk', 'Assistant']);
+  assert.deepEqual(registry.current().agents.map((a) => a.name), ['Money desk', 'Assistant'], 'current() changed before write resolved');
+  assert.deepEqual(loads, [['CFO'], ['Money desk', 'Assistant']]);
+
+  const text = await readFile(file, 'utf8');
+  assert.equal(text, `${JSON.stringify(JSON.parse(text), null, 2)}\n`, 'pretty-printed with two spaces');
+  const parsed = JSON.parse(text);
+  assert.equal(parsed.note, 'kept');
+  assert.equal(parsed.agents[0].accepts, null, 'the candidate is written as given, not normalized');
+  assert.equal((await stat(file)).mode & 0o777, 0o640);
+  assert.equal((await readdir(dir)).length, 1);
+
+  // The poll sees the write's own signature and does not load a second time.
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(loads.length, 2);
+});
+
+test('writes are single-flight: the second sees the first', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir)] });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  const add = (id) => (document) => ({ ...document, agents: [...document.agents, baseAgent(dir, { id, name: id })] });
+  const [first, second] = await Promise.all([registry.write(add('one')), registry.write(add('two'))]);
+  assert.deepEqual(first.agents.map((a) => a.id), ['cfo', 'one']);
+  assert.deepEqual(second.agents.map((a) => a.id), ['cfo', 'one', 'two']);
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).agents.map((a) => a.id), ['cfo', 'one', 'two']);
+});
+
+test('write refuses registry_invalid while the file does not load, and registry_invalid_json for broken JSON', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir)] });
+  const registry = createRegistry({ path: file, pollMs: 20 });
+  await registry.start();
+  t.after(() => registry.stop());
+
+  await writeAtomic(file, { version: 1, agents: [baseAgent(dir, { role: '' })] });
+  await waitUntil(() => registry.current().ok === false);
+  await assert.rejects(registry.write((d) => d), (error) => error.code === 'registry_invalid' && /role/.test(error.problems[0]));
+
+  await writeFile(file, '{ not json');
+  await waitUntil(() => registry.current().error === 'registry_invalid_json');
+  await assert.rejects(registry.write((d) => d), { code: 'registry_invalid' });
+  assert.equal(await readFile(file, 'utf8'), '{ not json', 'a hand-broken file is left alone');
+});
+
+test('a missing file is created by a mutation that yields a valid registry, and not by one that does not', async (t) => {
+  const dir = await tempDir(t);
+  const file = path.join(dir, 'agents.json');
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+  assert.equal(registry.current().error, 'registry_missing');
+
+  await assert.rejects(registry.write((document) => document), { code: 'invalid_registry' });
+  await assert.rejects(stat(file), { code: 'ENOENT' });
+
+  const result = await registry.write((document) => ({ ...document, agents: [baseAgent(dir)] }));
+  assert.deepEqual(result.agents.map((a) => a.id), ['cfo']);
+  assert.equal(registry.current().ok, true);
+  assert.equal((await stat(file)).mode & 0o777, 0o644);
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { version: 1, groups: [], agents: [baseAgent(dir)] });
 });

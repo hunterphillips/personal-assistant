@@ -337,7 +337,7 @@ test('first start seeds the settings file with the brief going to the pinned Cla
   assert.deepEqual(logs.filter((e) => e.event === 'settings_seeded'), [{ event: 'settings_seeded', agent: 'assistant' }]);
   const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
   assert.deepEqual(state.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: 'assistant' } });
-  assert.deepEqual(state.agents.find((a) => a.id === 'cfo').model, { id: null, effort: null, source: 'default', default: { id: null, effort: null } });
+  assert.deepEqual(state.agents.find((a) => a.id === 'cfo').model, { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } });
   await dashboard.close();
 
   // A second start finds the file and leaves it alone, even after an edit.
@@ -348,7 +348,7 @@ test('first start seeds the settings file with the brief going to the pinned Cla
   const next = await (await fetch(`http://127.0.0.1:${again.config.port}/api/state`)).json();
   assert.deepEqual(next.settings.model, { default: 'haiku', effort: 'max' });
   assert.equal(next.settings.brief.agent, 'cfo');
-  assert.deepEqual(next.agents.find((a) => a.id === 'cfo').model, { id: 'haiku', effort: 'max', source: 'system', default: { id: 'haiku', effort: 'max' } });
+  assert.deepEqual(next.agents.find((a) => a.id === 'cfo').model, { id: 'haiku', effort: 'max', source: 'system', default: { id: 'haiku', effort: 'max' }, agent: { id: null, effort: null } });
 });
 
 test('with no pinned Claude persona the seed names no one, and the notice waits for a target', async (t) => {
@@ -393,4 +393,40 @@ test('a notice waits for the Assistant when its adapter fails to start, and no p
   // The thread route answers 409 for an unavailable persona; the store shows nothing was written.
   await assert.rejects(stat(path.join(env.DASHBOARD_THREADS_DIR, 'assistant.jsonl')), { code: 'ENOENT' });
   assert.ok(logs.some((e) => e.event === 'notice_skipped' && e.reason === 'agent_not_started'));
+});
+
+test('POST /api/agents writes the registry file as 2-space JSON, keeps an unrelated top-level key, and the agent is still listed after a restart', async (t) => {
+  const env = await testEnv(t);
+  const folder = await tempDir(t);
+  await writeFile(env.DASHBOARD_REGISTRY_PATH, `${JSON.stringify({ version: 1, groups: [{ id: 'work', name: 'Work' }], agents: [await personaEntry(t)], note: 'hand-kept' }, null, 2)}\n`);
+  const dashboard = await startDashboard({ env, log: () => {}, createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => dashboard.close());
+  const base = `http://127.0.0.1:${dashboard.config.port}`;
+  const created = await fetch(`${base}/api/agents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: base },
+    body: JSON.stringify({
+      id: 'scout', name: 'Scout', role: 'Files', group: 'home', description: 'Reads my files.', cwd: folder,
+      model: 'haiku', effort: null, accepts: ['cfo'], pinned: false, newGroup: { id: 'home', name: 'Home' },
+    }),
+  });
+  assert.equal(created.status, 201);
+  const text = await readFile(env.DASHBOARD_REGISTRY_PATH, 'utf8');
+  assert.equal(text, `${JSON.stringify(JSON.parse(text), null, 2)}\n`);
+  const parsed = JSON.parse(text);
+  assert.equal(parsed.note, 'hand-kept');
+  assert.deepEqual(parsed.groups, [{ id: 'work', name: 'Work' }, { id: 'home', name: 'Home' }]);
+  assert.deepEqual(parsed.agents[1], {
+    id: 'scout', name: 'Scout', role: 'Files', description: 'Reads my files.', group: 'home', kind: 'persona', cwd: folder, provider: 'claude', model: 'haiku', accepts: ['cfo'],
+  });
+  const state = await (await fetch(`${base}/api/state`)).json();
+  assert.ok(state.agents.some((a) => a.id === 'scout'));
+  await dashboard.close();
+
+  const again = await startDashboard({ env, log: () => {}, createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => again.close());
+  const next = await (await fetch(`http://127.0.0.1:${again.config.port}/api/state`)).json();
+  const scout = next.agents.find((a) => a.id === 'scout');
+  assert.deepEqual([scout.name, scout.group, scout.accepts, scout.model.id], ['Scout', 'home', ['cfo'], 'haiku']);
+  assert.deepEqual(next.groups, [{ id: 'work', name: 'Work' }, { id: 'home', name: 'Home' }]);
 });

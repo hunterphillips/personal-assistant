@@ -90,6 +90,7 @@ const EXACT_ROUTES = new Map([
   ['/api/feed/instructions', { name: 'feed-instructions', methods: ['GET'] }],
   ['/api/feed/instructions/propose', { name: 'feed-instructions-propose', methods: ['POST'] }],
   ['/api/settings', { name: 'settings', methods: ['PUT'] }],
+  ['/api/agents', { name: 'agents-create', methods: ['POST'] }],
 ]);
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -103,7 +104,7 @@ export function defaultLog(entry) {
 
 export function createApp({
   config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, feedInstructions = null, notices = null,
-  settings = null, log = defaultLog,
+  settings = null, registry = null, log = defaultLog,
 }) {
   if (!hub) throw new TypeError('createApp requires a hub');
   const allowedHosts = new Set(config.allowedHosts);
@@ -111,7 +112,7 @@ export function createApp({
   let shuttingDown = false;
   const isShuttingDown = () => shuttingDown;
   const events = createEvents({ hub, notices, timeouts: config.timeouts, limits: config.limits, shuttingDown: isShuttingDown });
-  const agents = createAgentRoutes({ hub, store, cmux, log, limits: config.limits, shuttingDown: isShuttingDown });
+  const agents = createAgentRoutes({ hub, store, cmux, registry, log, limits: config.limits, shuttingDown: isShuttingDown });
   const goalsRoutes = goals
     ? createGoalsRoutes({ goals, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
     : null;
@@ -247,6 +248,8 @@ export function createApp({
       }
       case 'agent':
         return agents.serve(req, res, route);
+      case 'agents-create':
+        return agents.serveCreate(req, res);
       case 'brief-feedback': {
         const body = await readJsonBody(req, { limit: config.limits.feedbackBodyBytes });
         return brief.handleFeedback(req, res, body);
@@ -320,7 +323,7 @@ export function createApp({
       await dispatch(req, res, route, search);
     } catch (error) {
       if (error instanceof HttpError) {
-        sendError(res, error.status, error.code, { head: req.method === 'HEAD' });
+        sendError(res, error.status, error.code, { head: req.method === 'HEAD', detail: error.detail });
       } else {
         log({ event: 'handler_error', route: label, error: error?.name ?? 'unknown' });
         sendError(res, 500, 'internal_error');

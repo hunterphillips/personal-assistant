@@ -10,6 +10,9 @@
 //                    persona is 409 not_supported.
 //   POST new-thread  bodyless -> 200 once both thread files are cleared
 //   GET  thread      { messages } from store.read(id)
+//   PUT  settings    the agent's registry entry (agent-settings-routes.mjs);
+//                    POST /api/agents (serveCreate) adds one. Both need a
+//                    `registry` with write(); without it they are 404.
 // An id not in the registry is 404 no_such_agent; an agent of another kind
 // is 409 not_a_persona; a persona that is not started (unavailable) is 409
 // persona_unavailable. Adapter refusals (runtime/adapter.mjs) map to:
@@ -40,10 +43,11 @@
 // terminal by any other means than the recorded ids. There is no send and
 // no new-thread: these threads are driven from their terminals.
 //
-// createAgentRoutes({ hub, store, cmux, log, limits, shuttingDown }) returns
+// createAgentRoutes({ hub, store, cmux, registry, log, limits, shuttingDown }) returns
 //   match(pathname) -> route or null, in the shape app.mjs routes on
 //                      ({ name: 'agent', methods, bodyless?, label, params })
 //   serve(req, res, route) -> Promise<void>
+//   serveCreate(req, res) -> Promise<void>   POST /api/agents
 // The router (app.mjs) has already checked the method, Origin, and content
 // type before serve() runs; serve() reads the body itself. `shuttingDown` is
 // a function answering whether closeStreams() has run.
@@ -60,6 +64,7 @@
 //     persona_turn_rejected. The caller validates `text` and sends the reply.
 
 import { AGENT_ID } from './registry.mjs';
+import { createAgentSettingsRoutes } from './agent-settings-routes.mjs';
 import { HttpError, readJsonBody, sendJson } from './http.mjs';
 import { isEffort } from './models.mjs';
 
@@ -76,10 +81,11 @@ const ACTIONS = new Map([
   ['interrupt', { methods: ['POST'], bodyless: true }],
   ['new-thread', { methods: ['POST'], bodyless: true }],
   ['thread', { methods: ['GET'] }],
+  ['settings', { methods: ['PUT'] }],
   ['open-terminal', { methods: ['POST'], bodyless: true }],
 ]);
 const SESSION_ACTIONS = new Set(['answer', 'interrupt', 'thread', 'open-terminal']);
-const PERSONA_ACTIONS = new Set(['send', 'model', 'answer', 'interrupt', 'new-thread', 'thread']);
+const PERSONA_ACTIONS = new Set(['send', 'model', 'answer', 'interrupt', 'new-thread', 'thread', 'settings']);
 
 // Adapter refusal code -> HTTP status.
 const RUNTIME_STATUS = new Map([
@@ -99,7 +105,9 @@ const REQUEST_ID_MAX = 128;
 const MODEL_MAX = 64;
 const ACCEPTED = Symbol('accepted');
 
-export function createAgentRoutes({ hub, store = null, cmux = null, log, limits, shuttingDown }) {
+export function createAgentRoutes({ hub, store = null, cmux = null, registry = null, log, limits, shuttingDown }) {
+  const settingsRoutes = createAgentSettingsRoutes({ registry, hub, log, limits, shuttingDown });
+
   function match(pathname) {
     const session = pathname.startsWith(SESSION_PREFIX);
     const prefix = session ? SESSION_PREFIX : PREFIX;
@@ -258,6 +266,8 @@ export function createAgentRoutes({ hub, store = null, cmux = null, log, limits,
         return serveNewThread(res, id);
       case 'thread':
         return session ? serveSessionThread(res, id) : serveThread(res, id);
+      case 'settings':
+        return settingsRoutes.serveUpdate(req, res, id);
       case 'open-terminal':
         return serveOpenTerminal(res, id);
       default:
@@ -265,7 +275,7 @@ export function createAgentRoutes({ hub, store = null, cmux = null, log, limits,
     }
   }
 
-  return { match, serve };
+  return { match, serve, serveCreate: settingsRoutes.serveCreate };
 }
 
 // The started persona behind a route, or the HTTP refusal.

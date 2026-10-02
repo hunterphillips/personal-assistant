@@ -103,7 +103,7 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
     {
       id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
       provider: 'claude', state: 'unavailable', pending: null, lastMessage: null, lastError: null, costUsd: null,
-      model: { id: null, effort: null, source: 'default', default: { id: null, effort: null } }, accepts: null,
+      model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } }, accepts: null,
     },
   ]);
   assert.deepEqual(snapshot.routines, { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] });
@@ -144,11 +144,12 @@ test('a Claude persona\'s model resolves agent over system, each field on its ow
   ]));
   const { hub } = makeHub({ registry, settings });
   const view = (id) => hub.snapshot().agents.find((a) => a.id === id);
-  assert.deepEqual(view('cfo').model, { id: 'sonnet', effort: 'low', source: 'system', default: { id: 'sonnet', effort: 'low' } });
-  assert.deepEqual(view('ops').model, { id: 'opus', effort: 'low', source: 'agent', default: { id: 'opus', effort: 'low' } });
+  assert.deepEqual(view('cfo').model, { id: 'sonnet', effort: 'low', source: 'system', default: { id: 'sonnet', effort: 'low' }, agent: { id: null, effort: null } });
+  assert.deepEqual(view('ops').model, { id: 'opus', effort: 'low', source: 'agent', default: { id: 'opus', effort: 'low' }, agent: { id: 'opus', effort: null } });
   assert.equal('model' in view('scribe'), false);
   assert.equal('model' in view('tool'), false);
-  assert.equal('accepts' in view('scribe'), false);
+  assert.equal(view('scribe').accepts, null, 'a Codex persona is messageable too');
+  assert.equal('accepts' in view('tool'), false);
   assert.deepEqual(hub.snapshot().settings, {
     ok: true, error: null, model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' },
   });
@@ -159,8 +160,8 @@ test('a Claude persona\'s model resolves agent over system, each field on its ow
 
   // Nothing set anywhere: Claude Code's default, and the adapter gets nulls.
   settings.set({ model: { default: null, effort: null } });
-  assert.deepEqual(view('cfo').model, { id: null, effort: null, source: 'default', default: { id: null, effort: null } });
-  assert.deepEqual(view('ops').model, { id: 'opus', effort: null, source: 'agent', default: { id: 'opus', effort: null } });
+  assert.deepEqual(view('cfo').model, { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } });
+  assert.deepEqual(view('ops').model, { id: 'opus', effort: null, source: 'agent', default: { id: 'opus', effort: null }, agent: { id: 'opus', effort: null } });
   assert.deepEqual(hub.modelFor('cfo'), { id: null, effort: null });
 });
 
@@ -170,7 +171,7 @@ test('a settings change commits settings and the agent views that moved, and not
   settings.set({ model: { effort: 'high' } });
   assert.equal(hub.snapshot().revision, 2);
   assert.deepEqual(deltas.map((d) => Object.keys(d.patch).sort()), [['agents', 'settings']]);
-  assert.deepEqual(deltas[0].patch.agents[0].model, { id: null, effort: 'high', source: 'system', default: { id: null, effort: 'high' } });
+  assert.deepEqual(deltas[0].patch.agents[0].model, { id: null, effort: 'high', source: 'system', default: { id: null, effort: 'high' }, agent: { id: null, effort: null } });
   assert.equal(deltas[0].patch.settings.model.effort, 'high');
 
   settings.set({ brief: { agent: 'cfo' } });
@@ -408,7 +409,7 @@ test('start seeds a persona from its adapter and the last cached message', async
   assert.deepEqual(persona(hub), {
     id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
     provider: 'claude', state: 'error', pending: null, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
-    lastError: 'Invented failure', costUsd: 0.5, model: { id: null, effort: null, source: 'default', default: { id: null, effort: null } }, accepts: null,
+    lastError: 'Invented failure', costUsd: 0.5, model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } }, accepts: null,
   });
   assert.equal(persona(hub, 'ops').state, null);
   assert.equal('pending' in persona(hub, 'ops'), false);
@@ -722,18 +723,18 @@ test('a thread\'s own choice beats the agent and system levels, field by field, 
   const { hub } = makeHub({ registry, settings, adapters: { claude: adapter } });
   await hub.start();
   const view = (id) => hub.snapshot().agents.find((a) => a.id === id).model;
-  assert.deepEqual(view('cfo'), { id: 'sonnet', effort: 'low', source: 'system', default: { id: 'sonnet', effort: 'low' } });
+  assert.deepEqual(view('cfo'), { id: 'sonnet', effort: 'low', source: 'system', default: { id: 'sonnet', effort: 'low' }, agent: { id: null, effort: null } });
 
   // The adapter records a choice and says so with a message; the hub
   // recomputes the view on that event.
   choices = { ...choices, cfo: { id: 'haiku', effort: null } };
   adapter.emit({ type: 'message', agentId: 'cfo', at: 'a', role: 'system', kind: 'model', model: 'haiku', effort: null, text: 'Now on Haiku.' });
-  assert.deepEqual(view('cfo'), { id: 'haiku', effort: 'low', source: 'thread', default: { id: 'sonnet', effort: 'low' } });
+  assert.deepEqual(view('cfo'), { id: 'haiku', effort: 'low', source: 'thread', default: { id: 'sonnet', effort: 'low' }, agent: { id: null, effort: null } });
   assert.deepEqual(hub.modelFor('cfo'), { id: 'haiku', effort: 'low' });
 
   choices = { ...choices, ops: { id: null, effort: 'max' } };
   adapter.emit({ type: 'message', agentId: 'ops', at: 'a', role: 'system', kind: 'model', model: null, effort: 'max', text: 'Now at max effort.' });
-  assert.deepEqual(view('ops'), { id: 'opus', effort: 'max', source: 'thread', default: { id: 'opus', effort: 'low' } });
+  assert.deepEqual(view('ops'), { id: 'opus', effort: 'max', source: 'thread', default: { id: 'opus', effort: 'low' }, agent: { id: 'opus', effort: null } });
   assert.deepEqual(hub.modelFor('ops'), { id: 'opus', effort: 'max' });
 
   // The model line is bookkeeping: the row keeps the thread's real last
@@ -743,12 +744,12 @@ test('a thread\'s own choice beats the agent and system levels, field by field, 
   choices = { ...choices, cfo: { id: 'sonnet', effort: null } };
   adapter.emit({ type: 'message', agentId: 'cfo', at: 'c', role: 'system', kind: 'model', model: 'sonnet', effort: null, text: 'Now on Sonnet.' });
   assert.deepEqual(hub.snapshot().agents.find((a) => a.id === 'cfo').lastMessage, { role: 'assistant', text: 'Cash is fi', at: 'b' });
-  assert.deepEqual(view('cfo'), { id: 'sonnet', effort: 'low', source: 'thread', default: { id: 'sonnet', effort: 'low' } });
+  assert.deepEqual(view('cfo'), { id: 'sonnet', effort: 'low', source: 'thread', default: { id: 'sonnet', effort: 'low' }, agent: { id: null, effort: null } });
 
   // New thread drops the choice; the idle boundary recomputes the view.
   choices = { cfo: null, ops: null };
   adapter.emit({ type: 'thread.state', agentId: 'cfo', at: 'a', state: 'idle' });
-  assert.deepEqual(view('cfo'), { id: 'sonnet', effort: 'low', source: 'system', default: { id: 'sonnet', effort: 'low' } });
+  assert.deepEqual(view('cfo'), { id: 'sonnet', effort: 'low', source: 'system', default: { id: 'sonnet', effort: 'low' }, agent: { id: null, effort: null } });
   hub.close();
 });
 

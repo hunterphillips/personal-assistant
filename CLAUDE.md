@@ -30,10 +30,12 @@ from here.
   README and `docs/operations.md` hold routes, snapshot shape, helpers, and
   setup.
 - **Registry**: `registry/agents.json`, the agents and project folders the
-  daemon runs and lists: role, description, group, cwd, provider, launchd
-  labels, `pinned`; plus the `groups` list that sets group order and
-  labels. Absolute paths; the daemon keeps the last good copy on a bad
-  edit.
+  daemon runs and lists: role, description, group, cwd, provider, model
+  and effort, `accepts` (who may message it), launchd labels, `pinned`;
+  plus the `groups` list that sets group order and labels. Absolute paths;
+  the daemon keeps the last good copy on a bad edit. Since 2026-10-02 the
+  dashboard writes it (an agent's settings, New agent) as 2-space JSON in
+  the schema's key order; hand edits still load.
 - **Use cases**: `daily-brief/`, running every morning since 2026-09-27
   (gather one packet per domain, curate, build, verify), with the newsletter
   `watch` domain daily; `feed/`, the store behind the Feed, which

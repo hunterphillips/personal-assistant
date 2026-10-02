@@ -126,7 +126,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     limits: config.limits,
     log: logEntry,
   });
-  const app = createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, log: logEntry });
+  const app = createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, registry, log: logEntry });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;
   server.requestTimeout = config.timeouts.requestMs;

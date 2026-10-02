@@ -160,7 +160,8 @@
       var title = element('h3', 'card-name', group.name);
       title.id = headingId;
       header.appendChild(title);
-      if (group.role) header.appendChild(element('span', 'role-chip', group.role));
+      // A role that only repeats the name is not shown as a chip.
+      if (group.role && group.role !== group.name) header.appendChild(element('span', 'role-chip', group.role));
 
       var scans = group.items.filter(isFocusScan);
       if (scans.length > 0) {
