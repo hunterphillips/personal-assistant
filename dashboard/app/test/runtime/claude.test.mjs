@@ -111,7 +111,9 @@ test('a turn emits state, messages, and usage, writes the pointer, and caches th
     { role: 'user', text: 'How is cash?' },
     { role: 'assistant', text: 'Hello from the persona.' },
   ]);
-  assert.deepEqual(adapter.state('cfo'), { state: 'idle', pending: null, lastError: null, sessionId: 'session-1', costUsd: 0.25 });
+  assert.deepEqual(adapter.state('cfo'), {
+    state: 'idle', pending: null, lastError: null, sessionId: 'session-1', costUsd: 0.25, cwd: '/invented/cfo',
+  });
 
   const { prompt, options } = query.calls[0];
   assert.equal(prompt, 'How is cash?');
@@ -297,7 +299,9 @@ test('interrupt aborts the turn, resolves the pending request as interrupted, an
   assert.deepEqual(decision, { behavior: 'deny', message: 'Interrupted from the dashboard' });
   assert.equal(events.find((event) => event.type === 'resolved').outcome, 'interrupted');
   assert.equal(events.some((event) => event.type === 'error'), false);
-  assert.deepEqual(adapter.state('cfo'), { state: 'idle', pending: null, lastError: null, sessionId: 'session-1', costUsd: null });
+  assert.deepEqual(adapter.state('cfo'), {
+    state: 'idle', pending: null, lastError: null, sessionId: 'session-1', costUsd: null, cwd: '/invented/cfo',
+  });
   await adapter.interrupt(AGENT);
 });
 
@@ -617,12 +621,61 @@ test('a throwing listener is logged and the other listeners still run', async (t
   assert.equal(adapter.state('cfo').state, 'idle');
 });
 
-test('the model option is passed only when the agent sets one', async (t) => {
-  const { adapter, query } = await setup(t);
-  await adapter.send(AGENT, 'one');
-  await adapter.send({ ...AGENT, model: 'claude-sonnet' }, 'two');
+test('model and effort are passed only when the turn sets them, never from the agent', async (t) => {
+  const { adapter, query, logs } = await setup(t);
+  await adapter.send({ ...AGENT, model: 'claude-sonnet' }, 'one');
+  await adapter.send(AGENT, 'two', { model: 'sonnet', effort: 'high' });
+  await adapter.send(AGENT, 'three', { model: null, effort: 'low' });
+  await adapter.send(AGENT, 'four', { model: 'opus' });
   assert.equal('model' in query.calls[0].options, false);
-  assert.equal(query.calls[1].options.model, 'claude-sonnet');
+  assert.equal('effort' in query.calls[0].options, false);
+  assert.equal(query.calls[1].options.model, 'sonnet');
+  assert.equal(query.calls[1].options.effort, 'high');
+  assert.equal('model' in query.calls[2].options, false);
+  assert.equal(query.calls[2].options.effort, 'low');
+  assert.equal(query.calls[3].options.model, 'opus');
+  assert.equal('effort' in query.calls[3].options, false);
+  assert.deepEqual(logs.filter((e) => e.event === 'persona_init').map((e) => e.effort), [null, 'high', 'low', null]);
+});
+
+test('a model the CLI rejects ends the turn in error with its explanation as lastError', async (t) => {
+  const explanation = "There's an issue with the selected model (not-a-model). It may not exist or you may not have access to it.";
+  const query = fakeQuery(async function* () {
+    yield init();
+    yield result({ is_error: true, result: explanation, total_cost_usd: 0 });
+  });
+  const { adapter, events } = await setup(t, { query, limits: { messageTextBytes: 4_096 } });
+  await adapter.send(AGENT, 'Hi', { model: 'not-a-model' });
+  assert.equal(query.calls[0].options.model, 'not-a-model');
+  assert.deepEqual(states(events), ['busy', 'error']);
+  assert.equal(events.find((event) => event.type === 'error').message, explanation);
+  assert.equal(adapter.state('cfo').lastError, explanation);
+  assert.equal(adapter.state('cfo').state, 'error');
+});
+
+test('the cwd is pinned at start or first turn and moves only on New thread', async (t) => {
+  const { adapter, query } = await setup(t);
+  assert.equal(adapter.state('cfo').cwd, null);
+  await adapter.start(AGENT);
+  assert.equal(adapter.state('cfo').cwd, '/invented/cfo');
+  const moved = { ...AGENT, cwd: '/invented/elsewhere' };
+  await adapter.send(moved, 'one');
+  assert.equal(query.calls[0].options.cwd, '/invented/cfo');
+  assert.equal(query.calls[0].options.resume, undefined);
+  await adapter.send(moved, 'two');
+  assert.equal(query.calls[1].options.cwd, '/invented/cfo');
+  assert.equal(query.calls[1].options.resume, 'session-1');
+  await adapter.newThread(moved);
+  assert.equal(adapter.state('cfo').cwd, '/invented/elsewhere');
+  await adapter.send(moved, 'three');
+  assert.equal(query.calls[2].options.cwd, '/invented/elsewhere');
+  assert.equal('resume' in query.calls[2].options, false);
+
+  // A persona never started pins on its first send.
+  const other = { ...AGENT, id: 'ops', cwd: '/invented/ops' };
+  await adapter.send(other, 'one');
+  assert.equal(adapter.state('ops').cwd, '/invented/ops');
+  assert.equal(query.calls[3].options.cwd, '/invented/ops');
 });
 
 test('invalid agents and empty text are refused before any turn starts', async (t) => {

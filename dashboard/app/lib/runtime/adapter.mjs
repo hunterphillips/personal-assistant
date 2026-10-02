@@ -12,8 +12,9 @@
 //     'sdk_unavailable' when the rejection is a RuntimeError with that code
 //     (the provider's package could not be loaded) and 'start_failed'
 //     otherwise.
-//   send(agent, text) -> Promise<void>
-//     Starts one turn. See the refusal rule below. Once accepted, the promise
+//   send(agent, text, { model, effort } = {}) -> Promise<void>
+//     Starts one turn on the given model id and effort level, each optional
+//     and passed to the provider only when set. See the refusal rule below. Once accepted, the promise
 //     resolves when the turn ends and never rejects; failures arrive as
 //     `error` events and in state().
 //   answer(agent, requestId, answer) -> Promise<void>
@@ -26,9 +27,10 @@
 //     Forgets the persona's session so the next turn starts a fresh one.
 //     Rejects 'busy' while a turn runs, 'shutting_down' after close() has
 //     begun, and 'thread_reset_failed' when the files cannot be cleared.
-//   state(agentId) -> { state, pending, lastError, sessionId, costUsd }
+//   state(agentId) -> { state, pending, lastError, sessionId, costUsd, cwd? }
 //     state is 'idle' | 'busy' | 'waiting' | 'error'. pending is the oldest
-//     open request ({ requestId, kind, toolName, input, at }) or null.
+//     open request ({ requestId, kind, toolName, input, at }) or null. cwd,
+//     when the provider has one, is the folder the thread is pinned to.
 //   subscribe(fn) -> unsubscribe
 //   close() -> Promise<void>
 //     Refuses new turns, drains or aborts the running ones, and resolves

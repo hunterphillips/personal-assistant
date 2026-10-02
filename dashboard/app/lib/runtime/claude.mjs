@@ -1,6 +1,6 @@
 // Claude runtime adapter: runs persona threads through the Claude Agent SDK.
-// A persona is one long-lived SDK session whose cwd is the agent's repo; each
-// send() is one query() that resumes it. Routes and the hub sit above this
+// A persona is one long-lived SDK session whose cwd is the agent's repo as it
+// was when the thread began; each send() is one query() that resumes it. Routes and the hub sit above this
 // module; it owns only in-memory turn state and the thread files (threads.mjs).
 // The contract it implements, including the rule that refusals are decided
 // before the first await, is in adapter.mjs.
@@ -37,10 +37,11 @@
 //     and a system message 'New thread' (also written to the fresh cache).
 //     The idle emission is a boundary marker: it is sent even when the
 //     state was already idle, so views can reset the thread.
-//   state(agentId) -> { state, pending, lastError, sessionId, costUsd }
+//   state(agentId) -> { state, pending, lastError, sessionId, costUsd, cwd }
 //     state: 'idle' | 'busy' | 'waiting' | 'error'; pending is the oldest
 //     open request ({ requestId, kind, toolName, input, at }) or null;
-//     costUsd is the last total_cost_usd seen, a running session total.
+//     costUsd is the last total_cost_usd seen, a running session total; cwd
+//     is the folder the thread is pinned to (null before the first start).
 //   subscribe(fn) -> unsubscribe
 //   close() -> Promise<void>
 //     Refuses new sends and aborts at once any turn waiting on an answer
@@ -64,11 +65,18 @@
 // A listener that throws is logged as { event: 'runtime_listener_error' }
 // and the rest still run.
 //
-// Turn rules. Every query() passes cwd, the stored session id as resume,
-// permissionMode 'default' (so a global mode such as auto never applies),
-// maxTurns from limits.turnMaxTurns, the turn's AbortController, the agent's
-// model when set, and canUseTool on every turn (without it the SDK drops
-// AskUserQuestion). The init message's session id is written to the pointer
+// Turn rules. Every query() passes the thread's cwd, the stored session id
+// as resume, permissionMode 'default' (so a global mode such as auto never
+// applies), maxTurns from limits.turnMaxTurns, the turn's AbortController,
+// and canUseTool on every turn (without it the SDK drops AskUserQuestion).
+// send(agent, text, { model, effort }) takes the resolved pair for this turn
+// (hub.modelFor decides it from thread, agent, and system settings); each is
+// passed only when set, so null leaves Claude Code's own default in force.
+// A model the CLI rejects comes back as a result with is_error whose text
+// names the model, and the turn ends in error with that text as lastError.
+// The cwd is pinned when the persona starts or first takes a turn and
+// changes only on New thread, so a registry edit to an agent's folder never
+// resumes an old session in a new folder. The init message's session id is written to the pointer
 // when it differs from the one held, and so is the result's, but only after
 // init has been seen. canUseTool turns AskUserQuestion into a
 // question and every other tool into an approval, and waits for answer(),
@@ -152,6 +160,7 @@ export function createClaudeAdapter({
         turn: null,
         resetting: false,
         pending: new Map(),
+        cwd: null,
       };
       entries.set(agentId, entry);
     }
@@ -216,6 +225,7 @@ export function createClaudeAdapter({
         apiKeySource: message.apiKeySource ?? null,
         permissionMode: message.permissionMode ?? null,
         model: message.model ?? null,
+        effort: turn.effort ?? null,
       });
       const source = message.apiKeySource;
       if (typeof source === 'string' && !SUBSCRIPTION_SOURCES.has(source)) {
@@ -249,7 +259,11 @@ export function createClaudeAdapter({
       });
       if (message.is_error || message.subtype !== 'success') {
         const errors = Array.isArray(message.errors) ? message.errors.filter((item) => typeof item === 'string') : [];
-        return bound(errors.length > 0 ? errors.join('; ') : `Turn ended: ${message.subtype ?? 'error'}`);
+        if (errors.length > 0) return bound(errors.join('; '));
+        // A rejected model, among others, arrives as is_error with the
+        // explanation in `result` and no `errors` list.
+        if (message.is_error && typeof message.result === 'string' && message.result.trim() !== '') return bound(message.result.trim());
+        return bound(`Turn ended: ${message.subtype ?? 'error'}`);
       }
     }
     return null;
@@ -308,14 +322,15 @@ export function createClaudeAdapter({
       if (turn.aborted) return;
       resumed = Boolean(entry.sessionId);
       const options = {
-        cwd: agent.cwd,
+        cwd: entry.cwd,
         ...(entry.sessionId ? { resume: entry.sessionId } : {}),
         permissionMode: 'default',
         maxTurns: limits.turnMaxTurns,
         abortController: turn.controller,
         canUseTool: makeCanUseTool(entry, turn),
         stderr: (data) => { turn.stderr = `${turn.stderr}${data}`.slice(-STDERR_MAX); },
-        ...(agent.model ? { model: agent.model } : {}),
+        ...(turn.model ? { model: turn.model } : {}),
+        ...(turn.effort ? { effort: turn.effort } : {}),
       };
       for await (const message of run({ prompt: text, options })) {
         const problem = await handleMessage(entry, turn, message);
@@ -368,11 +383,12 @@ export function createClaudeAdapter({
       checkAgent(agent);
       await ensureQuery();
       const entry = entryFor(agent.id);
+      entry.cwd ??= agent.cwd;
       if (!entry.turn && !entry.resetting) await loadPointer(entry);
       return { threadId: agent.id };
     },
 
-    send(agent, text) {
+    send(agent, text, { model = null, effort = null } = {}) {
       try {
         checkAgent(agent);
       } catch (error) {
@@ -382,8 +398,17 @@ export function createClaudeAdapter({
       if (typeof text !== 'string' || text.trim() === '') return Promise.reject(new RuntimeError('invalid_text'));
       const entry = entryFor(agent.id);
       if (entry.turn || entry.resetting) return Promise.reject(new RuntimeError('busy'));
+      entry.cwd ??= agent.cwd;
       const turn = {
-        controller: new AbortController(), aborted: false, done: null, initSeen: false, refusal: null, ending: false, stderr: '',
+        controller: new AbortController(),
+        aborted: false,
+        done: null,
+        initSeen: false,
+        refusal: null,
+        ending: false,
+        stderr: '',
+        model: typeof model === 'string' && model !== '' ? model : null,
+        effort: typeof effort === 'string' && effort !== '' ? effort : null,
       };
       entry.turn = turn;
       turn.done = runTurn(entry, agent, text, turn);
@@ -423,6 +448,7 @@ export function createClaudeAdapter({
             entry.loaded = true;
             entry.costUsd = null;
             entry.lastError = null;
+            entry.cwd = agent.cwd;
             await store.clear(entry.agentId);
           } catch (error) {
             log({ event: 'thread_reset_error', agentId: entry.agentId, error: error?.message ?? String(error) });
@@ -439,7 +465,7 @@ export function createClaudeAdapter({
 
     state(agentId) {
       const entry = entries.get(agentId);
-      if (!entry) return { state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null };
+      if (!entry) return { state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null, cwd: null };
       const oldest = entry.pending.values().next().value;
       return {
         state: entry.state,
@@ -447,6 +473,7 @@ export function createClaudeAdapter({
         lastError: entry.lastError,
         sessionId: entry.sessionId,
         costUsd: entry.costUsd,
+        cwd: entry.cwd,
       };
     },
 
