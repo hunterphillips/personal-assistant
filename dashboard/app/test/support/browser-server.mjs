@@ -62,8 +62,9 @@ export { focusSourceAvailable };
 //   routines   { items, focusAvailable, refreshedAt }: when given, the hub is
 //              refreshed once at startup so the snapshot holds them
 //   personas   { <agentId>: { state, pending, lastError, costUsd, messages,
-//              startFails } } seeds each persona's runtime state and cached
-//              messages before the hub starts (see fakePersonas)
+//              model, startFails } } seeds each persona's runtime state and
+//              cached messages before the hub starts (see fakePersonas);
+//              `model` is the thread's own choice { id, effort }
 //   codex      { sessions, status, threads }: the fake Codex adapter's rows,
 //              its status() answer, and the messages thread() answers by
 //              session id (see fakeCodex); without it there is no Codex
@@ -89,8 +90,9 @@ export { focusSourceAvailable };
 //   settings   { model: { default, effort }, brief: { agent } } written to a
 //              real settings file in the temporary directory before the
 //              store loads it, so PUT /api/settings writes there; without it
-//              the file is missing and the store holds the defaults (the
-//              brief goes to no one). The string 'broken' writes a file the
+//              the file is seeded as server.mjs does at first start (the
+//              defaults, the brief going to the first pinned Claude persona
+//              among the agents, or no one). The string 'broken' writes a file the
 //              store cannot read. `settings` on the result is the store and
 //              `settingsPath` the file.
 export async function startHub({
@@ -153,6 +155,11 @@ export async function startHub({
     });
     const settings = createSettings({ path: config.settingsPath });
     await settings.load();
+    if (!settingsSeed) {
+      const listed = registryState?.agents ?? agents;
+      const target = listed.find((agent) => agent.kind === 'persona' && agent.provider === 'claude' && agent.pinned === true) ?? null;
+      await settings.seed({ brief: { agent: target?.id ?? null } });
+    }
     const focusRoutes = createFocusProxy(config);
     const briefRoutes = createBriefRoutes(config);
     const registry = controlledRegistry({ agents, ...registryState });
@@ -363,6 +370,7 @@ function fakePersonas(seed, store) {
         pending: initial.pending ? { requestId: `req-${nextRequest++}`, at: at(), ...initial.pending } : null,
         lastError: initial.lastError ?? null,
         costUsd: initial.costUsd ?? null,
+        model: initial.model ? { id: initial.model.id ?? null, effort: initial.model.effort ?? null } : null,
         turn: null,
       });
     }
@@ -379,10 +387,20 @@ function fakePersonas(seed, store) {
     emit('thread.state', id, { state });
   }
 
-  async function say(id, role, text) {
-    const message = { role, text, at: at() };
+  async function say(id, role, text, fields = {}) {
+    const message = { ...fields, role, text, at: at() };
     await store.append(id, message);
     emit('message', id, message);
+  }
+
+  const MODEL_NAMES = { fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' };
+  const EFFORT_NAMES = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra high', max: 'max' };
+  function modelLine(model, effort) {
+    if (model === null && effort === null) return "Back to the agent's default.";
+    const effortText = effort === null ? '' : `${EFFORT_NAMES[effort] ?? effort} effort`;
+    if (model === null) return `Now at ${effortText}.`;
+    const name = MODEL_NAMES[model] ?? model;
+    return effort === null ? `Now on ${name}.` : `Now on ${name}, ${effortText}.`;
   }
 
   function endTurn(id) {
@@ -422,6 +440,7 @@ function fakePersonas(seed, store) {
       const current = entry(id);
       return {
         state: current.state, pending: current.pending, lastError: current.lastError, sessionId: null, costUsd: current.costUsd, cwd: null,
+        model: current.model,
       };
     },
     subscribe(fn) {
@@ -458,11 +477,27 @@ function fakePersonas(seed, store) {
       setState(agent.id, 'idle');
       endTurn(agent.id);
     },
+    // As the real adapter: the same refusals, the pointer's pair kept in
+    // the entry, and the line written through the real store.
+    setModel(agent, choice = {}) {
+      calls.push(['setModel', agent.id, choice]);
+      const current = entry(agent.id);
+      if ('model' in choice && choice.model !== null && !(typeof choice.model === 'string' && choice.model !== '' && choice.model.length <= 64)) {
+        return Promise.reject(new RuntimeError('invalid_model'));
+      }
+      if ('effort' in choice && choice.effort !== null && !Object.hasOwn(EFFORT_NAMES, choice.effort)) return Promise.reject(new RuntimeError('invalid_effort'));
+      if (current.state === 'busy' || current.state === 'waiting') return Promise.reject(new RuntimeError('busy'));
+      const model = 'model' in choice ? choice.model : current.model?.id ?? null;
+      const effort = 'effort' in choice ? choice.effort : current.model?.effort ?? null;
+      current.model = model === null && effort === null ? null : { id: model, effort };
+      return say(agent.id, 'system', modelLine(model, effort), { kind: 'model', model, effort });
+    },
     async newThread(agent) {
       calls.push(['newThread', agent.id]);
       const current = entry(agent.id);
       if (current.state === 'busy' || current.state === 'waiting') throw new RuntimeError('busy');
       await store.clear(agent.id);
+      current.model = null;
       current.lastError = null;
       setState(agent.id, 'idle');
       await say(agent.id, 'system', 'New thread');

@@ -252,3 +252,12 @@ test('formatInput pretty-prints whole JSON and leaves cut input as it came', () 
   assert.equal(view.formatInput({ input: '{"a":1', truncated: true }), '{"a":1');
   assert.equal(view.formatInput({ input: 'not json', truncated: false }), 'not json');
 });
+
+test('modelButtonText names the effective pair, the model alone, or the Claude Code default', () => {
+  const models = [{ id: 'sonnet', name: 'Sonnet' }, { id: 'opus', name: 'Opus' }];
+  assert.equal(view.modelButtonText({ id: 'sonnet', effort: 'high' }, models), 'Sonnet · High');
+  assert.equal(view.modelButtonText({ id: 'sonnet', effort: null }, models), 'Sonnet');
+  assert.equal(view.modelButtonText({ id: null, effort: 'low' }, models), 'Claude Code default · Low');
+  assert.equal(view.modelButtonText({ id: null, effort: null }, models), 'Claude Code default');
+  assert.equal(view.modelButtonText({ id: 'unknown', effort: 'xhigh' }, models), 'unknown · Extra high');
+});

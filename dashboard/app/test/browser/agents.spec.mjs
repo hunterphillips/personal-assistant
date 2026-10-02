@@ -1043,3 +1043,144 @@ test.describe('with Markdown messages', () => {
     await expect(body).not.toContainText('##');
   });
 });
+
+test.describe('with a model picker under the composer', () => {
+  const SETTINGS = { model: { default: 'opus', effort: 'high' }, brief: { agent: null } };
+  test.use({ hubOptions: { build: () => ({ ...seeded().build(), settings: SETTINGS }) } });
+
+  const button = (page) => page.locator('#agent-model');
+  const menu = (page) => page.locator('#agent-model-menu');
+  const option = (page, name) => menu(page).getByRole('option', { name, exact: true });
+  const level = (page, name) => menu(page).locator('.effort-option', { hasText: new RegExp(`^${name}$`) });
+
+  test('the button shows the effective pair and the picker marks the default, the choice, and the effort', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(button(page)).toHaveText('Opus · High');
+    await expect(button(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(menu(page)).toBeHidden();
+    await expect(page.locator('#agent-model-note')).toBeHidden();
+    expect((await button(page).boundingBox()).height).toBeGreaterThanOrEqual(44);
+
+    await button(page).click();
+    await expect(menu(page)).toBeVisible();
+    await expect(button(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(menu(page).locator('.model-option')).toHaveText(['Fable', 'OpusDefault', 'Sonnet', 'Haiku']);
+    await expect(option(page, 'Opus Default')).toHaveAttribute('aria-selected', 'true');
+    await expect(option(page, 'Opus Default')).toBeFocused();
+    await expect(menu(page).locator('.effort-option')).toHaveText(['Low', 'Medium', 'High', 'Extra high', 'Max']);
+    await expect(level(page, 'High')).toHaveAttribute('aria-pressed', 'true');
+    await expect(menu(page).locator('[aria-pressed="true"]')).toHaveCount(1);
+    await expect(page.locator('#agent-model-reset')).toBeDisabled();
+
+    await page.keyboard.press('Escape');
+    await expect(menu(page)).toBeHidden();
+    await expect(button(page)).toBeFocused();
+    expect(hub.requests('/api/agents/cfo/model')).toEqual([]);
+  });
+
+  test('choosing a model and an effort changes the button, posts the route, adds the line, and a reload keeps it; the reset returns to the default', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(messages(page)).toHaveCount(2);
+
+    await button(page).click();
+    await option(page, 'Sonnet').click();
+    await expect(menu(page)).toBeHidden();
+    await expect(button(page)).toHaveText('Sonnet · High');
+    await expect(button(page)).toBeFocused();
+    await expect(messages(page)).toHaveCount(3);
+    await expect(messages(page).nth(2)).toHaveText(/^Now on Sonnet\./);
+    await expect(messages(page).nth(2)).toHaveClass(/thread-message-system/);
+    await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('Now on Sonnet.');
+    expect(hub.requests('/api/agents/cfo/model')).toEqual([{ method: 'POST', status: 200 }]);
+    expect(hub.personas.calls).toEqual([['setModel', 'cfo', { model: 'sonnet' }]]);
+
+    await button(page).click();
+    await expect(option(page, 'Sonnet')).toHaveAttribute('aria-selected', 'true');
+    await expect(option(page, 'Opus Default')).toHaveAttribute('aria-selected', 'false');
+    await expect(page.locator('#agent-model-reset')).toBeEnabled();
+    await level(page, 'Low').click();
+    await expect(button(page)).toHaveText('Sonnet · Low');
+    await expect(messages(page)).toHaveCount(4);
+    await expect(messages(page).nth(3)).toHaveText(/^Now on Sonnet, low effort\./);
+    expect(hub.personas.calls.at(-1)).toEqual(['setModel', 'cfo', { effort: 'low' }]);
+
+    await page.reload();
+    await expect(button(page)).toHaveText('Sonnet · Low');
+    await expect(messages(page)).toHaveCount(4);
+
+    await button(page).click();
+    await page.locator('#agent-model-reset').click();
+    await expect(button(page)).toHaveText('Opus · High');
+    await expect(messages(page)).toHaveCount(5);
+    await expect(messages(page).nth(4)).toHaveText(/^Back to the agent's default\./);
+    expect(hub.personas.calls.at(-1)).toEqual(['setModel', 'cfo', { model: null, effort: null }]);
+  });
+
+  test('a change during a turn is refused with the sentence, and the choice stands', async ({ page, hub }) => {
+    hub.personas.hold('cfo');
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await page.locator('#agent-input').fill('Take your time.');
+    await page.locator('#agent-send').click();
+    await expect(page.locator('#agent-status-text')).toHaveText('CFO is working.');
+
+    await button(page).click();
+    await option(page, 'Sonnet').click();
+    await expect(page.locator('#agent-failure')).toHaveText('Wait for the turn to finish before changing the model.');
+    await expect(button(page)).toHaveText('Opus · High');
+    expect(hub.requests('/api/agents/cfo/model')).toEqual([{ method: 'POST', status: 409 }]);
+
+    await hub.personas.reply('cfo', 'Done.');
+    await expect(page.locator('#agent-status')).toBeHidden();
+    await button(page).click();
+    await option(page, 'Sonnet').click();
+    await expect(button(page)).toHaveText('Sonnet · High');
+    await expect(page.locator('#agent-failure')).toBeHidden();
+  });
+
+  test('New thread returns the button to the default', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await button(page).click();
+    await option(page, 'Haiku').click();
+    await expect(button(page)).toHaveText('Haiku · High');
+
+    await page.locator('#agent-new-thread').click();
+    await page.locator('#agent-confirm').getByRole('button', { name: 'Start new thread' }).click();
+    await expect(messages(page)).toHaveText([/^New thread/]);
+    await expect(button(page)).toHaveText('Opus · High');
+    await button(page).click();
+    await expect(option(page, 'Opus Default')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#agent-model-reset')).toBeDisabled();
+  });
+
+  test('a Codex agent gets a note in place of the button', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=dev`);
+    await expect(pane(page).locator('#agent-name')).toHaveText('Dev');
+    await expect(button(page)).toBeHidden();
+    await expect(page.locator('#agent-model-note')).toHaveText('Codex, its own settings');
+    await expect(page.locator('#agent-model-note')).toBeVisible();
+  });
+
+  test('at phone width the picker is a sheet along the bottom that Escape and a tap outside close', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(button(page)).toHaveText('Opus · High');
+
+    await button(page).click();
+    await expect(menu(page)).toBeVisible();
+    const box = await menu(page).boundingBox();
+    expect(box.x).toBe(0);
+    expect(box.width).toBe(390);
+    expect(Math.round(box.y + box.height)).toBe(844);
+    await expect(menu(page).locator('.effort-option')).toHaveCount(5);
+
+    await page.keyboard.press('Escape');
+    await expect(menu(page)).toBeHidden();
+    await expect(button(page)).toBeFocused();
+
+    await button(page).click();
+    await expect(menu(page)).toBeVisible();
+    await page.mouse.click(195, 300);
+    await expect(menu(page)).toBeHidden();
+    expect(hub.requests('/api/agents/cfo/model')).toEqual([]);
+  });
+});

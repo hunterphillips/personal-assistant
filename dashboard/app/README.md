@@ -39,6 +39,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/agents/<id>/answer` | Answers the persona's open question or approval. |
 | `POST /api/agents/<id>/interrupt` | Stops the persona's turn. |
 | `POST /api/agents/<id>/new-thread` | Starts the persona on a new session. |
+| `POST /api/agents/<id>/model` | Sets the model and effort the persona's thread runs on: `{"model": "sonnet"}`, `{"effort": "low"}`, or both; null for a key returns it to the agent's default (below). |
 | `GET /api/agents/<id>/thread` | The persona's cached messages. |
 | `POST /api/sessions/<id>/answer` | Answers a Codex thread's open question or approval (below). |
 | `POST /api/sessions/<id>/interrupt` | Stops the Codex thread's running turn. |
@@ -108,11 +109,11 @@ snapshot; concurrent requests share one check. It stays for one release.
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
                "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
                "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
-               "lastError": null, "costUsd": 0.42, "model": { "id": "opus", "effort": null, "source": "agent" }, "accepts": null },
+               "lastError": null, "costUsd": 0.42, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null } }, "accepts": null },
              { "id": "assistant", "name": "Assistant", "role": "Assistant", "description": "...", "group": "personal", "kind": "persona",
                "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "provider": "claude", "pinned": true,
                "state": "idle", "pending": null, "lastMessage": null, "lastError": null, "costUsd": null,
-               "model": { "id": null, "effort": null, "source": "default" }, "accepts": null }],
+               "model": { "id": null, "effort": null, "source": "default", "default": { "id": null, "effort": null } }, "accepts": null }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
                  "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
                  "pending": { "requestId": "2", "kind": "question", "toolName": "requestUserInput", "input": { "...": "..." }, "truncated": false },
@@ -549,6 +550,17 @@ cannot be read again after a change, the messages already shown stay, with
 a Retry line above them. A draft typed for one persona is kept while another
 thread is open.
 
+Under the input, a Claude persona's thread shows the model and effort its
+next turn runs on ("Opus · High", "Sonnet", or "Claude Code default").
+The button opens a picker: the model table's names with the agent's
+default marked, the five effort levels, and "Use the agent's default",
+which is on only while the thread has a choice of its own. A choice posts
+at once and the thread gets a line ("Now on Sonnet, low effort."); during
+a turn the change is refused with "Wait for the turn to finish before
+changing the model." under the composer. New thread drops the choice. At
+phone width the picker is a sheet along the bottom. A Codex agent shows
+"Codex, its own settings" in its place.
+
 ### Health view
 
 The Health view, at `/health` and the last entry on the rail, opens with
@@ -629,13 +641,15 @@ events. Each persona in `agents` carries:
   could not be loaded; run `npm ci`), or `start_failed` (its session pointer
   could not be read).
 - `costUsd`: null, or the session's running total.
-- `model` (Claude personas only): `{ id, effort, source }`, what the next
-  turn runs on. `id` is a model id or alias or null, `effort` one of `low`,
-  `medium`, `high`, `xhigh`, `max`, or null; null means Claude Code's own
-  default. Each resolves on its own, the registry's `model` over the
-  settings' `model.default`, and the settings' `model.effort` for effort.
-  `source` names the level that set either: `agent`, `system`, or `default`
-  when neither did (`thread` is reserved for a choice made on the thread).
+- `model` (Claude personas only): `{ id, effort, source, default }`, what
+  the next turn runs on. `id` is a model id or alias or null, `effort` one
+  of `low`, `medium`, `high`, `xhigh`, `max`, or null; null means Claude
+  Code's own default. Each resolves on its own: the thread's own choice
+  over the registry's `model` over the settings' `model.default`, and the
+  thread's choice over the settings' `model.effort` for effort. `source`
+  names the level that set either: `thread`, `agent`, `system`, or
+  `default` when none did. `default` is the pair without the thread's
+  choice, what New thread or "Use the agent's default" returns to.
 - `accepts` (Claude personas only): the registry's `accepts` list, or null
   for everyone. Nothing reads it yet.
 
@@ -714,10 +728,12 @@ seconds for it to exit; see [docs/operations.md](docs/operations.md).
 `lib/threads.mjs` keeps two files per agent in `DASHBOARD_THREADS_DIR`
 (created with mode 0700; the files are 0600):
 
-- `<agent-id>.json` holds the session id and when it was first seen. It is
-  the only durable file a persona has here, and it is replaced atomically
-  (temporary file, fsync, rename). If it is lost, the next message starts a
-  new session. The transcript itself stays with Claude Code under
+- `<agent-id>.json` holds the session id, when it was first seen, and the
+  thread's own `model` and `effort` when one was chosen (each absent
+  otherwise). It is the only durable file a persona has here, and it is
+  replaced atomically (temporary file, fsync, rename). A choice made before
+  the first message is kept with a null session id. If the file is lost,
+  the next message starts a new session. The transcript itself stays with Claude Code under
   `~/.claude/projects/`.
 - `<agent-id>.jsonl` is a display cache of the thread, one message per line.
   It is capped at 200 messages and 1 MiB; past either cap it is rewritten
@@ -782,10 +798,18 @@ than the three), 400 `invalid_model` (not null or 1 to 64 characters), 400
   applies, and `maxTurns` 25. It also passes a `canUseTool` callback on
   every turn; without one the SDK removes `AskUserQuestion`.
 - Each turn runs on the model and effort the hub resolves for the agent
-  (`model` in the snapshot): `model` and `effort` are passed to the SDK only
-  when set, so a null leaves Claude Code's own default in force. A model
-  the CLI rejects ends the turn in error with the CLI's explanation, which
-  names the model, as `lastError`.
+  (`model` in the snapshot, the thread's choice first): `model` and
+  `effort` are passed to the SDK only when set, so a null leaves Claude
+  Code's own default in force. A model the CLI rejects ends the turn in
+  error with the CLI's explanation, which names the model, as `lastError`.
+- `POST /api/agents/<id>/model` takes `{ model?, effort? }` with at least
+  one key; a present key replaces the thread's choice, null returns it to
+  the agent's default, an absent key keeps it. It writes the pointer and a
+  system line (`{ kind: 'model', model, effort }`) into the cache and
+  answers `{ ok: true, model: { id, effort, source } }`. Refusals: 409
+  `busy` while a turn runs, 400 `invalid_model` (not null or 1 to 64
+  characters) or `invalid_effort`, 409 `not_supported` for a Codex agent,
+  503 `shutting_down`.
 - `AskUserQuestion` becomes a question. Any other tool that needs
   permission becomes an approval that carries the tool name and its full
   input. The turn waits for an answer. After 30 minutes without one, the

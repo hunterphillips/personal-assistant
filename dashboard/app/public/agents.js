@@ -47,6 +47,10 @@
   var PINNED = 'pinned';
   var PROVIDERS = { claude: 'Claude', codex: 'Codex' };
   var WATCHED = ['agents', 'groups', 'registry', 'sessions', 'codex', 'cmux'];
+  var EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+  var EFFORT_NAMES = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
+  var CODE_DEFAULT = 'Claude Code default';
+  var MODEL_BUSY = 'Wait for the turn to finish before changing the model.';
   var AGENT_ID = /^[a-z][a-z0-9-]{1,31}$/;
   var SESSION_ID = /^(?:codex|claude):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
   var NO_SESSIONS = 'No coding sessions. Start the Codex server or open a terminal in cmux.';
@@ -311,6 +315,36 @@
     return '';
   }
 
+  // The display name of a model id from the snapshot's table, or the id.
+  function modelNameOf(id, models) {
+    for (var i = 0; models && i < models.length; i += 1) {
+      if (models[i].id === id) return models[i].name;
+    }
+    return id;
+  }
+
+  function effortNameOf(effort) {
+    return EFFORT_NAMES[effort] || effort;
+  }
+
+  // The composer button's text for a resolved { id, effort }: "Sonnet · High",
+  // "Sonnet" when effort inherits at every level, "Claude Code default" when
+  // both do.
+  function modelButtonText(model, models) {
+    if (!model) return CODE_DEFAULT;
+    var name = model.id ? modelNameOf(model.id, models) : CODE_DEFAULT;
+    return model.effort ? name + ' \u00b7 ' + effortNameOf(model.effort) : name;
+  }
+
+  // A refused model change as a sentence; the common refusals read the same
+  // as elsewhere.
+  function modelRefusal(result, agent) {
+    if (result && result.code === 'busy') return MODEL_BUSY;
+    if (result && result.code === 'not_supported') return displayName(agent) + ' keeps its own model settings.';
+    if (result && (result.code === 'invalid_model' || result.code === 'invalid_effort')) return 'That model or effort is not offered.';
+    return refusalSentence(result, agent);
+  }
+
   // A refused or failed request as a sentence. `code` is the JSON error, or
   // null when there was no answer.
   function refusalSentence(result, agent) {
@@ -449,6 +483,13 @@
     var send = document.getElementById('agent-send');
     var reason = document.getElementById('agent-composer-reason');
     var failure = document.getElementById('agent-failure');
+    var modelButton = document.getElementById('agent-model');
+    var modelLabel = document.getElementById('agent-model-label');
+    var modelNote = document.getElementById('agent-model-note');
+    var modelMenu = document.getElementById('agent-model-menu');
+    var modelList = document.getElementById('agent-model-list');
+    var effortRow = document.getElementById('agent-effort-row');
+    var modelReset = document.getElementById('agent-model-reset');
 
     var state = null;
     var visible = false;
@@ -465,6 +506,8 @@
     var terminalError = ''; // why the selected session's Open terminal was refused, or ''
     var confirming = false; // New thread awaits confirmation
     var drafts = {}; // unsent composer text by agent id, for agents not selected
+    var menuOpen = false; // the model picker is open for the selected agent
+    var menuKey = null; // what the picker was last built from
     var tick = null;
 
     // The open agent or session, or null.
@@ -987,6 +1030,7 @@
         send.disabled = busy || !!reasonText;
         reason.textContent = reasonText;
         reason.hidden = !reasonText;
+        renderModelTools(agent);
       }
       foot.textContent = hasThread(agent) && session ? 'Type to this thread in its terminal.' : '';
       foot.hidden = !foot.textContent;
@@ -1050,6 +1094,7 @@
 
     // Puts the current draft away and brings out the chosen agent's.
     function setSelected(id) {
+      if (menuOpen) closeModelMenu(false);
       if (selectedId) drafts[selectedId] = input.value;
       selectedId = id;
       input.value = (id && drafts[id]) || '';
@@ -1123,7 +1168,7 @@
         } else if (result && result.code === 'no_such_request') {
           shell.requestState();
         }
-        if (current && !ok) actionError = refusalSentence(result, agent);
+        if (current && !ok) actionError = action === 'model' ? modelRefusal(result, agent) : refusalSentence(result, agent);
         renderThread();
         if (current && onDone) onDone(ok);
       });
@@ -1151,6 +1196,90 @@
     function focusComposer() {
       if (!composer.hidden && !input.disabled) input.focus();
       else if (!status.hidden) status.focus();
+    }
+
+    // The model and effort the next turn runs on, under the input: a button
+    // for a Claude persona (disabled while the persona cannot run), a note
+    // for a Codex one. The picker rebuilds only when what it shows changes,
+    // so an open one keeps its focus.
+    function renderModelTools(agent) {
+      var claude = isPersona(agent) && agent.provider === 'claude' && agent.model;
+      var codex = isPersona(agent) && agent.provider === 'codex';
+      modelButton.hidden = !claude;
+      modelNote.hidden = !codex;
+      if (!claude) {
+        if (menuOpen) closeModelMenu(false);
+        return;
+      }
+      modelLabel.textContent = modelButtonText(agent.model, state.models);
+      modelButton.disabled = agent.state === 'unavailable';
+      modelButton.setAttribute('aria-expanded', menuOpen ? 'true' : 'false');
+      modelMenu.hidden = !menuOpen;
+      if (menuOpen) renderModelMenu(agent);
+    }
+
+    function renderModelMenu(agent) {
+      var key = JSON.stringify([agent.id, agent.model, state.models, busy]);
+      if (key === menuKey) return;
+      menuKey = key;
+      var model = agent.model;
+      var models = state.models || [];
+      modelList.textContent = '';
+      for (var i = 0; i < models.length; i += 1) {
+        var option = element('button', 'model-option', models[i].name);
+        option.type = 'button';
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', model.id === models[i].id ? 'true' : 'false');
+        option.setAttribute('data-model', models[i].id);
+        option.disabled = busy;
+        if (model.default && model.default.id === models[i].id) option.appendChild(element('span', 'model-option-default', 'Default'));
+        modelList.appendChild(option);
+      }
+      effortRow.textContent = '';
+      for (var j = 0; j < EFFORTS.length; j += 1) {
+        var level = element('button', 'effort-option', effortNameOf(EFFORTS[j]));
+        level.type = 'button';
+        level.setAttribute('aria-pressed', model.effort === EFFORTS[j] ? 'true' : 'false');
+        level.setAttribute('data-effort', EFFORTS[j]);
+        level.disabled = busy;
+        effortRow.appendChild(level);
+      }
+      modelReset.disabled = busy || model.source !== 'thread';
+    }
+
+    function openModelMenu() {
+      var agent = selectedAgent();
+      if (menuOpen || modelButton.hidden || modelButton.disabled || !agent) return;
+      menuOpen = true;
+      menuKey = null;
+      renderModelTools(agent);
+      var selected = modelList.querySelector('[aria-selected="true"]') || modelList.firstElementChild;
+      if (selected) selected.focus();
+      document.addEventListener('pointerdown', onOutsidePointer, true);
+    }
+
+    function closeModelMenu(refocus) {
+      if (!menuOpen) return;
+      menuOpen = false;
+      menuKey = null;
+      modelMenu.hidden = true;
+      modelButton.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('pointerdown', onOutsidePointer, true);
+      if (refocus !== false && !modelButton.hidden) modelButton.focus();
+    }
+
+    function onOutsidePointer(event) {
+      if (modelMenu.contains(event.target) || modelButton.contains(event.target)) return;
+      closeModelMenu(false);
+    }
+
+    // Posts the thread's choice; the snapshot brings the new pair and the
+    // thread line. The picker closes on a choice and the button keeps focus.
+    function chooseModel(body) {
+      var agent = selectedAgent();
+      if (!isPersona(agent) || modelButton.disabled) return;
+      closeModelMenu(true);
+      act(agent, 'model', body);
     }
 
     function sendMessage() {
@@ -1268,6 +1397,51 @@
       sendMessage();
     });
 
+    modelButton.addEventListener('click', function () {
+      if (menuOpen) closeModelMenu(true);
+      else openModelMenu();
+    });
+
+    modelMenu.addEventListener('click', function (event) {
+      var option = event.target.closest('.model-option');
+      if (option && !option.disabled) return chooseModel({ model: option.getAttribute('data-model') });
+      var level = event.target.closest('.effort-option');
+      if (level && !level.disabled) return chooseModel({ effort: level.getAttribute('data-effort') });
+      if (event.target.closest('#agent-model-reset') && !modelReset.disabled) chooseModel({ model: null, effort: null });
+    });
+
+    // Escape closes; arrows move within the model list or the effort row;
+    // Enter and Space choose, as buttons do.
+    modelMenu.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeModelMenu(true);
+        return;
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      var group = event.target.closest('.model-list, .effort-row');
+      if (!group) return;
+      var items = Array.prototype.filter.call(group.children, function (node) { return !node.disabled; });
+      var index = items.indexOf(event.target);
+      if (index === -1) return;
+      event.preventDefault();
+      var forward = event.key === 'ArrowDown' || event.key === 'ArrowRight';
+      items[(index + (forward ? 1 : items.length - 1)) % items.length].focus();
+    });
+
+    // A press on a picker button keeps the focus where it is (WebKit moves
+    // it on mousedown, which would close the picker before the click).
+    modelMenu.addEventListener('mousedown', function (event) {
+      if (event.target.closest('button')) event.preventDefault();
+    });
+
+    // Leaving the picker with the keyboard closes it.
+    modelMenu.addEventListener('focusout', function (event) {
+      if (!menuOpen || !event.relatedTarget) return;
+      if (modelMenu.contains(event.relatedTarget) || event.relatedTarget === modelButton) return;
+      closeModelMenu(false);
+    });
+
     input.addEventListener('keydown', function (event) {
       if (event.key !== 'Enter' || event.isComposing) return;
       if (event.shiftKey || event.altKey) return;
@@ -1326,6 +1500,7 @@
     roleChip: roleChip,
     errorSentence: errorSentence,
     composerReason: composerReason,
+    modelButtonText: modelButtonText,
     refusalSentence: refusalSentence,
     previewText: previewText,
     stateLine: stateLine,
