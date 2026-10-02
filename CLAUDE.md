@@ -17,15 +17,18 @@ from here.
   shared app-server, Claude Code terminals in cmux; a gear opens each
   agent's settings beside its thread; on a desk the Assistant's thread
   opens by default, and each morning's brief lands in it as one collapsed
-  line), Reading holds the Daily
+  line; messages render Markdown; a button under the composer picks the
+  thread's model and effort; `@` mentions an agent; every Claude agent's
+  turn carries one tool, `ask`, that messages another agent in its own
+  thread, with the exchange shown in both), Reading holds the Daily
   Brief and the Feed (what the producers found, with images, and Discuss
   opening the Watch agent), Focus is embedded through a proxy, Goals
   reads the vault's priorities with add and edit going through the
   Second brain agent, Health holds Settings (the default model and effort,
   which agent receives the brief) and lists the launchd jobs and their
-  state (the code still calls them routines). The design for what comes next (the
-  Assistant agent, delegation between agents, routines as scheduled
-  prompts, models, Ideas) is
+  state (the code still calls them routines). The design (the Assistant as the pinned
+  agent, delegation, models, and what comes next: routines as scheduled
+  prompts, Ideas) is
   `thoughts/shared/plans/2026-09-30-assistant-system-design.md`. The app
   README and `docs/operations.md` hold routes, snapshot shape, helpers, and
   setup.
@@ -73,7 +76,7 @@ contribution per domain) are code words until they are renamed.
 1. `thoughts/shared/lanes/assistant/handoff.md`: the system and its
    interface. Current state, decisions, and what is next. The design it
    builds toward is `thoughts/shared/plans/2026-09-30-assistant-system-design.md`;
-   its sixteen decisions are settled and its behaviors B1 to B18 are what
+   its twenty decisions are settled and its behaviors B1 to B22 are what
    plans and issues cite. Routines there means scheduled prompts to an
    agent; the launchd jobs are "jobs" and live in Health.
 2. `thoughts/shared/lanes/daily-brief/handoff.md`: the brief. Scheduled since
