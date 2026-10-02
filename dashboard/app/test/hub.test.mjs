@@ -736,9 +736,48 @@ test('a thread\'s own choice beats the agent and system levels, field by field, 
   assert.deepEqual(view('ops'), { id: 'opus', effort: 'max', source: 'thread', default: { id: 'opus', effort: 'low' } });
   assert.deepEqual(hub.modelFor('ops'), { id: 'opus', effort: 'max' });
 
+  // The model line is bookkeeping: the row keeps the thread's real last
+  // message, as the hub's lastMessage, and the view still moves.
+  adapter.emit({ type: 'message', agentId: 'cfo', at: 'b', role: 'assistant', text: 'Cash is fine.' });
+  assert.deepEqual(hub.snapshot().agents.find((a) => a.id === 'cfo').lastMessage, { role: 'assistant', text: 'Cash is fi', at: 'b' });
+  choices = { ...choices, cfo: { id: 'sonnet', effort: null } };
+  adapter.emit({ type: 'message', agentId: 'cfo', at: 'c', role: 'system', kind: 'model', model: 'sonnet', effort: null, text: 'Now on Sonnet.' });
+  assert.deepEqual(hub.snapshot().agents.find((a) => a.id === 'cfo').lastMessage, { role: 'assistant', text: 'Cash is fi', at: 'b' });
+  assert.deepEqual(view('cfo'), { id: 'sonnet', effort: 'low', source: 'thread', default: { id: 'sonnet', effort: 'low' } });
+
   // New thread drops the choice; the idle boundary recomputes the view.
   choices = { cfo: null, ops: null };
   adapter.emit({ type: 'thread.state', agentId: 'cfo', at: 'a', state: 'idle' });
   assert.deepEqual(view('cfo'), { id: 'sonnet', effort: 'low', source: 'system', default: { id: 'sonnet', effort: 'low' } });
+  hub.close();
+});
+
+test('at start, lastMessage skips bookkeeping lines at the end of the cache and keeps the brief notice and New thread', async () => {
+  const cached = (messages) => makeHub({ adapters: { claude: fakeAdapter() }, store: { read: async () => messages } });
+  let { hub } = cached([
+    { role: 'assistant', text: 'Cash is fine.', at: 'a' },
+    { role: 'system', kind: 'model', model: 'sonnet', effort: null, text: 'Now on Sonnet.', at: 'b' },
+    { role: 'system', kind: 'model', model: null, effort: null, text: "Back to the agent's default.", at: 'c' },
+  ]);
+  await hub.start();
+  assert.deepEqual(persona(hub).lastMessage, { role: 'assistant', text: 'Cash is fi', at: 'a' });
+  hub.close();
+
+  ({ hub } = cached([{ role: 'system', kind: 'model', model: 'sonnet', effort: null, text: 'Now on Sonnet.', at: 'a' }]));
+  await hub.start();
+  assert.equal(persona(hub).lastMessage, null);
+  hub.close();
+
+  ({ hub } = cached([
+    { role: 'system', kind: 'brief', summary: 'Short.', text: 'A long memo', at: 'a' },
+    { role: 'system', kind: 'model', model: 'haiku', effort: null, text: 'Now on Haiku.', at: 'b' },
+  ]));
+  await hub.start();
+  assert.deepEqual(persona(hub).lastMessage, { role: 'system', text: 'Short.', at: 'a' });
+  hub.close();
+
+  ({ hub } = cached([{ role: 'system', text: 'New thread', at: 'a' }, { role: 'system', kind: 'model', model: 'opus', effort: null, text: 'Now on Opus.', at: 'b' }]));
+  await hub.start();
+  assert.deepEqual(persona(hub).lastMessage, { role: 'system', text: 'New thread', at: 'a' });
   hub.close();
 });

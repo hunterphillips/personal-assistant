@@ -1045,12 +1045,13 @@
     }
 
     // Fetches the thread when the selected persona's or Codex session's
-    // thread may have changed: a new selection, a new last message, or a
-    // turn that ended. `force` fetches it again regardless, for Retry.
+    // thread may have changed: a new selection, a new last message, a
+    // model change (its line is not the last message), or a turn that
+    // ended. `force` fetches it again regardless, for Retry.
     function syncThread(force) {
       var agent = selectedAgent();
       if (!hasThread(agent) || agent.state === 'unavailable') return;
-      var key = agent.id + '|' + JSON.stringify(agent.lastMessage) + '|' + (turnOpen(agent) ? 'open' : 'closed');
+      var key = agent.id + '|' + JSON.stringify(agent.lastMessage) + '|' + JSON.stringify(agent.model || null) + '|' + (turnOpen(agent) ? 'open' : 'closed');
       if (key === threadKey && !force) return;
       threadKey = key;
       fetchThread(agent);
@@ -1273,13 +1274,16 @@
       closeModelMenu(false);
     }
 
-    // Posts the thread's choice; the snapshot brings the new pair and the
-    // thread line. The picker closes on a choice and the button keeps focus.
+    // Posts the thread's choice; the snapshot brings the new pair, and the
+    // thread is fetched again for its line, which the row preview does not
+    // carry. The picker closes on a choice and the button keeps focus.
     function chooseModel(body) {
       var agent = selectedAgent();
       if (!isPersona(agent) || modelButton.disabled) return;
       closeModelMenu(true);
-      act(agent, 'model', body);
+      act(agent, 'model', body, function (ok) {
+        if (ok) syncThread(true);
+      });
     }
 
     function sendMessage() {

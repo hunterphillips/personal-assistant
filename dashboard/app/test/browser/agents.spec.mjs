@@ -1090,7 +1090,9 @@ test.describe('with a model picker under the composer', () => {
     await expect(messages(page)).toHaveCount(3);
     await expect(messages(page).nth(2)).toHaveText(/^Now on Sonnet\./);
     await expect(messages(page).nth(2)).toHaveClass(/thread-message-system/);
-    await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('Now on Sonnet.');
+    // The row keeps the thread's real last message; the line is bookkeeping.
+    await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('Cash is fine.');
+    await expect(row(page, 'CFO').locator('.agent-row-time')).toHaveText('12 minutes ago');
     expect(hub.requests('/api/agents/cfo/model')).toEqual([{ method: 'POST', status: 200 }]);
     expect(hub.personas.calls).toEqual([['setModel', 'cfo', { model: 'sonnet' }]]);
 
@@ -1107,6 +1109,7 @@ test.describe('with a model picker under the composer', () => {
     await page.reload();
     await expect(button(page)).toHaveText('Sonnet · Low');
     await expect(messages(page)).toHaveCount(4);
+    await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('Cash is fine.');
 
     await button(page).click();
     await page.locator('#agent-model-reset').click();

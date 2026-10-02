@@ -633,7 +633,10 @@ events. Each persona in `agents` carries:
   object, never cut, so every question and option is there to answer.
 - `lastMessage`: null, or `{ role, text, at }` with the first 200
   characters (a brief notice's `summary` stands in for its text). At
-  startup it comes from the thread cache.
+  startup it comes from the thread cache. A bookkeeping line (a system
+  message with a `kind` other than `brief`, such as the model line) never
+  becomes it, on an event or at startup: the row keeps the thread's real
+  last message.
 - `lastError`: null, or why the last turn failed or why the persona is
   unavailable: `provider_unavailable` (its provider runs no personas; a
   `codex` persona stays unavailable, since Codex threads are followed as

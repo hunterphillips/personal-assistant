@@ -135,7 +135,7 @@
 //     For each registry persona whose provider has an adapter in `adapters`,
 //     awaits adapter.start(agent) and seeds state, pending, lastError, and
 //     costUsd from adapter.state(id), and lastMessage from the last message
-//     in store.read(id). Until then a persona is 'unavailable' with
+//     in store.read(id) that is not a bookkeeping line (below). Until then a persona is 'unavailable' with
 //     lastError null. A persona with no adapter for its provider stays
 //     'unavailable' with lastError `adaptersDisabled` when given, else
 //     'provider_unavailable'; one whose start rejects is 'unavailable' with
@@ -145,7 +145,10 @@
 //     error message). Never rejects.
 //     Adapter events then update the entry: thread.state -> state (and
 //     lastError and costUsd from adapter.state, which the adapter clears
-//     without an event); message -> lastMessage; request -> pending;
+//     without an event); message -> lastMessage, except a bookkeeping
+//     line (a system message with a `kind` other than `brief`, such as
+//     setModel's `model` line), which leaves the thread's real last
+//     message in place; request -> pending;
 //     resolved -> pending null; usage -> costUsd; error -> lastError.
 //
 //   persona(id) -> { agent, adapter } | null
@@ -325,7 +328,7 @@ export function createHub({
     if (!store) return null;
     try {
       const messages = await store.read(agentId);
-      const last = messages.at(-1);
+      const last = messages.findLast(updatesPreview);
       return last ? preview(last, limits) : null;
     } catch (error) {
       log({ event: 'thread_cache_error', agentId, error: error?.message ?? String(error) });
@@ -372,7 +375,7 @@ export function createHub({
         break;
       }
       case 'message':
-        entry.lastMessage = preview(event, limits);
+        if (updatesPreview(event)) entry.lastMessage = preview(event, limits);
         break;
       case 'request':
         entry.pending = projectRequest(event, limits);
@@ -544,7 +547,7 @@ export function createHub({
       await store.append(agentId, record);
       const entry = personas.get(agentId);
       if (entry && !closed) {
-        entry.lastMessage = preview(record, limits);
+        if (updatesPreview(record)) entry.lastMessage = preview(record, limits);
         commitAgents();
       }
       return record;
@@ -771,6 +774,15 @@ function codexStatus(adapters, adaptersDisabled) {
   if (status?.available === true) return { available: true };
   const reason = typeof status?.reason === 'string' && STATE_WORD.test(status.reason) ? status.reason : 'unknown';
   return { available: false, reason };
+}
+
+// Whether a message becomes the snapshot's lastMessage. A bookkeeping line
+// (a system message with a `kind` other than `brief`: the model line, and
+// any later line the daemon writes about the thread) does not, so the row
+// keeps the thread's real last message. The brief notice and the plain
+// 'New thread' line do.
+function updatesPreview(message) {
+  return !(message?.role === 'system' && typeof message.kind === 'string' && message.kind !== 'brief');
 }
 
 // The snapshot's lastMessage: a message's summary when it carries one (a
