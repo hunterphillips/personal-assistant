@@ -20,6 +20,7 @@
       "kind": "persona",
       "cwd": "/Users/hunterphillips/workspace/work/investing/cfo",
       "provider": "claude",
+      "model": "opus",
       "routines": [
         "com.hunter.cfo.daily"
       ]
