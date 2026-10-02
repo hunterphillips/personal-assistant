@@ -63,8 +63,9 @@
 // Events, each { type, agentId, at, ...fields }:
 //   thread.state { state }
 //   message      { role, text, truncated? }
-//   request      { requestId, kind: 'question' | 'approval', toolName, input }
-//   resolved     { requestId, outcome }
+//   request      { requestId, kind: 'question' | 'approval', toolName, input,
+//                  from, chain }  the turn's sender and exchange (claude.mjs)
+//   resolved     { requestId, outcome, from, chain }
 //   usage        { usage, costUsd, denials }
 //   error        { message }
 //

@@ -380,12 +380,17 @@ function controlledRoutines({ items = [], focusAvailable = null, refreshedAt = n
 // persona seeded with `delegate: { to, text }` instead asks that agent
 // through the delegation service on each turn that is the user's own
 // (context.from absent) and replies with what the tool answered, as a
-// model that repeats the tool's text would. answer() resolves the pending
-// request and continues the turn the same way.
+// model that repeats the tool's text would; with `raise: { kind, toolName,
+// input }` on that seed, the receiver raises that request on arrival and
+// replies only once it is answered. answer() resolves the pending
+// request and continues the turn the same way. The open turn's `from` and
+// `chain` are kept on the entry and stamped on every request and resolved
+// event, as the real adapter does, so the real hub relays the card.
 // Controls on the returned object:
 //   hold(id)                       later turns stay busy until reply()
 //   reply(id, text)                ends the open turn with that reply
 //   raise(id, { kind, toolName, input })  puts the busy persona on a request
+//                                  (stamped with the open turn's from and chain)
 //   fail(id, message)              ends the open turn with an error
 //   say(id, text)                  adds assistant text to the open turn without ending it
 //   calls                          [['send', id, text], ['answer', id, requestId, answer], ...]
@@ -412,6 +417,9 @@ export function fakePersonas(seed, store) {
         costUsd: initial.costUsd ?? null,
         model: initial.model ? { id: initial.model.id ?? null, effort: initial.model.effort ?? null } : null,
         turn: null,
+        // The open turn's sender and exchange, stamped on what it raises.
+        from: null,
+        chain: [],
       });
     }
     return entries.get(id);
@@ -476,6 +484,16 @@ export function fakePersonas(seed, store) {
     if (entry(id).state === 'busy' && !held.has(id)) await finish(id, outcome.text);
   }
 
+  // A request on the persona's open turn, stamped with the turn's sender
+  // and chain as the real adapter stamps it.
+  function raise(id, request) {
+    const current = entry(id);
+    current.pending = { requestId: `req-${nextRequest++}`, at: at(), from: current.from, chain: [...current.chain], ...request };
+    setState(id, 'waiting');
+    emit('request', id, current.pending);
+    return current.pending.requestId;
+  }
+
   const adapter = {
     kind: 'claude',
     async start(agent) {
@@ -501,14 +519,20 @@ export function fakePersonas(seed, store) {
       if (current.state === 'busy' || current.state === 'waiting') return Promise.reject(new RuntimeError('busy'));
       const ended = new Promise((resolve) => { current.turn = resolve; });
       current.lastError = null;
+      current.from = typeof context.from === 'string' && context.from !== '' ? context.from : null;
+      current.chain = Array.isArray(context.chain) ? [...context.chain] : [];
       setState(agent.id, 'busy');
       const fields = {
-        ...(typeof context.from === 'string' && context.from !== '' ? { from: context.from } : {}),
+        ...(current.from ? { from: current.from } : {}),
         ...(Array.isArray(context.mentions) && context.mentions.length > 0 ? { mentions: [...context.mentions] } : {}),
       };
       const delegate = seed[agent.id]?.delegate;
+      // A sender's delegate seed may say what the receiver raises on
+      // arrival; the receiver then waits for the answer before replying.
+      const raised = current.from ? seed[current.from]?.delegate : null;
       say(agent.id, 'user', text, fields).then(() => {
-        if (delegate && !context.from) return delegateTurn(agent.id, delegate, context);
+        if (delegate && !current.from) return delegateTurn(agent.id, delegate, context);
+        if (raised && raised.to === agent.id && raised.raise) return raise(agent.id, raised.raise);
         return continueTurn(agent.id, text);
       });
       return ended;
@@ -521,7 +545,7 @@ export function fakePersonas(seed, store) {
       const current = entry(agent.id);
       if (!current.pending || current.pending.requestId !== requestId) throw new RuntimeError('no_such_request');
       current.pending = null;
-      emit('resolved', agent.id, { requestId, outcome: 'answered' });
+      emit('resolved', agent.id, { requestId, outcome: 'answered', from: current.from, chain: [...current.chain] });
       setState(agent.id, 'busy');
       continueTurn(agent.id, 'answered');
     },
@@ -531,7 +555,7 @@ export function fakePersonas(seed, store) {
       if (current.pending) {
         const { requestId } = current.pending;
         current.pending = null;
-        emit('resolved', agent.id, { requestId, outcome: 'interrupted' });
+        emit('resolved', agent.id, { requestId, outcome: 'interrupted', from: current.from, chain: [...current.chain] });
       }
       setState(agent.id, 'idle');
       endTurn(agent.id);
@@ -573,13 +597,7 @@ export function fakePersonas(seed, store) {
     hold: (id) => held.add(id),
     reply: (id, text) => finish(id, text),
     say: (id, text) => say(id, 'assistant', text),
-    raise(id, request) {
-      const current = entry(id);
-      current.pending = { requestId: `req-${nextRequest++}`, at: at(), ...request };
-      setState(id, 'waiting');
-      emit('request', id, current.pending);
-      return current.pending.requestId;
-    },
+    raise,
     fail(id, message) {
       const current = entry(id);
       current.lastError = message;

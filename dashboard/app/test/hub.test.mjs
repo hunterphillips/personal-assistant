@@ -102,7 +102,7 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
   assert.deepEqual(snapshot.agents, [
     {
       id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
-      provider: 'claude', state: 'unavailable', pending: null, lastMessage: null, lastError: null, costUsd: null, lastLineAt: null,
+      provider: 'claude', state: 'unavailable', pending: null, forwarded: [], lastMessage: null, lastError: null, costUsd: null, lastLineAt: null,
       model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } }, accepts: null,
     },
   ]);
@@ -408,7 +408,7 @@ test('start seeds a persona from its adapter and the last cached message', async
   assert.deepEqual(adapter.calls, [['start', 'cfo']]);
   assert.deepEqual(persona(hub), {
     id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
-    provider: 'claude', state: 'error', pending: null, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
+    provider: 'claude', state: 'error', pending: null, forwarded: [], lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
     lastError: 'Invented failure', costUsd: 0.5, lastLineAt: null,
     model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } }, accepts: null,
   });

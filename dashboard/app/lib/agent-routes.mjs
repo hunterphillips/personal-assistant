@@ -2,6 +2,11 @@
 //   POST send        { text } -> 202 { ok: true } once the adapter accepts the
 //                    turn; the handler never waits for the turn itself.
 //   POST answer      { requestId, answers } or { requestId, decision } -> 200
+//                    for the agent's own request, or one forwarded to this
+//                    thread (hub.requestOwner names the owner after the
+//                    agent's own adapter refuses no_such_request; the
+//                    owner's adapter settles it). An owner no longer
+//                    started is 409 no_such_request like any stale card.
 //   POST interrupt   bodyless -> 200; the abort is not awaited
 //   POST model       { model?, effort? } -> 200 { ok, model: { id, effort, source } }
 //                    the thread's own choice for its next turns; a key
@@ -178,7 +183,7 @@ export function createAgentRoutes({ hub, store = null, cmux = null, registry = n
     sendJson(res, 200, { ok: true, model: view ? { id: view.id, effort: view.effort, source: view.source } : null });
   }
 
-  async function serveAnswer(req, res, id, target) {
+  async function serveAnswer(req, res, id, target, forwarded = false) {
     const body = await readJsonBody(req, { limit: bodyBytes() });
     const keys = isRecord(body) ? Object.keys(body).sort().join() : '';
     const validShape = (keys === 'answers,requestId' || keys === 'decision,requestId') &&
@@ -189,7 +194,17 @@ export function createAgentRoutes({ hub, store = null, cmux = null, registry = n
     try {
       await adapter.answer(agent, body.requestId, answer);
     } catch (error) {
-      throw runtimeRefusal(error);
+      // Not this agent's: a card forwarded to its thread is answered
+      // through the owner's adapter, which settles it for both threads.
+      const owner = forwarded && error?.code === 'no_such_request' ? hub.requestOwner(id, body.requestId) : null;
+      if (!owner) throw runtimeRefusal(error);
+      const persona = hub.persona(owner);
+      if (!persona) throw new HttpError(409, 'no_such_request');
+      try {
+        await persona.adapter.answer(persona.agent, body.requestId, answer);
+      } catch (ownerError) {
+        throw runtimeRefusal(ownerError);
+      }
     }
     sendJson(res, 200, { ok: true });
   }
@@ -211,6 +226,9 @@ export function createAgentRoutes({ hub, store = null, cmux = null, registry = n
     } catch (error) {
       throw runtimeRefusal(error);
     }
+    // Cards forwarded to the old thread go with it; they stay answerable
+    // in their owners' threads.
+    hub.dropRelaysTo(id);
     sendJson(res, 200, { ok: true });
   }
 
@@ -262,7 +280,7 @@ export function createAgentRoutes({ hub, store = null, cmux = null, registry = n
       case 'model':
         return serveModel(req, res, id);
       case 'answer':
-        return serveAnswer(req, res, id, target);
+        return serveAnswer(req, res, id, target, !session);
       case 'interrupt':
         return serveInterrupt(res, id, target);
       case 'new-thread':

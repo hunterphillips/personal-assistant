@@ -64,6 +64,7 @@
   var SESSION_ID = /^(?:codex|claude):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
   var NO_SESSIONS = 'No coding sessions. Start the Codex server or open a terminal in cmux.';
   var TERMINAL_ONLY = 'Answer this one in the terminal.';
+  var FORWARDED_NOTE = 'Asked while answering you.';
   var UNBOUND = 'This thread was not started with codex-new, so its terminal is not known.';
   var TERMINAL_CLOSED = 'That terminal is closed.';
   var TICK_MS = 60000;
@@ -539,6 +540,8 @@
       return agent.state === 'busy' ? { text: 'Working', tone: 'muted' } : null;
     }
     if (!hasThread(agent)) return null;
+    // A card forwarded here is answerable here, whatever the agent's own turn is doing.
+    if (agent.state !== 'waiting' && isPersona(agent) && Array.isArray(agent.forwarded) && agent.forwarded.length > 0) return { text: 'Waiting for you', tone: 'wait' };
     switch (agent.state) {
       case 'waiting': return { text: 'Waiting for you', tone: 'wait' };
       case 'busy': return { text: 'Working', tone: 'muted' };
@@ -668,6 +671,27 @@
     var menuKey = null; // what the picker was last built from
     var mention = null; // the open @ picker: { start, candidates, index }, or null
     var tick = null;
+
+    // The listed agent with this id, or null.
+    function agentById(id) {
+      var agents = (state && state.agents) || [];
+      for (var i = 0; i < agents.length; i += 1) if (agents[i].id === id) return agents[i];
+      return null;
+    }
+
+    // The card the thread shows: the agent's own request while it waits,
+    // else the oldest request forwarded here (raised by another agent
+    // while answering a delegation that started in this thread). `owner`
+    // is the agent whose request it is.
+    function shownRequest(agent) {
+      if (!agent || !hasThread(agent)) return null;
+      if (agent.state === 'waiting' && agent.pending) return { pending: agent.pending, owner: agent, forwarded: false };
+      if (isPersona(agent) && Array.isArray(agent.forwarded) && agent.forwarded.length > 0) {
+        var card = agent.forwarded[0];
+        return { pending: card, owner: agentById(card.agent) || { id: card.agent, name: card.agent }, forwarded: true };
+      }
+      return null;
+    }
 
     // The open agent or session, or null.
     function selectedAgent() {
@@ -1063,8 +1087,10 @@
     }
 
     function renderRequest(agent) {
-      var pending = hasThread(agent) && agent.state === 'waiting' ? agent.pending : null;
-      var key = pending ? agent.id + '|' + pending.requestId : '';
+      var shown = shownRequest(agent);
+      var pending = shown ? shown.pending : null;
+      var owner = shown ? shown.owner : agent;
+      var key = pending ? agent.id + '|' + pending.requestId + '|' + (shown.forwarded ? pending.agent : '') : '';
       if (request.getAttribute('data-request') === key) {
         setRequestBusy();
         return;
@@ -1076,8 +1102,9 @@
       var native = pending.native === true;
       if (pending.kind === 'approval') {
         var card = element('section', 'request-card');
-        card.appendChild(element('h3', 'request-title', approvalTitle(agent, pending)));
-        card.appendChild(approvalDetails(agent, pending) || element('pre', 'request-input', formatInput(pending)));
+        card.appendChild(element('h3', 'request-title', approvalTitle(owner, pending)));
+        if (shown.forwarded) card.appendChild(element('p', 'request-note', FORWARDED_NOTE));
+        card.appendChild(approvalDetails(owner, pending) || element('pre', 'request-input', formatInput(pending)));
         if (pending.truncated) card.appendChild(element('p', 'request-note', 'Input cut short.'));
         if (native) {
           card.appendChild(element('p', 'request-note', TERMINAL_ONLY));
@@ -1092,6 +1119,12 @@
         var questions = questionsOf(pending);
         for (var i = 0; i < questions.length; i += 1) {
           if (questions[i] && typeof questions[i].question === 'string') request.appendChild(questionCard(questions[i], i));
+        }
+        if (shown.forwarded) {
+          var firstHead = request.querySelector('.request-head');
+          var note = element('p', 'request-note', FORWARDED_NOTE);
+          if (firstHead) firstHead.parentNode.insertBefore(note, firstHead.nextSibling);
+          else request.insertBefore(note, request.firstChild);
         }
         if (native) {
           request.appendChild(element('p', 'request-note', TERMINAL_ONLY));
@@ -1616,10 +1649,15 @@
       notice.textContent = failed ? errorSentence(agent) : '';
       notice.hidden = !failed;
 
-      var open = hasThread(agent) && turnOpen(agent);
+      // The status line stays up while a forwarded card is open, naming
+      // its owner; Interrupt is for this agent's own turn only.
+      var shown = shownRequest(agent);
+      var forwardedOpen = !!(shown && shown.forwarded);
+      var open = hasThread(agent) && (turnOpen(agent) || forwardedOpen);
       status.hidden = !open;
-      statusText.textContent = !open ? '' : agent.state === 'busy' ? name + ' is working.' : name + ' is waiting for you.';
+      statusText.textContent = !open ? '' : forwardedOpen ? displayName(shown.owner) + ' is waiting for you.' : agent.state === 'busy' ? name + ' is working.' : name + ' is waiting for you.';
       var interrupt = status.querySelector('button');
+      interrupt.hidden = !turnOpen(agent);
       interrupt.disabled = busy;
 
       renderRequest(agent);
@@ -1924,10 +1962,12 @@
       });
     }
 
-    function answerQuestion(agent) {
+    // Answers post to the open thread; the daemon settles a forwarded
+    // card through its owner.
+    function answerQuestion(agent, card) {
       var answers = collectAnswers();
       if (!answers) return;
-      act(agent, 'answer', { requestId: agent.pending.requestId, answers: answers }, focusComposer);
+      act(agent, 'answer', { requestId: card.requestId, answers: answers }, focusComposer);
     }
 
     function toggleOption(node) {
@@ -1958,17 +1998,18 @@
       var node = target.closest && target.closest('button[data-agent-action]');
       if (!node || node.disabled) return;
       var agent = selectedAgent();
+      var shown = shownRequest(agent);
       switch (node.getAttribute('data-agent-action')) {
         case 'choose':
           toggleOption(node);
           break;
         case 'answer':
-          if (agent && agent.pending) answerQuestion(agent);
+          if (shown) answerQuestion(agent, shown.pending);
           break;
         case 'allow':
         case 'deny':
-          if (agent && agent.pending) {
-            act(agent, 'answer', { requestId: agent.pending.requestId, decision: node.getAttribute('data-agent-action') }, focusComposer);
+          if (shown) {
+            act(agent, 'answer', { requestId: shown.pending.requestId, decision: node.getAttribute('data-agent-action') }, focusComposer);
           }
           break;
         case 'interrupt':

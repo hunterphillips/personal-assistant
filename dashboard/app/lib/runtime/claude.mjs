@@ -56,7 +56,9 @@
 //     state was already idle, so views can reset the thread.
 //   state(agentId) -> { state, pending, lastError, sessionId, costUsd, cwd, model }
 //     state: 'idle' | 'busy' | 'waiting' | 'error'; pending is the oldest
-//     open request ({ requestId, kind, toolName, input, at }) or null;
+//     open request ({ requestId, kind, toolName, input, at, from, chain },
+//     from and chain as the turn was sent with: null and [] for Hunter's
+//     own turn) or null;
 //     costUsd is the last total_cost_usd seen, a running session total; cwd
 //     is the folder the thread is pinned to (null before the first start);
 //     model is the thread's own choice { id, effort } (either may be null)
@@ -81,9 +83,14 @@
 //                                           { kind: 'model', model, effort });
 //                                           text is bounded to
 //                                           limits.messageTextBytes
-//   request      { requestId, kind: 'question' | 'approval', toolName, input }
+//   request      { requestId, kind: 'question' | 'approval', toolName, input,
+//                  from, chain }           from and chain are the turn's (the
+//                                           sender's id and the exchange so
+//                                           far; null and [] for Hunter's own
+//                                           turn), so the hub can show the
+//                                           card where the exchange started
 //   resolved     { requestId, outcome: 'answered' | 'allowed' | 'denied' |
-//                  'expired' | 'interrupted' }
+//                  'expired' | 'interrupted', from, chain }
 //   usage        { usage, costUsd, denials } from the result message
 //   error        { message }
 // A listener that throws is logged as { event: 'runtime_listener_error' }
@@ -388,14 +395,14 @@ export function createClaudeAdapter({
         const onAbort = () => pending.settle('interrupted', { behavior: 'deny', message: INTERRUPTED });
         const pending = {
           settled: false,
-          request: { requestId, kind, toolName, input, at: now().toISOString() },
+          request: { requestId, kind, toolName, input, at: now().toISOString(), from: turn.from ?? null, chain: [...turn.chain] },
           settle(outcome, result) {
             if (pending.settled) return;
             pending.settled = true;
             clearTimeout(timer);
             for (const signal of signals) signal.removeEventListener('abort', onAbort);
             entry.pending.delete(requestId);
-            emit('resolved', entry.agentId, { requestId, outcome });
+            emit('resolved', entry.agentId, { requestId, outcome, from: turn.from ?? null, chain: [...turn.chain] });
             if (entry.pending.size === 0 && entry.turn === turn && !turn.aborted && !turn.ending) setState(entry, 'busy');
             resolve(result);
           },
@@ -405,7 +412,7 @@ export function createClaudeAdapter({
           pending.settle('expired', { behavior: 'deny', message: `No answer within ${formatDuration(timeouts.requestMaxAgeMs)}` });
         }, timeouts.requestMaxAgeMs);
         for (const signal of signals) signal.addEventListener('abort', onAbort, { once: true });
-        emit('request', entry.agentId, { requestId, kind, toolName, input });
+        emit('request', entry.agentId, { requestId, kind, toolName, input, from: turn.from ?? null, chain: [...turn.chain] });
         setState(entry, 'waiting');
         if (signals.some((signal) => signal.aborted)) onAbort();
       });

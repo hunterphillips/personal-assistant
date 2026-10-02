@@ -46,7 +46,8 @@
 //     synchronous busy refusal posts a 'busy' line. The receiver's events
 //     are followed from before the send until its turn ends: assistant
 //     text is the reply; a request posts one 'waiting' line to the
-//     sender's thread (the card lives in the receiver's thread only). When
+//     sender's thread (the hub relays the card itself to the thread the
+//     exchange started in, hub.mjs `forwarded`). When
 //     the turn ends within timeouts.delegationWaitMs the 'finished' line
 //     (text: the reply, summary: its first sentence; the client prefixes
 //     "<name> replied:") or the 'failed' line posts and the tool gets the

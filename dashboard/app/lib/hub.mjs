@@ -155,6 +155,26 @@
 //     setModel's `model` line), which leaves the thread's real last
 //     message in place; request -> pending;
 //     resolved -> pending null; usage -> costUsd; error -> lastError.
+//     A request whose `chain[0]` is another started persona (it was
+//     raised while answering a delegation) is also relayed: the hub keeps
+//     { origin: chain[0], owner, from, chain } by requestId and lists the
+//     request, projected as `pending` is plus `agent` (the owner's id), in
+//     the origin's `forwarded`, oldest first. The origin's state and
+//     pending are untouched. The relay is dropped on the request's
+//     `resolved` (any outcome, and even when the owner's entry is gone),
+//     when the registry drops the owner or the origin, when the owner's
+//     thread.state turns error, and by dropRelaysTo. A request whose
+//     origin has no entry is not relayed and is logged relay_dropped.
+//
+//   requestOwner(agentId, requestId) -> agentId | null
+//     The owner of a request forwarded to agentId's thread, or null (an
+//     agent's own requests are its adapter's business). The answer route
+//     asks after the agent's own adapter refuses no_such_request.
+//
+//   dropRelaysTo(agentId)
+//     Drops every relay whose origin is agentId and empties its
+//     `forwarded`; the requests stay answerable in their owners' threads.
+//     The new-thread route calls it after a successful reset.
 //
 //   persona(id) -> { agent, adapter } | null
 //     The registry agent (with cwd) and its adapter, for a started persona.
@@ -290,6 +310,7 @@ export function createHub({
       if (!agent || agent.provider !== entry.agent.provider) {
         clearTimeout(entry.timer);
         personas.delete(id);
+        dropRelaysWhere((relay) => relay.owner === id || relay.origin === id);
       } else {
         if (agent.cwd !== entry.agent.cwd) log({ event: 'persona_cwd_changed', agentId: id });
         entry.agent = agent;
@@ -360,14 +381,52 @@ export function createHub({
     entry.timer.unref?.();
   }
 
+  // Relays: requestId -> { origin, owner, from, chain } for every open
+  // request raised while answering a delegation, mirrored in the origin
+  // entry's `forwarded`. The header describes when each is dropped.
+  const relays = new Map();
+
+  function dropRelaysWhere(matches) {
+    let changed = false;
+    for (const [requestId, relay] of relays) {
+      if (!matches(relay, requestId)) continue;
+      relays.delete(requestId);
+      const origin = personas.get(relay.origin);
+      if (origin) origin.forwarded = origin.forwarded.filter((item) => item.requestId !== requestId);
+      changed = true;
+    }
+    return changed;
+  }
+
+  function relayRequest(entry, event) {
+    const origin = Array.isArray(event.chain) ? event.chain[0] : undefined;
+    if (typeof origin !== 'string' || origin === '' || origin === entry.agent.id) return;
+    const target = personas.get(origin);
+    if (!target) {
+      log({ event: 'relay_dropped', agentId: entry.agent.id, origin, requestId: event.requestId });
+      return;
+    }
+    const projected = projectRequest(event, limits);
+    if (!projected) return;
+    relays.set(event.requestId, { origin, owner: entry.agent.id, from: event.from ?? null, chain: [...event.chain] });
+    target.forwarded = [...target.forwarded.filter((item) => item.requestId !== event.requestId), { ...projected, agent: entry.agent.id }];
+  }
+
   function onAdapterEvent(adapter, event) {
     if (closed) return;
+    // A settled request's relay goes even when its owner is no longer an
+    // entry, so the origin's card never outlives the request.
+    const relayDropped = event?.type === 'resolved' && dropRelaysWhere((_, requestId) => requestId === event.requestId);
     const entry = personas.get(event?.agentId);
     if (!entry) {
+      if (relayDropped) commitAgents();
       if (typeof adapter.sessions === 'function') commitSessions();
       return;
     }
-    if (!entry.ready || entry.adapter !== adapter) return;
+    if (!entry.ready || entry.adapter !== adapter) {
+      if (relayDropped) commitAgents();
+      return;
+    }
     switch (event.type) {
       case 'thread.state': {
         const previous = entry.state;
@@ -380,6 +439,7 @@ export function createHub({
           clearTimeout(entry.timer);
           entry.timer = null;
         }
+        if (event.state === 'error') dropRelaysWhere((item) => item.owner === entry.agent.id);
         break;
       }
       case 'message':
@@ -387,6 +447,7 @@ export function createHub({
         break;
       case 'request':
         entry.pending = projectRequest(event, limits);
+        relayRequest(entry, event);
         break;
       case 'resolved':
         if (entry.pending?.requestId === event.requestId) {
@@ -542,6 +603,16 @@ export function createHub({
       return { agent: entry.agent, adapter: entry.adapter };
     },
 
+    requestOwner(agentId, requestId) {
+      const relay = relays.get(requestId);
+      return relay && relay.origin === agentId ? relay.owner : null;
+    },
+
+    dropRelaysTo(agentId) {
+      if (closed) return;
+      if (dropRelaysWhere((relay) => relay.origin === agentId)) commitAgents();
+    },
+
     modelFor(agentId) {
       const agent = (registry.current()?.agents ?? []).find((item) => item.id === agentId);
       if (!agent || agent.kind !== 'persona' || agent.provider !== 'claude') return { id: null, effort: null };
@@ -594,7 +665,7 @@ export function createHub({
 
 function personaEntry(agent, adapter) {
   return {
-    agent, adapter, ready: false, state: 'unavailable', pending: null, lastMessage: null,
+    agent, adapter, ready: false, state: 'unavailable', pending: null, forwarded: [], lastMessage: null,
     lastError: null, costUsd: null, lastLineAt: null, timer: null,
   };
 }
@@ -673,6 +744,7 @@ function agentViews(current, personas, settingsState) {
     const entry = personas.get(agent.id);
     view.state = entry?.state ?? 'unavailable';
     view.pending = entry?.pending ?? null;
+    view.forwarded = entry ? entry.forwarded.map((item) => ({ ...item })) : [];
     view.lastMessage = entry?.lastMessage ?? null;
     view.lastError = entry?.lastError ?? null;
     view.costUsd = entry?.costUsd ?? null;
