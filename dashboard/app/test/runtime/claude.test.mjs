@@ -63,7 +63,7 @@ function gate() {
   return { promise, open };
 }
 
-async function setup(t, { query = simple(), timeouts = {}, limits = {} } = {}) {
+async function setup(t, { query = simple(), timeouts = {}, limits = {}, turnTools = null } = {}) {
   const dir = path.join(await tempDir(t), 'threads');
   const store = createThreadStore({ dir, limits: { ...LIMITS, ...limits } });
   const logs = [];
@@ -73,6 +73,7 @@ async function setup(t, { query = simple(), timeouts = {}, limits = {} } = {}) {
     config: { limits: { ...LIMITS, ...limits }, timeouts: { drainMs: 2_000, requestMaxAgeMs: 60_000, ...timeouts } },
     log: (entry) => logs.push(entry),
     now: () => new Date(AT),
+    turnTools,
   });
   const events = [];
   adapter.subscribe((event) => events.push(event));
@@ -820,4 +821,124 @@ test('send records who sent the text and whom it mentions, and the SDK gets the 
   const third = events.filter((event) => event.type === 'message' && event.role === 'user')[2];
   assert.equal('mentions' in third, false);
   assert.equal(query.calls[2].prompt, 'Third');
+});
+
+// The per-turn tools hook (delegation.mjs provides the real one).
+
+test('the tools hook adds mcpServers and allowedTools by name and cannot change anything else', async (t) => {
+  const server = { type: 'sdk', name: 'agents', instance: {} };
+  const seen = [];
+  const turnTools = (agent, context) => {
+    seen.push({ agent, context });
+    return {
+      mcpServers: { agents: server },
+      allowedTools: ['mcp__agents__ask'],
+      permissionMode: 'bypassPermissions',
+      canUseTool: null,
+      cwd: '/elsewhere',
+      resume: 'forged',
+      maxTurns: 999,
+    };
+  };
+  const { adapter, query } = await setup(t, { turnTools });
+  await adapter.send(AGENT, 'How is cash? @Brain', { mentions: ['brain'], chain: ['assistant'], from: 'assistant', prompt: 'From Assistant: How is cash? @Brain' });
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].agent, AGENT);
+  const { context } = seen[0];
+  assert.equal(context.text, 'How is cash? @Brain');
+  assert.equal(context.prompt, 'From Assistant: How is cash? @Brain');
+  assert.equal(context.from, 'assistant');
+  assert.deepEqual(context.chain, ['assistant']);
+  assert.deepEqual(context.mentions, ['brain']);
+  assert.match(context.turnId, /^[0-9a-f-]{36}$/);
+
+  const { options, prompt } = query.calls[0];
+  assert.equal(options.mcpServers.agents, server);
+  assert.deepEqual(options.allowedTools, ['mcp__agents__ask']);
+  assert.equal(options.permissionMode, 'default');
+  assert.equal(typeof options.canUseTool, 'function');
+  assert.equal(options.cwd, '/invented/cfo');
+  assert.equal('resume' in options, false);
+  assert.equal(options.maxTurns, LIMITS.turnMaxTurns);
+  // The adapter's prompt stands when the hook returns none.
+  assert.equal(prompt, 'From Assistant: How is cash? @Brain');
+
+  // A second turn gets a new turn id and an empty chain by default.
+  await adapter.send(AGENT, 'Again');
+  assert.notEqual(seen[1].context.turnId, seen[0].context.turnId);
+  assert.deepEqual(seen[1].context.chain, []);
+  assert.equal(seen[1].context.from, null);
+  assert.equal(seen[1].context.prompt, 'Again');
+});
+
+test('the tools hook may replace the prompt the model gets; the thread keeps the text', async (t) => {
+  const turnTools = () => ({ prompt: 'Replies that arrived since your last turn:\nFrom BRAIN (d-1): Three notes.\n\nWhat changed?' });
+  const { adapter, store, query } = await setup(t, { turnTools });
+  await adapter.send(AGENT, 'What changed?');
+  assert.equal(query.calls[0].prompt, 'Replies that arrived since your last turn:\nFrom BRAIN (d-1): Three notes.\n\nWhat changed?');
+  assert.equal('mcpServers' in query.calls[0].options, false);
+  assert.equal('allowedTools' in query.calls[0].options, false);
+  assert.equal((await store.read('cfo'))[0].text, 'What changed?');
+  // A blank hook prompt is ignored.
+  const blank = await setup(t, { turnTools: () => ({ prompt: '   ' }) });
+  await blank.adapter.send(AGENT, 'Plain');
+  assert.equal(blank.query.calls[0].prompt, 'Plain');
+});
+
+test('a tools hook that throws is logged and the turn runs without tools', async (t) => {
+  const turnTools = () => { throw new Error('invented hook failure'); };
+  const { adapter, events, logs, query } = await setup(t, { turnTools });
+  await adapter.send(AGENT, 'How is cash?');
+  assert.deepEqual(states(events), ['busy', 'idle']);
+  assert.equal(query.calls.length, 1);
+  assert.equal('mcpServers' in query.calls[0].options, false);
+  const logged = logs.find((entry) => entry.event === 'persona_tools_error');
+  assert.deepEqual(logged, { event: 'persona_tools_error', agentId: 'cfo', error: 'invented hook failure' });
+  assert.equal(events.some((event) => event.type === 'error'), false);
+});
+
+test('the hook result is committed once init is seen and rolled back when the turn never starts', async (t) => {
+  const settled = [];
+  const tools = () => ({ commit: () => settled.push('commit'), rollback: () => settled.push('rollback') });
+  const { adapter } = await setup(t, { turnTools: tools });
+  await adapter.send(AGENT, 'Fine turn');
+  assert.deepEqual(settled, ['commit']);
+
+  // A stream that fails before init: rolled back, once.
+  settled.length = 0;
+  const failing = fakeQuery(async function* () {
+    throw new Error('Claude Code process exited with code 127');
+  });
+  const broken = await setup(t, { query: failing, turnTools: tools });
+  await broken.adapter.send(AGENT, 'Continue');
+  assert.deepEqual(settled, ['rollback']);
+  assert.equal(broken.events.find((event) => event.type === 'error').message, 'The turn could not start. Retry; if it keeps failing, start a new thread.');
+
+  // A stream that fails before init while resuming: rolled back too.
+  settled.length = 0;
+  const resuming = fakeQuery(async function* ({ options }) {
+    options.stderr('No conversation found with session ID: session-0\n');
+    throw new Error('Claude Code process exited with code 1');
+  });
+  const resumed = await setup(t, { query: resuming, turnTools: tools });
+  await resumed.store.writePointer('cfo', { sessionId: 'session-0', createdAt: AT });
+  await resumed.adapter.send(AGENT, 'Continue');
+  assert.deepEqual(settled, ['rollback']);
+
+  // A turn that fails after init was committed and is not rolled back.
+  settled.length = 0;
+  const late = fakeQuery(async function* () {
+    yield init();
+    throw new Error('Claude Code process exited with code 1');
+  });
+  const afterInit = await setup(t, { query: late, turnTools: tools });
+  await afterInit.adapter.send(AGENT, 'Go');
+  assert.deepEqual(settled, ['commit']);
+
+  // A throwing commit is logged, not raised.
+  const noisy = await setup(t, { turnTools: () => ({ commit: () => { throw new Error('bad commit'); } }) });
+  await noisy.adapter.send(AGENT, 'Go');
+  assert.deepEqual(states(noisy.events), ['busy', 'idle']);
+  assert.ok(noisy.logs.some((entry) => entry.event === 'persona_tools_error' && entry.method === 'commit'));
 });

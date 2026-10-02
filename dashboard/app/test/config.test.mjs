@@ -129,6 +129,11 @@ test('persona limits and timeouts are exposed', () => {
   assert.equal(config.limits.messageTextBytes, 8192);
   assert.equal(config.limits.threadCacheMessages, 200);
   assert.equal(config.limits.threadCacheBytes, 1_048_576);
+  assert.equal(config.limits.delegationDepth, 2);
+  assert.equal(config.limits.delegationMessageChars, 4000);
+  assert.equal(config.limits.delegationReplyChars, 4000);
+  assert.equal(config.limits.delegationPendingReplies, 5);
+  assert.equal(config.timeouts.delegationWaitMs, 5_000);
 });
 
 test('the feed instructions path defaults beside the watch job and takes an override', () => {

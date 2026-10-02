@@ -5,7 +5,7 @@
 // The contract it implements, including the rule that refusals are decided
 // before the first await, is in adapter.mjs.
 //
-// createClaudeAdapter({ query, importSdk, store, config, log, now }) returns:
+// createClaudeAdapter({ query, importSdk, store, config, log, now, turnTools }) returns:
 //
 //   kind: 'claude'
 //   start(agent) -> Promise<{ threadId }>
@@ -14,7 +14,7 @@
 //     runs a query. Rejects with a RuntimeError 'sdk_unavailable' (its cause
 //     is the import error) if the SDK cannot be loaded, and with the fs
 //     error if the pointer file cannot be read.
-//   send(agent, text, { model, effort, from, mentions, prompt }) -> Promise<void>
+//   send(agent, text, { model, effort, from, mentions, prompt, chain }) -> Promise<void>
 //     Starts one turn. Refusals reject with a RuntimeError whose code is
 //     'busy' (a turn or New thread is in flight; decided synchronously, before
 //     any await, so two sends can never both reach query() and fork the
@@ -93,12 +93,14 @@
 // as resume, permissionMode 'default' (so a global mode such as auto never
 // applies), maxTurns from limits.turnMaxTurns, the turn's AbortController,
 // and canUseTool on every turn (without it the SDK drops AskUserQuestion).
-// send(agent, text, { model, effort, from, mentions, prompt }): `from` is the
+// send(agent, text, { model, effort, from, mentions, prompt, chain }): `from` is the
 // registry id of the agent that sent the text (absent for the user) and
 // `mentions` the ids it named with @; both are recorded on the user message
 // and carried by its event. `prompt`, when given, is what the SDK receives
 // in place of `text`, so the thread shows what was written while the model
-// gets the daemon's prefixed form (delegation.mjs). { model, effort } takes the resolved pair for this turn
+// gets the daemon's prefixed form (delegation.mjs). `chain` is the list of
+// agents the message passed through before the sender; it is not recorded,
+// only handed to the tools hook. { model, effort } takes the resolved pair for this turn
 // (hub.modelFor decides it from thread, agent, and system settings); each is
 // passed only when set, so null leaves Claude Code's own default in force.
 // A model the CLI rejects comes back as a result with is_error whose text
@@ -128,6 +130,21 @@
 // the SDK reports a failure while it winds down. Tools the repo's or the
 // user's allow rules cover, reads, and the Skill tool never reach
 // canUseTool, so they run without a card.
+//
+// Per-turn tools. With `turnTools` set, every turn calls
+// turnTools(agent, { text, prompt, from, chain, mentions, turnId }) before
+// query() and copies exactly these fields from its result by name, never
+// spreading it: `mcpServers` and `allowedTools` into the options (a later
+// phase adds `tools` here for a read-only chain), and `prompt` in place of
+// the text the model gets. A hook result cannot touch permissionMode,
+// canUseTool, cwd, resume, or anything else. A hook that throws is logged
+// as persona_tools_error and the turn runs without tools. The result may
+// carry commit() and rollback(): commit() runs once init has been seen
+// (the prompt reached the model), rollback() when the turn ends without
+// init (START_FAILED, RESUME_FAILED, an abort before the query), so the
+// hook can hand out replies it holds and take them back if the turn never
+// started (delegation.mjs). This hook is the one place a tool is attached
+// to a turn; the ask tool for agents lives behind it.
 
 import { randomUUID } from 'node:crypto';
 
@@ -155,7 +172,7 @@ const SUBSCRIPTION_SOURCES = new Set(['none', 'oauth']);
 const importClaudeSdk = () => import('@anthropic-ai/claude-agent-sdk');
 
 export function createClaudeAdapter({
-  query = null, importSdk = importClaudeSdk, store, config, log = () => {}, now = () => new Date(),
+  query = null, importSdk = importClaudeSdk, store, config, log = () => {}, now = () => new Date(), turnTools = null,
 }) {
   const { limits, timeouts } = config;
   const abortGraceMs = timeouts.abortGraceMs ?? TIMEOUTS.abortGraceMs;
@@ -268,10 +285,44 @@ export function createClaudeAdapter({
     emit('message', entry.agentId, message);
   }
 
+  // The hook's tools for this turn, or null. A hook that throws is logged
+  // and the turn runs without tools.
+  async function toolsForTurn(entry, agent, text, turn) {
+    if (typeof turnTools !== 'function') return null;
+    try {
+      const result = await turnTools(agent, {
+        text,
+        prompt: turn.prompt ?? text,
+        from: turn.from,
+        chain: [...turn.chain],
+        mentions: [...turn.mentions],
+        turnId: turn.id,
+      });
+      return isRecord(result) ? result : null;
+    } catch (error) {
+      log({ event: 'persona_tools_error', agentId: entry.agentId, error: bound(error?.message ?? String(error)) });
+      return null;
+    }
+  }
+
+  // commit() once the prompt reached the model, rollback() when it never
+  // did; each runs at most once and a throwing one is only logged.
+  function settleTools(entry, turn, method) {
+    const fn = turn.tools?.[method];
+    turn.toolsCommitted = true;
+    if (typeof fn !== 'function') return;
+    try {
+      fn();
+    } catch (error) {
+      log({ event: 'persona_tools_error', agentId: entry.agentId, method, error: bound(error?.message ?? String(error)) });
+    }
+  }
+
   // Returns a failure description when the message ends the turn in error.
   async function handleMessage(entry, turn, message) {
     if (message?.type === 'system' && message.subtype === 'init') {
       turn.initSeen = true;
+      if (!turn.toolsCommitted) settleTools(entry, turn, 'commit');
       log({
         event: 'persona_init',
         agentId: entry.agentId,
@@ -376,6 +427,8 @@ export function createClaudeAdapter({
       const run = await ensureQuery();
       if (!entry.loaded) await loadPointer(entry);
       if (turn.aborted) return;
+      turn.tools = await toolsForTurn(entry, agent, text, turn);
+      if (turn.aborted) return;
       resumed = Boolean(entry.sessionId);
       const options = {
         cwd: entry.cwd,
@@ -387,8 +440,13 @@ export function createClaudeAdapter({
         stderr: (data) => { turn.stderr = `${turn.stderr}${data}`.slice(-STDERR_MAX); },
         ...(turn.model ? { model: turn.model } : {}),
         ...(turn.effort ? { effort: turn.effort } : {}),
+        // Copied by name from the hook's result, never spread: the hook
+        // adds tools and nothing else.
+        ...(isRecord(turn.tools?.mcpServers) ? { mcpServers: turn.tools.mcpServers } : {}),
+        ...(Array.isArray(turn.tools?.allowedTools) ? { allowedTools: [...turn.tools.allowedTools] } : {}),
       };
-      for await (const message of run({ prompt: turn.prompt ?? text, options })) {
+      const hookPrompt = typeof turn.tools?.prompt === 'string' && turn.tools.prompt.trim() !== '' ? turn.tools.prompt : null;
+      for await (const message of run({ prompt: hookPrompt ?? turn.prompt ?? text, options })) {
         const problem = await handleMessage(entry, turn, message);
         if (turn.refusal) break;
         if (problem && !turn.aborted) failure = problem;
@@ -413,6 +471,7 @@ export function createClaudeAdapter({
       if (turn.aborted && !turn.refusal) failure = null;
       if (turn.refusal) failure = turn.refusal;
       turn.ending = true;
+      if (!turn.toolsCommitted) settleTools(entry, turn, 'rollback');
       for (const pending of [...entry.pending.values()]) {
         pending.settle('interrupted', { behavior: 'deny', message: INTERRUPTED });
       }
@@ -444,7 +503,7 @@ export function createClaudeAdapter({
       return { threadId: agent.id };
     },
 
-    send(agent, text, { model = null, effort = null, from = null, mentions = null, prompt = null } = {}) {
+    send(agent, text, { model = null, effort = null, from = null, mentions = null, prompt = null, chain = null } = {}) {
       try {
         checkAgent(agent);
       } catch (error) {
@@ -456,6 +515,7 @@ export function createClaudeAdapter({
       if (entry.turn || entry.resetting) return Promise.reject(new RuntimeError('busy'));
       entry.cwd ??= agent.cwd;
       const turn = {
+        id: randomUUID(),
         controller: new AbortController(),
         aborted: false,
         done: null,
@@ -463,11 +523,14 @@ export function createClaudeAdapter({
         refusal: null,
         ending: false,
         stderr: '',
+        tools: null,
+        toolsCommitted: false,
         model: typeof model === 'string' && model !== '' ? model : null,
         effort: typeof effort === 'string' && effort !== '' ? effort : null,
         from: typeof from === 'string' && from !== '' ? from : null,
         mentions: Array.isArray(mentions) ? mentions.filter((id) => typeof id === 'string' && id !== '') : [],
         prompt: typeof prompt === 'string' && prompt.trim() !== '' ? prompt : null,
+        chain: Array.isArray(chain) ? chain.filter((id) => typeof id === 'string' && id !== '') : [],
       };
       entry.turn = turn;
       turn.done = runTurn(entry, agent, text, turn);

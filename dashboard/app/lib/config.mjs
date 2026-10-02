@@ -64,6 +64,10 @@ export const LIMITS = Object.freeze({
   feedInstructionsBytes: 64 * 1024, // the feed's criteria file read by the Feed view
   settingsBodyBytes: 4 * 1024, // one PUT /api/settings body
   agentBodyBytes: 16 * 1024, // one PUT /api/agents/:id/settings or POST /api/agents body
+  delegationDepth: 2, // agents a message may pass through before the sender (delegation.mjs)
+  delegationMessageChars: 4000, // characters of one ask tool message
+  delegationReplyChars: 4000, // characters of a reply handed back to the sender's turn, or prepended to its next prompt
+  delegationPendingReplies: 5, // replies carried into the sender's next turn
 });
 
 export const TIMEOUTS = Object.freeze({
@@ -77,6 +81,7 @@ export const TIMEOUTS = Object.freeze({
   heartbeatMs: 25_000, // comment ping on each open event stream
   statusPollMs: 30_000, // status refresh while any event stream is open
   noticePollMs: 60_000, // brief notice check while any event stream is open (notices.mjs)
+  delegationWaitMs: 5_000, // how long the ask tool waits for the receiver before answering pending (delegation.mjs)
   drainMs: 30_000, // wait for busy persona turns at shutdown
   abortGraceMs: 2_000, // wait for aborted turns to end after the drain
   requestMaxAgeMs: 30 * 60_000, // a question or approval unanswered this long is denied

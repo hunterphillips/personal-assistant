@@ -12,13 +12,15 @@
 //     'sdk_unavailable' when the rejection is a RuntimeError with that code
 //     (the provider's package could not be loaded) and 'start_failed'
 //     otherwise.
-//   send(agent, text, { model, effort, from, mentions, prompt } = {}) -> Promise<void>
+//   send(agent, text, { model, effort, from, mentions, prompt, chain } = {}) -> Promise<void>
 //     Starts one turn on the given model id and effort level, each optional
 //     and passed to the provider only when set. `from` is the registry id
 //     of the agent sending the text (absent for the user), `mentions` the
-//     ids it named with @, and `prompt` what the provider receives in place
-//     of `text`; a provider records `from` and `mentions` on the user
-//     message and may ignore `prompt`. See the refusal rule below. Once accepted, the promise
+//     ids it named with @, `prompt` what the provider receives in place
+//     of `text`, and `chain` the agents the text passed through before
+//     the sender (delegation.mjs); a provider records `from` and
+//     `mentions` on the user message, may ignore `prompt`, and never
+//     records `chain`. See the refusal rule below. Once accepted, the promise
 //     resolves when the turn ends and never rejects; failures arrive as
 //     `error` events and in state().
 //   answer(agent, requestId, answer) -> Promise<void>
@@ -50,6 +52,13 @@
 //   close() -> Promise<void>
 //     Refuses new turns, drains or aborts the running ones, and resolves
 //     within a bounded time.
+//
+// A provider that runs turns on a model may take a `turnTools` hook at
+// creation (claude.mjs): turnTools(agent, { text, prompt, from, chain,
+// mentions, turnId }) -> { mcpServers?, allowedTools?, prompt?, commit?,
+// rollback? }, called before each turn, its fields copied by name. It is
+// how the daemon gives every agent the ask tool (delegation.mjs) and, later,
+// a read-only tool list for unattended chains.
 //
 // Events, each { type, agentId, at, ...fields }:
 //   thread.state { state }
