@@ -494,6 +494,104 @@ test('adapter events map onto the persona and each bumps the revision with an ag
   assert.deepEqual(deltas.map((d) => d.revision), [3, 4, 5, 6, 7, 8]);
 });
 
+// A request raised while answering a delegation: `chain[0]` is the thread
+// the exchange started in, and the hub lists the card there as `forwarded`.
+const relayed = (requestId, extra = {}) => ({ requestId, kind: 'approval', toolName: 'Bash', input: { command: 'ls' }, from: 'assistant', chain: ['assistant'], ...extra });
+const projected = (requestId, agent = 'cfo') => ({ requestId, kind: 'approval', toolName: 'Bash', input: '{"command":"ls"}', truncated: false, agent });
+
+async function relayHub(overrides = {}) {
+  const adapter = fakeAdapter();
+  const registry = fakeRegistry(registryState([agent('assistant'), agent('cfo'), agent('brain')]));
+  const made = makeHub({ adapters: { claude: adapter }, registry, ...overrides });
+  await made.hub.start();
+  return { ...made, adapter, registry };
+}
+
+test('a request with a chain is forwarded to the thread the exchange started in, and resolved clears it', async () => {
+  const { hub, adapter, deltas } = await relayHub();
+  adapter.states.cfo = { state: 'waiting', pending: relayed('r1') };
+  adapter.emit('thread.state', 'cfo', { state: 'waiting' });
+  adapter.emit('request', 'cfo', relayed('r1'));
+  // The owner's card is as before; the origin lists it with the owner's id and keeps its own state.
+  assert.deepEqual(persona(hub).pending, { requestId: 'r1', kind: 'approval', toolName: 'Bash', input: '{"command":"ls"}', truncated: false });
+  assert.deepEqual(persona(hub, 'assistant').forwarded, [projected('r1')]);
+  assert.deepEqual([persona(hub, 'assistant').state, persona(hub, 'assistant').pending], ['idle', null]);
+  assert.deepEqual(persona(hub, 'cfo').forwarded, []);
+  assert.deepEqual(persona(hub, 'brain').forwarded, []);
+  assert.equal(hub.requestOwner('assistant', 'r1'), 'cfo');
+  assert.equal(hub.requestOwner('cfo', 'r1'), null, 'its own request');
+  assert.equal(hub.requestOwner('assistant', 'nope'), null);
+
+  // Two open relays list oldest first; a truncated input is cut on the relayed copy too.
+  const long = relayed('r2', { input: { command: 'é'.repeat(100) } });
+  adapter.emit('request', 'cfo', long);
+  const list = persona(hub, 'assistant').forwarded;
+  assert.deepEqual(list.map((item) => item.requestId), ['r1', 'r2']);
+  assert.equal(list[1].truncated, true);
+  assert.ok(Buffer.byteLength(list[1].input) <= 64);
+  assert.equal(list[1].agent, 'cfo');
+
+  adapter.states.cfo = { state: 'waiting', pending: relayed('r2') };
+  adapter.emit('resolved', 'cfo', { requestId: 'r1', outcome: 'allowed', from: 'assistant', chain: ['assistant'] });
+  assert.deepEqual(persona(hub, 'assistant').forwarded.map((item) => item.requestId), ['r2']);
+  assert.equal(hub.requestOwner('assistant', 'r1'), null);
+  adapter.states.cfo = { state: 'busy', pending: null };
+  adapter.emit('resolved', 'cfo', { requestId: 'r2', outcome: 'interrupted', from: 'assistant', chain: ['assistant'] });
+  assert.deepEqual(persona(hub, 'assistant').forwarded, []);
+  assert.equal(persona(hub).pending, null);
+  assert.ok(deltas.every((d) => Object.keys(d.patch).join() === 'agents'));
+});
+
+test('a relay is dropped when its owner errors, when the registry drops either side, by dropRelaysTo, and for an owner whose entry is gone', async () => {
+  const { hub, adapter, registry, logs } = await relayHub();
+  const raise = (id) => adapter.emit('request', 'cfo', relayed(id));
+
+  // The owner's turn fails: its requests are dead.
+  raise('r1');
+  adapter.states.cfo = { state: 'error', lastError: 'Invented failure', pending: null };
+  adapter.emit('thread.state', 'cfo', { state: 'error' });
+  assert.deepEqual(persona(hub, 'assistant').forwarded, []);
+  assert.equal(hub.requestOwner('assistant', 'r1'), null);
+
+  // New thread on the origin clears its list; the owner's card stays.
+  adapter.states.cfo = { state: 'waiting', pending: relayed('r2') };
+  raise('r2');
+  hub.dropRelaysTo('assistant');
+  assert.deepEqual(persona(hub, 'assistant').forwarded, []);
+  assert.equal(persona(hub).pending?.requestId, 'r2');
+  assert.equal(hub.requestOwner('assistant', 'r2'), null);
+
+  // A chain whose origin is no started persona is not relayed, and logged.
+  adapter.emit('request', 'cfo', relayed('r3', { chain: ['ghost'] }));
+  assert.deepEqual(persona(hub, 'assistant').forwarded, []);
+  assert.deepEqual(logs.filter((entry) => entry.event === 'relay_dropped'), [{ event: 'relay_dropped', agentId: 'cfo', origin: 'ghost', requestId: 'r3' }]);
+
+  // The registry drops the owner.
+  raise('r4');
+  assert.equal(persona(hub, 'assistant').forwarded.length, 1);
+  registry.emit(registryState([agent('assistant'), agent('brain')]));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(persona(hub, 'assistant').forwarded, []);
+  assert.equal(hub.requestOwner('assistant', 'r4'), null);
+
+  // A resolved whose agent is no longer an entry still clears the origin's card, and commits.
+  registry.emit(registryState([agent('assistant'), agent('cfo'), agent('brain')]));
+  await new Promise((resolve) => setImmediate(resolve));
+  raise('r5');
+  assert.equal(persona(hub, 'assistant').forwarded.length, 1);
+  const before = hub.snapshot().revision;
+  adapter.emit('resolved', 'someone-else', { requestId: 'r5', outcome: 'answered', from: 'assistant', chain: ['assistant'] });
+  assert.deepEqual(persona(hub, 'assistant').forwarded, []);
+  assert.ok(hub.snapshot().revision > before);
+
+  // The registry drops the origin.
+  raise('r6');
+  assert.equal(hub.requestOwner('assistant', 'r6'), 'cfo');
+  registry.emit(registryState([agent('cfo'), agent('brain')]));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(hub.requestOwner('assistant', 'r6'), null);
+});
+
 test('a new turn clears a stale error through the adapter state', async () => {
   const adapter = fakeAdapter({ cfo: { state: 'error', lastError: 'Old failure', costUsd: 2 } });
   const { hub } = makeHub({ adapters: { claude: adapter } });

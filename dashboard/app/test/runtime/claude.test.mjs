@@ -264,6 +264,32 @@ test('an approval allow passes the input through and a deny sends the dashboard 
   assert.deepEqual(events.filter((event) => event.type === 'resolved').map((event) => event.outcome), ['allowed', 'denied']);
 });
 
+test('a request carries the turn\'s sender and chain, null and empty for the user\'s own turn', async (t) => {
+  const query = fakeQuery(async function* ({ options }) {
+    yield init();
+    await options.canUseTool('Bash', BASH_INPUT, {});
+    yield result();
+  });
+  const { adapter, events } = await setup(t, { query });
+  const hop = adapter.send(AGENT, 'From Assistant: run it', { from: 'assistant', chain: ['assistant'], prompt: 'From Assistant, an agent in this system (not the user): run it' });
+  const request = await waitFor(events, (event) => event.type === 'request');
+  assert.deepEqual([request.from, request.chain], ['assistant', ['assistant']]);
+  assert.deepEqual([adapter.state('cfo').pending.from, adapter.state('cfo').pending.chain], ['assistant', ['assistant']]);
+  await adapter.answer(AGENT, request.requestId, { decision: 'allow' });
+  await hop;
+  const resolved = events.find((event) => event.type === 'resolved');
+  assert.deepEqual([resolved.requestId, resolved.outcome, resolved.from, resolved.chain], [request.requestId, 'allowed', 'assistant', ['assistant']]);
+
+  events.length = 0;
+  const own = adapter.send(AGENT, 'Run it');
+  const ownRequest = await waitFor(events, (event) => event.type === 'request');
+  assert.deepEqual([ownRequest.from, ownRequest.chain], [null, []]);
+  await adapter.answer(AGENT, ownRequest.requestId, { decision: 'deny' });
+  await own;
+  const ownResolved = events.find((event) => event.type === 'resolved');
+  assert.deepEqual([ownResolved.from, ownResolved.chain], [null, []]);
+});
+
 test('an unanswered request expires as a denial and the thread stays busy until the result', async (t) => {
   let decision;
   const release = gate();

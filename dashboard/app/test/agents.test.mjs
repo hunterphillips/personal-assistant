@@ -18,13 +18,26 @@ function agent(id, extra = {}) {
 
 // An adapter stand-in. Each method records its call and follows `behavior`:
 // a RuntimeError code to refuse with, or (for send) 'pending' to hold the
-// turn open until release() is called.
+// turn open until release() is called. `open` (agentId -> Set of request
+// ids) makes answer() strict: once any request is listed, an id not open
+// on that agent is no_such_request, and a listed one is settled with a
+// resolved event (so the real hub clears its relays). raise() lists a
+// request and emits it as the real adapter would.
 function fakeAdapter() {
   let release;
   const listeners = new Set();
   const adapter = {
     calls: [],
     behavior: {},
+    open: new Map(),
+    emit(type, agentId, fields = {}) {
+      for (const fn of [...listeners]) fn({ type, agentId, at: '2026-09-25T12:01:00.000Z', ...fields });
+    },
+    raise(agentId, request) {
+      if (!adapter.open.has(agentId)) adapter.open.set(agentId, new Set());
+      adapter.open.get(agentId).add(request.requestId);
+      adapter.emit('request', agentId, { from: null, chain: [], ...request });
+    },
     turn: new Promise((resolve) => { release = resolve; }),
     release: () => release(),
     start: async () => ({}),
@@ -45,6 +58,11 @@ function fakeAdapter() {
     async answer(agentValue, requestId, answer) {
       adapter.calls.push(['answer', agentValue.id, requestId, answer]);
       if (adapter.behavior.answer) throw new RuntimeError(adapter.behavior.answer);
+      if (adapter.open.size === 0) return;
+      const mine = adapter.open.get(agentValue.id);
+      if (!mine?.has(requestId)) throw new RuntimeError('no_such_request');
+      mine.delete(requestId);
+      adapter.emit('resolved', agentValue.id, { requestId, outcome: 'answers' in answer ? 'answered' : answer.decision === 'allow' ? 'allowed' : 'denied' });
     },
     interrupt(agentValue) {
       adapter.calls.push(['interrupt', agentValue.id]);
@@ -205,6 +223,48 @@ test('answer passes answers or a decision through and maps refusals', async (t) 
     assert.deepEqual([response.status, response.json], [400, { error: 'invalid_answer' }], JSON.stringify(body));
   }
   assert.deepEqual(app.adapter.calls, []);
+});
+
+test('answer settles a request forwarded to the thread through its owner, and only there', async (t) => {
+  const app = await startAgents(t, { agents: [agent('assistant'), agent('cfo'), agent('brain')] });
+  const approval = (requestId, chain) => ({ requestId, kind: 'approval', toolName: 'Bash', input: { command: 'ls' }, from: chain[0] ?? null, chain });
+  // CFO raises two requests while answering the Assistant: both are forwarded, oldest first.
+  app.adapter.raise('cfo', approval('r1', ['assistant']));
+  app.adapter.raise('cfo', approval('r2', ['assistant']));
+  const view = (id) => app.hub.snapshot().agents.find((item) => item.id === id);
+  assert.deepEqual(view('assistant').forwarded.map((item) => [item.requestId, item.agent]), [['r1', 'cfo'], ['r2', 'cfo']]);
+  assert.deepEqual(view('brain').forwarded, []);
+
+  // The Assistant's route tries its own adapter, then the owner's.
+  const allowed = await post(app, '/api/agents/assistant/answer', { requestId: 'r1', decision: 'allow' });
+  assert.deepEqual([allowed.status, allowed.json], [200, { ok: true }]);
+  assert.deepEqual(app.adapter.calls, [
+    ['answer', 'assistant', 'r1', { decision: 'allow' }],
+    ['answer', 'cfo', 'r1', { decision: 'allow' }],
+  ]);
+  assert.deepEqual(view('assistant').forwarded.map((item) => item.requestId), ['r2']);
+
+  // Settled once: the same id from CFO's own route, and again from the Assistant's, is stale.
+  const again = await post(app, '/api/agents/cfo/answer', { requestId: 'r1', decision: 'allow' });
+  assert.deepEqual([again.status, again.json], [409, { error: 'no_such_request' }]);
+  assert.deepEqual((await post(app, '/api/agents/assistant/answer', { requestId: 'r1', decision: 'allow' })).status, 409);
+
+  // CFO's second request, not the oldest, is answerable from CFO's route as before.
+  app.adapter.calls.length = 0;
+  assert.equal((await post(app, '/api/agents/cfo/answer', { requestId: 'r2', decision: 'deny' })).status, 200);
+  assert.deepEqual(app.adapter.calls, [['answer', 'cfo', 'r2', { decision: 'deny' }]]);
+  assert.deepEqual(view('assistant').forwarded, []);
+
+  // A request forwarded to no one, and one forwarded to another thread, are not this thread's.
+  app.adapter.raise('cfo', approval('r3', []));
+  app.adapter.raise('cfo', approval('r4', ['assistant']));
+  assert.deepEqual((await post(app, '/api/agents/assistant/answer', { requestId: 'r3', decision: 'allow' })).json, { error: 'no_such_request' });
+  assert.deepEqual((await post(app, '/api/agents/brain/answer', { requestId: 'r4', decision: 'allow' })).json, { error: 'no_such_request' });
+
+  // Once the relay is gone (owner dropped, or New thread here), the card is stale.
+  app.adapter.open.delete('cfo');
+  app.hub.dropRelaysTo('assistant');
+  assert.deepEqual((await post(app, '/api/agents/assistant/answer', { requestId: 'r4', decision: 'allow' })).json, { error: 'no_such_request' });
 });
 
 test('interrupt answers at once while the turn winds down', async (t) => {
