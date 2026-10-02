@@ -555,7 +555,17 @@ The thread is read from `GET /api/agents/<id>/thread` when it opens and
 again whenever the state shows a new last message or a turn that started or
 ended, so it follows the turn without reconstructing it from deltas. Your
 messages sit on the right, the persona's on the left, and "New thread"
-markers in the middle. Every message, and the brief notice's memo, renders
+markers in the middle. A message another agent sent (a `user` message
+with `from`, the sender's registry id) sits on the left under the sender's
+name, which links to the sender's thread, and previews in the row as
+"<Sender>: ..." the way yours read "You: ...". An "@Name" in a message
+whose `mentions` lists that agent's id renders as a pill. A `system`
+message with `kind: 'delegation'` is a centered line about an exchange
+between agents, its `state` one of `sent` ("Messaged CFO"), `busy`,
+`refused` (with `reason`), `waiting`, `failed`, or `finished`, the last a
+collapsed "CFO replied: <summary>" row that opens to the reply; the agent's
+name links to its thread. Nothing posts these yet (phase 3's next piece
+does); the view renders what the store holds. Every message, and the brief notice's memo, renders
 its Markdown (`public/markdown.js`): paragraphs with their line breaks,
 headings, bulleted and numbered lists nested by indent, bold, italic,
 inline code, fenced code blocks, blockquotes, rules, and http, https, and
@@ -661,8 +671,9 @@ events. Each persona in `agents` carries:
   `input` is the tool input as JSON text; over 16 KiB it becomes the first
   16 KiB of that text, with `truncated: true`. A question's `input` is the
   object, never cut, so every question and option is there to answer.
-- `lastMessage`: null, or `{ role, text, at }` with the first 200
-  characters (a brief notice's `summary` stands in for its text). At
+- `lastMessage`: null, or `{ role, text, at, from? }` with the first 200
+  characters (a brief notice's `summary` stands in for its text; `from` is
+  the sending agent's id when another agent sent the message). At
   startup it comes from the thread cache. A bookkeeping line (a system
   message with a `kind` other than `brief`, such as the model line) never
   becomes it, on an event or at startup: the row keeps the thread's real
