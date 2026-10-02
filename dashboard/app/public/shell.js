@@ -72,6 +72,7 @@
     },
   };
   var routines = window.DashboardRoutines ? window.DashboardRoutines.create(shellApi) : null;
+  var settings = window.DashboardSettings ? window.DashboardSettings.create(shellApi) : null;
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
   var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
@@ -206,6 +207,7 @@
     if (fresh) applyRequests();
     render(fresh);
     if (routines) routines.update(state, keys);
+    if (settings) settings.update(state, keys);
     if (agents) agents.update(state, keys);
     if (goals) goals.update(state, keys);
   }
@@ -371,6 +373,10 @@
       if (view === 'health') routines.show();
       else routines.hide();
     }
+    if (settings) {
+      if (view === 'health') settings.show();
+      else settings.hide();
+    }
     if (agents) {
       if (view === 'agents') agents.show();
       else agents.hide();
@@ -419,12 +425,14 @@
     if (document.hidden) {
       disconnect();
       if (routines) routines.hide();
+      if (settings) settings.hide();
       if (agents) agents.hide();
       if (goals) goals.hide();
       if (feed) feed.hide();
     } else {
       connect();
       if (routines && current === 'health') routines.show();
+      if (settings && current === 'health') settings.show();
       if (agents && current === 'agents') agents.show();
       if (goals && current === 'goals') goals.show();
       if (feed && onFeed()) feed.show();

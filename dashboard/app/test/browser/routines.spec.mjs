@@ -1,5 +1,6 @@
-// The Health view's jobs (the code's routines), the settings panel beside a
-// thread with its jobs line, and the shell's event stream client, in real
+// The Health view's Settings card and jobs (the code's routines), the
+// settings panel beside a thread with its jobs line, and the shell's event
+// stream client, in real
 // browsers against the in-memory registry and routines of
 // test/support/browser-server.mjs. Pause and Resume reach the isolated
 // Focus copy, whose launchd stubs refuse.
@@ -477,6 +478,111 @@ test.describe('with an unreadable registry', () => {
     await expect(message).toHaveText('The registry could not be read. registry_invalid_json');
     await expect(message.locator('.routines-code')).toHaveText('registry_invalid_json');
     await expect(page.locator('.routine-card').first()).toBeVisible();
+  });
+});
+
+test.describe('Settings', () => {
+  const SETTINGS = { model: { default: 'opus', effort: 'high' }, brief: { agent: 'brain' } };
+  test.use({ hubOptions: { build: () => ({ ...seeded().build(), settings: SETTINGS }) } });
+
+  const select = (page, label) => page.locator('#settings-card').getByLabel(label, { exact: true });
+  const status = (page) => page.locator('#settings-status');
+  const readFile = async (hub) => JSON.parse(await (await import('node:fs/promises')).readFile(hub.settingsPath, 'utf8'));
+
+  test('the card sits above Jobs and shows the saved values with the lists the registry and model table give', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    const headings = await page.locator('#view-health h1').allTextContents();
+    expect(headings).toEqual(['Settings', 'Jobs']);
+    await expect(select(page, 'Default model')).toHaveValue('opus');
+    await expect(select(page, 'Default effort')).toHaveValue('high');
+    await expect(select(page, 'Brief goes to')).toHaveValue('brain');
+    expect(await select(page, 'Default model').locator('option').allTextContents()).toEqual(['Claude Code default', 'Fable', 'Opus', 'Sonnet', 'Haiku']);
+    expect(await select(page, 'Default effort').locator('option').allTextContents()).toEqual(['Claude Code default', 'Low', 'Medium', 'High', 'Extra high', 'Max']);
+    // Claude personas only: not the Codex one, not the system entry.
+    expect(await select(page, 'Brief goes to').locator('option').allTextContents()).toEqual(['No one', 'Second brain']);
+    await expect(status(page)).toBeHidden();
+    // Settings is not a jobs card.
+    await expect(page.locator('.routine-card')).toHaveCount(3);
+  });
+
+  test('a change is saved through one PUT, confirmed for a moment, and lands in the file and the state', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    await select(page, 'Default model').selectOption('sonnet');
+    await expect(status(page)).toHaveText('Saved.');
+    expect(hub.requests('/api/settings')).toEqual([{ method: 'PUT', status: 200 }]);
+    expect((await readFile(hub)).model).toEqual({ default: 'sonnet', effort: 'high' });
+    expect(hub.state.snapshot().settings.model.default).toBe('sonnet');
+    expect(hub.state.snapshot().agents.find((a) => a.id === 'brain').model).toEqual({ id: 'sonnet', effort: 'high', source: 'system' });
+    await expect(select(page, 'Default model')).toHaveValue('sonnet');
+    await expect(status(page)).toBeHidden({ timeout: 5_000 });
+
+    await select(page, 'Default effort').selectOption('');
+    await expect(status(page)).toHaveText('Saved.');
+    expect((await readFile(hub)).model).toEqual({ default: 'sonnet', effort: null });
+
+    await select(page, 'Brief goes to').selectOption('');
+    await expect(status(page)).toHaveText('Saved.');
+    expect((await readFile(hub)).brief).toEqual({ agent: null });
+    await expect(status(page)).toHaveText('No agent receives the brief.', { timeout: 5_000 });
+  });
+
+  test('a saved change reaches a second page through the stream', async ({ page, hub, browser }) => {
+    await openHealth(page, hub);
+    const other = await browser.newPage();
+    try {
+      await other.goto(`${hub.origin}/health`);
+      await expect(select(other, 'Default model')).toHaveValue('opus');
+      await select(page, 'Default model').selectOption('haiku');
+      await expect(status(page)).toHaveText('Saved.');
+      await expect(select(other, 'Default model')).toHaveValue('haiku');
+    } finally {
+      await other.close();
+    }
+  });
+
+  test('rows stack at 390px and sit side by side on a wide screen', async ({ page, hub }) => {
+    const wide = page.viewportSize().width >= 720;
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openHealth(page, hub);
+    const first = page.locator('.settings-row').first();
+    await expect.poll(() => gap(first, '.settings-label', '.settings-select')).toBeGreaterThanOrEqual(0);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    if (!wide) return;
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect.poll(() => gap(first, '.settings-label', '.settings-select')).toBeLessThan(0);
+  });
+});
+
+test.describe('Settings with no file', () => {
+  test.use({ hubOptions: seeded() });
+
+  test('every select reads Claude Code default or No one, and the card says no agent receives the brief', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    const card = page.locator('#settings-card');
+    await expect(card.getByLabel('Default model', { exact: true })).toHaveValue('');
+    await expect(card.getByLabel('Default effort', { exact: true })).toHaveValue('');
+    await expect(card.getByLabel('Brief goes to', { exact: true })).toHaveValue('');
+    await expect(page.locator('#settings-status')).toHaveText('No agent receives the brief.');
+    await card.getByLabel('Brief goes to', { exact: true }).selectOption('brain');
+    await expect(page.locator('#settings-status')).toHaveText('Saved.');
+    expect(hub.state.snapshot().settings.brief.agent).toBe('brain');
+  });
+});
+
+test.describe('Settings with an unreadable file', () => {
+  test.use({ hubOptions: { build: () => ({ ...seeded().build(), settings: 'broken' }) } });
+
+  test('the card says the file could not be read, and a change is refused and reverted', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    const card = page.locator('#settings-card');
+    const message = 'The settings file could not be read. Fix or delete it.';
+    await expect(page.locator('#settings-status')).toHaveText(message);
+    await card.getByLabel('Default model', { exact: true }).selectOption('opus');
+    await expect.poll(() => hub.requests('/api/settings')).toEqual([{ method: 'PUT', status: 409 }]);
+    await expect(page.locator('#settings-status')).toHaveText(message);
+    await expect(card.getByLabel('Default model', { exact: true })).toHaveValue('');
+    await expect(card.getByLabel('Default model', { exact: true })).toBeEnabled();
   });
 });
 

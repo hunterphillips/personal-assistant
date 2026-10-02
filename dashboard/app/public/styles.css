@@ -219,6 +219,55 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   margin: 0 0 16px;
 }
 
+/* Settings: three labelled selects at the top of Health. */
+.settings-card {
+  min-width: 0;
+  margin-bottom: 24px;
+  padding: 14px 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
+  align-items: center;
+  gap: 8px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.settings-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.settings-label {
+  font-weight: 600;
+}
+
+.settings-select {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+.settings-select:hover { border-color: var(--rule); }
+.settings-select:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.settings-status {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.settings-status.is-bad { color: var(--red); }
+
 /* What is off: the Codex server, cmux. Nothing while both answer. */
 .availability {
   margin-bottom: 16px;
@@ -1444,6 +1493,11 @@ a.agent-row[aria-current="true"] {
   .shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
   }
 
   .nav {

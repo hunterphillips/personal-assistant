@@ -173,6 +173,24 @@
       <section class="view" id="view-health" data-view="health" aria-label="Health" hidden>
         <div class="availability" id="health-availability" role="status" hidden></div>
         <div class="routines-header">
+          <h1 class="health-heading">Settings</h1>
+        </div>
+        <article class="settings-card" id="settings-card" aria-label="Settings">
+          <div class="settings-row">
+            <label class="settings-label" for="settings-model">Default model</label>
+            <select class="settings-select" id="settings-model" data-setting="model"></select>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label" for="settings-effort">Default effort</label>
+            <select class="settings-select" id="settings-effort" data-setting="effort"></select>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label" for="settings-brief">Brief goes to</label>
+            <select class="settings-select" id="settings-brief" data-setting="brief"></select>
+          </div>
+          <p class="settings-status" id="settings-status" role="status" hidden></p>
+        </article>
+        <div class="routines-header">
           <div class="routines-title">
             <h1 class="health-heading">Jobs</h1>
             <p class="routines-updated" id="routines-updated"></p>
@@ -184,6 +202,7 @@
       </section>
     </main>
   </div>
+  <script src="/assets/settings.js"></script>
   <script src="/assets/routines.js"></script>
   <script src="/assets/markdown.js"></script>
   <script src="/assets/agents.js"></script>

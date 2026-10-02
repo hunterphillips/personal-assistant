@@ -46,6 +46,7 @@ import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
 import { RuntimeError } from '../../lib/runtime/adapter.mjs';
 import { createNotices } from '../../lib/notices.mjs';
+import { createSettings } from '../../lib/settings.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } from './harness.mjs';
 import { focusSourceAvailable, startIsolatedFocus } from './isolated-focus.mjs';
@@ -85,10 +86,17 @@ export { focusSourceAvailable };
 //              test/fixtures/feed-instructions/relevance.md) copied into the
 //              temporary directory as DASHBOARD_FEED_INSTRUCTIONS.
 //              `instructionsFile` is the copy's path.
+//   settings   { model: { default, effort }, brief: { agent } } written to a
+//              real settings file in the temporary directory before the
+//              store loads it, so PUT /api/settings writes there; without it
+//              the file is missing and the store holds the defaults (the
+//              brief goes to no one). The string 'broken' writes a file the
+//              store cannot read. `settings` on the result is the store and
+//              `settingsPath` the file.
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, routines: routinesSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
-  vault = null, feed = null, instructions = null,
+  vault = null, feed = null, instructions = null, settings: settingsSeed = null,
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
     throw new Error('startHub: the vault option adds second-brain; remove it from agents.');
@@ -131,6 +139,9 @@ export async function startHub({
       if (FORBIDDEN_PORTS.has(port)) throw new Error(`refusing to use port ${port}`);
     }
 
+    const settingsPath = path.join(root, 'settings.json');
+    if (settingsSeed === 'broken') await writeFile(settingsPath, '{ not json');
+    else if (settingsSeed) await writeFile(settingsPath, JSON.stringify({ version: 1, ...settingsSeed }));
     const config = loadConfig({
       DASHBOARD_PORT: String(plainPort),
       DASHBOARD_PUBLIC_ORIGIN: `https://localhost:${securePort}`,
@@ -138,7 +149,10 @@ export async function startHub({
       DASHBOARD_FEED_DIR: feedDir,
       DASHBOARD_FEED_INSTRUCTIONS: instructionsFile,
       DASHBOARD_FOCUS_ORIGIN: focusOrigin,
+      DASHBOARD_SETTINGS_PATH: settingsPath,
     });
+    const settings = createSettings({ path: config.settingsPath });
+    await settings.load();
     const focusRoutes = createFocusProxy(config);
     const briefRoutes = createBriefRoutes(config);
     const registry = controlledRegistry({ agents, ...registryState });
@@ -155,7 +169,7 @@ export async function startHub({
     const adapters = { claude: personas.adapter };
     if (codex) adapters.codex = codex.adapter;
     const hub = createTestHub({
-      config, focus: focusRoutes, brief: briefRoutes, registry, routines, adapters, store, bindings, cmux, home,
+      config, focus: focusRoutes, brief: briefRoutes, registry, routines, adapters, store, bindings, cmux, settings, home,
     });
     await hub.start();
     if (routinesSeed) {
@@ -180,10 +194,12 @@ export async function startHub({
     const goals = createGoals({ registry, limits: config.limits });
     const feedReader = createFeed({ dir: feedDir, limits: config.limits });
     const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits });
-    const notices = createNotices({ briefsDir, threadsDir, hub, limits: config.limits });
+    const notices = createNotices({
+      briefsDir, threadsDir, hub, target: () => settings.current().settings.brief.agent, limits: config.limits,
+    });
     const newHandler = () => createApp({
       config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, feedInstructions,
-      notices, log: () => {},
+      notices, settings, log: () => {},
     });
     let handler = newHandler();
     cleanups.push(async () => {
@@ -208,10 +224,13 @@ export async function startHub({
       focus,
       writeBrief: (date, options) => writeFile(path.join(briefsDir, `viewer-${date}.html`), inventedViewer({ date, ...options })),
       writeRawBrief: (date, html) => writeFile(path.join(briefsDir, `viewer-${date}.html`), html),
-      // A brief notice as the run writes it; the Assistant must be in `agents`
-      // as a started persona for the daemon to post it.
+      // A brief notice as the run writes it; the agent `settings` names in
+      // brief.agent must be in `agents` as a started persona for the daemon
+      // to post it.
       writeNotice: (date, fields) => writeFile(path.join(briefsDir, `notice-${date}.json`), JSON.stringify({ date, state: 'ready', ...fields })),
       notices,
+      settings,
+      settingsPath,
       readFeedback: (date) => readFile(path.join(briefsDir, `feedback-${date}.md`), 'utf8'),
       state: hub,
       // Requests the app received, with the status sent so far (null before
@@ -401,7 +420,9 @@ function fakePersonas(seed, store) {
     },
     state(id) {
       const current = entry(id);
-      return { state: current.state, pending: current.pending, lastError: current.lastError, sessionId: null, costUsd: current.costUsd };
+      return {
+        state: current.state, pending: current.pending, lastError: current.lastError, sessionId: null, costUsd: current.costUsd, cwd: null,
+      };
     },
     subscribe(fn) {
       listeners.add(fn);
