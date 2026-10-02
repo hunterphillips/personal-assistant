@@ -36,7 +36,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /embedded/brief/<date>?revision=<revision>` | One brief viewer. |
 | `POST /api/brief/feedback` | Saves feedback for one brief. |
 | `POST /api/agents/<id>/send` | Sends `{"text": "...", "mentions": [...]}` to a persona (`mentions`, the agent ids the text names with @, is optional); 202 once the turn has started (below). |
-| `POST /api/agents/<id>/answer` | Answers the persona's open question or approval. |
+| `POST /api/agents/<id>/answer` | Answers the persona's open question or approval, or a request forwarded to this thread (raised by another agent while answering a delegation that started here; the owner's adapter settles it). |
 | `POST /api/agents/<id>/interrupt` | Stops the persona's turn. |
 | `POST /api/agents/<id>/new-thread` | Starts the persona on a new session. |
 | `POST /api/agents/<id>/model` | Sets the model and effort the persona's thread runs on: `{"model": "sonnet"}`, `{"effort": "low"}`, or both; null for a key returns it to the agent's default (below). |
@@ -110,11 +110,11 @@ snapshot; concurrent requests share one check. It stays for one release.
   "groups": [{ "id": "work", "name": "Work" }, { "id": "personal", "name": "Personal" }],
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
                "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
-               "state": "idle", "pending": null, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
+               "state": "idle", "pending": null, "forwarded": [], "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
                "lastError": null, "costUsd": 0.42, "lastLineAt": null, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null }, "agent": { "id": "opus", "effort": null } }, "accepts": null },
              { "id": "assistant", "name": "Assistant", "role": "Assistant", "description": "...", "group": "personal", "kind": "persona",
                "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "provider": "claude", "pinned": true,
-               "state": "idle", "pending": null, "lastMessage": null, "lastError": null, "costUsd": null, "lastLineAt": null,
+               "state": "idle", "pending": null, "forwarded": [], "lastMessage": null, "lastError": null, "costUsd": null, "lastLineAt": null,
                "model": { "id": null, "effort": null, "source": "default", "default": { "id": null, "effort": null }, "agent": { "id": null, "effort": null } }, "accepts": null }],
   "sessions": [{ "id": "codex:01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3", "provider": "codex", "threadId": "01a0e7dd-55cc-7722-b4e4-a0bc4169a2b3",
                  "cwd": "/Users/hunter/workspace/x", "projectId": "x", "title": "Fix the flaky test", "state": "waiting",
@@ -683,6 +683,12 @@ events. Each persona in `agents` carries:
   `input` is the tool input as JSON text; over 16 KiB it becomes the first
   16 KiB of that text, with `truncated: true`. A question's `input` is the
   object, never cut, so every question and option is there to answer.
+- `forwarded`: the open requests other agents raised while answering a
+  delegation that started in this thread, each shaped as `pending` is plus
+  `agent`, the owner's id, oldest first; `[]` when none. A relay never
+  changes this agent's `state` or `pending`. It is dropped when the request
+  resolves (any outcome), when the owner's turn fails, when the registry
+  drops either agent, and by New thread on this thread.
 - `lastMessage`: null, or `{ role, text, at, from? }` with the first 200
   characters (a brief notice's `summary` stands in for its text; `from` is
   the sending agent's id when another agent sent the message). At
@@ -917,9 +923,16 @@ read-only fake) both routes are 404.
   keeps running while it waits, so the whole turn, waiting included, is
   bounded by `turnMaxMs`. The persona stays busy after a denial until the
   SDK reports the turn's result, since the model keeps working.
+- A request raised during a delegated turn is also shown in the thread the
+  exchange started in (`forwarded` in the snapshot), and an answer posted to
+  either thread settles it once. The route tries the thread's own adapter
+  first and, when that refuses `no_such_request`, the owner the hub names
+  for the forwarded card.
 - Interrupt aborts the turn and denies any open request. New thread is
   refused while a turn runs or the server is shutting down; otherwise it
   deletes both files, and the cache starts again with a "New thread" line.
+  New thread also drops the cards forwarded to the thread; they stay
+  answerable in their owners' threads.
 - The result message's `total_cost_usd` is a running total for the
   session, not the cost of one turn. It is reported with the token usage
   and the list of denied tool calls.
@@ -957,8 +970,7 @@ running; the tool's arguments cannot name another.
   `kind: 'delegation'`, `state`, `to`, `text`, `summary`, and
   `delegationId` (a refusal carries `reason` instead): `sent` ("Messaged
   CFO"), `busy` (the receiver has a turn open), `waiting` (the receiver
-  raised a question or approval; the card lives in the receiver's thread
-  and the line links there), `finished` (`text` is the reply, `summary`
+  raised a question or approval; the line links to its thread), `finished` (`text` is the reply, `summary`
   its first sentence; the view prefixes "CFO replied:"), `failed` (the
   turn ended with no text after an error, an interrupt, or a timeout), and
   `refused` with reason `unknown`, `not_an_agent` (a project folder),
@@ -968,6 +980,11 @@ running; the tool's arguments cannot name another.
 - The checks run in that order: unknown, not an agent, unavailable,
   accepts, cycle, depth; then the receiver's adapter refuses `busy`
   before any await.
+- A question or approval the receiver raises is relayed by the hub to the
+  thread the exchange started in (`chain[0]`), under the receiver's name,
+  with "Asked while answering you." beneath the title; the agent in the
+  middle of a two-hop exchange keeps only its waiting line. Allowing or
+  answering it from either thread settles it for both.
 - The tool waits `delegationWaitMs` for the receiver's turn to end and
   answers with the reply text alone. Past that it answers "<name> is
   still working. The reply will arrive in this thread." (what the tool
