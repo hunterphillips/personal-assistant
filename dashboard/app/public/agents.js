@@ -28,8 +28,10 @@
 // agent's thread opens once it is listed.
 //
 // The thread is fetched from /api/agents/<id>/thread when a persona opens
-// and again whenever the snapshot shows its last message or its turn
-// changed, so the pane follows the turn without rebuilding it from deltas.
+// and again whenever the snapshot shows its last message, its turn, or
+// the time of its last line outside a turn (`lastLineAt`, a delegation
+// line landing after a pending reply) changed, so the pane follows the
+// turn without rebuilding it from deltas.
 // A question or approval is rendered from the snapshot's `pending`; the
 // card is rebuilt only when the request changes, so choices survive other
 // state changes. Send, Answer, Allow, Deny, Interrupt, and New thread post
@@ -1586,12 +1588,13 @@
 
     // Fetches the thread when the selected persona's or Codex session's
     // thread may have changed: a new selection, a new last message, a
-    // model change (its line is not the last message), or a turn that
-    // ended. `force` fetches it again regardless, for Retry.
+    // model change (its line is not the last message), a line the daemon
+    // wrote outside a turn (lastLineAt), or a turn that ended. `force`
+    // fetches it again regardless, for Retry.
     function syncThread(force) {
       var agent = selectedAgent();
       if (!hasThread(agent) || agent.state === 'unavailable') return;
-      var key = agent.id + '|' + JSON.stringify(agent.lastMessage) + '|' + JSON.stringify(agent.model || null) + '|' + (turnOpen(agent) ? 'open' : 'closed');
+      var key = agent.id + '|' + JSON.stringify(agent.lastMessage) + '|' + JSON.stringify(agent.model || null) + '|' + (agent.lastLineAt || '') + '|' + (turnOpen(agent) ? 'open' : 'closed');
       if (key === threadKey && !force) return;
       threadKey = key;
       fetchThread(agent);

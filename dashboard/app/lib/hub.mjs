@@ -21,7 +21,7 @@
 //       groups: [{ id, name }],    // the registry's group list, in order
 //       agents: [{ id, name, role, description, group, kind, cwd, jobs,
 //                  provider?, pinned?, state, pending?, lastMessage?,
-//                  lastError?, costUsd?, model?, accepts? }],
+//                  lastError?, costUsd?, lastLineAt?, model?, accepts? }],
 //       sessions: [{ id, provider, threadId, cwd, projectId, title, state,
 //                    pending, lastMessage, lastError, updatedAt, binding }
 //                  | { id, provider: 'claude', kind: 'terminal', cwd, projectId,
@@ -170,6 +170,9 @@
 //     to the agent's thread through the store, so the daemon stays the
 //     thread's only writer, then sets the persona's lastMessage from it
 //     (`summary` over `text` when the message carries one) and commits.
+//     A bookkeeping line (a delegation line) leaves lastMessage alone and
+//     sets lastLineAt to its `at` instead, so an open thread view knows to
+//     fetch again when a line lands outside the persona's own turn.
 //     For a message from outside a turn: the morning brief notice
 //     (notices.mjs). Rejects when there is no store or the store refuses
 //     the message; an agentId that is not a listed persona still appends
@@ -553,6 +556,7 @@ export function createHub({
       const entry = personas.get(agentId);
       if (entry && !closed) {
         if (updatesPreview(record)) entry.lastMessage = preview(record, limits);
+        else entry.lastLineAt = record.at;
         commitAgents();
       }
       return record;
@@ -591,7 +595,7 @@ export function createHub({
 function personaEntry(agent, adapter) {
   return {
     agent, adapter, ready: false, state: 'unavailable', pending: null, lastMessage: null,
-    lastError: null, costUsd: null, timer: null,
+    lastError: null, costUsd: null, lastLineAt: null, timer: null,
   };
 }
 
@@ -672,6 +676,7 @@ function agentViews(current, personas, settingsState) {
     view.lastMessage = entry?.lastMessage ?? null;
     view.lastError = entry?.lastError ?? null;
     view.costUsd = entry?.costUsd ?? null;
+    view.lastLineAt = entry?.lastLineAt ?? null;
     if (agent.provider === 'claude') {
       const base = resolveModel(agent, null, settingsState);
       view.model = {

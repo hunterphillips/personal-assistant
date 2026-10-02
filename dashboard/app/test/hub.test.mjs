@@ -102,7 +102,7 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
   assert.deepEqual(snapshot.agents, [
     {
       id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
-      provider: 'claude', state: 'unavailable', pending: null, lastMessage: null, lastError: null, costUsd: null,
+      provider: 'claude', state: 'unavailable', pending: null, lastMessage: null, lastError: null, costUsd: null, lastLineAt: null,
       model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } }, accepts: null,
     },
   ]);
@@ -409,7 +409,8 @@ test('start seeds a persona from its adapter and the last cached message', async
   assert.deepEqual(persona(hub), {
     id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
     provider: 'claude', state: 'error', pending: null, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
-    lastError: 'Invented failure', costUsd: 0.5, model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } }, accepts: null,
+    lastError: 'Invented failure', costUsd: 0.5, lastLineAt: null,
+    model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } }, accepts: null,
   });
   assert.equal(persona(hub, 'ops').state, null);
   assert.equal('pending' in persona(hub, 'ops'), false);
@@ -753,10 +754,12 @@ test('a thread\'s own choice beats the agent and system levels, field by field, 
   hub.close();
 });
 
-test('a delegation line never becomes the row preview, live or at start', async () => {
+test('a delegation line never becomes the row preview, live or at start, and one written outside a turn sets lastLineAt', async () => {
   const adapter = fakeAdapter();
-  const { hub } = makeHub({ adapters: { claude: adapter } });
+  const appended = [];
+  const { hub } = makeHub({ adapters: { claude: adapter }, store: { read: async () => [], append: async (id, message) => { appended.push([id, message]); } } });
   await hub.start();
+  assert.equal(persona(hub).lastLineAt, null);
   adapter.emit('message', 'cfo', { role: 'assistant', text: 'Cash is fine.' });
   const kept = { role: 'assistant', text: 'Cash is fi', at: '2026-09-25T12:01:00.000Z' };
   assert.deepEqual(persona(hub).lastMessage, kept);
@@ -769,6 +772,15 @@ test('a delegation line never becomes the row preview, live or at start', async 
     adapter.emit('message', 'cfo', { role: 'system', kind: 'delegation', ...line });
     assert.deepEqual(persona(hub).lastMessage, kept, line.state);
   }
+  // Through notify, the line is appended, the preview stays, and lastLineAt moves.
+  await hub.notify('cfo', { role: 'system', kind: 'delegation', state: 'finished', to: 'brain', delegationId: 'd-2', text: 'Late reply.', summary: 'Late reply.', at: 'later' });
+  assert.deepEqual(appended.at(-1), ['cfo', { role: 'system', kind: 'delegation', state: 'finished', to: 'brain', delegationId: 'd-2', text: 'Late reply.', summary: 'Late reply.', at: 'later' }]);
+  assert.deepEqual(persona(hub).lastMessage, kept);
+  assert.equal(persona(hub).lastLineAt, 'later');
+  // A notice through notify is the preview, and leaves lastLineAt alone.
+  await hub.notify('cfo', { role: 'system', kind: 'brief', text: 'Memo.', summary: 'Opening.', at: 'z' });
+  assert.deepEqual(persona(hub).lastMessage, { role: 'system', text: 'Opening.', at: 'z' });
+  assert.equal(persona(hub).lastLineAt, 'later');
   hub.close();
 
   const cached = makeHub({

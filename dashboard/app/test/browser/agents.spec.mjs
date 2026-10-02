@@ -1482,3 +1482,98 @@ test.describe('with messages between agents', () => {
     await expect(messages(page).nth(0).locator('.mention')).toHaveAttribute('data-mention', 'cfo');
   });
 });
+
+// Phase 3, piece 2: the Assistant asks CFO through the delegation service
+// as its fake turn, and the lines arrive live on both threads.
+test.describe('with a live exchange between agents', () => {
+  test.use({
+    hubOptions: {
+      build: () => ({
+        agents: [ASSISTANT, ...AGENTS],
+        delegationWaitMs: 150,
+        personas: {
+          assistant: {
+            delegate: { to: 'cfo', text: 'Is he over on equities? One line.' },
+            messages: [{ role: 'assistant', text: 'Morning.', at: ago(10 * MINUTE) }],
+          },
+          cfo: { messages: [{ role: 'assistant', text: 'Cash is fine.', at: ago(12 * MINUTE) }] },
+        },
+      }),
+    },
+  });
+
+  test('a reply within the wait lands inline: the sent line, the reply, and the message with its sender on the other thread', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await expect(messages(page)).toHaveCount(1);
+    await page.locator('#agent-input').fill('Ask CFO about equities.');
+    await page.locator('#agent-send').click();
+
+    await expect(messages(page)).toHaveCount(5);
+    await expect(messages(page).nth(1)).toHaveClass(/thread-message-user/);
+    const lines = page.locator('#agent-messages .thread-message-delegation');
+    await expect(lines).toHaveCount(2);
+    await expect(lines.nth(0).locator('.thread-message-text')).toHaveText('Messaged CFO');
+    await expect(lines.nth(0).locator('a[data-agent="cfo"]')).toHaveText('CFO');
+    const finished = lines.nth(1).locator('details.thread-delegation');
+    await expect(finished.locator('summary')).toHaveText('CFO replied: Reply: Is he over on equities?');
+    await expect(finished.locator('.thread-brief-body')).toBeHidden();
+    await expect(lines.nth(1).locator('a.thread-delegation-link[data-agent="cfo"]')).toHaveText('Open CFO');
+    await expect(messages(page).nth(4)).toHaveText(/^Reply: Reply: Is he over on equities\? One line\./);
+    // The row keeps the real last message, never a line.
+    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText('Reply: Reply: Is he over on equities? One line.');
+    await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('Reply: Is he over on equities? One line.');
+
+    await lines.nth(1).locator('a.thread-delegation-link').click();
+    await expect(page).toHaveURL(/agent=cfo/);
+    await expect(messages(page)).toHaveCount(3);
+    const incoming = messages(page).nth(1);
+    await expect(incoming).toHaveClass(/thread-message-agent/);
+    await expect(incoming.locator('a.thread-message-from')).toHaveText('Assistant');
+    await expect(incoming.locator('.thread-message-text')).toHaveText('Is he over on equities? One line.');
+    await expect(messages(page).nth(2)).toHaveText(/^Reply: Is he over on equities\? One line\./);
+  });
+
+  test('a reply after the wait is pending, then its line arrives when the other agent answers', async ({ page, hub }) => {
+    hub.personas.hold('cfo');
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await page.locator('#agent-input').fill('Ask CFO, no rush.');
+    await page.locator('#agent-send').click();
+
+    await expect(messages(page)).toHaveCount(4);
+    const lines = page.locator('#agent-messages .thread-message-delegation');
+    await expect(lines).toHaveCount(1);
+    await expect(lines.nth(0).locator('.thread-message-text')).toHaveText('Messaged CFO');
+    await expect(messages(page).nth(3)).toHaveText(/^Reply: pending: [0-9a-f-]{36}\. CFO will answer in this thread\./);
+    await expect(page.locator('#agent-send')).toBeEnabled();
+    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Working');
+
+    await hub.personas.reply('cfo', 'Not over. Drift is under a point.');
+    await expect(messages(page)).toHaveCount(5);
+    await expect(lines).toHaveCount(2);
+    const finished = lines.nth(1).locator('details.thread-delegation');
+    await expect(finished.locator('summary')).toHaveText('CFO replied: Not over.');
+    await finished.locator('summary').click();
+    await expect(finished.locator('.thread-brief-body')).toHaveText('Not over. Drift is under a point.');
+    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText(/^Reply: pending:/);
+  });
+
+  test('a question raised by the other agent shows a waiting line here and the card only there', async ({ page, hub }) => {
+    hub.personas.hold('cfo');
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await page.locator('#agent-input').fill('Ask CFO to check.');
+    await page.locator('#agent-send').click();
+    await expect(messages(page)).toHaveCount(4);
+
+    hub.personas.raise('cfo', QUESTION_REQUEST);
+    const lines = page.locator('#agent-messages .thread-message-delegation');
+    await expect(lines).toHaveCount(2);
+    await expect(lines.nth(1).locator('.thread-message-text')).toHaveText('CFO is waiting for you.');
+    await expect(lines.nth(1).locator('a[data-agent="cfo"]')).toHaveText('CFO');
+    await expect(page.locator('#agent-request')).toBeHidden();
+    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Waiting for you');
+
+    await lines.nth(1).locator('a[data-agent="cfo"]').click();
+    await expect(page).toHaveURL(/agent=cfo/);
+    await expect(page.locator('#agent-request .request-title')).toHaveText(QUESTION);
+  });
+});
