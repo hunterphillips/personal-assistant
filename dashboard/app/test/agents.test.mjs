@@ -261,8 +261,7 @@ test('answer settles a request forwarded to the thread through its owner, and on
   assert.deepEqual((await post(app, '/api/agents/assistant/answer', { requestId: 'r3', decision: 'allow' })).json, { error: 'no_such_request' });
   assert.deepEqual((await post(app, '/api/agents/brain/answer', { requestId: 'r4', decision: 'allow' })).json, { error: 'no_such_request' });
 
-  // Once the relay is gone (owner dropped, or New thread here), the card is stale.
-  app.adapter.open.delete('cfo');
+  // Once the relay is gone (New thread here), the card is stale.
   app.hub.dropRelaysTo('assistant');
   assert.deepEqual((await post(app, '/api/agents/assistant/answer', { requestId: 'r4', decision: 'allow' })).json, { error: 'no_such_request' });
 });

@@ -1557,7 +1557,7 @@ test.describe('with a live exchange between agents', () => {
     await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText('CFO is still working. The reply will arrive in this thread.');
   });
 
-  test('a question raised by the other agent shows a waiting line here and the card only there', async ({ page, hub }) => {
+  test('a question raised by the other agent shows a waiting line here and its card, answerable from this thread', async ({ page, hub }) => {
     hub.personas.hold('cfo');
     await page.goto(`${hub.origin}/?agent=assistant`);
     await page.locator('#agent-input').fill('Ask CFO to check.');
@@ -1569,12 +1569,119 @@ test.describe('with a live exchange between agents', () => {
     await expect(lines).toHaveCount(2);
     await expect(lines.nth(1).locator('.thread-message-text')).toHaveText('CFO is waiting for you.');
     await expect(lines.nth(1).locator('a[data-agent="cfo"]')).toHaveText('CFO');
-    await expect(page.locator('#agent-request')).toBeHidden();
+    const request = page.locator('#agent-request');
+    await expect(request).toBeVisible();
+    await expect(request.locator('.request-title')).toHaveText(QUESTION);
+    await expect(request.locator('.request-note')).toHaveText('Asked while answering you.');
     await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'Assistant').locator('.agent-row-state')).toHaveText('Waiting for you');
+    // The Assistant's own turn is over: the status line names CFO, Interrupt is gone, and the composer stays open.
+    await expect(page.locator('#agent-status-text')).toHaveText('CFO is waiting for you.');
+    await expect(page.locator('#agent-status').getByRole('button', { name: 'Interrupt' })).toBeHidden();
+    await expect(page.locator('#agent-send')).toBeEnabled();
 
-    await lines.nth(1).locator('a[data-agent="cfo"]').click();
-    await expect(page).toHaveURL(/agent=cfo/);
-    await expect(page.locator('#agent-request .request-title')).toHaveText(QUESTION);
+    await request.locator('.option').nth(1).click();
+    await request.getByRole('button', { name: 'Answer' }).click();
+    await expect(request).toBeHidden();
+    await expect(row(page, 'Assistant').locator('.agent-row-state')).toHaveCount(0);
+    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Working');
+    expect(hub.personas.calls.filter((call) => call[0] === 'answer')).toEqual([
+      ['answer', 'assistant', expect.stringMatching(/^req-/), { answers: { [QUESTION]: 'Amber' } }],
+      ['answer', 'cfo', expect.stringMatching(/^req-/), { answers: { [QUESTION]: 'Amber' } }],
+    ]);
+    await hub.personas.reply('cfo', 'Checked.');
+    await expect(lines).toHaveCount(3);
+    await expect(lines.nth(2).locator('details.thread-delegation summary')).toHaveText('CFO replied: Checked.');
+  });
+
+  test('a forwarded card that was already answered says so under the composer', async ({ page, hub }) => {
+    hub.personas.hold('cfo');
+    await page.route('**/api/agents/assistant/answer', (route) => route.fulfill({
+      status: 409, contentType: 'application/json', body: '{"error":"no_such_request"}',
+    }));
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await page.locator('#agent-input').fill('Ask CFO to check.');
+    await page.locator('#agent-send').click();
+    await expect(messages(page)).toHaveCount(4);
+
+    hub.personas.raise('cfo', { kind: 'approval', toolName: 'Bash', input: { command: 'ls' } });
+    const request = page.locator('#agent-request');
+    await expect(request.locator('.request-title')).toHaveText('CFO wants to run Bash');
+    await request.getByRole('button', { name: 'Allow' }).click();
+    await expect(page.locator('#agent-failure')).toHaveText('That request was already answered or has expired.');
+    await expect(request).toBeVisible();
+    expect(hub.personas.calls.filter((call) => call[0] === 'answer')).toEqual([]);
+  });
+});
+
+// Phase 3b, piece 1: a request the receiver raises while answering a
+// delegation is forwarded to the thread the exchange started in. The
+// receiver raises it on arrival (the `raise` on the sender's delegate seed).
+test.describe('with an approval raised while answering a delegation', () => {
+  test.use({
+    hubOptions: {
+      build: () => ({
+        agents: [ASSISTANT, ...AGENTS],
+        delegationWaitMs: 150,
+        personas: {
+          assistant: {
+            delegate: {
+              to: 'cfo', text: 'Check the ledger.',
+              raise: { kind: 'approval', toolName: 'Bash', input: { command: 'ls', description: 'List files' } },
+            },
+            messages: [{ role: 'assistant', text: 'Morning.', at: ago(10 * MINUTE) }],
+          },
+          cfo: { messages: [{ role: 'assistant', text: 'Cash is fine.', at: ago(12 * MINUTE) }] },
+        },
+      }),
+    },
+  });
+
+  test("the card shows here under the other agent's name, Allow here clears it in both threads, and the reply arrives", async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await page.locator('#agent-input').fill('Ask CFO to check.');
+    await page.locator('#agent-send').click();
+
+    const request = page.locator('#agent-request');
+    await expect(request.locator('.request-title')).toHaveText('CFO wants to run Bash');
+    await expect(request.locator('.request-note')).toHaveText('Asked while answering you.');
+    await expect(request.locator('.request-input')).toHaveText('{\n  "command": "ls",\n  "description": "List files"\n}');
+    await expect(request.getByRole('button')).toHaveText(['Allow', 'Deny']);
+    await expect(row(page, 'Assistant').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Waiting for you');
+    // Past the wait the ask goes pending and the Assistant's own turn ends; the card stays, with the status line naming CFO.
+    await expect(messages(page)).toHaveCount(5);
+    await expect(messages(page).nth(4).locator('.thread-message-text')).toHaveText('CFO is still working. The reply will arrive in this thread.');
+    await expect(request).toBeVisible();
+    await expect(page.locator('#agent-status-text')).toHaveText('CFO is waiting for you.');
+    await expect(page.locator('#agent-status').getByRole('button', { name: 'Interrupt' })).toBeHidden();
+    await expect(page.locator('#agent-send')).toBeEnabled();
+
+    // The same card in CFO's own thread, without the note.
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(request.locator('.request-title')).toHaveText('CFO wants to run Bash');
+    await expect(request.locator('.request-note')).toHaveCount(0);
+    await expect(page.locator('#agent-composer-reason')).toHaveText('Allow or deny the request first.');
+
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await expect(request.locator('.request-note')).toHaveText('Asked while answering you.');
+    await request.getByRole('button', { name: 'Allow' }).click();
+    await expect(request).toBeHidden();
+    await expect(page.locator('#agent-status')).toBeHidden();
+    await expect(row(page, 'Assistant').locator('.agent-row-state')).toHaveCount(0);
+    expect(hub.personas.calls.filter((call) => call[0] === 'answer')).toEqual([
+      ['answer', 'assistant', expect.stringMatching(/^req-/), { decision: 'allow' }],
+      ['answer', 'cfo', expect.stringMatching(/^req-/), { decision: 'allow' }],
+    ]);
+    const lines = page.locator('#agent-messages .thread-message-delegation');
+    await expect(lines).toHaveCount(3);
+    await expect(lines.nth(2).locator('details.thread-delegation summary')).toHaveText('CFO replied: Reply: answered');
+    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveCount(0, { timeout: 10_000 });
+
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(request).toBeHidden();
+    await expect(messages(page)).toHaveCount(3);
+    await expect(messages(page).nth(2)).toHaveText(/^Reply: answered/);
   });
 });
 

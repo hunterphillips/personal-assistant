@@ -236,25 +236,67 @@ test('pending replies belong to the session the ask was made in and are capped',
   assert.deepEqual(delegation.takePending('assistant', null), []);
 });
 
-test('a request on the receiver posts one waiting line to the sender, and the reply still lands', async (t) => {
-  const { delegation, personas, lines, hub } = await setup(t, { waitMs: 40 });
+test('a request on the receiver posts one waiting line to the sender and its card is forwarded there; an answer from there settles it, and the reply still lands', async (t) => {
+  const { app, delegation, personas, lines, hub } = await setup(t, { waitMs: 40 });
   personas.hold('cfo');
   const outcome = await delegation.ask({ from: 'assistant', chain: [], to: 'cfo', message: 'Check the ledger' });
   assert.equal(outcome.status, 'pending');
   const requestId = personas.raise('cfo', { kind: 'approval', toolName: 'Bash', input: { command: 'ls' } });
-  personas.raise('cfo', { kind: 'approval', toolName: 'Bash', input: { command: 'ls -a' } });
+  const second = personas.raise('cfo', { kind: 'approval', toolName: 'Bash', input: { command: 'ls -a' } });
   await settle(40);
   assert.deepEqual((await lines('assistant')).map(({ state, text }) => ({ state, text })), [
     { state: 'sent', text: 'Messaged CFO' },
     { state: 'waiting', text: 'CFO is waiting for you.' },
   ]);
-  // The card lives only in the receiver's thread: the sender's thread has no request.
-  assert.equal(hub.snapshot().agents.find((a) => a.id === 'assistant').pending, null);
-  assert.equal(hub.snapshot().agents.find((a) => a.id === 'cfo').pending?.kind, 'approval');
+  // The cards are CFO's (the fake keeps the newest as its pending); the Assistant's thread lists both as forwarded, its own state and pending untouched.
+  const view = (id) => hub.snapshot().agents.find((a) => a.id === id);
+  assert.equal(view('cfo').pending?.requestId, second);
+  assert.deepEqual([view('assistant').state, view('assistant').pending], ['idle', null]);
+  assert.deepEqual(view('assistant').forwarded, [
+    { requestId, kind: 'approval', toolName: 'Bash', input: '{"command":"ls"}', truncated: false, agent: 'cfo' },
+    { requestId: second, kind: 'approval', toolName: 'Bash', input: '{"command":"ls -a"}', truncated: false, agent: 'cfo' },
+  ]);
   assert.equal(requestId.startsWith('req-'), true);
+
+  // Answered from the Assistant's thread: the route settles it through CFO's adapter, and the card goes from both.
+  const answered = await request(app, 'POST', '/api/agents/assistant/answer', {
+    headers: { origin: app.origin, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: second, decision: 'allow' }),
+  });
+  assert.deepEqual([answered.status, answered.json], [200, { ok: true }]);
+  assert.deepEqual(personas.calls.filter((call) => call[0] === 'answer'), [
+    ['answer', 'assistant', second, { decision: 'allow' }],
+    ['answer', 'cfo', second, { decision: 'allow' }],
+  ]);
+  assert.deepEqual(view('assistant').forwarded.map((item) => item.requestId), [requestId]);
   await personas.reply('cfo', 'Ledger is clean.');
   await settle();
   assert.deepEqual((await lines('assistant')).map((line) => line.state), ['sent', 'waiting', 'finished']);
+});
+
+test('a request two hops deep is forwarded to the thread the exchange started in, not to the agent in the middle', async (t) => {
+  const { delegation, personas, lines, hub } = await setup(t, { waitMs: 40 });
+  personas.hold('watch');
+  // The user asked the Assistant, the Assistant asked CFO, and CFO asks Watch.
+  assert.equal((await delegation.ask({ from: 'cfo', chain: ['assistant'], to: 'watch', message: 'Anything new?' })).status, 'pending');
+  const requestId = personas.raise('watch', { kind: 'approval', toolName: 'WebFetch', input: { url: 'https://example.invalid' } });
+  await settle(40);
+  const view = (id) => hub.snapshot().agents.find((a) => a.id === id);
+  assert.deepEqual(view('assistant').forwarded.map((item) => [item.requestId, item.agent]), [[requestId, 'watch']]);
+  assert.deepEqual(view('cfo').forwarded, []);
+  assert.equal(hub.requestOwner('assistant', requestId), 'watch');
+  assert.equal(hub.requestOwner('cfo', requestId), null);
+  // The waiting line is the sender's, CFO's; the Assistant's thread gets the card alone.
+  assert.deepEqual((await lines('cfo')).map(({ state, text }) => ({ state, text })), [
+    { state: 'sent', text: 'Messaged Watch' },
+    { state: 'waiting', text: 'Watch is waiting for you.' },
+  ]);
+  assert.deepEqual(await lines('assistant'), []);
+  // An interrupt settles the request as interrupted, and the forwarded card goes with it.
+  const watch = hub.persona('watch');
+  await watch.adapter.interrupt(watch.agent);
+  await settle();
+  assert.deepEqual(view('assistant').forwarded, []);
+  assert.equal(hub.requestOwner('assistant', requestId), null);
 });
 
 test('a turn that ends without text after an interrupt, an error, or no result is failed; text that arrived is a reply', async (t) => {
@@ -448,5 +490,34 @@ test('through the routes: the user sends to A, A asks B, both threads show the e
   assert.equal(views.find((a) => a.id === 'assistant').lastMessage.text, 'Reply: Is he over on equities?');
   assert.equal(views.find((a) => a.id === 'cfo').lastMessage.text, 'Reply: Is he over on equities?');
   assert.equal((await lines('cfo')).length, 0);
+  assert.equal(personas.sent.length, 2);
+});
+
+test('through the routes: A asks B, B raises, the card is answered from A, and the reply lands', async (t) => {
+  const { app, personas, thread, lines, hub } = await setup(t, {
+    seed: { assistant: { delegate: { to: 'cfo', text: 'Check the ledger.', raise: { kind: 'approval', toolName: 'Bash', input: { command: 'ls' } } } } },
+  });
+  const post = (path, body) => request(app, 'POST', path, {
+    headers: { origin: app.origin, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  assert.equal((await post('/api/agents/assistant/send', { text: 'Ask CFO to check.' })).status, 202);
+  await settle(200);
+  const view = (id) => hub.snapshot().agents.find((a) => a.id === id);
+  assert.equal(view('cfo').state, 'waiting');
+  assert.equal(view('assistant').state, 'busy', 'the ask tool is still waiting inline');
+  const [card] = view('assistant').forwarded;
+  assert.deepEqual([card.agent, card.kind, card.toolName], ['cfo', 'approval', 'Bash']);
+  assert.deepEqual((await lines('assistant')).map((line) => line.state), ['sent', 'waiting']);
+
+  assert.deepEqual((await post('/api/agents/assistant/answer', { requestId: card.requestId, decision: 'allow' })).status, 200);
+  await settle(300);
+  assert.deepEqual(view('assistant').forwarded, []);
+  assert.deepEqual([view('assistant').state, view('cfo').state], ['idle', 'idle']);
+  assert.deepEqual(await thread('cfo'), [
+    { role: 'user', text: 'Check the ledger.', from: 'assistant' },
+    { role: 'assistant', text: 'Reply: answered' },
+  ]);
+  assert.deepEqual((await lines('assistant')).map((line) => line.state), ['sent', 'waiting', 'finished']);
+  assert.deepEqual((await thread('assistant')).at(-1), { role: 'assistant', text: 'Reply: answered' });
   assert.equal(personas.sent.length, 2);
 });
