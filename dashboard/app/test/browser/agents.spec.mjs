@@ -1388,3 +1388,97 @@ test.describe('the settings form', () => {
     expect(hub.registry.writes).toHaveLength(0);
   });
 });
+
+// Phase 3, piece 1: messages carry who sent them and lines about a
+// delegation render; nothing sends yet, so the threads are seeded.
+const DELEGATION = (fields) => ({ role: 'system', kind: 'delegation', ...fields });
+const FROM_ASSISTANT = {
+  role: 'user', from: 'assistant', mentions: ['brain'], text: 'Should he rebalance? Ask @Second brain about the lease too.', at: ago(9 * MINUTE),
+};
+
+test.describe('with messages between agents', () => {
+  test.use({
+    hubOptions: {
+      build: () => ({
+        agents: [ASSISTANT, ...AGENTS],
+        personas: {
+          assistant: { messages: [
+            { role: 'user', text: 'Should I rebalance? @CFO knows.', mentions: ['cfo'], at: ago(10 * MINUTE) },
+            DELEGATION({ state: 'sent', to: 'cfo', text: 'Messaged CFO', summary: 'Messaged CFO', at: ago(10 * MINUTE + 1_000) }),
+            DELEGATION({ state: 'busy', to: 'brain', text: 'Second brain is busy. Try again in a moment.', summary: 'Second brain is busy. Try again in a moment.', at: ago(9 * MINUTE) }),
+            DELEGATION({ state: 'refused', reason: 'not_allowed', to: 'brain', from: 'assistant', text: 'Second brain does not accept messages from Assistant.', summary: 'Second brain does not accept messages from Assistant.', at: ago(8 * MINUTE) }),
+            DELEGATION({ state: 'waiting', to: 'cfo', text: 'CFO is waiting for you.', summary: 'CFO is waiting for you.', at: ago(7 * MINUTE) }),
+            DELEGATION({ state: 'failed', to: 'cfo', text: 'CFO could not answer.', summary: 'CFO could not answer.', at: ago(6 * MINUTE) }),
+            DELEGATION({ state: 'finished', to: 'cfo', delegationId: 'd1', summary: 'No. Drift is under a point.',
+              text: 'No. Drift is under a point.\n\n- Nothing is due before Thursday.\n- The **wire** goes out Friday.', at: ago(5 * MINUTE) }),
+            { role: 'assistant', text: 'CFO says no: drift is under a point.', at: ago(4 * MINUTE) },
+          ] },
+          cfo: { messages: [
+            FROM_ASSISTANT,
+            { role: 'assistant', text: 'No. Drift is under a point.', at: ago(8 * MINUTE) },
+            { role: 'user', text: 'Thanks. Tell @Second brain I said so.', mentions: ['brain'], at: ago(3 * MINUTE) },
+          ] },
+        },
+      }),
+    },
+  });
+
+  test('a message another agent sent shows its sender, previews with its name, and mentions render as pills', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    // The sender's reply is CFO's last message; the Assistant's row keeps its own reply, since delegation lines are bookkeeping.
+    await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('You: Thanks. Tell @Second brain I said so.');
+    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText('CFO says no: drift is under a point.');
+
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(messages(page)).toHaveCount(3);
+    const first = messages(page).nth(0);
+    await expect(first).toHaveClass(/thread-message-agent/);
+    await expect(first).toHaveClass(/thread-message-assistant/);
+    await expect(first).not.toHaveClass(/thread-message-user/);
+    const label = first.locator('a.thread-message-from');
+    await expect(label).toHaveText('Assistant');
+    await expect(label).toHaveAttribute('data-agent', 'assistant');
+    await expect(label).toHaveAttribute('href', '/?agent=assistant');
+    const pill = first.locator('.mention');
+    await expect(pill).toHaveText('@Second brain');
+    await expect(pill).toHaveAttribute('data-mention', 'brain');
+    await expect(first.locator('.thread-message-text')).toHaveText('Should he rebalance? Ask @Second brain about the lease too.');
+    // Hunter's own message stays on the right with no label, and its mention is a pill too.
+    const last = messages(page).nth(2);
+    await expect(last).toHaveClass(/thread-message-user/);
+    await expect(last.locator('.thread-message-from')).toHaveCount(0);
+    await expect(last.locator('.mention')).toHaveText('@Second brain');
+    // The sender's label opens the sender's thread.
+    await label.click();
+    await expect(page).toHaveURL(/agent=assistant/);
+    await expect(page.locator('#agent-name')).toHaveText('Assistant');
+  });
+
+  test('delegation lines render centered with the agent linked, and a finished one opens to the reply', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=assistant`);
+    await expect(messages(page)).toHaveCount(8);
+    const lines = page.locator('#agent-messages .thread-message-delegation');
+    await expect(lines).toHaveCount(6);
+    await expect(lines.nth(0)).toHaveClass(/thread-message-system/);
+    await expect(lines.nth(0).locator('.thread-message-text')).toHaveText('Messaged CFO');
+    await expect(lines.nth(0).locator('a[data-agent="cfo"]')).toHaveText('CFO');
+    await expect(lines.nth(1).locator('.thread-message-text')).toHaveText('Second brain is busy. Try again in a moment.');
+    await expect(lines.nth(2).locator('.thread-message-text')).toHaveText('Second brain does not accept messages from Assistant.');
+    await expect(lines.nth(3).locator('.thread-message-text')).toHaveText('CFO is waiting for you.');
+    await expect(lines.nth(3).locator('a[data-agent="cfo"]')).toHaveCount(1);
+    await expect(lines.nth(4).locator('.thread-message-text')).toHaveText('CFO could not answer.');
+
+    const finished = lines.nth(5).locator('details.thread-delegation');
+    await expect(finished).toBeVisible();
+    await expect(finished).not.toHaveAttribute('open', /.*/);
+    await expect(finished.locator('summary')).toHaveText('CFO replied: No. Drift is under a point.');
+    await expect(finished.locator('.thread-brief-body')).toBeHidden();
+    await finished.locator('summary').click();
+    await expect(finished).toHaveAttribute('open', '');
+    await expect(finished.locator('.thread-brief-body li')).toHaveText(['Nothing is due before Thursday.', 'The wire goes out Friday.']);
+    await expect(finished.locator('.thread-brief-body strong')).toHaveText('wire');
+    await expect(lines.nth(5).locator('a.thread-delegation-link[data-agent="cfo"]')).toHaveText('Open CFO');
+    // The mention in Hunter's own message is a pill here too.
+    await expect(messages(page).nth(0).locator('.mention')).toHaveAttribute('data-mention', 'cfo');
+  });
+});

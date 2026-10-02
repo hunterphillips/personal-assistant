@@ -16,7 +16,14 @@
 //
 // window.DashboardMarkdown:
 //   parse(text) -> [block]       the tree, plain data
-//   renderInto(node, text)       appends the rendered blocks to node
+//   renderInto(node, text, { mentions })
+//                                appends the rendered blocks to node.
+//                                `mentions` is an optional list of
+//                                { id, name }: an "@Name" or "@id" in the
+//                                text (case-insensitive, the longest name
+//                                first) becomes <span class="mention"
+//                                data-mention="id">, built from text nodes
+//                                only, never inside code
 //   plain(text) -> string        the text with its markers stripped, on one
 //                                line, for row previews and summaries
 (function () {
@@ -389,12 +396,12 @@
 
   var HEADING_TAGS = { 1: 'h3', 2: 'h4', 3: 'h5' };
 
-  function renderInline(doc, parent, nodes) {
+  function renderInline(doc, parent, nodes, pills) {
     for (var i = 0; i < nodes.length; i += 1) {
       var node = nodes[i];
       var el;
       switch (node.type) {
-        case 'text': parent.appendChild(doc.createTextNode(node.text)); continue;
+        case 'text': appendText(doc, parent, node.text, pills); continue;
         case 'break': parent.appendChild(doc.createElement('br')); continue;
         case 'code':
           el = doc.createElement('code');
@@ -405,36 +412,85 @@
           el.setAttribute('href', node.href);
           el.setAttribute('target', '_blank');
           el.setAttribute('rel', 'noopener noreferrer');
-          renderInline(doc, el, node.children);
+          renderInline(doc, el, node.children, pills);
           break;
         default:
           el = doc.createElement(node.type);
-          renderInline(doc, el, node.children);
+          renderInline(doc, el, node.children, pills);
       }
       parent.appendChild(el);
     }
   }
 
-  function renderBlocks(doc, parent, blocks) {
+  // A text run, split around the mentions it names. Each pill is a span
+  // with the typed text and the agent's id; the rest stays text nodes.
+  function appendText(doc, parent, text, pills) {
+    if (!pills || text.indexOf('@') === -1) {
+      parent.appendChild(doc.createTextNode(text));
+      return;
+    }
+    var pattern = pills.pattern;
+    var last = 0;
+    pattern.lastIndex = 0;
+    var match;
+    while ((match = pattern.exec(text)) !== null) {
+      if (match.index > last) parent.appendChild(doc.createTextNode(text.slice(last, match.index)));
+      var pill = doc.createElement('span');
+      pill.className = 'mention';
+      pill.setAttribute('data-mention', pills.ids[match[1].toLowerCase()]);
+      pill.textContent = match[0];
+      parent.appendChild(pill);
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) parent.appendChild(doc.createTextNode(text.slice(last)));
+  }
+
+  // The matcher for a message's mentions: "@" then one of the names or ids,
+  // longest first so "Focus scanner" wins over "Focus", not followed by a
+  // word character. Null when there is nothing to match.
+  function mentionPills(mentions) {
+    if (!Array.isArray(mentions) || mentions.length === 0) return null;
+    var ids = {};
+    var words = [];
+    for (var i = 0; i < mentions.length; i += 1) {
+      var mention = mentions[i];
+      if (!mention || typeof mention.id !== 'string' || mention.id === '') continue;
+      var names = [mention.id];
+      if (typeof mention.name === 'string' && mention.name.trim() !== '') names.push(mention.name.trim());
+      for (var j = 0; j < names.length; j += 1) {
+        var key = names[j].toLowerCase();
+        if (ids[key] === undefined) {
+          ids[key] = mention.id;
+          words.push(names[j]);
+        }
+      }
+    }
+    if (words.length === 0) return null;
+    words.sort(function (a, b) { return b.length - a.length; });
+    var escaped = words.map(function (word) { return word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); });
+    return { ids: ids, pattern: new RegExp('@(' + escaped.join('|') + ')(?![\\w-])', 'gi') };
+  }
+
+  function renderBlocks(doc, parent, blocks, pills) {
     for (var i = 0; i < blocks.length; i += 1) {
       var block = blocks[i];
       var el;
       switch (block.type) {
         case 'paragraph':
           el = doc.createElement('p');
-          renderInline(doc, el, block.inline);
+          renderInline(doc, el, block.inline, pills);
           break;
         case 'heading':
           el = doc.createElement(HEADING_TAGS[block.level]);
           el.className = 'md-heading';
-          renderInline(doc, el, block.inline);
+          renderInline(doc, el, block.inline, pills);
           break;
         case 'list':
           el = doc.createElement(block.ordered ? 'ol' : 'ul');
           if (block.ordered && block.start !== 1) el.setAttribute('start', String(block.start));
           for (var j = 0; j < block.items.length; j += 1) {
             var item = doc.createElement('li');
-            renderBlocks(doc, item, block.items[j].blocks);
+            renderBlocks(doc, item, block.items[j].blocks, pills);
             el.appendChild(item);
           }
           break;
@@ -447,7 +503,7 @@
           break;
         case 'quote':
           el = doc.createElement('blockquote');
-          renderBlocks(doc, el, block.blocks);
+          renderBlocks(doc, el, block.blocks, pills);
           break;
         default:
           el = doc.createElement('hr');
@@ -456,8 +512,9 @@
     }
   }
 
-  function renderInto(node, text) {
-    renderBlocks(node.ownerDocument, node, parse(text));
+  function renderInto(node, text, options) {
+    var pills = options && options.mentions ? mentionPills(options.mentions) : null;
+    renderBlocks(node.ownerDocument, node, parse(text), pills);
     return node;
   }
 

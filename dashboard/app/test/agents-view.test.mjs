@@ -261,3 +261,35 @@ test('modelButtonText names the effective pair, the model alone, or the Claude C
   assert.equal(view.modelButtonText({ id: null, effort: null }, models), 'Claude Code default');
   assert.equal(view.modelButtonText({ id: 'unknown', effort: 'xhigh' }, models), 'unknown · Extra high');
 });
+
+test("previewText names the agent that sent a message, as 'You:' names Hunter", () => {
+  const agents = [{ id: 'assistant', name: 'Assistant' }, { id: 'cfo', name: 'CFO' }];
+  assert.equal(view.previewText(persona({ lastMessage: { role: 'user', text: 'Should he rebalance?', from: 'assistant' } }), agents), 'Assistant: Should he rebalance?');
+  assert.equal(view.previewText(persona({ lastMessage: { role: 'user', text: 'Hi', from: 'ghost' } }), agents), 'ghost: Hi');
+  assert.equal(view.previewText(persona({ lastMessage: { role: 'user', text: 'Hi' } }), agents), 'You: Hi');
+  // A delegation line previews its summary, like the brief notice.
+  assert.equal(view.previewText(persona({ lastMessage: { role: 'system', kind: 'delegation', state: 'finished', to: 'cfo', summary: 'Cash is fine.', text: 'Cash is fine. More.' } }), agents), 'Cash is fine.');
+  assert.equal(view.agentName(agents, 'cfo'), 'CFO');
+  assert.equal(view.agentName(agents, 'nope'), 'nope');
+  assert.equal(view.agentName(undefined, 'nope'), 'nope');
+});
+
+test('delegationParts gives each state its sentence with the agent as a linkable part', () => {
+  const names = (id) => ({ cfo: 'CFO', assistant: 'Assistant' }[id] || id);
+  const parts = (entry) => plain(view.delegationParts({ role: 'system', kind: 'delegation', ...entry }, names));
+  const cfo = { agent: 'cfo', text: 'CFO' };
+  assert.deepEqual(parts({ state: 'sent', to: 'cfo', text: 'Messaged CFO' }), ['Messaged ', cfo]);
+  assert.deepEqual(parts({ state: 'busy', to: 'cfo' }), [cfo, ' is busy. Try again in a moment.']);
+  assert.deepEqual(parts({ state: 'waiting', to: 'cfo' }), [cfo, ' is waiting for you.']);
+  assert.deepEqual(parts({ state: 'failed', to: 'cfo' }), [cfo, ' could not answer.']);
+  assert.deepEqual(parts({ state: 'refused', reason: 'not_allowed', to: 'cfo', from: 'assistant' }), [cfo, ' does not accept messages from Assistant.']);
+  assert.deepEqual(parts({ state: 'refused', reason: 'cycle', to: 'cfo' }), [cfo, ' is already in this exchange.']);
+  assert.deepEqual(parts({ state: 'refused', reason: 'depth', to: 'cfo' }), ['This exchange is already two agents deep.']);
+  assert.deepEqual(parts({ state: 'refused', reason: 'unavailable', to: 'cfo' }), [cfo, ' is not available.']);
+  assert.deepEqual(parts({ state: 'refused', reason: 'not_an_agent', to: 'cfo' }), [cfo, ' does not take messages.']);
+  assert.deepEqual(parts({ state: 'refused', reason: 'unknown', to: 'ghost' }), ['No agent is named ghost.']);
+  // An unknown state or reason falls back to the stored sentence; a missing receiver too.
+  assert.deepEqual(parts({ state: 'later', text: 'Something new.' }), ['Something new.']);
+  assert.deepEqual(parts({ state: 'refused', reason: 'odd', to: 'cfo', text: 'CFO said no.' }), ['CFO said no.']);
+  assert.deepEqual(parts({ state: 'sent', text: 'Messaged someone' }), ['Messaged someone']);
+});

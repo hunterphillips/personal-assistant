@@ -1276,6 +1276,43 @@ textarea.form-input {
   overflow-wrap: anywhere;
 }
 
+/* A message another agent sent: the sender's name above the bubble. */
+.thread-message-from {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.thread-message-from:hover,
+.thread-message-from:focus-visible { color: var(--ink); text-decoration: underline; }
+
+/* A line about a delegation: centered like a date line; the agent's name
+   links to its thread. A finished one reuses the brief's disclosure row. */
+.thread-delegation-text a {
+  color: var(--green);
+  text-decoration: none;
+}
+.thread-delegation-text a:hover,
+.thread-delegation-text a:focus-visible { text-decoration: underline; }
+.thread-delegation-link {
+  color: var(--green);
+  text-decoration: none;
+}
+.thread-delegation-link:hover,
+.thread-delegation-link:focus-visible { text-decoration: underline; }
+
+/* An agent named with @ in a sent message. */
+.mention {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--side);
+  color: var(--green);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 /* Markdown in a message body (markdown.js). A one-line message is one
    paragraph with no margins, so it reads as plain text did. */
 .markdown > :first-child { margin-top: 0; }

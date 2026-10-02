@@ -415,13 +415,54 @@
 
   // The one-line preview under a row: the last message with its Markdown
   // markers stripped, or the description for an agent that has no thread.
-  function previewText(agent) {
+  // A message another agent sent is prefixed with that agent's name, the
+  // way Hunter's own are prefixed "You:"; `agents` resolves the name.
+  function previewText(agent, agents) {
     if (!isPersona(agent)) return agent.description || '';
     var message = agent.lastMessage;
     if (!message || typeof message.text !== 'string') return '';
     var source = typeof message.summary === 'string' && message.summary ? message.summary : message.text;
     var text = window.DashboardMarkdown.plain(source);
-    return message.role === 'user' ? 'You: ' + text : text;
+    if (message.role !== 'user') return text;
+    if (typeof message.from === 'string' && message.from) return agentName(agents, message.from) + ': ' + text;
+    return 'You: ' + text;
+  }
+
+  // An agent's display name from the snapshot, or its id when unknown.
+  function agentName(agents, id) {
+    var list = agents || [];
+    for (var i = 0; i < list.length; i += 1) {
+      if (list[i] && list[i].id === id) return list[i].name || id;
+    }
+    return id;
+  }
+
+  // The sentence a delegation line shows, as parts: strings and
+  // { agent: id, text: name } for a name that links to that agent's thread.
+  // `entry` is a system message with kind 'delegation'; `names(id)` resolves
+  // an id. The daemon stores the same sentence as `text`; it is the fallback
+  // for a state this view does not know.
+  function delegationParts(entry, names) {
+    var to = typeof entry.to === 'string' ? entry.to : null;
+    var from = typeof entry.from === 'string' ? entry.from : null;
+    var name = to ? { agent: to, text: names(to) } : null;
+    switch (entry.state) {
+      case 'sent': return name ? ['Messaged ', name] : [entry.text || ''];
+      case 'busy': return name ? [name, ' is busy. Try again in a moment.'] : [entry.text || ''];
+      case 'waiting': return name ? [name, ' is waiting for you.'] : [entry.text || ''];
+      case 'failed': return name ? [name, ' could not answer.'] : [entry.text || ''];
+      case 'refused':
+        switch (entry.reason) {
+          case 'not_allowed': return name ? [name, ' does not accept messages from ' + (from ? names(from) : 'this agent') + '.'] : [entry.text || ''];
+          case 'cycle': return name ? [name, ' is already in this exchange.'] : [entry.text || ''];
+          case 'depth': return ['This exchange is already two agents deep.'];
+          case 'unavailable': return name ? [name, ' is not available.'] : [entry.text || ''];
+          case 'not_an_agent': return name ? [name, ' does not take messages.'] : [entry.text || ''];
+          case 'unknown': return ['No agent is named ' + (to || 'that') + '.'];
+          default: return [entry.text || ''];
+        }
+      default: return [entry.text || ''];
+    }
   }
 
   // The row's state line for a persona or a session, or null. A Codex
@@ -592,7 +633,7 @@
       if (persona && agent.lastMessage) head.appendChild(timeSpan('agent-row-time', agent.lastMessage.at));
       node.appendChild(head);
 
-      var preview = previewText(agent);
+      var preview = previewText(agent, state.agents);
       if (preview) node.appendChild(element('span', 'agent-row-preview', preview));
       var line = stateLine(agent);
       if (line) node.appendChild(element('span', 'agent-row-state agent-row-state-' + line.tone, line.text));
@@ -674,16 +715,77 @@
 
     function messageNode(entry) {
       if (entry.role === 'system' && entry.kind === 'brief') return briefNode(entry);
+      if (entry.role === 'system' && entry.kind === 'delegation') return delegationNode(entry);
+      if (entry.role === 'user' && typeof entry.from === 'string' && entry.from) return agentMessageNode(entry);
       var role = entry.role === 'user' || entry.role === 'system' ? entry.role : 'assistant';
       var node = element('div', 'thread-message thread-message-' + role);
-      node.appendChild(markdownNode('thread-message-text', entry.text));
+      node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
       node.appendChild(messageMeta(entry));
       return node;
     }
 
-    // A message body rendered from its Markdown (markdown.js).
-    function markdownNode(className, text) {
-      return window.DashboardMarkdown.renderInto(element('div', className + ' markdown'), text);
+    // A message another agent sent into this thread: on the left like a
+    // reply, with the sender's name above it linking to the sender's thread.
+    function agentMessageNode(entry) {
+      var node = element('div', 'thread-message thread-message-assistant thread-message-agent');
+      node.appendChild(agentLink(entry.from, 'thread-message-from'));
+      node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // A line about a delegation, centered like a date line. A finished one
+    // opens to the reply, the way the brief notice opens to the memo.
+    function delegationNode(entry) {
+      var names = function (id) { return agentName(state.agents, id); };
+      if (entry.state === 'finished') {
+        var node = element('div', 'thread-message thread-message-system thread-message-brief thread-message-delegation');
+        var details = element('details', 'thread-brief thread-delegation');
+        var replied = typeof entry.summary === 'string' && entry.summary ? entry.summary : (entry.text || '');
+        var who = typeof entry.to === 'string' && entry.to ? names(entry.to) : (typeof entry.from === 'string' && entry.from ? names(entry.from) : 'The agent');
+        details.appendChild(element('summary', 'thread-brief-summary', who + ' replied: ' + window.DashboardMarkdown.plain(replied)));
+        details.appendChild(markdownNode('thread-brief-body', entry.text || ''));
+        node.appendChild(details);
+        var meta = messageMeta(entry);
+        var target = typeof entry.to === 'string' && entry.to ? entry.to : (typeof entry.from === 'string' ? entry.from : null);
+        if (target) {
+          meta.appendChild(document.createTextNode(' '));
+          meta.appendChild(agentLink(target, 'thread-delegation-link', 'Open ' + names(target)));
+        }
+        node.appendChild(meta);
+        return node;
+      }
+      var line = element('div', 'thread-message thread-message-system thread-message-delegation');
+      var text = element('div', 'thread-message-text thread-delegation-text');
+      var parts = delegationParts(entry, names);
+      for (var i = 0; i < parts.length; i += 1) {
+        var part = parts[i];
+        if (typeof part === 'string') text.appendChild(document.createTextNode(part));
+        else text.appendChild(agentLink(part.agent, null, part.text));
+      }
+      line.appendChild(text);
+      line.appendChild(messageMeta(entry));
+      return line;
+    }
+
+    // A link to an agent's thread by registry id, labeled with its name.
+    function agentLink(id, className, label) {
+      var link = element('a', className, label || agentName(state.agents, id));
+      link.setAttribute('href', '/?agent=' + encodeURIComponent(id));
+      link.setAttribute('data-agent', id);
+      return link;
+    }
+
+    // A message body rendered from its Markdown (markdown.js). `mentions`,
+    // when the message carries registry ids, turns their "@Name" into pills.
+    function markdownNode(className, text, mentions) {
+      var pills = null;
+      if (Array.isArray(mentions) && mentions.length > 0) {
+        pills = mentions.filter(function (id) { return typeof id === 'string' && id; }).map(function (id) {
+          return { id: id, name: agentName(state.agents, id) };
+        });
+      }
+      return window.DashboardMarkdown.renderInto(element('div', className + ' markdown'), text, pills ? { mentions: pills } : undefined);
     }
 
     // The morning brief's notice: one line that opens to the memo. A brief
@@ -1997,6 +2099,8 @@
     modelButtonText: modelButtonText,
     refusalSentence: refusalSentence,
     previewText: previewText,
+    agentName: agentName,
+    delegationParts: delegationParts,
     stateLine: stateLine,
     formatInput: formatInput,
     displayName: displayName,

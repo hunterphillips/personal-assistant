@@ -127,3 +127,30 @@ test('plain strips the markers to one line for previews and summaries', () => {
   assert.equal(md.plain('[x](javascript:alert(1))'), '[x](javascript:alert(1))');
   assert.equal(md.plain(''), '');
 });
+
+test('mentions become pills from text nodes only, longest name first, case-insensitive, never inside code or from raw HTML', () => {
+  const mentions = [{ id: 'cfo', name: 'CFO' }, { id: 'focus', name: 'Focus' }, { id: 'scanner', name: 'Focus scanner' }];
+  const withPills = (text) => md.renderInto(new Element(doc, 'div'), text, { mentions }).children.join('');
+  assert.equal(withPills('Ask @CFO about it'), '<p>Ask <span data-mention="cfo" class="mention">@CFO</span> about it</p>');
+  // The typed casing stays; the id matches as well as the name.
+  assert.equal(withPills('@cfo and @Cfo'), '<p><span data-mention="cfo" class="mention">@cfo</span> and <span data-mention="cfo" class="mention">@Cfo</span></p>');
+  // The longest name wins, so "Focus scanner" is one pill.
+  assert.equal(withPills('@Focus scanner, then @Focus'),
+    '<p><span data-mention="scanner" class="mention">@Focus scanner</span>, then <span data-mention="focus" class="mention">@Focus</span></p>');
+  // A name followed by a word character is not that agent.
+  assert.equal(withPills('@CFOs are busy'), '<p>@CFOs are busy</p>');
+  // Unknown names stay text; nothing happens without mentions.
+  assert.equal(withPills('@nobody here'), '<p>@nobody here</p>');
+  assert.equal(html('@CFO here'), '<p>@CFO here</p>');
+  // Inside code the text is untouched, and in bold the pill nests.
+  assert.equal(withPills('`@CFO` **@CFO**'),
+    '<p><code>@CFO</code> <strong><span data-mention="cfo" class="mention">@CFO</span></strong></p>');
+  // A name that is HTML renders as text, never as markup.
+  const hostile = [{ id: 'x', name: '<img src=x onerror=alert(1)>' }];
+  assert.equal(md.renderInto(new Element(doc, 'div'), 'hi @<img src=x onerror=alert(1)> there', { mentions: hostile }).children.join(''),
+    '<p>hi <span data-mention="x" class="mention">@&lt;img src=x onerror=alert(1)&gt;</span> there</p>'.replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+  // Regex characters in a name are literal.
+  const dotted = [{ id: 'dot', name: 'A.B (C)' }];
+  assert.equal(md.renderInto(new Element(doc, 'div'), '@A.B (C) and @AxB (C)', { mentions: dotted }).children.join(''),
+    '<p><span data-mention="dot" class="mention">@A.B (C)</span> and @AxB (C)</p>');
+});
