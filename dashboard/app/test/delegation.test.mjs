@@ -179,7 +179,7 @@ test('a reply that is not back within the wait is pending, posts when it lands, 
   const { delegation, personas, lines, logs } = await setup(t, { waitMs: 40 });
   personas.hold('cfo');
   const outcome = await delegation.ask({ from: 'assistant', chain: [], to: 'cfo', message: 'Take your time' });
-  assert.deepEqual(outcome, { status: 'pending', delegationId: 'd-1', text: 'pending: d-1. CFO will answer in this thread.' });
+  assert.deepEqual(outcome, { status: 'pending', delegationId: 'd-1', text: 'CFO is still working. The reply will arrive in this thread.' });
   assert.deepEqual((await lines('assistant')).map((line) => line.state), ['sent']);
   assert.deepEqual(delegation.pendingFor('assistant', null), []);
 
@@ -437,7 +437,7 @@ test('through the routes: the user sends to A, A asks B, both threads show the e
     { role: 'user', text: 'Ask CFO about equities' },
     { role: 'system', kind: 'delegation', state: 'sent', to: 'cfo', delegationId: 'd-1', text: 'Messaged CFO', summary: 'Messaged CFO' },
     { role: 'system', kind: 'delegation', state: 'finished', to: 'cfo', delegationId: 'd-1', text: 'Reply: Is he over on equities?', summary: 'Reply: Is he over on equities?' },
-    { role: 'assistant', text: 'Reply: Reply: Is he over on equities?' },
+    { role: 'assistant', text: 'Reply: Is he over on equities?' },
   ]);
   assert.deepEqual(await thread('cfo'), [
     { role: 'user', text: 'Is he over on equities?', from: 'assistant' },
@@ -445,7 +445,7 @@ test('through the routes: the user sends to A, A asks B, both threads show the e
   ]);
   // The row preview is the real last message, never a delegation line.
   const views = app.hub.snapshot().agents;
-  assert.equal(views.find((a) => a.id === 'assistant').lastMessage.text, 'Reply: Reply: Is he over on equities?');
+  assert.equal(views.find((a) => a.id === 'assistant').lastMessage.text, 'Reply: Is he over on equities?');
   assert.equal(views.find((a) => a.id === 'cfo').lastMessage.text, 'Reply: Is he over on equities?');
   assert.equal((await lines('cfo')).length, 0);
   assert.equal(personas.sent.length, 2);

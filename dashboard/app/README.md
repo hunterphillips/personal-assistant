@@ -957,8 +957,9 @@ running; the tool's arguments cannot name another.
   accepts, cycle, depth; then the receiver's adapter refuses `busy`
   before any await.
 - The tool waits `delegationWaitMs` for the receiver's turn to end and
-  answers with the reply text. Past that it answers
-  `pending: <delegationId>. <name> will answer in this thread.`; the
+  answers with the reply text alone. Past that it answers "<name> is
+  still working. The reply will arrive in this thread." (what the tool
+  answers is prose the model may repeat, so it carries no id); the
   finished or failed line posts when the turn ends, and the reply is kept
   for the sender's next own turn (a turn the user starts, never a hop from
   another agent), for the session the ask was made in (New thread drops

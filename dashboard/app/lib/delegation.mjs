@@ -50,9 +50,12 @@
 //     the turn ends within timeouts.delegationWaitMs the 'finished' line
 //     (text: the reply, summary: its first sentence; the client prefixes
 //     "<name> replied:") or the 'failed' line posts and the tool gets the
-//     reply inline; otherwise the tool gets the pending sentence and the
+//     reply inline; otherwise the tool gets the pending sentence ("<name>
+//     is still working. The reply will arrive in this thread.") and the
 //     line posts when the turn ends, with the reply queued for the
-//     sender's next own turn. A turn that ends with no text is 'failed'
+//     sender's next own turn. What the tool answers is prose the model
+//     may repeat, so it never carries an id; the delegationId stays in
+//     the result fields and the lines. A turn that ends with no text is 'failed'
 //     when the adapter or the hub recorded an error for the receiver, an
 //     error or interrupted event was seen, or no usage arrived (an
 //     interrupt or shutdown); otherwise it is 'finished' with "<name>
@@ -288,7 +291,7 @@ export function createDelegation({
     ended.then(() => finish(false)).catch((error) => {
       log({ event: 'delegation_error', agentId: from, to: target, delegationId, error: bound(error?.message ?? String(error)) });
     });
-    return { status: 'pending', delegationId, text: `pending: ${delegationId}. ${nameOf(target)} will answer in this thread.` };
+    return { status: 'pending', delegationId, text: `${nameOf(target)} is still working. The reply will arrive in this thread.` };
   }
 
   function sessionOf(agentId) {

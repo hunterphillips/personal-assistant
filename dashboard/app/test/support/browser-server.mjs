@@ -379,8 +379,8 @@ function controlledRoutines({ items = [], focusAvailable = null, refreshedAt = n
 // replies "Reply: <text>" and goes idle, unless the persona is held. A
 // persona seeded with `delegate: { to, text }` instead asks that agent
 // through the delegation service on each turn that is the user's own
-// (context.from absent) and replies "Reply: <what the tool answered>", as
-// the model would after calling the tool. answer() resolves the pending
+// (context.from absent) and replies with what the tool answered, as a
+// model that repeats the tool's text would. answer() resolves the pending
 // request and continues the turn the same way.
 // Controls on the returned object:
 //   hold(id)                       later turns stay busy until reply()
@@ -473,7 +473,7 @@ export function fakePersonas(seed, store) {
   async function delegateTurn(id, delegate, context) {
     if (!delegation) throw new Error('fakePersonas: a delegate seed needs setDelegation()');
     const outcome = await delegation.ask({ from: id, chain: context.chain ?? [], to: delegate.to, message: delegate.text });
-    if (entry(id).state === 'busy' && !held.has(id)) await finish(id, `Reply: ${outcome.text}`);
+    if (entry(id).state === 'busy' && !held.has(id)) await finish(id, outcome.text);
   }
 
   const adapter = {

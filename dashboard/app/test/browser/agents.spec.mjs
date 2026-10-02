@@ -1518,9 +1518,9 @@ test.describe('with a live exchange between agents', () => {
     await expect(finished.locator('summary')).toHaveText('CFO replied: Reply: Is he over on equities?');
     await expect(finished.locator('.thread-brief-body')).toBeHidden();
     await expect(lines.nth(1).locator('a.thread-delegation-link[data-agent="cfo"]')).toHaveText('Open CFO');
-    await expect(messages(page).nth(4)).toHaveText(/^Reply: Reply: Is he over on equities\? One line\./);
+    await expect(messages(page).nth(4)).toHaveText(/^Reply: Is he over on equities\? One line\./);
     // The row keeps the real last message, never a line.
-    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText('Reply: Reply: Is he over on equities? One line.');
+    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText('Reply: Is he over on equities? One line.');
     await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('Reply: Is he over on equities? One line.');
 
     await lines.nth(1).locator('a.thread-delegation-link').click();
@@ -1543,7 +1543,7 @@ test.describe('with a live exchange between agents', () => {
     const lines = page.locator('#agent-messages .thread-message-delegation');
     await expect(lines).toHaveCount(1);
     await expect(lines.nth(0).locator('.thread-message-text')).toHaveText('Messaged CFO');
-    await expect(messages(page).nth(3)).toHaveText(/^Reply: pending: [0-9a-f-]{36}\. CFO will answer in this thread\./);
+    await expect(messages(page).nth(3).locator('.thread-message-text')).toHaveText('CFO is still working. The reply will arrive in this thread.');
     await expect(page.locator('#agent-send')).toBeEnabled();
     await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Working');
 
@@ -1554,7 +1554,7 @@ test.describe('with a live exchange between agents', () => {
     await expect(finished.locator('summary')).toHaveText('CFO replied: Not over.');
     await finished.locator('summary').click();
     await expect(finished.locator('.thread-brief-body')).toHaveText('Not over. Drift is under a point.');
-    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText(/^Reply: pending:/);
+    await expect(row(page, 'Assistant').locator('.agent-row-preview')).toHaveText('CFO is still working. The reply will arrive in this thread.');
   });
 
   test('a question raised by the other agent shows a waiting line here and the card only there', async ({ page, hub }) => {
