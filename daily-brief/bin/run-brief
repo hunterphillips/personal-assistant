@@ -78,6 +78,13 @@ log() {
 
 say() { printf 'run-brief: %s\n' "$1"; }
 
+brief_json_valid() {
+    "$python3" -c 'import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+expected = {"date", "title", "words", "opening", "sections"}
+sys.exit(0 if isinstance(data, dict) and set(data) == expected else 1)' "$1" >/dev/null 2>&1
+}
+
 # Render a prompt file, substituting {{PLACEHOLDERS}}.
 render() {
     /usr/bin/sed \
@@ -172,9 +179,12 @@ for f in "$brief_dir/contribution-contract.md" "$brief_dir/curator.md" \
     [ -f "$f" ] || { log "exit=1 date=$date reason=missing-file $f"; say "missing $f"; exit 1; }
 done
 
-if [ "$stage" = all ] && [ "$force" = 0 ] && [ -f "$briefs/viewer-$date.html" ]; then
+if [ "$stage" = all ] && [ "$force" = 0 ] \
+   && [ -f "$briefs/viewer-$date.html" ] \
+   && [ -f "$briefs/brief-$date.json" ] \
+   && brief_json_valid "$briefs/brief-$date.json"; then
     log "exit=0 date=$date reason=already-built"
-    say "viewer-$date.html exists; use --force to rebuild"
+    say "viewer-$date.html and brief-$date.json exist; use --force to rebuild"
     exit 0
 fi
 
@@ -394,7 +404,9 @@ viewer=MISSING; exit_code=0; notice=none
 if [ -f "$briefs/memo-$date.md" ]; then
     if "$python3" "$briefs/build.py" "$date" >>"$transcripts/$date-verify.log" 2>&1 \
        && "$node" "$briefs/check-viewer.mjs" "$date" >>"$transcripts/$date-verify.log" 2>&1 \
-       && [ -f "$briefs/viewer-$date.html" ]; then
+       && [ -f "$briefs/viewer-$date.html" ] \
+       && [ -f "$briefs/brief-$date.json" ] \
+       && brief_json_valid "$briefs/brief-$date.json"; then
         viewer=written
         if [ -n "${watch_packet:-}" ]; then
             /usr/bin/jq --arg d "$watch_packet" '.reported = ((.reported // []) + [$d] | unique)' "$brief_dir/watch/state.json" >"$brief_dir/watch/state.json.tmp" \
