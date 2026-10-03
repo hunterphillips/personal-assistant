@@ -691,6 +691,20 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   background: var(--side);
   color: var(--muted);
 }
+/* A destructive action, such as confirming Delete: red in both themes,
+   with --on-accent for text, which flips with the theme as the red does. */
+.button-danger {
+  border-color: var(--red);
+  background: var(--red);
+  color: var(--on-accent);
+}
+.button-danger:hover { filter: brightness(0.92); }
+.button-danger:disabled {
+  border-color: var(--line);
+  background: var(--side);
+  color: var(--muted);
+  filter: none;
+}
 
 .link-button {
   min-height: 44px;

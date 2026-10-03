@@ -59,6 +59,11 @@ test('Delete asks inline with what goes and where the brief moves; Cancel keeps 
     'Delete CFO? This removes it from the registry with its routines and their runs. Its thread stays on disk. The brief will go to Myos.',
   );
   await expect(confirm.getByRole('button', { name: 'Delete', exact: true })).toBeFocused();
+  // Destructive, not the primary teal: the theme's red behind it.
+  const red = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--red').trim());
+  const background = await confirm.getByRole('button', { name: 'Delete', exact: true }).evaluate((node) => getComputedStyle(node).backgroundColor);
+  const probe = await page.evaluate((value) => { const el = document.createElement('i'); el.style.color = value; document.body.appendChild(el); const c = getComputedStyle(el).color; el.remove(); return c; }, red);
+  expect(background).toBe(probe);
 
   await confirm.getByRole('button', { name: 'Cancel' }).click();
   await expect(confirm).toBeHidden();
