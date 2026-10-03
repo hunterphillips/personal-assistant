@@ -11,43 +11,56 @@ from here.
 ## The system
 
 - **Interface**: `dashboard/app/`, a Node 24 daemon on 127.0.0.1:4243 behind
-  Tailscale Serve, in Focus's theme since 2026-09-30. A rail of five views:
-  Home is the Agents view (the Assistant pinned above the groups the
-  registry lists, agents on the Claude Agent SDK, Codex threads on a
-  shared app-server, Claude Code terminals in cmux; a gear opens each
-  agent's settings beside its thread; on a desk the Assistant's thread
-  opens by default, and each morning's brief lands in it as one collapsed
-  line; messages render Markdown; a button under the composer picks the
-  thread's model and effort; `@` mentions an agent; every Claude agent's
-  turn carries one tool, `ask`, that messages another agent in its own
-  thread, with the exchange shown in both and a card the receiver raises
-  shown where the exchange started; each agent runs at a permission
-  level, Ask, Auto, or Full access, set in its gear panel; its routines,
-  scheduled prompts the daemon runs itself as a turn in its thread at its
-  level, are listed under its settings with a picker form and under the
-  groups in the list), Feed holds what the producers found (with images,
-  and Discuss opening the Watch agent; its instructions send a change to
-  Watch), the Daily Brief opens as an overlay from the header on any view
-  (rendered from the run's brief JSON, with Approve, Dismiss, notes, and its
-  own instructions), Focus
-  is embedded through a proxy, Goals
-  reads the vault's priorities with add and edit going through the
-  Second brain agent, Health holds Settings (the default model, effort, and
-  permission level, which agent receives the brief) and lists the launchd jobs and their
-  state. Every turn runs with the SDK's Claude Code preset system
-  prompt. The design (the Assistant as the pinned agent, delegation,
-  models, routines, and what comes next: Ideas) is
-  `thoughts/shared/plans/2026-09-30-assistant-system-design.md`; the
-  app header (quick chat, notifications, the brief as an overlay, the
+  Tailscale Serve, in Focus's theme since 2026-09-30. Every view sits under
+  one header: the view's name and its actions on the left, and on the
+  right Brief, Quick chat, a bell with the open notification count, and a
+  menu with the theme (Light, Dark, or System) and Settings (one menu on a
+  phone); the rail's chat icon carries a dot when an agent is waiting or
+  has an unread reply, Health a mark when a job's last run failed; Quick
+  chat opens any Claude agent's thread in a pane over any view, defaulting
+  to Myos, and sends what Hunter is looking at as a context line. A rail
+  of five views: Home is the Agents view (the Assistant pinned above the
+  groups the registry lists, agents on the Claude Agent SDK, Codex
+  threads on a shared app-server, Claude Code terminals in cmux; a gear
+  opens each agent's settings beside its thread; on a desk the
+  Assistant's thread opens by default, and each morning's brief lands in
+  it as one collapsed line; messages render Markdown; a button under the
+  composer picks the thread's model and effort; `@` mentions an agent;
+  every Claude agent's turn carries two tools, `ask` (that messages
+  another agent in its own thread, with the exchange shown in both and a
+  card the receiver raises shown where the exchange started) and
+  `notify` (that raises a notification in the header's list); each
+  turn's prompt also names the agent, its registry name, role, and
+  description; each agent runs at a permission level, Ask, Auto, or Full
+  access, set in its gear panel; its routines, scheduled prompts the
+  daemon runs itself as a turn in its thread at its level, are listed
+  under its settings with a picker form and under the groups in the
+  list; Myos is the built-in guide agent, seeded by the daemon, and any
+  other agent can be deleted from its gear panel), Feed holds what the
+  producers found (with images, and Discuss opening the Watch agent; its
+  instructions send a change to Watch), the Daily Brief opens as an
+  overlay from the header on any view (rendered from the run's brief
+  JSON, with Approve, Dismiss, notes, and its own instructions), Focus is
+  embedded through a proxy and takes the dashboard's theme, Goals reads
+  the vault's priorities with add and edit going through the Second
+  brain agent, Health holds Settings (the default model, effort, and
+  permission level, which agent receives the brief, which agent quick
+  chat talks to) and lists the launchd jobs and their state. Every turn
+  runs with the SDK's Claude Code preset system prompt. The design (the
+  Assistant as the pinned agent, delegation, models, routines, and what
+  comes next: Ideas) is
+  `thoughts/shared/plans/2026-09-30-assistant-system-design.md`; the app
+  header (quick chat, notifications, the brief as an overlay, the
   embedded assistant) is designed in
-  `thoughts/shared/plans/2026-10-03-app-header-design.md` and not yet
-  built. The app
-  README and `docs/operations.md` hold routes, snapshot shape, helpers, and
-  setup.
+  `thoughts/shared/plans/2026-10-03-app-header-design.md` and built per
+  `thoughts/shared/plans/2026-10-03-app-header-implementation.md`. The
+  app README and `docs/operations.md` hold routes, snapshot shape,
+  helpers, and setup.
 - **Registry**: `registry/agents.json`, the agents and project folders the
   daemon runs and lists: role, description, group, cwd, provider, model
-  and effort, `accepts` (who may message it), launchd labels, `pinned`;
-  plus the `groups` list that sets group order and labels. Absolute paths;
+  and effort, `accepts` (who may message it), launchd labels, `pinned`,
+  `builtin` (seeded from `registry/builtin.json`, no Delete); plus the
+  `groups` list that sets group order and labels. Absolute paths;
   the daemon keeps the last good copy on a bad edit. Since 2026-10-02 the
   dashboard writes it (an agent's settings, New agent) as 2-space JSON in
   the schema's key order; hand edits still load.
@@ -112,12 +125,14 @@ picks one up and ends by updating it.
   SDK, `ws`, and `zod`); run `npm ci` after pulling. `var/` is local state.
 - `dashboard/prototype/`: a static design study with illustrative data; its
   own repository, ignored here.
-- `registry/agents.json`: the agent registry.
+- `registry/agents.json`: the agent registry; `registry/builtin.json` the
+  built-in agents.
 - `routines/`: one file per routine, written by the dashboard and committed
   like the registry; `runs/` beside them holds the runs logs, gitignored.
+- `notifications/`: the notifications store, gitignored.
 - `daily-brief/`: contract, schema, curator rules, `bin/run-brief` and its
   prompts, `launchd/`, `watch/`. `contributions/` and `briefs/` are outputs,
-  gitignored; each build writes the viewer and structured brief data;
+  gitignored; each build writes the viewer and `brief-<date>.json`;
   `build.py` and `check-viewer.mjs` beside the briefs are code.
 - `feed/`: the feed store's README; `items/` is its output, gitignored.
 - `systems/`: symlinks to the agents' repos.
