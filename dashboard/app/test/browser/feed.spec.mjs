@@ -236,7 +236,7 @@ test.describe('with an empty store', () => {
 test.describe('with the feed instructions', () => {
   test.use({ hubOptions: { feed: FEED, instructions: INSTRUCTIONS, agents: [WATCH] } });
 
-  const toggle = (page) => page.getByRole('button', { name: 'Feed instructions' });
+  const toggle = (page) => page.getByRole('button', { name: 'Instructions' });
   const panel = (page) => page.locator('#feed-instructions');
   const input = (page) => panel(page).getByLabel('What should change?');
 
@@ -252,7 +252,8 @@ test.describe('with the feed instructions', () => {
     await expect(toggle(page)).toBeVisible();
     await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
     await expect(toggle(page).locator('svg')).toHaveCount(1);
-    if (page.viewportSize().width >= 720) await expect(toggle(page)).toHaveText('Feed instructions');
+    await expect(toggle(page)).toHaveAttribute('aria-label', 'Instructions');
+    await expect(toggle(page)).toHaveAttribute('title', 'Instructions');
     await expect(panel(page)).toBeHidden();
     await toggle(page).click();
     await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true');
@@ -363,7 +364,7 @@ test.describe('with the feed instructions', () => {
   test('on a phone the button is the icon alone and the panel fits', async ({ page, hub }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPanel(page, hub);
-    await expect(toggle(page).locator('.instructions-label')).toBeHidden();
+    await expect(toggle(page).locator('.instructions-label')).toHaveCount(0);
     const button = await toggle(page).boundingBox();
     expect(button.x + button.width).toBeLessThanOrEqual(390);
     expect(button.height).toBeGreaterThanOrEqual(44);
@@ -380,12 +381,12 @@ test.describe('with no feed instructions file', () => {
 
   test('the panel says the file is missing and does not show an old copy on reopen', async ({ page, hub }) => {
     await openFeed(page, hub);
-    await page.getByRole('button', { name: 'Feed instructions' }).click();
+    await page.getByRole('button', { name: 'Instructions' }).click();
     await expect(page.locator('#feed-instructions .instructions-problem')).toHaveText('The feed instructions file is missing.');
-    await page.getByRole('button', { name: 'Feed instructions' }).click();
+    await page.getByRole('button', { name: 'Instructions' }).click();
     // The next read is held, so only what openPanel leaves in place shows.
     await page.route('**/api/feed/instructions', () => {});
-    await page.getByRole('button', { name: 'Feed instructions' }).click();
+    await page.getByRole('button', { name: 'Instructions' }).click();
     await expect(page.locator('#feed-instructions')).toBeVisible();
     await expect(page.locator('#feed-instructions .instructions-problem')).toHaveCount(0);
   });

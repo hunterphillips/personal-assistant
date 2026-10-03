@@ -50,15 +50,18 @@ test.describe('header shell', () => {
     await expect(page.locator('.app-header #brief-instructions-toggle')).toHaveCount(0);
     const headerEntries = page.locator('.header-right > .header-entry, .header-right > .header-menu-toggle');
     await expect(headerEntries).toHaveCount(4);
-    await expect(headerEntries.nth(0)).toHaveText('Brief');
-    await expect(headerEntries.nth(1)).toHaveText('Quick chat');
+    // All four are icon-only now, so each is found by its accessible name.
     // toHaveAccessibleName triggers WebKit's native accessible-name lookup,
     // which mobile-webkit cannot complete under this shell's strict CSP (it
     // logs a stylesheet-blocked violation and fails even for untouched
-    // elements, e.g. .header-brief) -- unrelated to this button; the label
-    // is checked on the attribute that is its source instead.
+    // elements, e.g. .header-brief) -- unrelated to these buttons; each
+    // label is checked on the attribute that is its source instead, which
+    // also still works while the entries are display:none on a phone
+    // (getByRole excludes hidden elements, so it cannot be used here).
+    await expect(headerEntries.nth(0)).toHaveAttribute('aria-label', 'Brief');
+    await expect(headerEntries.nth(1)).toHaveAttribute('aria-label', 'Quick chat');
     await expect(headerEntries.nth(2)).toHaveAttribute('aria-label', 'Notifications');
-    await expect(headerEntries.nth(3)).toHaveText('Menu');
+    await expect(headerEntries.nth(3)).toHaveAttribute('aria-label', 'Menu');
   });
 
   test('Menu closes with Escape or an outside click, and Settings opens Health', async ({ page, hub }) => {

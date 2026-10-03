@@ -122,6 +122,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   align-items: center;
   gap: 4px;
   padding: 28px 10px;
+  padding-top: clamp(48px, 16vh, 160px);
   background: var(--side);
   border-right: 1px solid var(--line);
 }
@@ -862,10 +863,11 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .instructions-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  min-width: 44px;
   min-height: 44px;
   margin-left: auto;
-  padding: 0 4px;
+  padding: 0;
   border: 0;
   background: none;
   color: var(--muted);
@@ -2224,8 +2226,6 @@ textarea.form-input {
   #view-goals,
   #view-health { padding: 20px 16px; }
 
-  .instructions-toggle { min-width: 44px; justify-content: center; }
-  .instructions-label { display: none; }
   .feed-page { padding: 16px 16px 24px; }
   .feed-item { grid-template-columns: 24px minmax(0, 1fr); }
   .feed-badge { width: 24px; height: 24px; }
