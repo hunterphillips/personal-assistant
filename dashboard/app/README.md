@@ -63,6 +63,9 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `DELETE /api/routines/<id>` | Removes the routine and its runs log; `{"ok": true}`. |
 | `GET /api/routines/<id>/runs` | The routine's newest ten runs, newest first (below). |
 | `POST /api/routines/<id>/run` | Runs the routine now, outside its schedule; 202 once the turn has started, 409 `busy` or `agent_unavailable` when it cannot (below). |
+| `GET /api/notifications` | The notifications as the snapshot carries them: `{"open", "items"}` (below). |
+| `POST /api/notifications/<id>/acknowledge` | Bodyless. Acknowledges one; `{"ok": true, "acknowledged": 1}`, or `0` when it already was; 404 `no_such_notification` when the store no longer keeps it. |
+| `POST /api/notifications/acknowledge` | Bodyless. Acknowledges every open one; `{"ok": true, "acknowledged": <n>}`. |
 
 `/focus/`, `/reading/`, `/brief/`, `/feed/`, `/agents/`, `/goals/`, and `/health/` redirect to the
 paths without the slash. A known path
@@ -76,6 +79,7 @@ what `lib/app.mjs` expects from it.
 - `lib/agent-routes.mjs` serves the persona routes under `/api/agents/` and the session routes under `/api/sessions/`.
 - `lib/goals-routes.mjs` serves the Goals routes over `lib/goals.mjs`, which reads the vault.
 - `lib/routine-routes.mjs` serves the routine routes over `lib/routines.mjs`, the routine files and their runs logs, and `lib/schedule.mjs`, the cron subset and its occurrences in Chicago time; `lib/scheduler.mjs` runs them.
+- `lib/notification-routes.mjs` serves the notification routes over `lib/notifications.mjs`, the notifications file.
 - `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store, and `lib/feed-instructions.mjs`, which reads the criteria file.
 - `lib/brief-instructions.mjs` reads the brief's rules file and serves the two routes under `/api/brief/instructions`; `lib/instructions.mjs` is the prose reader both instructions files share, and `lib/instructions-routes.mjs` their two routes.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
@@ -144,6 +148,7 @@ snapshot; concurrent requests share one check. It stays for one release.
                             "created": "<ISO>", "updated": "<ISO>", "nextAt": "<ISO>",
                             "lastRun": { "run": "<uuid>", "occurrence": "<ISO>", "trigger": "schedule", "startedAt": "<ISO>", "endedAt": "<ISO>", "outcome": "finished" } }] },
   "settings": { "ok": true, "error": null, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" }, "permission": { "default": "ask" } },
+  "notifications": { "open": 1, "items": [{ "id": "<uuid>", "agent": "cfo", "text": "...", "link": "job:com.example.drift", "at": "<ISO>", "acknowledgedAt": null }] },
   "models": [{ "id": "fable", "name": "Fable" }, { "id": "opus", "name": "Opus" }, { "id": "sonnet", "name": "Sonnet" }, { "id": "haiku", "name": "Haiku" }] }
 ```
 
@@ -230,6 +235,32 @@ agent that leaves takes its routines' `nextAt` with it), and when a run
 ends; each is one revision with a `routines` patch, plus `agents` when a
 persona's `needsYou` moved. `GET /api/routines/<id>/runs` reads the newest
 ten runs from the log, newest first, as `lastRun` is shaped.
+
+### Notifications
+
+A notification is a sentence an agent judged worth Hunter's attention
+soon, raised with the `notify` tool (Delegation, under Personas). The
+store (`lib/notifications.mjs`) is one file,
+`notifications/notifications.jsonl` at the repo root
+(`DASHBOARD_NOTIFICATIONS_DIR`), gitignored because a sentence may carry
+a figure: one JSON line per notification, `{ id, agent, text, link, at,
+acknowledgedAt }`, oldest first. `link` is null or what the header opens:
+`agent:<id>` (the agent's thread), `feed:<run>/<index>` (the Feed
+scrolled to the item at that position in the run file `<run>.json`, from
+0), `brief:<date>` (the Brief tab, for now), or `job:<label>` (Health with
+that job selected). Raising appends a line; acknowledging rewrites the
+file atomically. Past `LIMITS.notificationsMax` (200) the oldest
+acknowledged items roll off first, then the oldest open ones. A line the
+daemon cannot read is skipped and logged `notification_invalid`.
+
+`notifications` in the snapshot holds every kept item, newest first, and
+`open`, how many are unacknowledged; each raise or acknowledge is one
+revision with a `notifications` patch. The header shows `open` beside
+Notifications when it is above zero (on a phone, beside Menu and the
+menu's Notifications entry), and the list under the header shows the
+open items with Acknowledge, Acknowledge all, and the acknowledged ones
+under a divider. A card up, a run that ended waiting, an unopened reply,
+and a failed job never become notifications; they are the rail's marks.
 
 ### Daily Brief
 
@@ -413,7 +444,8 @@ here. The snapshot's `jobs` key, `public/jobs.js`, and
 `public/index.html`, `public/shell.js`, `public/agents.js`,
 `public/markdown.js`, `public/jobs.js`, `public/goals.js`,
 `public/feed.js`, `public/instructions.js` (the instructions panel the
-Feed and Brief tabs share), and `public/styles.css` make up the
+Feed and Brief tabs share), `public/notifications.js` (the header's count
+and list), and `public/styles.css` make up the
 page served at `/`, `/agents`, `/reading`, `/brief`, `/focus`, `/goals`,
 and `/health`. The Agents view is the page at `/`; `/agents` shows the same
 view. `/reading` and `/brief` show the Reading view, `/focus` Focus,
@@ -1135,6 +1167,14 @@ from the sender (`accepts` absent or null means everyone), with each one's
 id, name, role, and description. The sender is the agent whose turn is
 running; the tool's arguments cannot name another.
 
+The same server carries `notify({ text, link? })` when the daemon has a
+notification store: one sentence (at most
+`LIMITS.notificationTextChars`, 500) and an optional link (Notifications,
+above), raised under the agent whose turn is running and answered with
+the id. An empty or long sentence or a link in no known shape is refused
+to the model in one sentence and nothing is stored. Nothing is posted in
+any thread. Both tools are in `allowedTools`, so neither raises a card.
+
 - The message runs as a turn of the receiver through its own adapter. The
   receiver's thread shows it as written, with `from` the sender's id, and
   the model gets `From <sender>, an agent in this system (not the user):
@@ -1271,6 +1311,8 @@ directory.
 | `TIMEOUTS.drainMs` | 30 seconds | Wait for running turns at shutdown |
 | `TIMEOUTS.abortGraceMs` | 2 seconds | Wait for aborted turns to end after the drain |
 | `TIMEOUTS.turnMaxMs` | 30 minutes | A persona turn, time waiting on an answer included, is interrupted after this |
+| `LIMITS.notificationsMax` | 200 | Notifications kept; acknowledged ones roll off first |
+| `LIMITS.notificationTextChars` | 500 | Characters of one notification's sentence |
 | `LIMITS.delegationDepth` | 2 | Agents a message may pass through before the sender: the user asks A, A may ask B, B may ask C, C may not ask |
 | `LIMITS.delegationMessageChars` | 4000 | Characters of one ask tool message |
 | `LIMITS.delegationReplyChars` | 4000 | Characters of a reply handed back to the sender's turn or prepended to its next prompt |
@@ -1693,6 +1735,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_THREADS_DIR` | `var/threads` | Persona session pointers and message caches. Resolved from this directory; created on the first write. |
 | `DASHBOARD_SETTINGS_PATH` | `var/settings.json` | The settings file the interface writes (below). Resolved from this directory; written on first start. |
 | `DASHBOARD_ROUTINES_DIR` | `../../routines` | The routine files and, under `runs/`, their logs. Resolved from this directory; created on the first write. |
+| `DASHBOARD_NOTIFICATIONS_DIR` | `../../notifications` | The notifications file agents raise into. Resolved from this directory; created, user-only, on the first raise. |
 | `DASHBOARD_CODEX_DIR` | `var/codex` | The Codex socket, `owner.json`, `bindings.json` and its `bindings.lock`, and the `waiting/` markers, shared with `bin/codex-serve` and `bin/codex-new`. Resolved from this directory. |
 | `DASHBOARD_CMUX_SOCKET_PATH_FILE` | `~/.local/state/cmux/last-socket-path` | File cmux writes its socket path to while it runs. Missing means cmux is not running. |
 | `DASHBOARD_CMUX_PASSWORD_FILE` | `~/.local/state/cmux/socket-control-password` | The cmux socket password, where cmux keeps it. Read on each call, never logged. |
@@ -1716,7 +1759,10 @@ text and, for a failure before init, the CLI's last 2 KiB of stderr),
 `thread_resume_failed`, the Codex events listed under Codex sessions, the
 hub's `sessions_refresh_error` (an error code), `hub_listener_error`, and
 `thread_cache_error`, the routine store's `routine_invalid` (a file it
-skipped), the routes' `routine_write_error`, the scheduler's
+skipped), the routes' `routine_write_error`, the notification store's
+`notification_invalid` (a line it skipped) and `notifications_load_error`,
+the notify tool's `notification_raised` and `notification_error`, the
+notification routes' `notification_write_error`, the scheduler's
 `routine_run`, `routine_log_error`, `routine_line_error`, and
 `routine_tick_error`, the bindings reader's `bindings_error` and
 `bindings_listener_error`, and the cmux events

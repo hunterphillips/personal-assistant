@@ -3,7 +3,8 @@
 // (goals.js), and Health (jobs.js, the launchd jobs) with the History
 // API, creates each child frame the first time its view is shown and keeps
 // it afterwards, and keeps one copy of the server's state, which it hands
-// to the Health, Agents, and Goals views. Agents is the page at `/`;
+// to the Health, Agents, and Goals views and the header's notifications
+// (notifications.js), whose links open views through shellApi. Agents is the page at `/`;
 // `/agents` shows it too, `/reading` and `/feed` show Reading on the Feed
 // tab, `/brief` shows it on the Brief tab, `/health` shows Health (the server
 // redirects the old `/routines` there), and any unknown path lands on
@@ -72,12 +73,26 @@
       history.pushState(null, '', '/?agent=' + encodeURIComponent(id));
       show('agents');
     },
+    // A notification's link (notifications.js): Health with that job
+    // selected, the Feed scrolled to an item, the Brief tab.
+    openJob: function (label) {
+      go('/health');
+      if (jobs) jobs.select(label);
+    },
+    openFeedItem: function (run, index) {
+      go('/feed');
+      if (feed) feed.reveal(run, index);
+    },
+    openBrief: function () {
+      go('/brief');
+    },
   };
   var jobs = window.DashboardJobs ? window.DashboardJobs.create(shellApi) : null;
   var settings = window.DashboardSettings ? window.DashboardSettings.create(shellApi) : null;
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
   var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
+  var notifications = window.DashboardNotifications ? window.DashboardNotifications.create(shellApi) : null;
   // The Brief instructions panel (instructions.js): the brief's rules and a
   // change sent to the agent Settings names as receiving the brief.
   var briefInstructions = window.DashboardInstructions
@@ -91,6 +106,12 @@
     : null;
 
   function $(id) { return document.getElementById(id); }
+
+  // Shows the view at `pathname`, adding a history entry when it changes.
+  function go(pathname) {
+    if (location.pathname !== pathname || location.search) history.pushState(null, '', pathname);
+    show(viewFor(pathname));
+  }
 
   function viewFor(pathname) {
     return Object.prototype.hasOwnProperty.call(ROUTES, pathname) ? ROUTES[pathname] : 'agents';
@@ -267,6 +288,7 @@
     if (settings) settings.update(state, keys);
     if (agents) agents.update(state, keys);
     if (goals) goals.update(state, keys);
+    if (notifications) notifications.update(state, keys);
   }
 
   function isSnapshot(body) {

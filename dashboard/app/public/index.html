@@ -71,12 +71,12 @@
         <div class="header-right">
           <a class="header-entry header-brief" href="/brief">Brief</a>
           <button type="button" class="header-entry" id="quick-chat-toggle" hidden>Quick chat</button>
-          <button type="button" class="header-entry" id="notifications-toggle" hidden>Notifications</button>
-          <button type="button" class="header-menu-toggle" id="app-menu-toggle" aria-expanded="false" aria-controls="app-menu">Menu</button>
+          <button type="button" class="header-entry" id="notifications-toggle">Notifications<span class="header-count" id="notifications-count" aria-hidden="true" hidden></span></button>
+          <button type="button" class="header-menu-toggle" id="app-menu-toggle" aria-expanded="false" aria-controls="app-menu">Menu<span class="header-count menu-count" id="app-menu-count" aria-hidden="true" hidden></span></button>
           <div class="app-menu" id="app-menu" hidden>
             <a class="menu-entry menu-mobile-only" href="/brief">Brief</a>
             <button type="button" class="menu-entry menu-mobile-only" hidden>Quick chat</button>
-            <button type="button" class="menu-entry menu-mobile-only" hidden>Notifications</button>
+            <button type="button" class="menu-entry menu-mobile-only" id="notifications-menu-entry">Notifications<span class="header-count" id="notifications-menu-count" aria-hidden="true" hidden></span></button>
             <fieldset class="theme-options">
               <legend>Theme</legend>
               <label><input type="radio" name="dashboard-theme" value="light"> Light</label>
@@ -85,6 +85,17 @@
             </fieldset>
             <a class="menu-entry" id="settings-link" href="/health">Settings</a>
           </div>
+        </div>
+        <div class="notifications-panel" id="notifications-panel" role="dialog" aria-label="Notifications" hidden>
+          <div class="notifications-head">
+            <h2 class="notifications-title">Notifications</h2>
+            <button type="button" class="button" id="notifications-acknowledge-all" hidden>Acknowledge all</button>
+          </div>
+          <p class="notifications-reason" id="notifications-reason" role="status" hidden></p>
+          <p class="notifications-empty" id="notifications-empty">There are no notifications.</p>
+          <ol class="notifications-list" id="notifications-open" aria-label="Open" hidden></ol>
+          <h3 class="notifications-divider" id="notifications-divider" hidden>Acknowledged</h3>
+          <ol class="notifications-list notifications-done" id="notifications-acknowledged" aria-labelledby="notifications-divider" hidden></ol>
         </div>
       </header>
       <div class="notice" id="shell-notice" role="status" hidden>
@@ -282,6 +293,7 @@
   <script src="/assets/goals.js"></script>
   <script src="/assets/instructions.js"></script>
   <script src="/assets/feed.js"></script>
+  <script src="/assets/notifications.js"></script>
   <script src="/assets/shell.js"></script>
   <script src="/assets/agents-sidebar.js"></script>
 </body>

@@ -342,6 +342,17 @@
         if (tick !== null) clearInterval(tick);
         tick = null;
       },
+      // Selects the job with this label (a notification's link) and brings
+      // its row into view once it is drawn.
+      select: function (label) {
+        selectedLabel = typeof label === 'string' ? label : null;
+        render();
+        var row = selectedLabel ? cards.querySelector('[data-job-label="' + CSS.escape(selectedLabel) + '"]') : null;
+        if (row) {
+          row.scrollIntoView({ block: 'center' });
+          row.focus({ preventScroll: true });
+        }
+      },
       selected: function () {
         return state && state.jobs && Array.isArray(state.jobs.items)
           ? state.jobs.items.find(function (item) { return item.label === selectedLabel; }) || null

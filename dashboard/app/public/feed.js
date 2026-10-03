@@ -157,6 +157,7 @@
     var sequence = 0;
     var rendered = null; // the JSON text of the answer on screen
     var pending = null; // the id being discussed, while the request is out
+    var target = null; // { run, index } to scroll to once it is drawn
 
     function discussButton(item) {
       var button = element('button', 'feed-discuss');
@@ -251,6 +252,25 @@
       rendered = JSON.stringify(data);
     }
 
+    // Scrolls to the target item and marks it, when it is on the page. With
+    // `last`, a target that is not there is given up.
+    function revealTarget(last) {
+      if (!target || !visible) return;
+      var group = runs.querySelector('[data-feed-run="' + CSS.escape(target.run) + '"]');
+      var node = group ? group.querySelectorAll('.feed-item')[target.index] : null;
+      if (!node) {
+        if (last) target = null;
+        return;
+      }
+      target = null;
+      var marked = runs.querySelectorAll('.feed-item[data-feed-target]');
+      for (var i = 0; i < marked.length; i += 1) marked[i].removeAttribute('data-feed-target');
+      node.setAttribute('data-feed-target', '');
+      node.tabIndex = -1;
+      node.scrollIntoView({ block: 'start' });
+      node.focus({ preventScroll: true });
+    }
+
     // Resolves once the answer is handled.
     function load() {
       var id = ++sequence;
@@ -263,6 +283,7 @@
         } else if (visible) {
           setNoAnswer();
         }
+        revealTarget(true);
       });
     }
 
@@ -322,6 +343,12 @@
         if (data) render();
         load();
         poll = setInterval(load, POLL_MS);
+      },
+      // Scrolls to the index-th item of the run once it is drawn (a
+      // notification's link); show() has already run.
+      reveal: function (run, index) {
+        target = { run: run, index: index };
+        revealTarget(false);
       },
       hide: function () {
         visible = false;

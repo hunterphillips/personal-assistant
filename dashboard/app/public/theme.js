@@ -44,9 +44,10 @@
   });
   document.addEventListener('click', function (event) {
     if (menu.hidden) return;
-    // An entry that navigates (Brief, on a phone) closes the menu too; the
-    // shell's own link handler still routes it.
-    var entry = event.target.closest && event.target.closest('a.menu-entry');
+    // An entry (Brief or Notifications, on a phone) closes the menu too; the
+    // shell's own link handler still routes Brief, and Notifications opens
+    // its list in the menu's place.
+    var entry = event.target.closest && event.target.closest('.menu-entry');
     if (entry && entry !== settings) close(false);
     else if (!menu.contains(event.target) && !toggle.contains(event.target)) close(false);
   });
