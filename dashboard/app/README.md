@@ -453,8 +453,10 @@ its id with the first letter raised), in registry order within a group:
 name, role (left out when it only repeats the name), provider (Claude or
 Codex), and for a persona its last message
 with a relative time, plus a line for its state: "Waiting for you" on a
-question or approval, "Working" during a turn, "The last turn failed", or
-"Unavailable". A persona marked `pinned` in the registry sits above the
+question or approval, "Working" during a turn, "The last turn failed",
+"Unavailable", or "Needs you" when a routine's run left a card unanswered
+and nothing has been written in the thread since (Routines under
+Personas). A persona marked `pinned` in the registry sits above the
 groups under no heading. A project folder or system agent shows its
 description instead and opens nothing. Choosing a persona opens its thread
 and puts `?agent=<id>` in the URL (`/?agent=cfo`; `/agents?agent=cfo` opens
@@ -467,7 +469,19 @@ its thread." when nothing is pinned. On a phone the list fills the width,
 nothing opens by itself, and a thread takes the whole width with an "All
 agents" link back. The launchd jobs, the registry error, and the lines for
 the Codex server and cmux are on the Health view; the Agents view says only
-what each row needs. From 720px, a bare icon button (`public/agents-sidebar.js`)
+what each row needs.
+
+Under the groups, a collapsed "Routines" heading opens to every routine
+(Routines under State) grouped under its agent's name in registry order:
+the routine's name, the chip its row in the panel carries (below), its
+schedule in the daemon's words, and the next fire, "Next at 6:30
+tomorrow" ("today", a weekday within the week, "on Oct 12" beyond it), or
+nothing while it is off. A row opens the agent's thread with the panel on
+that routine's form. "No agent has a routine yet." when there is none; the
+heading is hidden while the registry cannot be read. Whether it is open
+lasts until the page reloads.
+
+From 720px, a bare icon button (`public/agents-sidebar.js`)
 hides and shows the list so an open thread can take the full width: it sits
 at the top right of the list, beside the Agents heading, while the list
 shows, and moves to the left end of the thread header, before the agent
@@ -584,6 +598,40 @@ the snapshot. A refused save lists the validator's problems under the form
 next edit; a saved folder change adds "The folder applies when a new thread
 starts." The jobs sentence (see Jobs) follows the form. Edits made
 elsewhere while the form holds unsaved changes leave the form alone.
+
+For a Claude persona a "Routines" heading follows the jobs sentence: the
+agent's routines as rows (name; a chip, "Off" while inactive, "Not yet
+run", or the last run's outcome: "Finished", "Waiting for you", "Failed",
+"Skipped" for `busy`, "Interrupted", "Missed", "Running"; the schedule in
+the daemon's words and the last run's time), "No routines yet." when there
+are none, and "Add routine". A row or the button swaps the settings form
+for the routine's form, headed by the routine's name or "New routine" with
+a chevron back to the list: Name, Instruction, When, Active, Save (Create
+for a new one, off until a field changed) and Cancel. When is a cadence
+select, "Every day", "Weekdays", "Weekends", "Every week on…" (which adds
+Mon to Sun checkboxes), "Every hour", "Every 30 minutes", and "Every month
+on the…" (which adds a day from 1 to 28), with a time beside it for every
+cadence but the hourly two. The form composes the five-field line from
+these and sends it; the line shows nowhere, and a stored line the picker
+has no shape for (a hand-edited file) opens the picker at its defaults
+under "The saved schedule is not one the picker offers. Saving replaces
+it." Problems list under the form before anything is sent ("Give the
+routine a name.", "Say what the routine asks CFO to do.", "Choose at least
+one day.", "Choose a time.", "Choose a day of the month from 1 to 28.");
+a refusal shows one sentence for its code, the schedule one as "That
+schedule could not be saved. Choose when it runs and a time." A saved
+routine's form adds Test run and Delete (an inline "Delete <name>? Its runs
+go with it." with Delete routine and Cancel, as New thread confirms) and "Last runs",
+the newest ten from `GET /api/routines/<id>/runs`: the outcome chip, the
+occurrence's time, and a sentence, "Test run." or "Ran late, after the
+dashboard was down." first when it applies, then "Replied in 48 seconds.",
+"CFO wanted to run Bash." or "CFO asked: <question>" for a run that ended
+waiting on a card, "The turn failed.", "The agent was not started.", "The
+agent was already working.", "The dashboard stopped during the run.",
+"One fire was missed." or "<n> fires were missed.", or "Running now.". A
+refused test run says "CFO is still working. Wait for the reply." or "CFO
+is unavailable." The form stays as it is while snapshots arrive, and
+closes when another agent is chosen.
 
 A project or system entry stays read-only: Role, Group, Provider, and
 Folder, each left out with its label when the registry has no value, then
@@ -1108,7 +1156,9 @@ instruction as the message, through `lib/scheduler.mjs`. The model gets
 `Routine "<name>" (a scheduled run, not the user): <instruction>` and one
 sentence that it may ask other agents and that its reply is what the run
 leaves behind; the thread shows the instruction as a user message with
-`routine: { id, name }` on it, never `from`. Nothing else differs from a
+`routine: { id, name }` on it, never `from`; the thread renders it on the
+right like Hunter's with "Routine · <name>" above it, and a row's preview
+of it starts with the routine's name. Nothing else differs from a
 message Hunter sends: the turn runs on the model and effort the hub
 resolves for the agent, at the agent's permission level, with the ask
 tool, and a card it raises is the agent's own `pending`, answered as any
@@ -1143,7 +1193,8 @@ On the first card of a run the scheduler posts one line to the agent's
 thread, `{ role: "system", kind: "routine", state: "waiting", routine,
 agent, toolName, summary, text }`, "CFO is waiting for you during Daily
 drift." with the input's first 120 characters as `text`; it is
-bookkeeping (`lastLineAt`), never the row's preview. A run that ended
+bookkeeping (`lastLineAt`), never the row's preview. The thread renders it
+centered like a delegation line, opening to `text`. A run that ended
 `waiting` sets the agent's `needsYou` until Hunter writes in the thread.
 The log line `routine_run` carries the routine, agent, trigger, outcome,
 and duration; `routine_log_error` and `routine_line_error` a run line or

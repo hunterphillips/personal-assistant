@@ -27,6 +27,17 @@
 // empty, with an id slugged from the name, and POSTs /api/agents; the new
 // agent's thread opens once it is listed.
 //
+// Under a persona's settings the panel lists its routines (the snapshot's
+// `routines`): each row's name, schedule in words, and last run. A row or
+// "Add routine" swaps the panel to the routine form (Name, Instruction,
+// When as a picker of cadence and time, Active), which POSTs or PUTs
+// /api/routines; a saved routine's form also offers Test run, Delete with
+// an inline confirm, and its last runs from /api/routines/<id>/runs. A
+// collapsed Routines section at the foot of the list shows every routine
+// under its agent, each row opening that agent's panel on it. A persona
+// whose routine last ended waiting shows "Needs you" on its row until
+// Hunter writes in its thread.
+//
 // The thread is fetched from /api/agents/<id>/thread when a persona opens
 // and again whenever the snapshot shows its last message, its turn, or
 // the time of its last line outside a turn (`lastLineAt`, a delegation
@@ -55,7 +66,7 @@
 
   var PINNED = 'pinned';
   var PROVIDERS = { claude: 'Claude', codex: 'Codex' };
-  var WATCHED = ['agents', 'groups', 'registry', 'sessions', 'codex', 'cmux', 'settings'];
+  var WATCHED = ['agents', 'groups', 'registry', 'sessions', 'codex', 'cmux', 'settings', 'routines'];
   var EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
   var EFFORT_NAMES = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
   var PERMISSION_LEVELS = ['ask', 'auto', 'full'];
@@ -86,6 +97,230 @@
   var CODEX_NOTE = 'Codex, its own settings';
   var FOLDER_NOTE = 'The folder applies when a new thread starts.';
   var NOT_WRITTEN = 'The registry could not be written.';
+
+  // --- Routines: the picker's schedules and the words for a run ----------
+
+  var DAY_WORDS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var PICKER_DAYS = [1, 2, 3, 4, 5, 6, 0]; // Monday first
+  // The When select's cadences; `days` and `monthly` show their own field.
+  var CADENCES = [
+    { id: 'daily', name: 'Every day' },
+    { id: 'weekdays', name: 'Weekdays' },
+    { id: 'weekends', name: 'Weekends' },
+    { id: 'days', name: 'Every week on…' },
+    { id: 'hourly', name: 'Every hour' },
+    { id: 'minutes', name: 'Every 30 minutes' },
+    { id: 'monthly', name: 'Every month on the…' },
+  ];
+  var NO_TIME_CADENCES = { hourly: true, minutes: true };
+  // A run's outcome as a chip: its text and tone.
+  var OUTCOME_CHIPS = {
+    finished: { text: 'Finished', tone: '' },
+    waiting: { text: 'Waiting for you', tone: 'wait' },
+    failed: { text: 'Failed', tone: 'bad' },
+    busy: { text: 'Skipped', tone: 'muted' },
+    interrupted: { text: 'Interrupted', tone: 'bad' },
+    missed: { text: 'Missed', tone: 'bad' },
+    running: { text: 'Running', tone: 'muted' },
+  };
+  var NO_ROUTINES = 'No routines yet.';
+  var NO_ROUTINES_ANYWHERE = 'No agent has a routine yet.';
+  var NOT_RUN_YET = 'This routine has not run yet.';
+  var PICK_DAYS = 'Choose at least one day.';
+  var PICK_TIME = 'Choose a time.';
+  var PICK_DAY_OF_MONTH = 'Choose a day of the month from 1 to 28.';
+  var NAME_MISSING = 'Give the routine a name.';
+  var SCHEDULE_REPLACED = 'The saved schedule is not one the picker offers. Saving replaces it.';
+  var RUNS_UNREADABLE = 'The runs could not be read.';
+
+  function pad(n) {
+    return (n < 10 ? '0' : '') + n;
+  }
+
+  // The picker's state as the five-field line the routes take. A spec is
+  // { kind, hour?, minute?, days?, dom? }.
+  function specToCron(spec) {
+    switch (spec.kind) {
+      case 'daily': return spec.minute + ' ' + spec.hour + ' * * *';
+      case 'weekdays': return spec.minute + ' ' + spec.hour + ' * * 1-5';
+      case 'weekends': return spec.minute + ' ' + spec.hour + ' * * 0,6';
+      case 'days': return spec.minute + ' ' + spec.hour + ' * * ' + spec.days.join(',');
+      case 'hourly': return '0 * * * *';
+      case 'minutes': return '*/30 * * * *';
+      case 'monthly': return spec.minute + ' ' + spec.hour + ' ' + spec.dom + ' * *';
+      default: return '';
+    }
+  }
+
+  // A stored line as the picker's state, or null when the picker cannot
+  // show it (a shape only a hand-edited file would hold).
+  function cronToSpec(line) {
+    var f = String(line || '').trim().split(/\s+/);
+    if (f.length !== 5) return null;
+    var minute = f[0];
+    var hour = f[1];
+    var dom = f[2];
+    var month = f[3];
+    var dow = f[4];
+    if (month !== '*') return null;
+    if (hour === '*' && dom === '*' && dow === '*') {
+      if (minute === '0') return { kind: 'hourly' };
+      if (minute === '*/30') return { kind: 'minutes' };
+      return null;
+    }
+    if (!/^\d{1,2}$/.test(minute) || !/^\d{1,2}$/.test(hour)) return null;
+    var hh = parseInt(hour, 10);
+    var mm = parseInt(minute, 10);
+    if (hh > 23 || mm > 59) return null;
+    if (dom !== '*') {
+      if (dow !== '*' || !/^\d{1,2}$/.test(dom)) return null;
+      var d = parseInt(dom, 10);
+      if (d < 1 || d > 28) return null;
+      return { kind: 'monthly', dom: d, hour: hh, minute: mm };
+    }
+    if (dow === '*') return { kind: 'daily', hour: hh, minute: mm };
+    if (dow === '1-5') return { kind: 'weekdays', hour: hh, minute: mm };
+    if (dow === '0,6') return { kind: 'weekends', hour: hh, minute: mm };
+    var days = [];
+    var parts = dow.split(',');
+    for (var i = 0; i < parts.length; i += 1) {
+      var range = /^([0-6])-([0-6])$/.exec(parts[i]);
+      if (range) {
+        for (var r = parseInt(range[1], 10); r <= parseInt(range[2], 10); r += 1) if (days.indexOf(r) === -1) days.push(r);
+        continue;
+      }
+      if (!/^[0-6]$/.test(parts[i])) return null;
+      var n = parseInt(parts[i], 10);
+      if (days.indexOf(n) === -1) days.push(n);
+    }
+    if (days.length === 0) return null;
+    days.sort();
+    return { kind: 'days', days: days, hour: hh, minute: mm };
+  }
+
+  // A local calendar day as a key, for "today" and "tomorrow".
+  function localDay(date) {
+    return Math.floor((date.getTime() - date.getTimezoneOffset() * 60000) / 86400000);
+  }
+
+  // "Next at 6:30 tomorrow" for the next occurrence, or '' for none.
+  function nextWords(iso, now) {
+    var time = typeof iso === 'string' ? Date.parse(iso) : NaN;
+    if (isNaN(time)) return '';
+    var date = new Date(time);
+    var clock = date.getHours() + ':' + pad(date.getMinutes());
+    var days = localDay(date) - localDay(new Date(now));
+    var day;
+    if (days <= 0) day = 'today';
+    else if (days === 1) day = 'tomorrow';
+    else if (days < 7) day = 'on ' + DAY_WORDS[date.getDay()];
+    else day = 'on ' + MONTH_SHORT[date.getMonth()] + ' ' + date.getDate();
+    return 'Next at ' + clock + ' ' + day;
+  }
+
+  // The chip a routine's row shows: Off, Not yet run, Running, or the last
+  // run's outcome.
+  function routineChip(routine) {
+    if (routine.active === false) return { text: 'Off', tone: 'off' };
+    var last = routine.lastRun;
+    if (!last) return { text: 'Not yet run', tone: 'muted' };
+    return runChip(last);
+  }
+
+  function runChip(run) {
+    var outcome = run.run && !run.endedAt && !run.outcome ? 'running' : run.outcome;
+    return OUTCOME_CHIPS[outcome] || OUTCOME_CHIPS.finished;
+  }
+
+  // When a run happened: its scheduled time, else when it started, else
+  // the end of a missed span.
+  function runTime(run) {
+    return run.occurrence || run.startedAt || run.to || run.endedAt || null;
+  }
+
+  // "48 seconds", "3 minutes".
+  function durationWords(ms) {
+    var seconds = Math.max(1, Math.round(ms / 1000));
+    if (seconds < 60) return seconds === 1 ? '1 second' : seconds + ' seconds';
+    var minutes = Math.round(seconds / 60);
+    return minutes === 1 ? '1 minute' : minutes + ' minutes';
+  }
+
+  // One sentence under a run: what happened. `names(id)` resolves an
+  // agent's name.
+  function runNote(run, names) {
+    var parts = [];
+    if (run.trigger === 'test') parts.push('Test run.');
+    else if (run.trigger === 'catchup') parts.push('Ran late, after the dashboard was down.');
+    var chip = runChip(run);
+    var card = null;
+    var cards = Array.isArray(run.cards) ? run.cards : [];
+    for (var i = 0; i < cards.length && !card; i += 1) {
+      if (cards[i] && (cards[i].resolved === null || cards[i].resolved === 'expired' || cards[i].resolved === 'interrupted')) card = cards[i];
+    }
+    switch (chip === OUTCOME_CHIPS.running ? 'running' : run.outcome) {
+      case 'finished':
+        if (run.startedAt && run.endedAt) parts.push('Replied in ' + durationWords(Date.parse(run.endedAt) - Date.parse(run.startedAt)) + '.');
+        break;
+      case 'waiting':
+        if (card && card.kind === 'question') parts.push(names(card.agent) + ' asked: ' + (card.summary || ''));
+        else if (card) parts.push(names(card.agent) + ' wanted to run ' + (card.toolName || 'a tool') + '.');
+        else parts.push('A card went unanswered.');
+        break;
+      case 'failed':
+        parts.push(run.detail === 'agent_unavailable' ? 'The agent was not started.' : 'The turn failed.');
+        break;
+      case 'busy':
+        parts.push('The agent was already working.');
+        break;
+      case 'interrupted':
+        parts.push('The dashboard stopped during the run.');
+        break;
+      case 'missed':
+        parts.push(run.count === 1 ? 'One fire was missed.' : (run.count || 0) + ' fires were missed.');
+        break;
+      case 'running':
+        parts.push('Running now.');
+        break;
+      default:
+        break;
+    }
+    return parts.join(' ');
+  }
+
+  // A refused routine save as a sentence.
+  function routineRefusal(result, agent) {
+    if (!result) return NO_ANSWER;
+    var name = agent ? displayName(agent) : 'The agent';
+    switch (result.code) {
+      case 'invalid_schedule': return 'That schedule could not be saved. Choose when it runs and a time.';
+      case 'invalid_body': return 'The routine needs a name, an instruction, and a schedule.';
+      case 'no_such_agent': return 'That agent is no longer registered.';
+      case 'not_an_agent': return name + ' does not take routines.';
+      case 'no_such_routine': return 'That routine is gone.';
+      case 'too_many_routines': return 'There is no room for another routine.';
+      case 'shutting_down': return 'The dashboard is restarting.';
+      case 'payload_too_large': return 'That is too long.';
+      case 'routine_write_failed': return 'The routine could not be written.';
+      default: return 'The routine could not be saved.';
+    }
+  }
+
+  // A refused test run as a sentence.
+  function testRunRefusal(result, agent) {
+    if (!result) return NO_ANSWER;
+    var name = agent ? displayName(agent) : 'The agent';
+    switch (result.code) {
+      case 'busy': return name + ' is still working. Wait for the reply.';
+      case 'agent_unavailable': return name + ' is unavailable.';
+      case 'no_such_routine': return 'That routine is gone.';
+      case 'not_yet': return 'Test runs are not available yet.';
+      case 'shutting_down': return 'The dashboard is restarting.';
+      default: return 'The routine could not be run.';
+    }
+  }
 
   function element(tag, className, text) {
     var node = document.createElement(tag);
@@ -441,6 +676,7 @@
     var text = window.DashboardMarkdown.plain(source);
     if (message.role !== 'user') return text;
     if (typeof message.from === 'string' && message.from) return agentName(agents, message.from) + ': ' + text;
+    if (message.routine && typeof message.routine.name === 'string') return message.routine.name + ': ' + text;
     return 'You: ' + text;
   }
 
@@ -555,6 +791,8 @@
     if (!hasThread(agent)) return null;
     // A card forwarded here is answerable here, whatever the agent's own turn is doing.
     if (agent.state !== 'waiting' && isPersona(agent) && Array.isArray(agent.forwarded) && agent.forwarded.length > 0) return { text: 'Waiting for you', tone: 'wait' };
+    // A routine's run left a card unanswered; the row says so until Hunter writes.
+    if (agent.state === 'idle' && isPersona(agent) && agent.needsYou === true) return { text: 'Needs you', tone: 'wait' };
     switch (agent.state) {
       case 'waiting': return { text: 'Waiting for you', tone: 'wait' };
       case 'busy': return { text: 'Working', tone: 'muted' };
@@ -657,6 +895,9 @@
     var effortRow = document.getElementById('agent-effort-row');
     var modelReset = document.getElementById('agent-model-reset');
     var mentionMenu = document.getElementById('agent-mention-menu');
+    var routinesNode = document.getElementById('agent-routines');
+    var routinesSection = document.getElementById('agents-routines');
+    var routinesSectionBody = document.getElementById('agents-routines-body');
 
     var state = null;
     var visible = false;
@@ -684,6 +925,15 @@
     var menuKey = null; // what the picker was last built from
     var mention = null; // the open @ picker: { start, candidates, index }, or null
     var tick = null;
+    var routineForm = null; // { agentId, routineId | null } while the panel shows the routine form
+    var routineNotice = []; // sentences under the routine form, until the next edit
+    var routineConfirming = false; // Delete awaits confirmation
+    var routinePanelKey = null; // what the panel's Routines section was last built from
+    var routineFormTarget = null; // 'edit:<id>' or 'create:<agent>', for the form that is built
+    var routineFormBaseline = null; // the routine form's values as built, for Save
+    var routineRuns = { key: null, id: null, runs: null, loading: false, error: false }; // the open routine's last runs
+    var routineRunsRendered = null;
+    var routinesSectionKey = null; // what the sidebar section was last built from
 
     // The listed agent with this id, or null.
     function agentById(id) {
@@ -800,7 +1050,11 @@
       }
       var sentence = sessionsSentence(state);
       if (sentence) groupsNode.appendChild(element('p', 'agents-message agents-sessions-message', sentence));
+      // The routines section keeps its node (and whether it is open) under
+      // the groups.
+      groupsNode.appendChild(routinesSection);
       newAgent.hidden = !!(state.registry && state.registry.ok === false);
+      renderRoutinesSection();
       if (focusedId) {
         var again = groupsNode.querySelector('[data-agent="' + CSS.escape(focusedId) + '"]');
         if (again) again.focus();
@@ -817,7 +1071,9 @@
     function messageNode(entry) {
       if (entry.role === 'system' && entry.kind === 'brief') return briefNode(entry);
       if (entry.role === 'system' && entry.kind === 'delegation') return delegationNode(entry);
+      if (entry.role === 'system' && entry.kind === 'routine') return routineLineNode(entry);
       if (entry.role === 'user' && typeof entry.from === 'string' && entry.from) return agentMessageNode(entry);
+      if (entry.role === 'user' && entry.routine && typeof entry.routine === 'object') return routineMessageNode(entry);
       var role = entry.role === 'user' || entry.role === 'system' ? entry.role : 'assistant';
       var node = element('div', 'thread-message thread-message-' + role);
       node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
@@ -831,6 +1087,37 @@
       var node = element('div', 'thread-message thread-message-assistant thread-message-agent');
       node.appendChild(agentLink(entry.from, 'thread-message-from'));
       node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // A routine's instruction: on the right like Hunter's, with the
+    // routine's name above it.
+    function routineMessageNode(entry) {
+      var node = element('div', 'thread-message thread-message-user thread-message-routine');
+      var name = typeof entry.routine.name === 'string' && entry.routine.name ? entry.routine.name : 'routine';
+      node.appendChild(element('span', 'thread-message-label', 'Routine \u00b7 ' + name));
+      node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // The line a routine's run posts when it raises a card: centered like
+    // a delegation line, opening to the card's input.
+    function routineLineNode(entry) {
+      var summary = typeof entry.summary === 'string' && entry.summary ? entry.summary : (entry.text || '');
+      var body = typeof entry.text === 'string' && entry.text && entry.text !== summary ? entry.text : '';
+      if (!body) {
+        var line = element('div', 'thread-message thread-message-system thread-message-routine-line');
+        line.appendChild(element('div', 'thread-message-text', summary));
+        line.appendChild(messageMeta(entry));
+        return line;
+      }
+      var node = element('div', 'thread-message thread-message-system thread-message-brief thread-message-routine-line');
+      var details = element('details', 'thread-brief thread-routine');
+      details.appendChild(element('summary', 'thread-brief-summary', summary));
+      details.appendChild(element('pre', 'thread-brief-body thread-routine-input', body));
+      node.appendChild(details);
       node.appendChild(messageMeta(entry));
       return node;
     }
@@ -1204,6 +1491,7 @@
         detailsDescription.hidden = true;
         detailsJobs.hidden = true;
         detailsForm.hidden = false;
+        hideRoutinePanel();
         renderForm(null);
         return;
       }
@@ -1213,13 +1501,25 @@
         detailsFields.textContent = '';
         detailsFields.hidden = true;
         detailsDescription.hidden = true;
-        detailsForm.hidden = false;
-        renderForm(agent);
-        renderJobs(agent);
+        if (routineForm && routineForm.agentId !== agent.id) resetRoutineForm();
+        // Routines are for Claude agents; while a routine's form is open
+        // the settings form steps aside.
+        var claude = agent.provider === 'claude';
+        var routineOpen = claude && !!routineForm;
+        detailsForm.hidden = routineOpen;
+        if (!routineOpen) {
+          renderForm(agent);
+          renderJobs(agent);
+        } else {
+          detailsJobs.hidden = true;
+        }
+        if (claude) renderRoutinePanel(agent);
+        else hideRoutinePanel();
         return;
       }
       detailsForm.hidden = true;
       detailsFields.hidden = false;
+      hideRoutinePanel();
       renderDetails(agent);
     }
 
@@ -2020,12 +2320,563 @@
       node.setAttribute('aria-pressed', pressed ? 'false' : 'true');
     }
 
+
+    // --- Routines: the panel's list and form, the sidebar section ----------
+
+    function routineItems() {
+      return state && state.routines && Array.isArray(state.routines.items) ? state.routines.items : [];
+    }
+
+    function routinesOf(agentId) {
+      return routineItems().filter(function (routine) { return routine.agent === agentId; });
+    }
+
+    function routineById(id) {
+      var items = routineItems();
+      for (var i = 0; i < items.length; i += 1) if (items[i].id === id) return items[i];
+      return null;
+    }
+
+    function chipNode(chip) {
+      return element('span', 'routine-chip' + (chip.tone ? ' routine-chip-' + chip.tone : ''), chip.text);
+    }
+
+    // A row in a routines list: the name and chip, then the schedule with
+    // the last run (in the panel) or the next fire (in the sidebar).
+    function routineRow(routine, link) {
+      var node;
+      if (link) {
+        node = element('a', 'routine-item');
+        node.href = agentUrl(routine.agent);
+        node.setAttribute('data-agent', routine.agent);
+      } else {
+        node = button('routine-item', undefined, 'open-routine');
+      }
+      node.setAttribute('data-routine', routine.id);
+      var head = element('span', 'routine-item-head');
+      head.appendChild(element('span', 'routine-item-name', routine.name));
+      head.appendChild(chipNode(routineChip(routine)));
+      node.appendChild(head);
+      var when = routine.schedule && routine.schedule.text ? routine.schedule.text : '';
+      var extra = '';
+      if (link) {
+        extra = routine.active === false ? '' : nextWords(routine.nextAt, Date.now());
+      } else if (routine.lastRun && runTime(routine.lastRun)) {
+        extra = 'Last run ' + formatTime(runTime(routine.lastRun));
+      }
+      var line = element('span', 'routine-item-when', when + (extra ? ' · ' + extra : ''));
+      if (!link && routine.lastRun && runTime(routine.lastRun)) {
+        line.textContent = '';
+        line.appendChild(document.createTextNode(when + ' · Last run '));
+        line.appendChild(timeSpan(null, runTime(routine.lastRun)));
+      }
+      node.appendChild(line);
+      return node;
+    }
+
+    function resetRoutineForm() {
+      routineForm = null;
+      routineNotice = [];
+      routineConfirming = false;
+      routinePanelKey = null;
+      routineFormTarget = null;
+      routineFormBaseline = null;
+    }
+
+    // The panel's Routines section for a persona: its routines and Add
+    // routine, or the form for one of them.
+    function renderRoutinePanel(agent) {
+      routinesNode.hidden = false;
+      if (routineForm && routineForm.agentId !== agent.id) resetRoutineForm();
+      if (routineForm) {
+        renderRoutineForm(agent);
+        return;
+      }
+      var mine = routinesOf(agent.id);
+      var key = JSON.stringify(['list', agent.id, mine.map(function (routine) {
+        return [routine.id, routine.name, routine.schedule, routine.active, routine.lastRun];
+      })]);
+      if (key === routinePanelKey) {
+        refreshTimes(routinesNode);
+        return;
+      }
+      routinePanelKey = key;
+      routinesNode.textContent = '';
+      var head = element('div', 'details-routines-head');
+      var heading = element('h3', 'card-name', 'Routines');
+      heading.id = 'agent-routines-heading';
+      head.appendChild(heading);
+      routinesNode.appendChild(head);
+      if (mine.length === 0) {
+        routinesNode.appendChild(element('p', 'routine-empty', NO_ROUTINES));
+      } else {
+        var list = element('div', 'routine-items');
+        for (var i = 0; i < mine.length; i += 1) list.appendChild(routineRow(mine[i], false));
+        routinesNode.appendChild(list);
+      }
+      routinesNode.appendChild(button('button', 'Add routine', 'add-routine'));
+    }
+
+    function hideRoutinePanel() {
+      routinesNode.hidden = true;
+      routinesNode.textContent = '';
+      routinePanelKey = null;
+    }
+
+    function routineFormNode() {
+      return routinesNode.querySelector('#routine-form');
+    }
+
+    function routineControl(name) {
+      var form = routineFormNode();
+      return form ? form.querySelector('[name="' + name + '"]') : null;
+    }
+
+    // The When picker: a cadence and a time, with the days for "Every week
+    // on…" and the day of the month for "Every month on the…".
+    function whenField(spec) {
+      var wrap = element('div', 'form-field form-field-when');
+      var lab = element('label', 'form-label', 'When');
+      lab.htmlFor = 'routine-form-cadence';
+      wrap.appendChild(lab);
+      var row = element('div', 'form-when-row');
+      var cadence = element('select', 'form-input form-select');
+      cadence.name = 'cadence';
+      cadence.id = 'routine-form-cadence';
+      var kind = spec ? spec.kind : 'weekdays';
+      for (var i = 0; i < CADENCES.length; i += 1) {
+        var option = element('option', null, CADENCES[i].name);
+        option.value = CADENCES[i].id;
+        if (CADENCES[i].id === kind) option.selected = true;
+        cadence.appendChild(option);
+      }
+      row.appendChild(cadence);
+      var time = element('input', 'form-input');
+      time.type = 'time';
+      time.name = 'time';
+      time.id = 'routine-form-time';
+      time.setAttribute('aria-label', 'Time');
+      time.value = spec && typeof spec.hour === 'number' ? pad(spec.hour) + ':' + pad(spec.minute) : '06:30';
+      row.appendChild(time);
+      wrap.appendChild(row);
+      var days = element('div', 'form-days');
+      days.setAttribute('role', 'group');
+      days.setAttribute('aria-label', 'Days');
+      for (var d = 0; d < PICKER_DAYS.length; d += 1) {
+        var day = PICKER_DAYS[d];
+        var checked = !!spec && spec.kind === 'days' && spec.days.indexOf(day) !== -1;
+        days.appendChild(checkbox('day', String(day), DAY_SHORT[day], checked));
+      }
+      wrap.appendChild(days);
+      var domField = element('div', 'form-field form-field-dom');
+      var domLabel = element('label', 'form-label', 'Day of the month');
+      domLabel.htmlFor = 'routine-form-dom';
+      var dom = element('input', 'form-input');
+      dom.type = 'number';
+      dom.name = 'dom';
+      dom.id = 'routine-form-dom';
+      dom.min = '1';
+      dom.max = '28';
+      dom.value = spec && spec.kind === 'monthly' ? String(spec.dom) : '1';
+      domField.appendChild(domLabel);
+      domField.appendChild(dom);
+      wrap.appendChild(domField);
+      syncPicker(wrap);
+      return wrap;
+    }
+
+    // The picker shows only the parts its cadence needs.
+    function syncPicker(wrap) {
+      var cadence = wrap.querySelector('[name="cadence"]');
+      if (!cadence) return;
+      var kind = cadence.value;
+      wrap.querySelector('.form-days').hidden = kind !== 'days';
+      wrap.querySelector('.form-field-dom').hidden = kind !== 'monthly';
+      wrap.querySelector('[name="time"]').hidden = !!NO_TIME_CADENCES[kind];
+    }
+
+    // The picker's state, or { problem } naming what is missing.
+    function pickerSpec(form) {
+      var cadence = form.querySelector('[name="cadence"]').value;
+      if (cadence === 'hourly' || cadence === 'minutes') return { spec: { kind: cadence } };
+      var timeValue = form.querySelector('[name="time"]').value;
+      var match = /^(\d{2}):(\d{2})/.exec(timeValue || '');
+      if (!match) return { problem: PICK_TIME };
+      var hour = parseInt(match[1], 10);
+      var minute = parseInt(match[2], 10);
+      if (cadence === 'days') {
+        var boxes = form.querySelectorAll('input[name="day"]:checked');
+        var days = [];
+        for (var i = 0; i < boxes.length; i += 1) days.push(parseInt(boxes[i].value, 10));
+        if (days.length === 0) return { problem: PICK_DAYS };
+        days.sort();
+        return { spec: { kind: 'days', days: days, hour: hour, minute: minute } };
+      }
+      if (cadence === 'monthly') {
+        var dom = parseInt(form.querySelector('[name="dom"]').value, 10);
+        if (!(dom >= 1 && dom <= 28)) return { problem: PICK_DAY_OF_MONTH };
+        return { spec: { kind: 'monthly', dom: dom, hour: hour, minute: minute } };
+      }
+      return { spec: { kind: cadence, hour: hour, minute: minute } };
+    }
+
+    // The form's values: what Save posts, and what dirtiness compares.
+    function routineFormValues() {
+      var form = routineFormNode();
+      if (!form) return null;
+      var picked = pickerSpec(form);
+      return {
+        name: form.querySelector('[name="name"]').value.trim(),
+        instruction: form.querySelector('[name="instruction"]').value.trim(),
+        active: form.querySelector('[name="active"]').checked,
+        schedule: picked.spec ? specToCron(picked.spec) : null,
+        problem: picked.problem || null,
+      };
+    }
+
+    function routineFormDirty() {
+      var values = routineFormValues();
+      return values !== null && routineFormBaseline !== null && JSON.stringify(values) !== routineFormBaseline;
+    }
+
+    // Save is on once a field changed (always for a new routine); the
+    // problems sit under the fields; the Delete confirm shows when asked.
+    function syncRoutineForm() {
+      var form = routineFormNode();
+      if (!form) return;
+      var save = form.querySelector('[data-form-action="save"]');
+      if (save) save.disabled = busy || !routineFormDirty();
+      var buttons = form.querySelectorAll('button[data-agent-action]');
+      for (var i = 0; i < buttons.length; i += 1) buttons[i].disabled = busy;
+      var list = form.querySelector('.form-problems');
+      list.textContent = '';
+      for (var j = 0; j < routineNotice.length; j += 1) list.appendChild(element('li', null, routineNotice[j]));
+      list.hidden = routineNotice.length === 0;
+      var confirm = form.querySelector('.routine-confirm');
+      if (confirm) confirm.hidden = !routineConfirming;
+      var actions = form.querySelector('.routine-actions');
+      if (actions) actions.hidden = routineConfirming;
+    }
+
+    // Builds the form for the routine (or a new one) when what it shows
+    // changed, unless it holds unsaved edits for the same routine.
+    function renderRoutineForm(agent) {
+      var routine = routineForm.routineId ? routineById(routineForm.routineId) : null;
+      if (routineForm.routineId && !routine) {
+        resetRoutineForm();
+        renderRoutinePanel(agent);
+        return;
+      }
+      var target = routine ? 'edit:' + routine.id : 'create:' + agent.id;
+      var key = JSON.stringify(['form', target, routine ? [routine.name, routine.instruction, routine.schedule, routine.active] : null, agent.name]);
+      if (key === routinePanelKey || (routinePanelKey !== null && target === routineFormTarget && routineFormDirty())) {
+        syncRoutineForm();
+        renderRoutineRuns(agent, routine);
+        return;
+      }
+      routinePanelKey = key;
+      routineFormTarget = target;
+      routinesNode.textContent = '';
+
+      var head = element('div', 'details-routines-head');
+      var back = button('button icon-button', undefined, 'cancel-routine');
+      back.setAttribute('aria-label', 'Back to the routines');
+      back.title = 'Back to the routines';
+      back.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m15 6-6 6 6 6"/></svg>';
+      head.appendChild(back);
+      var heading = element('h3', 'card-name', routine ? routine.name : 'New routine');
+      heading.id = 'agent-routines-heading';
+      head.appendChild(heading);
+      routinesNode.appendChild(head);
+
+      var form = element('form', 'details-form routine-form');
+      form.id = 'routine-form';
+      form.noValidate = true;
+      form.appendChild(formField('Name', textInput('name', routine ? routine.name : '', 60), 'routine-form-name'));
+      var instruction = element('textarea', 'form-input');
+      instruction.name = 'instruction';
+      instruction.rows = 4;
+      instruction.maxLength = 4000;
+      instruction.value = routine ? routine.instruction : '';
+      form.appendChild(formField('Instruction', instruction, 'routine-form-instruction'));
+      var spec = routine ? cronToSpec(routine.schedule && routine.schedule.cron) : null;
+      form.appendChild(whenField(spec));
+      if (routine && !spec) form.appendChild(element('p', 'form-note', SCHEDULE_REPLACED));
+      form.appendChild(checkbox('active', 'true', 'Active', routine ? routine.active !== false : true));
+      var problems = element('ul', 'form-problems');
+      problems.hidden = true;
+      form.appendChild(problems);
+      var actions = element('div', 'form-actions');
+      var save = element('button', 'button button-primary', routine ? 'Save' : 'Create');
+      save.type = 'submit';
+      save.setAttribute('data-form-action', 'save');
+      actions.appendChild(save);
+      actions.appendChild(button('button', 'Cancel', 'cancel-routine'));
+      form.appendChild(actions);
+      if (routine) {
+        var secondary = element('div', 'form-actions routine-actions');
+        secondary.appendChild(button('button button-small', 'Test run', 'test-routine'));
+        secondary.appendChild(button('button button-small', 'Delete', 'delete-routine'));
+        form.appendChild(secondary);
+        var confirm = element('div', 'routine-confirm');
+        confirm.setAttribute('role', 'group');
+        confirm.setAttribute('aria-label', 'Delete routine');
+        confirm.hidden = true;
+        confirm.appendChild(element('span', null, 'Delete ' + routine.name + '? Its runs go with it.'));
+        confirm.appendChild(button('button button-primary', 'Delete routine', 'confirm-delete-routine'));
+        confirm.appendChild(button('button', 'Cancel', 'cancel-delete-routine'));
+        form.appendChild(confirm);
+      }
+      routinesNode.appendChild(form);
+      if (routine) {
+        var runs = element('div', 'routine-runs');
+        runs.id = 'routine-runs';
+        routinesNode.appendChild(runs);
+      }
+      routineFormBaseline = routine ? JSON.stringify(routineFormValues()) : '';
+      routineRunsRendered = null;
+      syncRoutineForm();
+      renderRoutineRuns(agent, routine);
+    }
+
+    // Last runs: fetched when the form opens on a saved routine and again
+    // whenever its last run moves.
+    function renderRoutineRuns(agent, routine) {
+      var node = routinesNode.querySelector('#routine-runs');
+      if (!routine || !node) return;
+      var fetchKey = routine.id + '|' + JSON.stringify(routine.lastRun || null);
+      if (fetchKey !== routineRuns.key) {
+        routineRuns = { key: fetchKey, id: routine.id, runs: routineRuns.id === routine.id ? routineRuns.runs : null, loading: true, error: false };
+        fetchRoutineRuns(routine.id, fetchKey);
+      }
+      var key = JSON.stringify([routine.id, routineRuns.runs, routineRuns.loading, routineRuns.error]);
+      if (key === routineRunsRendered) {
+        refreshTimes(node);
+        return;
+      }
+      routineRunsRendered = key;
+      node.textContent = '';
+      node.appendChild(element('p', 'form-label', 'Last runs'));
+      var runs = routineRuns.runs;
+      if (runs === null) {
+        node.appendChild(element('p', 'routine-empty', routineRuns.error ? RUNS_UNREADABLE : 'Reading the runs.'));
+        return;
+      }
+      if (runs.length === 0) {
+        node.appendChild(element('p', 'routine-empty', NOT_RUN_YET));
+        return;
+      }
+      var names = function (id) { return agentName(state.agents, id); };
+      var list = element('ul', 'routine-run-list');
+      for (var i = 0; i < runs.length; i += 1) {
+        var run = runs[i];
+        var item = element('li', 'routine-run-row');
+        var line = element('span', 'routine-run-head');
+        line.appendChild(chipNode(runChip(run)));
+        var at = runTime(run);
+        if (at) line.appendChild(timeSpan('routine-run-time', at));
+        item.appendChild(line);
+        var note = runNote(run, names);
+        if (note) item.appendChild(element('span', 'routine-run-note', note));
+        list.appendChild(item);
+      }
+      node.appendChild(list);
+    }
+
+    function fetchRoutineRuns(id, fetchKey) {
+      fetch('/api/routines/' + encodeURIComponent(id) + '/runs', { cache: 'no-store', credentials: 'same-origin' })
+        .then(function (response) { return response.ok ? response.json() : null; }, function () { return null; })
+        .then(function (body) {
+          if (routineRuns.key !== fetchKey) return;
+          routineRuns.loading = false;
+          if (body && Array.isArray(body.runs)) {
+            routineRuns.runs = body.runs;
+            routineRuns.error = false;
+          } else {
+            routineRuns.error = true;
+          }
+          if (visible) renderThread();
+        });
+    }
+
+    function openRoutineForm(agent, routineId) {
+      routineForm = { agentId: agent.id, routineId: routineId };
+      routineNotice = [];
+      routineConfirming = false;
+      routinePanelKey = null;
+      routineFormBaseline = null;
+      detailsOpen = true;
+      renderThread();
+      var first = routineControl('name');
+      if (first) first.focus();
+    }
+
+    // Back to the agent's routines; the keyboard lands on the heading.
+    function closeRoutineForm() {
+      resetRoutineForm();
+      renderThread();
+      var heading = routinesNode.querySelector('#agent-routines-heading');
+      if (heading) {
+        heading.tabIndex = -1;
+        heading.focus();
+      }
+    }
+
+    // A routine row in the sidebar: that agent's thread with the panel
+    // open on the routine.
+    function openRoutine(agentId, routineId) {
+      routineForm = { agentId: agentId, routineId: routineId };
+      routineNotice = [];
+      routineConfirming = false;
+      routinePanelKey = null;
+      routineFormBaseline = null;
+      detailsOpen = true;
+      select(agentId, true);
+      render();
+    }
+
+    // Saves the form: POST for a new routine, PUT for a saved one. The
+    // snapshot brings the routine to the lists; on success the panel
+    // returns to the agent's routines, where the row shows the schedule.
+    function saveRoutine() {
+      if (busy || !routineForm) return;
+      var agent = selectedAgent();
+      if (!isPersona(agent) || agent.id !== routineForm.agentId) return;
+      var values = routineFormValues();
+      if (!values) return;
+      var problems = [];
+      if (!values.name) problems.push(NAME_MISSING);
+      if (!values.instruction) problems.push('Say what the routine asks ' + agent.name + ' to do.');
+      if (values.problem) problems.push(values.problem);
+      if (problems.length > 0) {
+        routineNotice = problems;
+        syncRoutineForm();
+        return;
+      }
+      var editing = routineForm.routineId;
+      var body = { name: values.name, agent: agent.id, instruction: values.instruction, schedule: values.schedule, active: values.active };
+      busy = true;
+      routineNotice = [];
+      renderThread();
+      call(editing ? 'PUT' : 'POST', editing ? '/api/routines/' + encodeURIComponent(editing) : '/api/routines', body).then(function (result) {
+        busy = false;
+        var ok = !!(result && result.ok);
+        if (ok && !shell.isStreaming()) shell.requestState();
+        var current = routineForm && routineForm.agentId === agent.id && agent.id === selectedId;
+        if (!current) {
+          renderThread();
+          return;
+        }
+        if (ok) {
+          resetRoutineForm();
+          renderThread();
+          var heading = routinesNode.querySelector('#agent-routines-heading');
+          if (heading) {
+            heading.tabIndex = -1;
+            heading.focus();
+          }
+          return;
+        }
+        routineNotice = [routineRefusal(result, agent)];
+        renderThread();
+      });
+    }
+
+    function testRoutine(agent) {
+      if (busy || !routineForm || !routineForm.routineId) return;
+      var id = routineForm.routineId;
+      busy = true;
+      routineNotice = [];
+      renderThread();
+      post('/api/routines/' + encodeURIComponent(id) + '/run').then(function (result) {
+        busy = false;
+        var ok = !!(result && result.ok);
+        if (ok && !shell.isStreaming()) shell.requestState();
+        if (!ok && routineForm && routineForm.routineId === id) routineNotice = [testRunRefusal(result, agent)];
+        renderThread();
+      });
+    }
+
+    function deleteRoutine(agent) {
+      if (busy || !routineForm || !routineForm.routineId) return;
+      var id = routineForm.routineId;
+      busy = true;
+      routineConfirming = false;
+      routineNotice = [];
+      renderThread();
+      call('DELETE', '/api/routines/' + encodeURIComponent(id)).then(function (result) {
+        busy = false;
+        var ok = !!(result && result.ok);
+        if (ok && !shell.isStreaming()) shell.requestState();
+        if (routineForm && routineForm.routineId === id) {
+          if (ok) resetRoutineForm();
+          else routineNotice = [routineRefusal(result, agent)];
+        }
+        renderThread();
+      });
+    }
+
+    // The sidebar's collapsed section: every routine under its agent, in
+    // registry order. Rebuilt only when what it shows changed; its open
+    // state is the element's own.
+    function renderRoutinesSection() {
+      if (!state) return;
+      var registryBad = !!(state.registry && state.registry.ok === false);
+      var items = routineItems();
+      routinesSection.hidden = registryBad;
+      var key = JSON.stringify([items.map(function (routine) {
+        return [routine.id, routine.name, routine.agent, routine.schedule, routine.active, routine.nextAt, routine.lastRun];
+      }), (state.agents || []).map(function (agent) { return [agent.id, agent.name]; })]);
+      if (key === routinesSectionKey) return;
+      routinesSectionKey = key;
+      routinesSectionBody.textContent = '';
+      var groupsList = [];
+      var agents = state.agents || [];
+      for (var i = 0; i < agents.length; i += 1) {
+        var mine = items.filter(function (routine) { return routine.agent === agents[i].id; });
+        if (mine.length > 0) groupsList.push({ agent: agents[i], routines: mine });
+      }
+      if (groupsList.length === 0) {
+        routinesSectionBody.appendChild(element('p', 'routine-empty', NO_ROUTINES_ANYWHERE));
+        return;
+      }
+      for (var g = 0; g < groupsList.length; g += 1) {
+        var group = element('div', 'agents-routines-group');
+        group.appendChild(element('h3', 'agents-routines-heading', groupsList[g].agent.name));
+        var list = element('div', 'routine-items');
+        for (var j = 0; j < groupsList[g].routines.length; j += 1) list.appendChild(routineRow(groupsList[g].routines[j], true));
+        group.appendChild(list);
+        routinesSectionBody.appendChild(group);
+      }
+    }
+
+    routinesNode.addEventListener('submit', function (event) {
+      if (event.target && event.target.id === 'routine-form') {
+        event.preventDefault();
+        saveRoutine();
+      }
+    });
+
+    function onRoutineFormEdit(event) {
+      var form = event.target && event.target.closest && event.target.closest('#routine-form');
+      if (!form) return;
+      if (event.target.name === 'cadence' && event.type === 'change') syncPicker(form.querySelector('.form-field-when'));
+      routineNotice = [];
+      syncRoutineForm();
+    }
+    routinesNode.addEventListener('input', onRoutineFormEdit);
+    routinesNode.addEventListener('change', onRoutineFormEdit);
+
     view.addEventListener('click', function (event) {
       var target = event.target;
       var link = target.closest && target.closest('a[data-agent]');
       if (link) {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
+        if (link.hasAttribute('data-routine')) {
+          openRoutine(link.getAttribute('data-agent'), link.getAttribute('data-routine'));
+          return;
+        }
         select(link.getAttribute('data-agent'), true);
         return;
       }
@@ -2095,6 +2946,33 @@
             formNotice = [];
             renderThread();
           }
+          break;
+        case 'open-routine':
+          if (isPersona(agent)) openRoutineForm(agent, node.getAttribute('data-routine'));
+          break;
+        case 'add-routine':
+          if (isPersona(agent)) openRoutineForm(agent, null);
+          break;
+        case 'cancel-routine':
+          closeRoutineForm();
+          break;
+        case 'test-routine':
+          if (isPersona(agent)) testRoutine(agent);
+          break;
+        case 'delete-routine':
+          routineConfirming = true;
+          renderThread();
+          var confirmButton = routinesNode.querySelector('.routine-confirm button');
+          if (confirmButton) confirmButton.focus();
+          break;
+        case 'confirm-delete-routine':
+          if (isPersona(agent)) deleteRoutine(agent);
+          break;
+        case 'cancel-delete-routine':
+          routineConfirming = false;
+          renderThread();
+          var deleteButton = routinesNode.querySelector('[data-agent-action="delete-routine"]');
+          if (deleteButton) deleteButton.focus();
           break;
         default:
           break;
@@ -2382,5 +3260,12 @@
     terminalReason: terminalReason,
     openRefusal: openRefusal,
     terminalState: terminalState,
+    specToCron: specToCron,
+    cronToSpec: cronToSpec,
+    nextWords: nextWords,
+    routineChip: routineChip,
+    runNote: runNote,
+    routineRefusal: routineRefusal,
+    testRunRefusal: testRunRefusal,
   };
 }());

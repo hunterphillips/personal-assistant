@@ -1898,3 +1898,182 @@ textarea.form-input {
     box-shadow: 0 -8px 24px rgba(34, 32, 28, 0.16);
   }
 }
+
+/* Routines: the panel's list and form under an agent's settings, the
+   collapsed section at the foot of the Agents list, and a routine's
+   message and line in the thread. Health's jobs keep the .routine-row and
+   .routine-run rules above; these are the routine-item and routine-run-row
+   family. */
+.details-routines {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.details-routines-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.details-routines-head .card-name {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.details-routines-head .card-name:focus { outline: none; }
+.routine-items {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 12px;
+}
+.routine-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: calc(100% + 24px);
+  min-height: 44px;
+  padding: 8px 12px;
+  margin: 0 -12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.routine-item:hover { background: #ffffff85; }
+.routine-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.routine-item-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.routine-item-when {
+  color: var(--muted);
+  font-size: 13px;
+}
+.routine-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--side);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.routine-chip-wait { background: var(--amber-bg); color: var(--amber); }
+.routine-chip-bad { background: var(--red-bg); color: var(--red); }
+.routine-chip-muted { font-weight: 400; }
+.routine-chip-off { background: none; border: 1px solid var(--line); }
+.routine-empty {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+.routine-form .form-when-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.routine-form .form-when-row input[type="time"] {
+  width: auto;
+  min-width: 128px;
+}
+.routine-form .form-when-row input[hidden] { display: none; }
+.routine-form .form-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+.routine-form .form-days .form-check { min-height: 28px; }
+.routine-form .form-field-dom { margin-top: 4px; }
+.routine-actions { margin-top: 4px; }
+.routine-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.routine-runs { margin-top: 20px; }
+.routine-runs .form-label { margin: 0 0 6px; }
+.routine-run-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+.routine-run-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.routine-run-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.routine-run-time { color: var(--muted); white-space: nowrap; }
+.routine-run-note {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* The collapsed section under the groups. */
+.agents-routines { margin: 4px 0 16px; }
+.agents-routines-summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.agents-routines-summary::-webkit-details-marker { display: none; }
+.agents-routines-summary::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 8px 1px 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+.agents-routines[open] > .agents-routines-summary::before { transform: rotate(45deg); }
+.agents-routines-group { margin: 4px 0 10px; }
+.agents-routines-heading {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.agents-routines .routine-item { padding: 6px 12px; }
+.agents-routines .routine-empty { margin: 4px 0 8px; font-size: 13px; }
+
+/* A routine's instruction in the thread, and the line its run posts. */
+.thread-message-label {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.thread-routine-input {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}

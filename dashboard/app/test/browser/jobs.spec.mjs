@@ -208,7 +208,8 @@ test.describe('with seeded jobs', () => {
 
     // Nothing about the jobs themselves renders here.
     await expect(details.locator('.routine-row, .badge')).toHaveCount(0);
-    await expect(details.getByRole('button')).toHaveCount(3);
+    await expect(details.getByRole('button')).toHaveCount(4);
+    await expect(details.getByRole('button', { name: 'Add routine' })).toBeVisible();
     await expect(details.getByRole('button', { name: 'Save' })).toBeDisabled();
     await expect(details.getByRole('button', { name: 'Close details' })).toBeVisible();
     expect(hub.jobs.calls).toBe(0);

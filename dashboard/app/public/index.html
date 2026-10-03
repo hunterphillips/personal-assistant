@@ -43,7 +43,12 @@
             <h1 class="agents-heading">Agents</h1>
           </div>
           <p class="agents-message" id="agents-message" hidden></p>
-          <div id="agents-groups"></div>
+          <div id="agents-groups">
+            <details class="agents-routines" id="agents-routines" hidden>
+              <summary class="agents-routines-summary">Routines</summary>
+              <div id="agents-routines-body"></div>
+            </details>
+          </div>
           <p class="agents-list-foot">
             <button type="button" class="button" id="agents-new" data-agent-action="new-agent">New agent</button>
           </p>
@@ -120,6 +125,7 @@
               <form class="details-form" id="agent-form" novalidate hidden></form>
               <p class="details-description" id="agent-details-description" hidden></p>
               <p class="details-jobs" id="agent-details-jobs" hidden></p>
+              <section class="details-routines" id="agent-routines" aria-labelledby="agent-routines-heading" hidden></section>
             </aside>
           </div>
         </div>

@@ -23,7 +23,12 @@
 // Feed a temporary copy of the `feed` option's run files; without it the
 // feed directory is a missing path in the temporary directory. The feed
 // instructions are a temporary copy of the `instructions` option's file,
-// or a missing path in the temporary directory.
+// or a missing path in the temporary directory. Routines are the real
+// store (routines.mjs) over a temporary `routines/` directory seeded from
+// the `routines` option, and the real scheduler (scheduler.mjs) runs over
+// the hub on an injected clock: it never ticks on its own, so a test
+// calls `scheduler.tick()` and moves `clock.advance(ms)`; a test run goes
+// through the route as the form sends it.
 // stopStreams() ends every event stream with `bye` and
 // leaves the app refusing new ones (503 shutting_down), as during shutdown;
 // restartApp() then puts a new app handler over the same hub, as after a
@@ -51,6 +56,9 @@ import { createGoals } from '../../lib/goals.mjs';
 import { RuntimeError } from '../../lib/runtime/adapter.mjs';
 import { createNotices } from '../../lib/notices.mjs';
 import { RegistryError, validateDocument } from '../../lib/registry.mjs';
+import { createRoutines } from '../../lib/routines.mjs';
+import { describe, parseCron } from '../../lib/schedule.mjs';
+import { createScheduler } from '../../lib/scheduler.mjs';
 import { createSettings } from '../../lib/settings.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } from './harness.mjs';
@@ -100,10 +108,19 @@ export { focusSourceAvailable };
 //              among the agents, or no one). The string 'broken' writes a file the
 //              store cannot read. `settings` on the result is the store and
 //              `settingsPath` the file.
+//   routines   [{ id, name, agent, instruction, cron, active?, runs? }]
+//              written as routine files into the temporary `routines/`
+//              directory before the store loads (`schedule.text` is the
+//              daemon's words for `cron`; `runs`, when given, is the log's
+//              lines, oldest first). `routines` on the result is the store,
+//              `routinesDir` the directory, `scheduler` { tick, testRun },
+//              and `clock` { now, advance(ms) } the scheduler's and hub's
+//              clock, the real time moved ahead by what `advance` adds.
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, jobs: jobsSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
   vault = null, feed = null, instructions = null, settings: settingsSeed = null, delegationWaitMs = null,
+  routines: routineSeed = null,
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
     throw new Error('startHub: the vault option adds second-brain; remove it from agents.');
@@ -131,6 +148,14 @@ export async function startHub({
     if (feed) await cp(feed, feedDir, { recursive: true });
     const instructionsFile = path.join(root, instructions ? 'relevance.md' : 'relevance-missing.md');
     if (instructions) await cp(instructions, instructionsFile);
+    const routinesDir = path.join(root, 'routines');
+    // The clock runs with the real one, moved ahead by what tests advance.
+    const clock = {
+      offset: 0,
+      now: () => new Date(Date.now() + clock.offset),
+      advance(ms) { clock.offset += ms; },
+    };
+    await writeRoutineSeed(routinesDir, routineSeed ?? [], clock.now());
 
     const focus = withFocus && focusSourceAvailable() ? await startIsolatedFocus(context) : null;
     const focusOrigin = focus?.origin ?? `http://127.0.0.1:${await freePort()}`;
@@ -157,6 +182,7 @@ export async function startHub({
       DASHBOARD_FEED_INSTRUCTIONS: instructionsFile,
       DASHBOARD_FOCUS_ORIGIN: focusOrigin,
       DASHBOARD_SETTINGS_PATH: settingsPath,
+      DASHBOARD_ROUTINES_DIR: routinesDir,
     });
     // A shorter ask wait lets a test see the pending sentence.
     const config = delegationWaitMs === null
@@ -184,12 +210,21 @@ export async function startHub({
     const bindings = fakeBindings(new Map(Object.entries(bindingSeed ?? {}).map(([threadId, ids]) => [threadId, Object.freeze({ ...ids })])));
     const adapters = { claude: personas.adapter };
     if (codex) adapters.codex = codex.adapter;
+    const routines = createRoutines({ dir: routinesDir, limits: config.limits, now: clock.now });
+    await routines.load();
     const hub = createTestHub({
-      config, focus: focusRoutes, brief: briefRoutes, registry, jobs, adapters, store, bindings, cmux, settings, home,
+      config, focus: focusRoutes, brief: briefRoutes, registry, jobs, routines, adapters, store, bindings, cmux, settings, home, now: clock.now,
     });
     await hub.start();
     const delegation = createDelegation({ hub, registry, limits: config.limits, timeouts: config.timeouts });
     personas.adapter.setDelegation(delegation);
+    // The scheduler never arms a timer here; a test ticks it.
+    const scheduler = createScheduler({
+      routines, hub, zone: config.timeZone, timeouts: config.timeouts, limits: config.limits, now: clock.now,
+      setTimeout: () => null, clearTimeout: () => {},
+    });
+    await scheduler.start();
+    cleanups.push(async () => scheduler.stop());
     if (jobsSeed) {
       await hub.refreshJobs();
       jobs.calls = 0;
@@ -217,7 +252,7 @@ export async function startHub({
     });
     const newHandler = () => createApp({
       config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, feedInstructions,
-      notices, settings, registry, log: () => {},
+      notices, settings, registry, routines, scheduler, log: () => {},
     });
     let handler = newHandler();
     cleanups.push(async () => {
@@ -260,6 +295,10 @@ export async function startHub({
       jobs,
       personas,
       delegation,
+      routines,
+      routinesDir,
+      scheduler: { tick: () => scheduler.tick(), testRun: (id) => scheduler.testRun(id) },
+      clock,
       codex,
       cmux,
       bindings,
@@ -276,6 +315,28 @@ export async function startHub({
   } catch (error) {
     await stop();
     throw error;
+  }
+}
+
+// Writes the `routines` seed as the store's files: <id>.json with the
+// daemon's words for the cron line, and runs/<id>.jsonl when the seed
+// carries run lines.
+async function writeRoutineSeed(dir, seeds, now) {
+  if (seeds.length === 0) return;
+  await mkdir(path.join(dir, 'runs'), { recursive: true, mode: 0o700 });
+  for (const seed of seeds) {
+    const cron = parseCron(seed.cron);
+    if (!cron) throw new Error(`startHub: routine seed ${seed.id} has a cron line the daemon refuses`);
+    const stamp = now.toISOString();
+    const document = {
+      version: 1, id: seed.id, name: seed.name, agent: seed.agent, instruction: seed.instruction,
+      schedule: { cron: cron.line, text: describe(cron) }, active: seed.active ?? true,
+      created: seed.created ?? stamp, updated: seed.updated ?? stamp,
+    };
+    await writeFile(path.join(dir, `${seed.id}.json`), `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
+    if (Array.isArray(seed.runs) && seed.runs.length > 0) {
+      await writeFile(path.join(dir, 'runs', `${seed.id}.jsonl`), seed.runs.map((line) => JSON.stringify(line)).join('\n') + '\n', { mode: 0o600 });
+    }
   }
 }
 
@@ -385,12 +446,16 @@ function controlledJobs({ items = [], focusAvailable = null, refreshedAt = null 
 // replies only once it is answered. answer() resolves the pending
 // request and continues the turn the same way. The open turn's `from` and
 // `chain` are kept on the entry and stamped on every request and resolved
-// event, as the real adapter does, so the real hub relays the card.
+// event, as the real adapter does, so the real hub relays the card. A send
+// with `routine` (the scheduler's) records the user message with it and
+// never with `from`, as the real adapter does.
 // Controls on the returned object:
 //   hold(id)                       later turns stay busy until reply()
 //   reply(id, text)                ends the open turn with that reply
 //   raise(id, { kind, toolName, input })  puts the busy persona on a request
 //                                  (stamped with the open turn's from and chain)
+//   expire(id)                     the open request goes unanswered: resolved
+//                                  as expired, the turn goes on busy
 //   fail(id, message)              ends the open turn with an error
 //   say(id, text)                  adds assistant text to the open turn without ending it
 //   calls                          [['send', id, text], ['answer', id, requestId, answer], ...]
@@ -420,6 +485,7 @@ export function fakePersonas(seed, store) {
         // The open turn's sender and exchange, stamped on what it raises.
         from: null,
         chain: [],
+        routine: null,
       });
     }
     return entries.get(id);
@@ -519,11 +585,13 @@ export function fakePersonas(seed, store) {
       if (current.state === 'busy' || current.state === 'waiting') return Promise.reject(new RuntimeError('busy'));
       const ended = new Promise((resolve) => { current.turn = resolve; });
       current.lastError = null;
-      current.from = typeof context.from === 'string' && context.from !== '' ? context.from : null;
+      current.routine = context.routine && typeof context.routine === 'object' ? { id: context.routine.id, name: context.routine.name } : null;
+      current.from = !current.routine && typeof context.from === 'string' && context.from !== '' ? context.from : null;
       current.chain = Array.isArray(context.chain) ? [...context.chain] : [];
       setState(agent.id, 'busy');
       const fields = {
         ...(current.from ? { from: current.from } : {}),
+        ...(current.routine ? { routine: current.routine } : {}),
         ...(Array.isArray(context.mentions) && context.mentions.length > 0 ? { mentions: [...context.mentions] } : {}),
       };
       const delegate = seed[agent.id]?.delegate;
@@ -598,6 +666,15 @@ export function fakePersonas(seed, store) {
     reply: (id, text) => finish(id, text),
     say: (id, text) => say(id, 'assistant', text),
     raise,
+    expire(id) {
+      const current = entry(id);
+      if (!current.pending) return;
+      const { requestId } = current.pending;
+      current.pending = null;
+      emit('resolved', id, { requestId, outcome: 'expired', from: current.from, chain: [...current.chain] });
+      setState(id, 'busy');
+      continueTurn(id, 'expired');
+    },
     fail(id, message) {
       const current = entry(id);
       current.lastError = message;
