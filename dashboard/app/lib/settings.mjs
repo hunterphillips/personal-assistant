@@ -4,7 +4,8 @@
 //   { "version": 1,
 //     "model": { "default": null, "effort": null },
 //     "brief": { "agent": "assistant" },
-//     "permission": { "default": "ask" } }
+//     "permission": { "default": "ask" },
+//     "quickChat": { "agent": "myos" } }
 //
 // `model.default` is a model id or alias (models.mjs) or null, and
 // `model.effort` one of EFFORTS or null; null means Claude Code's own
@@ -15,7 +16,11 @@
 // first pinned Claude persona (server.mjs). `permission.default` is one of
 // permissions.mjs PERMISSION_LEVELS, never null: the level an agent's turns
 // run at when its registry entry sets none. A file without the key loads
-// as 'ask' and gains the key on its next write.
+// as 'ask' and gains the key on its next write. `quickChat.agent` is the
+// registry id of the agent the header's quick chat opens on, or null; it is
+// seeded at start to the first built-in Claude persona, else the pinned
+// one, else the first (builtins.mjs defaultAgentId), and added to a file
+// from before it existed by addMissing().
 //
 // createSettings({ path, log, now }) returns:
 //
@@ -30,22 +35,30 @@
 //     polling, since the daemon is the file's only writer.
 //   update(patch) -> Promise<settings>
 //     `patch` is a partial { model?: { default?, effort? }, brief?: {
-//     agent? }, permission?: { default? } }. Merged over current().settings, validated whole, written
+//     agent? }, permission?: { default? }, quickChat?: { agent? } }. Merged over current().settings, validated whole, written
 //     atomically (a temporary file beside it with mode 0600, then rename;
 //     the directory is created 0700), then current() changes and listeners
 //     run. Rejects with SettingsError whose code is invalid_body (not an
 //     object, unknown or empty keys), invalid_model, invalid_effort,
-//     invalid_agent, invalid_permission, or settings_invalid when current().ok is false: a file
+//     invalid_agent, invalid_permission, invalid_quick_chat_agent, or
+//     settings_invalid when current().ok is false: a file
 //     broken by hand is repaired or deleted by its owner, never overwritten
 //     by a save that would merge over the last good copy and erase the edit.
-//     Whether brief.agent names a real persona is the route's check
-//     (settings-routes.mjs), which has the registry.
+//     Whether brief.agent or quickChat.agent names a real persona is the
+//     route's check (settings-routes.mjs), which has the registry.
 //   seed(values) -> Promise<boolean>
 //     Writes DEFAULTS merged with `values` only when the file is missing
 //     and answers whether it wrote. A present file, valid or not, is left
 //     alone.
+//   addMissing(values) -> Promise<boolean>
+//     The migration for a key added after the file was first written: when
+//     the file exists, loads, and lacks a top-level key of `values` (read
+//     from its raw JSON, since current() fills every key), writes the
+//     current settings with those sections from `values`, and answers
+//     whether it wrote. A missing file is seed()'s, and a file that does not
+//     load is left alone.
 //   onChange(fn) -> unsubscribe
-//     fn(current()) after every successful update or seed.
+//     fn(current()) after every successful update, seed, or addMissing.
 //
 // validatePatch(patch) -> code | null
 //   The shape and value checks update() applies, for a route that wants to
@@ -61,17 +74,19 @@ import { AGENT_ID } from './registry.mjs';
 
 const MAX_BYTES = 64 * 1024;
 const MODEL_MAX = 64;
-const TOP_KEYS = new Set(['version', 'model', 'brief', 'permission']);
+const TOP_KEYS = new Set(['version', 'model', 'brief', 'permission', 'quickChat']);
 const MODEL_KEYS = new Set(['default', 'effort']);
 const BRIEF_KEYS = new Set(['agent']);
 const PERMISSION_KEYS = new Set(['default']);
-const SECTION_KEYS = { model: MODEL_KEYS, brief: BRIEF_KEYS, permission: PERMISSION_KEYS };
+const QUICK_CHAT_KEYS = new Set(['agent']);
+const SECTION_KEYS = { model: MODEL_KEYS, brief: BRIEF_KEYS, permission: PERMISSION_KEYS, quickChat: QUICK_CHAT_KEYS };
 
 export const DEFAULTS = Object.freeze({
   version: 1,
   model: Object.freeze({ default: null, effort: null }),
   brief: Object.freeze({ agent: null }),
   permission: Object.freeze({ default: 'ask' }),
+  quickChat: Object.freeze({ agent: null }),
 });
 
 export class SettingsError extends Error {
@@ -215,6 +230,37 @@ export function createSettings({ path: file, log = () => {}, now = () => new Dat
       });
     },
 
+    addMissing(values = {}) {
+      return serialized(async () => {
+        let raw;
+        try {
+          raw = await readFile(settingsPath, 'utf8');
+        } catch (error) {
+          if (error?.code === 'ENOENT') return false;
+          throw error;
+        }
+        if (!state.ok) return false;
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return false;
+        }
+        if (!isRecord(parsed)) return false;
+        const patch = {};
+        for (const key of Object.keys(values)) if (!Object.hasOwn(parsed, key)) patch[key] = values[key];
+        if (Object.keys(patch).length === 0) return false;
+        const merged = merge(state.settings, patch);
+        const problem = validateDocument(merged);
+        if (problem) throw new SettingsError(codeFor(problem), problem);
+        const settings = normalize(merged);
+        await writeDocument(settings);
+        settle(settings);
+        notify();
+        return true;
+      });
+    },
+
     onChange(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -265,6 +311,14 @@ function validateDocument(value) {
     const { default: level } = value.permission;
     if (level !== undefined && !isPermission(level)) return 'permission.default must be one of ask, auto, full';
   }
+  if (value.quickChat !== undefined) {
+    if (!isRecord(value.quickChat)) return 'quickChat must be an object';
+    for (const key of Object.keys(value.quickChat)) if (!QUICK_CHAT_KEYS.has(key)) return `unknown key "quickChat.${key}"`;
+    const { agent } = value.quickChat;
+    if (agent !== undefined && agent !== null && !(typeof agent === 'string' && AGENT_ID.test(agent))) {
+      return 'quickChat.agent must be null or an agent id';
+    }
+  }
   return null;
 }
 
@@ -273,6 +327,7 @@ function codeFor(problem) {
   if (problem.startsWith('model.effort')) return 'invalid_effort';
   if (problem.startsWith('brief.agent')) return 'invalid_agent';
   if (problem.startsWith('permission.default')) return 'invalid_permission';
+  if (problem.startsWith('quickChat.agent')) return 'invalid_quick_chat_agent';
   return 'invalid_body';
 }
 
@@ -283,6 +338,7 @@ function normalize(value) {
     model: { default: value.model?.default ?? null, effort: value.model?.effort ?? null },
     brief: { agent: value.brief?.agent ?? null },
     permission: { default: value.permission?.default ?? DEFAULTS.permission.default },
+    quickChat: { agent: value.quickChat?.agent ?? null },
   });
 }
 
@@ -292,6 +348,7 @@ function merge(base, patch) {
     model: { ...base.model, ...(isRecord(patch?.model) ? patch.model : {}) },
     brief: { ...base.brief, ...(isRecord(patch?.brief) ? patch.brief : {}) },
     permission: { ...base.permission, ...(isRecord(patch?.permission) ? patch.permission : {}) },
+    quickChat: { ...base.quickChat, ...(isRecord(patch?.quickChat) ? patch.quickChat : {}) },
   };
 }
 

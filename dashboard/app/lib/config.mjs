@@ -13,6 +13,9 @@
 //                               (default ../../daily-brief/curator.md)
 //   DASHBOARD_FOCUS_ORIGIN      Focus server, http:// loopback only (default http://127.0.0.1:4242)
 //   DASHBOARD_REGISTRY_PATH     agent registry JSON file (default ../../registry/agents.json)
+//   DASHBOARD_BUILTIN_PATH      the agents that are part of the dashboard, seeded into the
+//                               registry when missing (default ../../registry/builtin.json;
+//                               need not exist)
 //   DASHBOARD_ROUTINES_DIR      the routine files and their runs log (default ../../routines,
 //                               beside registry/; need not exist)
 //   DASHBOARD_NOTIFICATIONS_DIR the notifications file agents raise into (default
@@ -45,6 +48,9 @@ const DEFAULT_BRIEF_INSTRUCTIONS = '../../daily-brief/curator.md';
 const DEFAULT_REGISTRY_PATH = '../../registry/agents.json';
 const DEFAULT_ROUTINES_DIR = '../../routines';
 const DEFAULT_NOTIFICATIONS_DIR = '../../notifications';
+const DEFAULT_BUILTIN_PATH = '../../registry/builtin.json';
+// The repository the dashboard lives in: a built-in agent's folder.
+const REPO_ROOT = path.resolve(APP_ROOT, '../..');
 // Routine schedules run on this clock, following its changes. A constant
 // until someone else runs the daemon (no configurability ahead of need).
 export const TIME_ZONE = 'America/Chicago';
@@ -141,6 +147,7 @@ export function loadConfig(env = process.env) {
   const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, DEFAULT_REGISTRY_PATH);
   const routinesDir = parsePath(env.DASHBOARD_ROUTINES_DIR, DEFAULT_ROUTINES_DIR);
   const notificationsDir = parsePath(env.DASHBOARD_NOTIFICATIONS_DIR, DEFAULT_NOTIFICATIONS_DIR);
+  const builtinPath = parsePath(env.DASHBOARD_BUILTIN_PATH, DEFAULT_BUILTIN_PATH);
   // The default is already absolute, so path.resolve keeps it as-is; only a
   // relative override is resolved from APP_ROOT.
   const launchAgentsDir = parsePath(env.DASHBOARD_LAUNCH_AGENTS_DIR, path.join(os.homedir(), 'Library', 'LaunchAgents'));
@@ -180,6 +187,8 @@ export function loadConfig(env = process.env) {
     feedInstructionsPath,
     briefInstructionsPath,
     registryPath,
+    builtinPath,
+    repoRoot: REPO_ROOT,
     routinesDir,
     notificationsDir,
     timeZone: TIME_ZONE,

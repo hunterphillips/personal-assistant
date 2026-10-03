@@ -26,14 +26,14 @@ test('a missing file is the defaults and no error; load sets loadedAt', async (t
   assert.deepEqual(settings.current(), { ok: true, settings: DEFAULTS, error: null, loadedAt: NOW, path: settingsPath });
   assert.ok(Object.isFrozen(settings.current()) && Object.isFrozen(settings.current().settings.model));
   assert.deepEqual(logs, []);
-  assert.deepEqual(DEFAULTS, { version: 1, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' } });
+  assert.deepEqual(DEFAULTS, { version: 1, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' }, quickChat: { agent: null } });
 });
 
 test('a valid file loads with every key present and nulls kept', async (t) => {
   const { settings, settingsPath } = await setup(t);
   await writeFile(settingsPath, JSON.stringify({ version: 1, model: { default: 'opus' }, brief: { agent: 'cfo' } }));
   await settings.load();
-  assert.deepEqual(settings.current().settings, { version: 1, model: { default: 'opus', effort: null }, brief: { agent: 'cfo' }, permission: { default: 'ask' } });
+  assert.deepEqual(settings.current().settings, { version: 1, model: { default: 'opus', effort: null }, brief: { agent: 'cfo' }, permission: { default: 'ask' }, quickChat: { agent: null } });
   assert.equal(settings.current().ok, true);
 });
 
@@ -48,7 +48,7 @@ test('permission.default is one of the three levels, never null, fills in as ask
   await settings.load();
   assert.deepEqual(settings.current().settings.permission, { default: 'ask' });
   await settings.update({ model: { effort: 'low' } });
-  assert.deepEqual(await read(), { version: 1, model: { default: 'opus', effort: 'low' }, brief: { agent: 'cfo' }, permission: { default: 'ask' } });
+  assert.deepEqual(await read(), { version: 1, model: { default: 'opus', effort: 'low' }, brief: { agent: 'cfo' }, permission: { default: 'ask' }, quickChat: { agent: null } });
 
   for (const [patch, code] of [
     [{ permission: { default: null } }, 'invalid_permission'],
@@ -119,7 +119,7 @@ test('update merges, validates, writes atomically with mode 600, notifies, and a
   const { settings, settingsPath, dir, changes, read } = await setup(t, { nested: true });
   await settings.load();
   const saved = await settings.update({ model: { default: 'sonnet' } });
-  assert.deepEqual(saved, { version: 1, model: { default: 'sonnet', effort: null }, brief: { agent: null }, permission: { default: 'ask' } });
+  assert.deepEqual(saved, { version: 1, model: { default: 'sonnet', effort: null }, brief: { agent: null }, permission: { default: 'ask' }, quickChat: { agent: null } });
   assert.ok(Object.isFrozen(saved));
   assert.deepEqual(await read(), saved);
   assert.equal((await stat(settingsPath)).mode & 0o777, 0o600);
@@ -130,7 +130,7 @@ test('update merges, validates, writes atomically with mode 600, notifies, and a
   assert.equal(changes[0].ok, true);
 
   await settings.update({ model: { effort: 'low' }, brief: { agent: 'cfo' } });
-  assert.deepEqual(settings.current().settings, { version: 1, model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' }, permission: { default: 'ask' } });
+  assert.deepEqual(settings.current().settings, { version: 1, model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' }, permission: { default: 'ask' }, quickChat: { agent: null } });
   assert.deepEqual(await read(), settings.current().settings);
   await settings.update({ model: { default: null } });
   assert.deepEqual(settings.current().settings.model, { default: null, effort: 'low' });
@@ -185,14 +185,14 @@ test('concurrent updates apply in order over one another', async (t) => {
     settings.update({ model: { effort: 'high' } }),
     settings.update({ brief: { agent: 'cfo' } }),
   ]);
-  assert.deepEqual(await read(), { version: 1, model: { default: 'opus', effort: 'high' }, brief: { agent: 'cfo' }, permission: { default: 'ask' } });
+  assert.deepEqual(await read(), { version: 1, model: { default: 'opus', effort: 'high' }, brief: { agent: 'cfo' }, permission: { default: 'ask' }, quickChat: { agent: null } });
 });
 
 test('seed writes the defaults with the given values only when the file is missing', async (t) => {
   const { settings, read, changes } = await setup(t, { nested: true });
   await settings.load();
   assert.equal(await settings.seed({ brief: { agent: 'assistant' } }), true);
-  assert.deepEqual(await read(), { version: 1, model: { default: null, effort: null }, brief: { agent: 'assistant' }, permission: { default: 'ask' } });
+  assert.deepEqual(await read(), { version: 1, model: { default: null, effort: null }, brief: { agent: 'assistant' }, permission: { default: 'ask' }, quickChat: { agent: null } });
   assert.equal(settings.current().settings.brief.agent, 'assistant');
   assert.equal(changes.length, 1);
 
@@ -222,4 +222,42 @@ test('a listener that throws is logged and the rest still run', async (t) => {
   ran = false;
   await settings.update({ model: { default: 'haiku' } });
   assert.equal(ran, false);
+});
+
+test('quickChat.agent is null or an agent id, with its own refusal code', async (t) => {
+  const { settings, read } = await setup(t);
+  await settings.load();
+  assert.equal(validatePatch({ quickChat: { agent: 'Not An Id' } }), 'invalid_quick_chat_agent');
+  assert.equal(validatePatch({ quickChat: { agent: 3 } }), 'invalid_quick_chat_agent');
+  assert.equal(validatePatch({ quickChat: { other: 'x' } }), 'invalid_body');
+  assert.equal(validatePatch({ quickChat: { agent: null } }), null);
+  await assert.rejects(settings.update({ quickChat: { agent: 'Bad' } }), { code: 'invalid_quick_chat_agent' });
+  await settings.update({ quickChat: { agent: 'myos' } });
+  assert.deepEqual((await read()).quickChat, { agent: 'myos' });
+  assert.deepEqual(settings.current().settings.quickChat, { agent: 'myos' });
+});
+
+test('addMissing adds a key a file from before it lacks, once, and leaves a missing or broken file alone', async (t) => {
+  const { settings, settingsPath, read, changes } = await setup(t);
+  await settings.load();
+  assert.equal(await settings.addMissing({ quickChat: { agent: 'myos' } }), false, 'a missing file is seed()\'s');
+
+  const before = { version: 1, model: { default: 'opus', effort: null }, brief: { agent: 'cfo' }, permission: { default: 'auto' } };
+  await writeFile(settingsPath, JSON.stringify(before));
+  await settings.load();
+  assert.deepEqual(settings.current().settings.quickChat, { agent: null }, 'loads with the key filled');
+  assert.equal(await settings.addMissing({ quickChat: { agent: 'myos' } }), true);
+  assert.deepEqual(await read(), { ...before, quickChat: { agent: 'myos' } });
+  assert.equal((await stat(settingsPath)).mode & 0o777, 0o600);
+  assert.equal(changes.at(-1).settings.quickChat.agent, 'myos');
+
+  // Present, even as null, is never overwritten.
+  await settings.update({ quickChat: { agent: null } });
+  assert.equal(await settings.addMissing({ quickChat: { agent: 'myos' } }), false);
+  assert.deepEqual((await read()).quickChat, { agent: null });
+
+  await writeFile(settingsPath, '{ broken');
+  await settings.load();
+  assert.equal(await settings.addMissing({ quickChat: { agent: 'myos' } }), false);
+  assert.equal(await readFile(settingsPath, 'utf8'), '{ broken');
 });

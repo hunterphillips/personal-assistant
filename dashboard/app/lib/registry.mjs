@@ -47,8 +47,16 @@
 //         "jobs": ["com.hunter.cfo.daily"], // optional, default [];
 //                                    // each /^[A-Za-z0-9][A-Za-z0-9.-]*$/,
 //                                    // unique across the whole registry
-//         "pinned": true             // optional; a persona listed above
+//         "pinned": true,            // optional; a persona listed above
 //                                    // the groups; a problem on other kinds
+//         "builtin": true            // optional; a persona that is part of
+//                                    // the dashboard itself: the daemon
+//                                    // seeds it from registry/builtin.json
+//                                    // when missing (builtins.mjs) and the
+//                                    // dashboard never deletes it. A
+//                                    // problem on other kinds. Named
+//                                    // builtin because kind "system" is
+//                                    // already a provider-less entry
 //       }
 //     ],
 //     "...": "unknown top-level keys are ignored"
@@ -159,7 +167,7 @@ const KINDS = new Set(['persona', 'project', 'system']);
 const PROVIDERS = new Set(['claude', 'codex']);
 const MAX_ACCEPTS = 100;
 const AGENT_KEYS = new Set([
-  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'permission', 'accepts', 'jobs', 'pinned',
+  'id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'permission', 'accepts', 'jobs', 'pinned', 'builtin',
 ]);
 const GROUP_KEYS = new Set(['id', 'name']);
 const EMPTY_DOCUMENT = Object.freeze({ version: 1, groups: [], agents: [] });
@@ -561,6 +569,14 @@ function validateAgent(entry, index, problems, checkDirectory = isDirectory) {
     }
   }
 
+  if (entry.builtin !== undefined) {
+    if (typeof entry.builtin !== 'boolean') {
+      fail('builtin must be true or false');
+    } else if (entry.builtin && entry.kind !== 'persona') {
+      fail('builtin is only for a persona');
+    }
+  }
+
   let jobs = [];
   if (entry.jobs !== undefined) {
     const isValidJobs = Array.isArray(entry.jobs) &&
@@ -587,6 +603,7 @@ function validateAgent(entry, index, problems, checkDirectory = isDirectory) {
     ...(entry.permission !== undefined ? { permission: entry.permission } : {}),
     ...(accepts ? { accepts } : {}),
     ...(entry.pinned === true ? { pinned: true } : {}),
+    ...(entry.builtin === true ? { builtin: true } : {}),
     jobs,
   };
 }
