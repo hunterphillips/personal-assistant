@@ -45,6 +45,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/agents/<id>/thread` | The persona's cached messages. |
 | `PUT /api/agents/<id>/settings` | Rewrites a persona's registry entry (name, role, group, description, folder, model, effort, permission level, who may message it, pinned) and answers the stored entry (below). |
 | `POST /api/agents` | Adds a Claude persona to the registry from the same fields plus `id`; 201 with the stored entry (below). |
+| `DELETE /api/agents/<id>` | Removes a persona from the registry with its routines and their runs logs; its thread stays on disk (below). |
 | `POST /api/sessions/<id>/answer` | Answers a Codex thread's open question or approval (below). |
 | `POST /api/sessions/<id>/interrupt` | Stops the Codex thread's running turn. |
 | `GET /api/sessions/<id>/thread` | The Codex thread's recent messages, read from the app-server. |
@@ -56,7 +57,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/feed/discuss` | Sends one feed item to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
 | `GET /api/feed/instructions` | The feed's criteria file, read as prose (below). |
 | `POST /api/feed/instructions/propose` | Sends a change to the criteria to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
-| `PUT /api/settings` | Saves a partial patch of the settings (default model and effort, which agent receives the brief, the default permission level) and answers the whole document (below). |
+| `PUT /api/settings` | Saves a partial patch of the settings (default model and effort, which agent receives the brief, which agent quick chat opens on, the default permission level) and answers the whole document (below). |
 | `GET /api/routines` | The routines as the snapshot lists them (below). |
 | `POST /api/routines` | Adds a routine from `{"name", "agent", "instruction", "schedule", "active"}`, `schedule` a cron line; 201 with the stored routine (below). |
 | `PUT /api/routines/<id>` | Rewrites a routine from the same five keys and answers it. |
@@ -87,6 +88,7 @@ what `lib/app.mjs` expects from it.
 - `lib/focus-proxy.mjs` forwards the Focus routes.
 - `lib/brief-adapter.mjs` serves the brief routes over `lib/briefs.mjs` and `lib/feedback.mjs`.
 - `lib/hub.mjs` keeps the state snapshot and its subscribers.
+- `lib/builtins.mjs` seeds the built-in agents from `registry/builtin.json` at start and picks the agent a setting falls to.
 - `lib/registry.mjs` and `lib/jobs.mjs` read the agent registry and its launchd jobs; `lib/launchd.mjs` renders the plist for `bin/dashboard-install`.
 - `lib/threads.mjs` and `lib/runtime/` hold the persona thread files, the two runtime adapters (`claude.mjs` runs personas, `codex.mjs` follows the shared Codex app-server's threads), and the cmux client (`cmux.mjs`).
 - `lib/bindings.mjs` reads the terminal bindings `bin/codex-new` records.
@@ -147,7 +149,7 @@ snapshot; concurrent requests share one check. It stays for one release.
                             "schedule": { "cron": "30 6 * * 1-5", "text": "Weekdays at 6:30" }, "active": true,
                             "created": "<ISO>", "updated": "<ISO>", "nextAt": "<ISO>",
                             "lastRun": { "run": "<uuid>", "occurrence": "<ISO>", "trigger": "schedule", "startedAt": "<ISO>", "endedAt": "<ISO>", "outcome": "finished" } }] },
-  "settings": { "ok": true, "error": null, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" }, "permission": { "default": "ask" } },
+  "settings": { "ok": true, "error": null, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" }, "permission": { "default": "ask" }, "quickChat": { "agent": "myos" } },
   "notifications": { "open": 1, "items": [{ "id": "<uuid>", "agent": "cfo", "text": "...", "link": "job:com.example.drift", "at": "<ISO>", "acknowledgedAt": null }] },
   "models": [{ "id": "fable", "name": "Fable" }, { "id": "opus", "name": "Opus" }, { "id": "sonnet", "name": "Sonnet" }, { "id": "haiku", "name": "Haiku" }] }
 ```
@@ -692,6 +694,26 @@ refused test run says "CFO is still working. Wait for the reply." or "CFO
 is unavailable." The form stays as it is while snapshots arrive, and
 closes when another agent is chosen.
 
+At the panel's foot, below the routines, a persona shows Delete unless
+the registry marks it `builtin` (Myos, part of the dashboard). Delete asks
+inline: "Delete CFO? This removes it from the registry with its routines
+and their runs. Its thread stays on disk.", followed by "The brief will go
+to Myos." or "Quick chat will talk to Myos." when Settings names the agent
+for either ("No agent will receive the brief." or "Quick chat will have no
+agent." when no Claude agent is left), with Delete and Cancel. Confirming
+sends `DELETE /api/agents/<id>` and, on success, closes the panel and the
+thread. The daemon strips the id from every other agent's `accepts` (a
+list left empty stays empty, so it still means no one), removes the
+agent's routines and their runs logs, and moves the brief or quick chat to
+the first built-in Claude agent, else the pinned one, else the first. The
+thread files and the session stay, so an agent added again under the same
+id finds its thread. Refusals, each one sentence under the button: 409
+`builtin` ("Myos is part of the dashboard and cannot be deleted."), 409
+`busy` while a turn runs or waits on a card ("CFO is in the middle of a
+turn. Delete it once the turn ends."), 409 `not_agent` for a project or
+system entry, 404 `no_such_agent`, 409 `registry_invalid`, and 503
+`shutting_down`.
+
 A project or system entry stays read-only: Role, Group, Provider, and
 Folder, each left out with its label when the registry has no value, then
 the description as written, and the jobs sentence.
@@ -779,11 +801,13 @@ The Health view, at `/health` and the last entry on the rail, opens with
 the Settings card and then lists the launchd jobs of every registry entry
 under the heading "Jobs". It scrolls on its own, in a 720px column.
 
-The Settings card has four rows, each a select. "Default model" offers
+The Settings card has five rows, each a select. "Default model" offers
 "Claude Code default" and the model table's names (Fable, Opus, Sonnet,
 Haiku); "Default effort" offers "Claude Code default" and the five levels
 (Low, Medium, High, Extra high, Max); "Brief goes to" offers "No one" and
-every Claude agent by name; "Default permissions" offers Ask, Auto, and
+every Claude agent by name; "Quick chat talks to" offers every Claude
+agent by name (and "No one" only while nothing is set), the agent the
+header's quick chat opens on; "Default permissions" offers Ask, Auto, and
 Full access, seeded Ask, with the level's sentence under it (the same
 three as the gear panel's). A value the lists do not carry (a model id
 typed into the file by hand, an agent since removed) shows as itself.
@@ -1022,24 +1046,27 @@ or deleted, so a hand edit is never overwritten by a merge over the last
 good copy.
 
 `PUT /api/settings` takes a partial patch, `{ model?: { default?,
-effort? }, brief?: { agent? }, permission?: { default? } }`, in a body of at most 4 KiB with a
+effort? }, brief?: { agent? }, permission?: { default? }, quickChat?: {
+agent? } }`, in a body of at most 4 KiB with a
 same-origin `Origin` and a JSON content type. The store merges it, writes
 the file atomically (temporary file with mode 0600, rename; the directory is
 created 0700), and answers 200 `{ ok: true, settings }` with the whole
 document; the hub then commits `settings` and the agent views that moved.
 Refusals, in order: 400 `invalid_body` (not an object, empty, or keys other
-than the four), 400 `invalid_model` (not null or 1 to 64 characters), 400
+than the five), 400 `invalid_model` (not null or 1 to 64 characters), 400
 `invalid_effort`, 400 `invalid_agent` (not null or an agent id), 400
-`invalid_permission` (not one of the three levels; null is refused), 404
-`no_such_agent` (names no Claude persona in the registry; null is allowed),
+`invalid_permission` (not one of the three levels; null is refused), 400
+`invalid_quick_chat_agent` (not null or an agent id), 404
+`no_such_agent` (`brief.agent` or `quickChat.agent` names no Claude persona
+in the registry; null is allowed),
 409 `settings_invalid`, 503 `shutting_down`, 500 `settings_write_failed`
 (logged as `settings_write_error`).
 
 ### Registry writes
 
-`PUT /api/agents/<id>/settings` and `POST /api/agents`
-(`lib/agent-settings-routes.mjs`) are the two routes that write the
-registry file, through `registry.write(mutate)` in `lib/registry.mjs`. A
+`PUT /api/agents/<id>/settings`, `POST /api/agents`, and `DELETE
+/api/agents/<id>` (`lib/agent-settings-routes.mjs`) are the three routes
+that write the registry file, through `registry.write(mutate)` in `lib/registry.mjs`. A
 body carries every field: `name`, `role`, `group`, `description`, `cwd`
 (absolute), `model` (null or an id or alias), `effort` (null or a level),
 `accepts` (null or a list of agent ids; null, an empty list, and every
@@ -1051,7 +1078,7 @@ the three is 400 `invalid_permission`; `newGroup: { id, name }` adds a group who
 listed group has (one that does joins it) and `group` must equal its id.
 A created agent is kind `persona` on `claude`; project and system entries
 are still hand edits. The entry is written in the schema's key order with
-its `jobs` kept, and the whole file as 2-space JSON with a trailing
+its `jobs` and a `builtin` flag kept (no body sets the flag), and the whole file as 2-space JSON with a trailing
 newline, so a dashboard write reads as a small diff; unrelated top-level
 keys are kept. The write is atomic (a temp file beside the registry,
 renamed over it, with the file's mode kept), the registry reloads at
@@ -1090,7 +1117,12 @@ read-only fake) both routes are 404.
   on its own and the tools hook cannot change it. Every turn also runs
   with the Claude Code preset system prompt, so an agent behaves as its
   repo's CLAUDE.md expects; CLAUDE.md itself loads through the default
-  setting sources:
+  setting sources. The preset carries an `append` from the agent's
+  registry entry: "You are Myos, one of Hunter's agents in his personal
+  assistant system. Your role: Guide. In your own words: …", since
+  several agents share this repo's folder. The SDK records it on a
+  session's first request, so it reaches an existing thread, and a rename
+  takes effect, only after New thread:
 
   | Level | `permissionMode` | Also |
   | --- | --- | --- |

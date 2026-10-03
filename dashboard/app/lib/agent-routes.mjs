@@ -17,8 +17,10 @@
 //   POST read        bodyless -> 200 once the shared read time is recorded
 //   GET  thread      { messages } from store.read(id)
 //   PUT  settings    the agent's registry entry (agent-settings-routes.mjs);
-//                    POST /api/agents (serveCreate) adds one. Both need a
-//                    `registry` with write(); without it they are 404.
+//                    POST /api/agents (serveCreate) adds one, and DELETE
+//                    /api/agents/:id (no action, bodyless) removes one with
+//                    its routines. All three need a `registry` with
+//                    write(); without it they are 404.
 // An id not in the registry is 404 no_such_agent; an agent of another kind
 // is 409 not_a_persona; a persona that is not started (unavailable) is 409
 // persona_unavailable. Adapter refusals (runtime/adapter.mjs) map to:
@@ -49,7 +51,7 @@
 // terminal by any other means than the recorded ids. There is no send and
 // no new-thread: these threads are driven from their terminals.
 //
-// createAgentRoutes({ hub, store, cmux, registry, log, limits, shuttingDown }) returns
+// createAgentRoutes({ hub, store, cmux, registry, settings, routines, log, limits, shuttingDown }) returns
 //   match(pathname) -> route or null, in the shape app.mjs routes on
 //                      ({ name: 'agent', methods, bodyless?, label, params })
 //   serve(req, res, route) -> Promise<void>
@@ -117,14 +119,20 @@ const REQUEST_ID_MAX = 128;
 const MODEL_MAX = 64;
 const ACCEPTED = Symbol('accepted');
 
-export function createAgentRoutes({ hub, store = null, cmux = null, registry = null, log, limits, shuttingDown }) {
-  const settingsRoutes = createAgentSettingsRoutes({ registry, hub, log, limits, shuttingDown });
+export function createAgentRoutes({
+  hub, store = null, cmux = null, registry = null, settings = null, routines = null, log, limits, shuttingDown,
+}) {
+  const settingsRoutes = createAgentSettingsRoutes({ registry, hub, settings, routines, log, limits, shuttingDown });
 
   function match(pathname) {
     const session = pathname.startsWith(SESSION_PREFIX);
     const prefix = session ? SESSION_PREFIX : PREFIX;
     if (!pathname.startsWith(prefix)) return null;
     const [id, action, ...rest] = pathname.slice(prefix.length).split('/');
+    // The agent itself: DELETE /api/agents/:id.
+    if (!session && action === undefined && AGENT_ID.test(id)) {
+      return { name: 'agent', methods: ['DELETE'], bodyless: true, label: `${PREFIX}:id`, params: { id, action: 'delete', session } };
+    }
     const route = ACTIONS.get(action);
     if (!route || rest.length !== 0) return null;
     if (session ? !SESSION_ACTIONS.has(action) || !SESSION_ROUTE_ID.test(id) : !PERSONA_ACTIONS.has(action) || !AGENT_ID.test(id)) return null;
@@ -304,6 +312,8 @@ export function createAgentRoutes({ hub, store = null, cmux = null, registry = n
         return serveRead(res, id);
       case 'settings':
         return settingsRoutes.serveUpdate(req, res, id);
+      case 'delete':
+        return settingsRoutes.serveDelete(req, res, id);
       case 'open-terminal':
         return serveOpenTerminal(res, id);
       default:

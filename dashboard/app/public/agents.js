@@ -27,6 +27,12 @@
 // empty, with an id slugged from the name, and POSTs /api/agents; the new
 // agent's thread opens once it is listed.
 //
+// At the panel's foot, any persona the registry does not mark `builtin`
+// offers Delete. It asks inline with one sentence naming what goes (the
+// registry entry, its routines and their runs; the thread stays on disk)
+// and where the brief or quick chat moves when Settings names this agent,
+// then sends DELETE /api/agents/<id>; a refusal is one sentence under it.
+//
 // Under a persona's settings the panel lists its routines (the snapshot's
 // `routines`): each row's name, schedule in words, and last run. A row or
 // "Add routine" swaps the panel to the routine form (Name, Instruction,
@@ -897,6 +903,11 @@
     var modelReset = document.getElementById('agent-model-reset');
     var mentionMenu = document.getElementById('agent-mention-menu');
     var routinesNode = document.getElementById('agent-routines');
+    var deleteNode = document.getElementById('agent-delete');
+    var deleteAgentButton = deleteNode.querySelector('[data-agent-action="delete-agent"]');
+    var deleteConfirm = document.getElementById('agent-delete-confirm');
+    var deleteText = document.getElementById('agent-delete-text');
+    var deleteRefusal = document.getElementById('agent-delete-refusal');
     var routinesSection = document.getElementById('agents-routines');
     var routinesSectionBody = document.getElementById('agents-routines-body');
 
@@ -936,6 +947,8 @@
     var routineRunsRendered = null;
     var routinesSectionKey = null; // what the sidebar section was last built from
     var markingRead = null; // the persona whose bodyless read request is out
+    var deleteFor = null; // the agent id whose Delete awaits confirmation
+    var deleteNotice = null; // { agentId, text }: why its Delete was refused
 
     // The listed agent with this id, or null.
     function agentById(id) {
@@ -1521,6 +1534,7 @@
         detailsJobs.hidden = true;
         detailsForm.hidden = false;
         hideRoutinePanel();
+        renderDelete(null, false);
         renderForm(null);
         return;
       }
@@ -1544,12 +1558,92 @@
         }
         if (claude) renderRoutinePanel(agent);
         else hideRoutinePanel();
+        renderDelete(agent, !routineOpen);
         return;
       }
       detailsForm.hidden = true;
       detailsFields.hidden = false;
       hideRoutinePanel();
+      renderDelete(null, false);
       renderDetails(agent);
+    }
+
+    // --- Delete ------------------------------------------------------------
+
+    // Who receives what Settings names this agent for, once it is gone:
+    // the same rule the daemon applies (builtins.mjs defaultAgentId).
+    function fallbackFor(agent) {
+      var claude = ((state && state.agents) || []).filter(function (other) {
+        return other.id !== agent.id && other.kind === 'persona' && other.provider === 'claude';
+      });
+      var pick = claude.filter(function (other) { return other.builtin === true; })[0] ||
+        claude.filter(function (other) { return other.pinned === true; })[0] || claude[0] || null;
+      return pick;
+    }
+
+    function deleteSentence(agent) {
+      var settings = (state && state.settings) || {};
+      var next = fallbackFor(agent);
+      var text = 'Delete ' + agent.name + '? This removes it from the registry with its routines and their runs. Its thread stays on disk.';
+      if (settings.brief && settings.brief.agent === agent.id) {
+        text += next ? ' The brief will go to ' + next.name + '.' : ' No agent will receive the brief.';
+      }
+      if (settings.quickChat && settings.quickChat.agent === agent.id) {
+        text += next ? ' Quick chat will talk to ' + next.name + '.' : ' Quick chat will have no agent.';
+      }
+      return text;
+    }
+
+    function deleteRefusalText(agent, result) {
+      var code = result && result.code;
+      if (code === 'builtin') return agent.name + ' is part of the dashboard and cannot be deleted.';
+      if (code === 'busy') return agent.name + ' is in the middle of a turn. Delete it once the turn ends.';
+      if (code === 'not_agent') return 'Only an agent can be deleted here.';
+      if (code === 'no_such_agent') return agent.name + ' is no longer registered.';
+      if (code === 'registry_invalid') return 'The registry file could not be read. Fix it by hand first.';
+      if (code === 'shutting_down') return 'The dashboard is shutting down.';
+      return agent.name + ' could not be deleted.';
+    }
+
+    // The foot of the panel: Delete for a persona that is not built in,
+    // while its settings form shows.
+    function renderDelete(agent, shown) {
+      var offered = !!agent && shown && !creating && isPersona(agent) && agent.builtin !== true;
+      deleteNode.hidden = !offered;
+      if (!offered) return;
+      var asking = deleteFor === agent.id;
+      deleteAgentButton.hidden = asking;
+      deleteAgentButton.disabled = busy;
+      deleteConfirm.hidden = !asking;
+      if (asking) deleteText.textContent = deleteSentence(agent);
+      var buttons = deleteConfirm.querySelectorAll('button');
+      for (var i = 0; i < buttons.length; i += 1) buttons[i].disabled = busy;
+      var refusal = deleteNotice && deleteNotice.agentId === agent.id ? deleteNotice.text : '';
+      deleteRefusal.textContent = refusal;
+      deleteRefusal.hidden = !refusal;
+    }
+
+    function deleteAgent(agent) {
+      if (busy || !isPersona(agent)) return;
+      busy = true;
+      deleteFor = null;
+      deleteNotice = null;
+      renderThread();
+      call('DELETE', routeBase(agent)).then(function (result) {
+        busy = false;
+        var ok = !!(result && result.ok);
+        if (ok) {
+          if (!shell.isStreaming()) shell.requestState();
+          if (selectedId === agent.id) {
+            detailsOpen = false;
+            select(null, true);
+            return;
+          }
+        } else {
+          deleteNotice = { agentId: agent.id, text: deleteRefusalText(agent, result) };
+        }
+        renderThread();
+      });
     }
 
     function renderDetails(agent) {
@@ -2990,6 +3084,21 @@
           break;
         case 'test-routine':
           if (isPersona(agent)) testRoutine(agent);
+          break;
+        case 'delete-agent':
+          if (!isPersona(agent)) break;
+          deleteFor = agent.id;
+          deleteNotice = null;
+          renderThread();
+          deleteConfirm.querySelector('button').focus();
+          break;
+        case 'confirm-delete-agent':
+          if (isPersona(agent) && deleteFor === agent.id) deleteAgent(agent);
+          break;
+        case 'cancel-delete-agent':
+          deleteFor = null;
+          renderThread();
+          deleteAgentButton.focus();
           break;
         case 'delete-routine':
           routineConfirming = true;

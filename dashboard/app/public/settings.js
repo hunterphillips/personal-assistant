@@ -1,8 +1,8 @@
 // The Settings card at the top of Health: the default model and effort for
 // every agent's turns, which agent's thread the morning brief notice goes
-// to, and the default permission level, each a select over the snapshot's
-// `models`, the effort levels, the Claude agents the registry lists, and
-// the three levels (a sentence under the last says what the chosen level
+// to, which agent the header's quick chat opens on, and the default
+// permission level, each a select over the snapshot's `models`, the effort
+// levels, the Claude agents the registry lists, and the three levels (a sentence under the last says what the chosen level
 // does). A change is sent as one PUT
 // /api/settings; the saved values arrive back through the state like every
 // other change, so the card never holds a value the server did not. While
@@ -82,6 +82,7 @@
       model: $('settings-model'),
       effort: $('settings-effort'),
       brief: $('settings-brief'),
+      quickChat: $('settings-quick-chat'),
       permission: $('settings-permission'),
     };
     var permissionNote = $('settings-permission-note');
@@ -94,7 +95,7 @@
     var savedTimer = null;
 
     function settingsOf() {
-      return (state && state.settings) || { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' } };
+      return (state && state.settings) || { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' }, quickChat: { agent: null } };
     }
 
     function setStatus(text, tone) {
@@ -119,10 +120,15 @@
       var agents = [{ id: '', name: NO_ONE }].concat(claudeAgents(state).map(function (agent) {
         return { id: agent.id, name: agent.name };
       }));
+      var quickChat = (settings.quickChat && settings.quickChat.agent) || null;
+      // Quick chat always has an agent once seeded; "No one" shows only
+      // while the value is null, so the select never claims an agent.
+      var quickChatAgents = (quickChat ? [] : [{ id: '', name: NO_ONE }]).concat(agents.slice(1));
       var level = (settings.permission && settings.permission.default) || 'ask';
       fill(selects.model, models, settings.model.default);
       fill(selects.effort, efforts, settings.model.effort);
       fill(selects.brief, agents, settings.brief.agent);
+      if (selects.quickChat) fill(selects.quickChat, quickChatAgents, quickChat);
       fill(selects.permission, PERMISSIONS, level);
       if (permissionNote) permissionNote.textContent = PERMISSION_NOTES[level] || '';
       Object.keys(selects).forEach(function (key) { selects[key].disabled = saving; });
@@ -156,6 +162,7 @@
       if (key === 'model') return { model: { default: chosen } };
       if (key === 'effort') return { model: { effort: chosen } };
       if (key === 'permission') return { permission: { default: value } };
+      if (key === 'quickChat') return { quickChat: { agent: chosen } };
       return { brief: { agent: chosen } };
     }
 

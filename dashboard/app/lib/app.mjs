@@ -127,7 +127,7 @@ export function createApp({
   let shuttingDown = false;
   const isShuttingDown = () => shuttingDown;
   const events = createEvents({ hub, notices, timeouts: config.timeouts, limits: config.limits, shuttingDown: isShuttingDown });
-  const agents = createAgentRoutes({ hub, store, cmux, registry, log, limits: config.limits, shuttingDown: isShuttingDown });
+  const agents = createAgentRoutes({ hub, store, cmux, registry, settings, routines, log, limits: config.limits, shuttingDown: isShuttingDown });
   const goalsRoutes = goals
     ? createGoalsRoutes({ goals, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
     : null;
