@@ -120,7 +120,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 15px;
   padding: 28px 10px;
   padding-top: clamp(48px, 16vh, 160px);
   background: var(--side);
