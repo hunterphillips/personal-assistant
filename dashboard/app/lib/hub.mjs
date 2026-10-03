@@ -22,7 +22,7 @@
 //       registry: { ok, error, loadedAt },
 //       groups: [{ id, name }],    // the registry's group list, in order
 //       agents: [{ id, name, role, description, group, kind, cwd, jobs,
-//                  provider?, pinned?, state, pending?, lastMessage?,
+//                  provider?, pinned?, builtin?, state, pending?, lastMessage?,
 //                  lastError?, costUsd?, lastLineAt?, model?, permission?,
 //                  accepts?, unread }],
 //       sessions: [{ id, provider, threadId, cwd, projectId, title, state,
@@ -36,7 +36,7 @@
 //                             schedule: { cron, text }, active, created,
 //                             updated, nextAt, lastRun }] },
 //       settings: { ok, error, model: { default, effort }, brief: { agent },
-//                   permission: { default } },
+//                   permission: { default }, quickChat: { agent } },
 //       notifications: { open, items: [{ id, agent, text, link, at,
 //                                         acknowledgedAt }] },
 //       models: [{ id, name }] }
@@ -880,6 +880,7 @@ function settingsView(current) {
     model: { default: settings.model?.default ?? null, effort: settings.model?.effort ?? null },
     brief: { agent: settings.brief?.agent ?? null },
     permission: { default: settings.permission?.default ?? SETTINGS_DEFAULTS.permission.default },
+    quickChat: { agent: settings.quickChat?.agent ?? null },
   };
 }
 
@@ -938,6 +939,8 @@ function agentViews(current, personas, settingsState, routines = null, reads = n
     };
     if (agent.provider !== undefined) view.provider = agent.provider;
     if (agent.pinned === true) view.pinned = true;
+    // Part of the dashboard (registry.mjs): the panel offers no Delete.
+    if (agent.builtin === true) view.builtin = true;
     if (agent.kind !== 'persona') {
       view.state = null;
       return view;

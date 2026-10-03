@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { createClaudeAdapter } from '../../lib/runtime/claude.mjs';
+import { createClaudeAdapter, identityPrompt } from '../../lib/runtime/claude.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { tempDir } from '../support/harness.mjs';
 
@@ -1090,4 +1090,19 @@ test('a routine send records the routine on the user message and never a sender,
     assert.equal(rejected?.code, 'invalid_routine', JSON.stringify(bad));
   }
   assert.equal(query.calls.length, 3);
+});
+
+test('the preset carries the agent\'s identity from its registry entry, built on every turn', async (t) => {
+  const { adapter, query } = await setup(t);
+  const named = { ...AGENT, name: 'Myos', role: 'Guide', description: 'I know how this dashboard works.' };
+  await adapter.send(named, 'Who are you?');
+  assert.deepEqual(query.calls[0].options.systemPrompt, {
+    type: 'preset',
+    preset: 'claude_code',
+    append: "You are Myos, one of Hunter's agents in his personal assistant system. Your role: Guide. In your own words: I know how this dashboard works.",
+  });
+  // A rename reaches the next turn's options.
+  await adapter.send({ ...named, name: 'Guide' }, 'Again');
+  assert.match(query.calls[1].options.systemPrompt.append, /^You are Guide, /);
+  assert.equal(identityPrompt({ id: 'x' }), null);
 });

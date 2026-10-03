@@ -44,6 +44,10 @@
 //     Any of the five fields; the rest keep their values. `updated` is
 //     stamped on every save, an Active toggle included.
 //   remove(id) -> Promise<void>         the file and its runs log
+//   removeForAgent(agentId) -> Promise<string[]>
+//     Every routine of that agent, each as remove() does, in one serialized
+//     step; resolves with the ids removed (none is not an error). Called
+//     when the agent is deleted (agent-settings-routes.mjs).
 //   appendRun(id, line) -> Promise<void>
 //     Appends one line (mode 0600; runs/ created 0700) and, past
 //     limits.routineRunLines lines, rewrites the log to the newest ones.
@@ -309,6 +313,30 @@ export function createRoutines({
         byId.delete(id);
         logs.delete(id);
         notify();
+      });
+    },
+
+    removeForAgent(agentId) {
+      return serialized(async () => {
+        const ids = [...byId.values()].filter((routine) => routine.agent === agentId).map((routine) => routine.id);
+        const removed = [];
+        try {
+          for (const id of ids) {
+            await unlink(filePath(id)).catch((error) => {
+              if (error?.code !== 'ENOENT') throw error;
+            });
+            await unlink(logPath(id)).catch((error) => {
+              if (error?.code !== 'ENOENT') throw error;
+            });
+            byId.delete(id);
+            logs.delete(id);
+            removed.push(id);
+          }
+        } finally {
+          // A failure part way still tells the hub about the ones gone.
+          if (removed.length > 0) notify();
+        }
+        return removed;
       });
     },
 

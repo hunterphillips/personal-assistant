@@ -177,6 +177,17 @@
               <p class="details-description" id="agent-details-description" hidden></p>
               <p class="details-jobs" id="agent-details-jobs" hidden></p>
               <section class="details-routines" id="agent-routines" aria-labelledby="agent-routines-heading" hidden></section>
+              <div class="details-delete" id="agent-delete" hidden>
+                <button type="button" class="button button-small" data-agent-action="delete-agent">Delete</button>
+                <div class="delete-confirm" id="agent-delete-confirm" role="group" aria-label="Delete agent" hidden>
+                  <p class="delete-confirm-text" id="agent-delete-text"></p>
+                  <div class="delete-confirm-actions">
+                    <button type="button" class="button button-danger" data-agent-action="confirm-delete-agent">Delete</button>
+                    <button type="button" class="button" data-agent-action="cancel-delete-agent">Cancel</button>
+                  </div>
+                </div>
+                <p class="delete-refusal" id="agent-delete-refusal" role="status" hidden></p>
+              </div>
             </aside>
           </div>
         </div>
@@ -233,6 +244,10 @@
           <div class="settings-row">
             <label class="settings-label" for="settings-brief">Brief goes to</label>
             <select class="settings-select" id="settings-brief" data-setting="brief"></select>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label" for="settings-quick-chat">Quick chat talks to</label>
+            <select class="settings-select" id="settings-quick-chat" data-setting="quickChat"></select>
           </div>
           <div class="settings-row">
             <label class="settings-label" for="settings-permission">Default permissions</label>

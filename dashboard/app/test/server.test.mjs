@@ -29,6 +29,8 @@ async function testEnv(t) {
     DASHBOARD_FOCUS_ORIGIN: `http://127.0.0.1:${await freePort()}`,
     DASHBOARD_BRIEFS_DIR: await tempDir(t),
     DASHBOARD_REGISTRY_PATH: path.join(await tempDir(t), 'agents.json'),
+    // No built-in agents unless a test names a file; the seed has tests of its own.
+    DASHBOARD_BUILTIN_PATH: path.join(await tempDir(t), 'builtin-missing.json'),
     DASHBOARD_LAUNCH_AGENTS_DIR: await tempDir(t),
     DASHBOARD_THREADS_DIR: path.join(await tempDir(t), 'threads'),
     DASHBOARD_CODEX_DIR: path.join(await tempDir(t), 'codex'),
@@ -357,11 +359,12 @@ test('first start seeds the settings file with the brief going to the pinned Cla
   t.after(() => dashboard.close());
   assert.deepEqual(JSON.parse(await readFile(env.DASHBOARD_SETTINGS_PATH, 'utf8')), {
     version: 1, model: { default: null, effort: null }, brief: { agent: 'assistant' }, permission: { default: 'ask' },
+    quickChat: { agent: 'assistant' },
   });
   assert.equal((await stat(env.DASHBOARD_SETTINGS_PATH)).mode & 0o777, 0o600);
-  assert.deepEqual(logs.filter((e) => e.event === 'settings_seeded'), [{ event: 'settings_seeded', agent: 'assistant' }]);
+  assert.deepEqual(logs.filter((e) => e.event === 'settings_seeded'), [{ event: 'settings_seeded', agent: 'assistant', quickChat: 'assistant' }]);
   const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
-  assert.deepEqual(state.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: 'assistant' }, permission: { default: 'ask' } });
+  assert.deepEqual(state.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: 'assistant' }, permission: { default: 'ask' }, quickChat: { agent: 'assistant' } });
   assert.deepEqual(state.agents.find((a) => a.id === 'cfo').model, { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } });
   assert.deepEqual(state.agents.find((a) => a.id === 'cfo').permission, { level: 'ask', source: 'system', agent: null, default: 'ask' });
   await dashboard.close();
@@ -375,6 +378,13 @@ test('first start seeds the settings file with the brief going to the pinned Cla
   assert.deepEqual(next.settings.model, { default: 'haiku', effort: 'max' });
   assert.equal(next.settings.brief.agent, 'cfo');
   assert.deepEqual(next.settings.permission, { default: 'ask' }, 'a file from before the key loads as ask');
+  // A file from before quick chat gains the key once, the rest kept.
+  assert.deepEqual(next.settings.quickChat, { agent: 'assistant' });
+  assert.deepEqual(logs.filter((e) => e.event === 'settings_migrated'), [{ event: 'settings_migrated', quickChat: 'assistant' }]);
+  assert.deepEqual(JSON.parse(await readFile(env.DASHBOARD_SETTINGS_PATH, 'utf8')), {
+    version: 1, model: { default: 'haiku', effort: 'max' }, brief: { agent: 'cfo' }, permission: { default: 'ask' },
+    quickChat: { agent: 'assistant' },
+  });
   assert.deepEqual(next.agents.find((a) => a.id === 'cfo').model, { id: 'haiku', effort: 'max', source: 'system', default: { id: 'haiku', effort: 'max' }, agent: { id: null, effort: null } });
 });
 
@@ -386,7 +396,7 @@ test('with no pinned Claude persona the seed names no one, and the notice waits 
   const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
   t.after(() => dashboard.close());
   assert.deepEqual(JSON.parse(await readFile(env.DASHBOARD_SETTINGS_PATH, 'utf8')).brief, { agent: null });
-  assert.deepEqual(logs.filter((e) => e.event === 'settings_seeded'), [{ event: 'settings_seeded', agent: null }]);
+  assert.deepEqual(logs.filter((e) => e.event === 'settings_seeded'), [{ event: 'settings_seeded', agent: null, quickChat: 'cfo' }]);
   assert.ok(logs.some((e) => e.event === 'notice_skipped' && e.reason === 'no_target'));
   assert.deepEqual(await readThread(dashboard, 'cfo'), []);
 
@@ -456,4 +466,27 @@ test('POST /api/agents writes the registry file as 2-space JSON, keeps an unrela
   const scout = next.agents.find((a) => a.id === 'scout');
   assert.deepEqual([scout.name, scout.group, scout.accepts, scout.model.id], ['Scout', 'home', ['cfo'], 'haiku']);
   assert.deepEqual(next.groups, [{ id: 'work', name: 'Work' }, { id: 'home', name: 'Home' }]);
+});
+
+test('start seeds the built-in agents into a registry without them, lists them with a read time, and is a no-op after', async (t) => {
+  const env = { ...await testEnv(t), DASHBOARD_BUILTIN_PATH: fileURLToPath(new URL('../../../registry/builtin.json', import.meta.url)) };
+  await writeFile(env.DASHBOARD_REGISTRY_PATH, JSON.stringify({ version: 1, groups: [{ id: 'personal', name: 'Personal' }], agents: [await assistantEntry(t)] }));
+  const logs = [];
+  const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => dashboard.close());
+  const file = JSON.parse(await readFile(env.DASHBOARD_REGISTRY_PATH, 'utf8'));
+  assert.deepEqual(file.agents.map((entry) => entry.id), ['assistant', 'myos']);
+  assert.equal(file.agents[1].cwd, path.resolve(APP_DIR, '../..'));
+  assert.deepEqual(logs.filter((e) => e.event === 'builtins_seeded'), [{ event: 'builtins_seeded', agents: ['myos'] }]);
+  const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
+  const myos = state.agents.find((entry) => entry.id === 'myos');
+  assert.deepEqual([myos.name, myos.group, myos.builtin, myos.unread], ['Myos', 'personal', true, false]);
+  // Quick chat starts on the built-in agent.
+  assert.deepEqual(state.settings.quickChat, { agent: 'myos' });
+  await dashboard.close();
+
+  const again = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => again.close());
+  assert.equal(logs.filter((e) => e.event === 'builtins_seeded').length, 1);
+  assert.deepEqual(JSON.parse(await readFile(env.DASHBOARD_REGISTRY_PATH, 'utf8')), file);
 });

@@ -143,6 +143,7 @@ export function fakeSettings(initial = {}, { ok = true, error = null } = {}) {
     model: Object.freeze({ ...base.model, ...(patch?.model ?? {}) }),
     brief: Object.freeze({ ...base.brief, ...(patch?.brief ?? {}) }),
     permission: Object.freeze({ ...base.permission, ...(patch?.permission ?? {}) }),
+    quickChat: Object.freeze({ ...base.quickChat, ...(patch?.quickChat ?? {}) }),
   });
   let settings = merge(SETTINGS_DEFAULTS, initial);
   let state = Object.freeze({ ok, settings, error, loadedAt: '2026-01-01T00:00:00.000Z', path: '/invented/settings.json' });

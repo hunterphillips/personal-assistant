@@ -4,8 +4,10 @@
 // the cmux client, the routine store (loaded before the hub, so its
 // snapshot lists them) and the scheduler that runs them, the notification
 // store (loaded before the hub too), state hub, the Goals, Feed, and feed instructions
-// readers, the settings store, the brief notices, and app, start the
-// personas, seed the settings file on first start, post any brief notice
+// readers, the settings store, the brief notices, and app, add any built-in
+// agent the registry lacks (builtins.mjs), start the
+// personas, seed the settings file on first start (and add quick chat to
+// one written before it existed), post any brief notice
 // not yet in the thread of the agent the settings name, start the
 // scheduler (which closes runs the last process left open and catches
 // up), listen on
@@ -33,6 +35,7 @@ import path from 'node:path';
 import { createApp, defaultLog } from './lib/app.mjs';
 import { createBindings } from './lib/bindings.mjs';
 import { createBriefRoutes } from './lib/brief-adapter.mjs';
+import { defaultAgentId, seedBuiltins } from './lib/builtins.mjs';
 import { createDelegation } from './lib/delegation.mjs';
 import { createFeed } from './lib/feed.mjs';
 import { createBriefInstructions } from './lib/brief-instructions.mjs';
@@ -181,6 +184,8 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   };
 
   await Promise.all([registry.start(), bindings.start()]);
+  // Before the read store loads, so a seeded agent gets now as its read time.
+  await seedBuiltins({ registry, file: config.builtinPath, root: config.repoRoot, log: logEntry });
   await reads.load((registry.current()?.agents ?? []).filter((agent) => agent.kind === 'persona').map((agent) => agent.id));
   await seedSettings({ settings, registry, log: logEntry });
   await hub.start();
@@ -208,14 +213,18 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
 
 // First start: when there is no settings file yet, write the defaults with
 // the brief going to the first pinned Claude persona the registry lists (or
-// no one), so no agent id lives in code. A present file is left alone, and
-// a failure to write is logged, never fatal: the daemon runs on defaults.
+// no one) and quick chat to the first built-in one (builtins.mjs
+// defaultAgentId), so no agent id lives in code. A present file is left
+// alone except that quick chat is added to a file from before it existed.
+// A failure to write is logged, never fatal: the daemon runs on defaults.
 async function seedSettings({ settings, registry, log }) {
   const agents = registry.current()?.agents ?? [];
   const target = agents.find((agent) => agent.kind === 'persona' && agent.provider === 'claude' && agent.pinned === true) ?? null;
+  const quickChat = { agent: defaultAgentId(agents) };
   try {
-    const wrote = await settings.seed({ brief: { agent: target?.id ?? null } });
-    if (wrote) log({ event: 'settings_seeded', agent: target?.id ?? null });
+    const wrote = await settings.seed({ brief: { agent: target?.id ?? null }, quickChat });
+    if (wrote) log({ event: 'settings_seeded', agent: target?.id ?? null, quickChat: quickChat.agent });
+    else if (await settings.addMissing({ quickChat })) log({ event: 'settings_migrated', quickChat: quickChat.agent });
   } catch (error) {
     log({ event: 'settings_seed_error', error: error?.message ?? String(error) });
   }

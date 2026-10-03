@@ -97,6 +97,17 @@
       "jobs": [
         "com.personal-assistant.dashboard"
       ]
+    },
+    {
+      "id": "myos",
+      "name": "Myos",
+      "role": "Guide",
+      "description": "I know how this dashboard and its agents work. I explain what Hunter is looking at, answer what the system is doing, and pass a message or a task to the agent that owns it.",
+      "group": "personal",
+      "kind": "persona",
+      "cwd": "/Users/hunterphillips/workspace/personal-assistant",
+      "provider": "claude",
+      "builtin": true
     }
   ]
 }

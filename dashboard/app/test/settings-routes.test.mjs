@@ -28,7 +28,7 @@ test('PUT saves a partial patch, answers the whole document, and the snapshot fo
   const response = await put(app, { model: { default: 'sonnet', effort: 'high' } });
   assert.equal(response.status, 200);
   assert.deepEqual(response.json, {
-    ok: true, settings: { version: 1, model: { default: 'sonnet', effort: 'high' }, brief: { agent: 'assistant' }, permission: { default: 'ask' } },
+    ok: true, settings: { version: 1, model: { default: 'sonnet', effort: 'high' }, brief: { agent: 'assistant' }, permission: { default: 'ask' }, quickChat: { agent: null } },
   });
   assert.deepEqual(settings.updates, [{ model: { default: 'sonnet', effort: 'high' } }]);
   const snapshot = app.hub.snapshot();
@@ -38,11 +38,11 @@ test('PUT saves a partial patch, answers the whole document, and the snapshot fo
 
   const cleared = await put(app, { model: { default: null }, brief: { agent: null } });
   assert.equal(cleared.status, 200);
-  assert.deepEqual(cleared.json.settings, { version: 1, model: { default: null, effort: 'high' }, brief: { agent: null }, permission: { default: 'ask' } });
+  assert.deepEqual(cleared.json.settings, { version: 1, model: { default: null, effort: 'high' }, brief: { agent: null }, permission: { default: 'ask' }, quickChat: { agent: null } });
   assert.equal(app.hub.snapshot().settings.brief.agent, null);
 
   const state = await request(app, 'GET', '/api/state');
-  assert.deepEqual(state.json.settings, { ok: true, error: null, model: { default: null, effort: 'high' }, brief: { agent: null }, permission: { default: 'ask' } });
+  assert.deepEqual(state.json.settings, { ok: true, error: null, model: { default: null, effort: 'high' }, brief: { agent: null }, permission: { default: 'ask' }, quickChat: { agent: null } });
   assert.deepEqual(state.json.models.map((m) => m.name), ['Fable', 'Opus', 'Sonnet', 'Haiku']);
 });
 
@@ -142,5 +142,18 @@ test('without a settings store the route is 404', async (t) => {
   const app = await startApp(t, { registry: fakeRegistry(AGENTS), settings: null });
   const response = await put(app, { model: { default: 'opus' } });
   assert.equal(response.status, 404);
-  assert.deepEqual(app.hub.snapshot().settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' } });
+  assert.deepEqual(app.hub.snapshot().settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' }, quickChat: { agent: null } });
+});
+
+test('PUT saves quick chat for a Claude persona, refuses another kind with 404 and a bad id with 400', async (t) => {
+  const { app, settings } = await setup(t);
+  for (const id of ['nobody', 'scribe', 'focus']) {
+    assert.deepEqual((await put(app, { quickChat: { agent: id } })).json, { error: 'no_such_agent' }, id);
+  }
+  assert.deepEqual((await put(app, { quickChat: { agent: 'Bad Id' } })).json, { error: 'invalid_quick_chat_agent' });
+  assert.deepEqual(settings.updates, []);
+  const saved = await put(app, { quickChat: { agent: 'cfo' } });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.json.settings.quickChat, { agent: 'cfo' });
+  assert.deepEqual(app.hub.snapshot().settings.quickChat, { agent: 'cfo' });
 });

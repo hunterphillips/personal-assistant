@@ -111,7 +111,7 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
     },
   ]);
   assert.deepEqual(snapshot.jobs, { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] });
-  assert.deepEqual(snapshot.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' } });
+  assert.deepEqual(snapshot.settings, { ok: true, error: null, model: { default: null, effort: null }, brief: { agent: null }, permission: { default: 'ask' }, quickChat: { agent: null } });
   assert.deepEqual(snapshot.models.map((m) => m.id), ['fable', 'opus', 'sonnet', 'haiku']);
   assert.ok(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.agents[0]) && Object.isFrozen(snapshot.jobs));
   assert.ok(Object.isFrozen(snapshot.settings) && Object.isFrozen(snapshot.models));
@@ -156,6 +156,7 @@ test('a Claude persona\'s model resolves agent over system, each field on its ow
   assert.equal('accepts' in view('tool'), false);
   assert.deepEqual(hub.snapshot().settings, {
     ok: true, error: null, model: { default: 'sonnet', effort: 'low' }, brief: { agent: 'cfo' }, permission: { default: 'ask' },
+    quickChat: { agent: null },
   });
   assert.deepEqual(hub.modelFor('cfo'), { id: 'sonnet', effort: 'low' });
   assert.deepEqual(hub.modelFor('ops'), { id: 'opus', effort: 'low' });
@@ -189,6 +190,7 @@ test('a settings change commits settings and the agent views that moved, and not
   settings.set({}, { ok: false, error: 'settings_invalid_json' });
   assert.deepEqual(hub.snapshot().settings, {
     ok: false, error: 'settings_invalid_json', model: { default: null, effort: 'high' }, brief: { agent: 'cfo' }, permission: { default: 'ask' },
+    quickChat: { agent: null },
   });
 
   hub.close();
@@ -196,7 +198,7 @@ test('a settings change commits settings and the agent views that moved, and not
 });
 
 test('a Claude persona\'s permission resolves agent over system, permissionFor carries it, and a settings change re-resolves', () => {
-  const settings = fakeSettingsStore({ permission: { default: 'ask' } });
+  const settings = fakeSettingsStore({ permission: { default: 'ask' }, quickChat: { agent: null } });
   const registry = fakeRegistry(registryState([
     agent('cfo'),
     agent('ops', { permission: 'full' }),

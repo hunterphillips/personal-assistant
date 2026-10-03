@@ -691,6 +691,20 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   background: var(--side);
   color: var(--muted);
 }
+/* A destructive action, such as confirming Delete: red in both themes,
+   with --on-accent for text, which flips with the theme as the red does. */
+.button-danger {
+  border-color: var(--red);
+  background: var(--red);
+  color: var(--on-accent);
+}
+.button-danger:hover { filter: brightness(0.92); }
+.button-danger:disabled {
+  border-color: var(--line);
+  background: var(--side);
+  color: var(--muted);
+  filter: none;
+}
 
 .link-button {
   min-height: 44px;
@@ -2305,6 +2319,38 @@ textarea.form-input {
   border-radius: 10px;
   background: var(--amber-bg);
   color: var(--amber);
+}
+/* Delete at the foot of an agent's settings, with its inline confirm and
+   a refusal sentence; the confirm shares the routine confirm's look. */
+.details-delete {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.delete-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.delete-confirm-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.delete-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.delete-refusal {
+  margin: 0;
+  color: var(--red);
+  overflow-wrap: anywhere;
 }
 .routine-runs { margin-top: 20px; }
 .routine-runs .form-label { margin: 0 0 6px; }

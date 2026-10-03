@@ -51,6 +51,7 @@ import path from 'node:path';
 
 import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
+import { defaultAgentId } from '../../lib/builtins.mjs';
 import { createDelegation } from '../../lib/delegation.mjs';
 import { createFeed } from '../../lib/feed.mjs';
 import { createBriefInstructions } from '../../lib/brief-instructions.mjs';
@@ -117,7 +118,8 @@ export { focusSourceAvailable };
 //              store loads it, so PUT /api/settings writes there; without it
 //              the file is seeded as server.mjs does at first start (the
 //              defaults, the brief going to the first pinned Claude persona
-//              among the agents, or no one). The string 'broken' writes a file the
+//              among the agents, or no one, and quick chat to the first
+//              built-in one, else the pinned, else the first). The string 'broken' writes a file the
 //              store cannot read. `settings` on the result is the store and
 //              `settingsPath` the file.
 //   routines   [{ id, name, agent, instruction, cron, active?, runs? }]
@@ -213,7 +215,7 @@ export async function startHub({
     if (!settingsSeed) {
       const listed = registryState?.agents ?? agents;
       const target = listed.find((agent) => agent.kind === 'persona' && agent.provider === 'claude' && agent.pinned === true) ?? null;
-      await settings.seed({ brief: { agent: target?.id ?? null } });
+      await settings.seed({ brief: { agent: target?.id ?? null }, quickChat: { agent: defaultAgentId(listed) } });
     }
     const focusRoutes = createFocusProxy(config);
     const briefRoutes = createBriefRoutes(config);

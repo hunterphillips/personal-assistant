@@ -709,3 +709,31 @@ test('a missing file is created by a mutation that yields a valid registry, and 
   assert.equal((await stat(file)).mode & 0o777, 0o644);
   assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { version: 1, groups: [], agents: [baseAgent(dir)] });
 });
+
+test('builtin is kept on a persona, dropped when false, and rejected on other kinds or non-booleans', async (t) => {
+  const dir = await tempDir(t);
+  const file = await write(dir, {
+    version: 1,
+    agents: [baseAgent(dir, { id: 'guide', pinned: true, builtin: true }), baseAgent(dir, { id: 'cfo', builtin: false })],
+  });
+  const registry = createRegistry({ path: file, pollMs: 10_000 });
+  await registry.start();
+  t.after(() => registry.stop());
+  const state = registry.current();
+  assert.equal(state.ok, true, state.error);
+  assert.equal(state.agents[0].builtin, true);
+  assert.equal('builtin' in state.agents[1], false);
+
+  for (const [name, entry, pattern] of [
+    ['project', baseAgent(dir, { kind: 'project', builtin: true }), /builtin is only for a persona/],
+    ['string', baseAgent(dir, { builtin: 'yes' }), /builtin must be true or false/],
+  ]) {
+    const bad = path.join(dir, `builtin-${name}.json`);
+    await writeFile(bad, JSON.stringify({ version: 1, agents: [entry] }));
+    const badRegistry = createRegistry({ path: bad, pollMs: 10_000 });
+    await badRegistry.start();
+    t.after(() => badRegistry.stop());
+    assert.equal(badRegistry.current().ok, false, name);
+    assert.match(badRegistry.current().error, pattern);
+  }
+});
