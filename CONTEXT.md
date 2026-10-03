@@ -49,13 +49,14 @@ Shown in Health, never edited from the interface.
 _Avoid_: routine, scan, daemon
 
 **Brief**:
-The Daily Brief: the morning memo the run writes at 06:05. Read in Reading;
-announced as one line in the Assistant's thread.
+The Daily Brief: the morning memo the run writes at 06:05. Read in the
+overlay that opens from the header on any view; announced as one line in
+the Assistant's thread.
 _Avoid_: digest, newsletter, report
 
 **Feed**:
-What Watch and later producers found, as posts with Discuss. Read in
-Reading.
+What Watch and later producers found, as posts with Discuss. Its own view,
+named Feed in the rail; it was Reading while the brief was a tab there.
 _Avoid_: news, digest, stream
 
 **Ideas**:

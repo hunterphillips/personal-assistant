@@ -2,12 +2,13 @@
 
 The assistant daemon and the tailnet-only hub it serves. A local Node server
 on `127.0.0.1:4243`; Tailscale serves it to the tailnet over HTTPS. The page
-is a shell with a rail of five views. Home is the Agents view at `/`;
-Reading is the Daily Brief; Focus and Goals are their own views; Health
-lists the launchd jobs. Personas run on the Claude Agent SDK, Codex threads are observed
+is a shell with a rail of five views. Home is the Agents view at `/`; Feed
+lists what the producers found; Focus and Goals are their own views; Health
+lists the launchd jobs. The Daily Brief opens from the header as an overlay
+over any view. Personas run on the Claude Agent SDK, Codex threads are observed
 on a shared app-server, and cmux terminals are listed with their state.
 Focus runs in an iframe through a proxy to its own server. Briefs are read
-from `daily-brief/briefs/`, and feedback is saved beside them.
+from `daily-brief/briefs/` as data, and feedback is saved beside them.
 
 The plan is
 `thoughts/shared/plans/2026-09-25-dashboard-assistant-daemon-implementation.md`
@@ -23,17 +24,19 @@ Operations are in [docs/operations.md](docs/operations.md).
 
 | Route | Purpose |
 | --- | --- |
-| `GET /`, `/agents`, `/focus`, `/reading`, `/brief`, `/feed`, `/goals`, `/health` | The shell. `/` and `/agents` show the Agents view; `/reading` and `/feed` show Reading on its Feed tab and `/brief` on its Brief tab; `/health` shows Health. |
+| `GET /`, `/agents`, `/focus`, `/brief`, `/feed`, `/goals`, `/health` | The shell. `/` and `/agents` show the Agents view; `/feed` shows the Feed, and `/brief` the Feed with the brief's overlay open; `/health` shows Health. |
 | `GET /routines`, `/routines/` | 302 to `/health`, keeping the query. Kept for one release while the jobs move from Agents to Health. |
+| `GET /reading`, `/reading/` | 302 to `/feed`, keeping the query. Reading became the Feed when the brief moved to the overlay. |
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
 | `GET /api/state` | Checks Focus and the brief, then returns the state hub's snapshot (below). |
 | `GET /api/events` | Server-Sent Events: the snapshot, then each change (below). |
 | `POST /api/jobs/refresh` | Re-reads the jobs and answers `{"ok": true, "revision": N}`. |
 | `GET /api/dashboard/status` | Focus and brief status (below). The shell no longer reads it; kept for one release. |
-| `GET /assets/<name>` | Shell scripts, styles, and the brief bridge. |
+| `GET /assets/<name>` | Shell scripts and styles. |
 | `GET /embedded/focus`, `/api/focus`, `/api/status`; `PUT /api/focus`; `POST /api/pause`, `/api/resume`, `/api/refresh` | Forwarded to Focus (below). |
-| `GET /api/brief/latest` | Latest brief metadata. |
-| `GET /embedded/brief/<date>?revision=<revision>` | One brief viewer. |
+| `GET /api/brief/latest` | The newest brief as data (below). |
+| `GET /api/brief/<date>` | One date's brief as data. |
+| `GET /api/brief/<date>/feedback` | The feedback saved for that date, or an empty draft. |
 | `POST /api/brief/feedback` | Saves feedback for one brief. |
 | `GET /api/brief/instructions` | The brief's rules file, read as prose (below). |
 | `POST /api/brief/instructions/propose` | Sends a change to the rules to the agent Settings names as receiving the brief; 202 `{"ok": true, "agentId": "<id>"}` once the turn has started (below). |
@@ -67,7 +70,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/notifications/<id>/acknowledge` | Bodyless. Acknowledges one; `{"ok": true, "acknowledged": 1}`, or `0` when it already was; 404 `no_such_notification` when the store no longer keeps it. |
 | `POST /api/notifications/acknowledge` | Bodyless. Acknowledges every open one; `{"ok": true, "acknowledged": <n>}`. |
 
-`/focus/`, `/reading/`, `/brief/`, `/feed/`, `/agents/`, `/goals/`, and `/health/` redirect to the
+`/focus/`, `/brief/`, `/feed/`, `/agents/`, `/goals/`, and `/health/` redirect to the
 paths without the slash. A known path
 with the wrong method is 405, and anything else is 404. Errors are JSON bodies of the form
 `{"error": "<code>"}`. The comment at the top of each route module describes
@@ -102,9 +105,10 @@ what `lib/app.mjs` expects from it.
 
 `focus.available` is false when Focus does not answer its health check in
 time. `brief.state` is `ready`, `empty` (the briefs directory holds no brief),
-`unavailable` (the directory cannot be read, or the check timed out), or a
-state naming why the latest file cannot be served, such as `unreadable`,
-`unsupported`, `incomplete`, or `oversized`. `date` is present when a latest
+`unavailable` (the directory cannot be read, or the check timed out),
+`missing` (the newest date has a viewer page but no `brief-<date>.json`), or
+a state naming why the latest file cannot be served, such as `unreadable`,
+`unsupported`, or `oversized`. `date` is present when a latest
 file was found, and `revision` when it could be hashed. The two checks run in
 parallel under a time limit, so a slow Focus cannot hold the answer back for
 long. The body never contains brief text.
@@ -247,7 +251,7 @@ a figure: one JSON line per notification, `{ id, agent, text, link, at,
 acknowledgedAt }`, oldest first. `link` is null or what the header opens:
 `agent:<id>` (the agent's thread), `feed:<run>/<index>` (the Feed
 scrolled to the item at that position in the run file `<run>.json`, from
-0), `brief:<date>` (the Brief tab, for now), or `job:<label>` (Health with
+0), `brief:<date>` (that date's brief in the overlay), or `job:<label>` (Health with
 that job selected). Raising appends a line; acknowledging rewrites the
 file atomically. Past `LIMITS.notificationsMax` (200) the oldest
 acknowledged items roll off first, then the oldest open ones. A line the
@@ -264,35 +268,65 @@ and a failed job never become notifications; they are the rail's marks.
 
 ### Daily Brief
 
-The latest brief is the `viewer-<YYYY-MM-DD>.html` file with the newest date in
-the briefs directory. Its revision is the SHA-256 of the file.
+The morning run writes `brief-<YYYY-MM-DD>.json` beside the viewer page it
+keeps for the record (`daily-brief/briefs/build.py`):
 
-`GET /api/brief/latest` returns the same `state`, `date`, and `revision` as the
-status route, plus `url` (`/embedded/brief/<date>?revision=<revision>`) when the
-state is `ready`. A briefs directory that cannot be read is a 503
-`brief_directory_unavailable`.
+```json
+{ "date": "2026-09-21", "title": "text", "words": 420,
+  "opening": { "id": "opening", "text": "Markdown" },
+  "sections": [{ "id": "money", "label": "Money",
+                 "items": [{ "id": "money-1", "text": "Markdown" }] }] }
+```
 
-`GET /embedded/brief/<date>?revision=<revision>` serves that viewer, adapted to
-save through the dashboard, with its own CSP. A date that is not a real
-calendar date is 404, and a revision that is not 64 lowercase hex characters
-is 400. If the file
-on disk no longer has that revision, the answer is 409 `revision_conflict`
-rather than a different brief; the shell then fetches the state again and
-offers the newer one.
+`opening` is null when the memo has none. The latest brief is the newest
+date among `brief-<date>.json` and `viewer-<date>.html`; a newest date with
+only a viewer is `missing`, never an older brief. The reader
+(`lib/briefs.mjs`) refuses a file over 2 MiB, a symbolic link, and any file
+that is not exactly this shape: the date must match the name, ids are
+unique, at most 20 sections of 40 items and 200 items in all, each text at
+most 8,000 characters. A refused file is shown as unavailable, never in
+part. Its revision is the SHA-256 of the file's bytes.
+
+`GET /api/brief/latest` answers `{ "state": "ready", "date", "revision",
+"title", "words", "opening", "sections" }`, or `{ "state", "date", "error"
+}` when the newest date cannot be shown, or `{ "state": "empty" }`. A briefs
+directory that cannot be read is a 503 `brief_directory_unavailable`. `GET
+/api/brief/<date>` answers the same for one date; a date with no data is
+`{ "state": "missing", "date", "error": "brief_not_found" }`, and a date
+that is not a real calendar date is 404.
 
 `POST /api/brief/feedback` takes JSON with exactly these keys:
 
 ```json
 { "date": "2026-09-21", "revision": "<64 hex>", "overall": "text",
-  "items": [{ "id": "item-id", "mark": "approved", "note": "text" }] }
+  "items": [{ "id": "money-1", "mark": "approved", "note": "text" }] }
 ```
 
 `mark` is `approved`, `dismissed`, or `null`. `items` must name each item in
-that brief once. `overall` is capped at 8,000 characters, each note at 4,000,
-and the list at 200 items; beyond those it is 413. A revision that no longer
-matches the file is 409. On success the server writes
-`feedback-<date>.md` beside the viewer, replacing any earlier one for that
-date, with one write per date at a time.
+that brief once, the opening included. `overall` is capped at 8,000
+characters, each note at 4,000, and the list at 200 items; beyond those it
+is 413. A revision that no longer matches the file is 409
+`revision_conflict`. On success the server writes two files beside the
+brief, both 0600, replacing any earlier ones for that date, with one save
+per date at a time: `feedback-<date>.md`, which the curator reads the next
+morning (each item under its section label as `- <id>: APPROVED`, the
+paragraph's text quoted under it, and its note), and `feedback-<date>.json`,
+the request with `savedAt`, which `GET /api/brief/<date>/feedback` returns.
+With nothing saved that route answers `{ "date", "revision": null,
+"overall": "", "items": [], "savedAt": null }`.
+
+The overlay (`public/brief-overlay.js`) opens from the header's Brief entry
+on any view, from Open brief on the morning line in a thread, and from a
+notification's `brief:` link. It shows the date and title, the opening,
+and each section with its items in the dashboard's Markdown and a serif
+face, with Approve, Dismiss, and Note under each item and an overall note
+and Save at the end. Save sends every item; the saved time, unsaved
+changes, and a refused save each read as one sentence under it. The
+overlay reads back the saved feedback when it opens, keeps unsaved marks
+while the page is open, offers "Load newer brief" when the snapshot names
+a newer one, and closes with Close or Escape. A brief it cannot show
+reads "The brief for <date> could not be opened." or "No brief has been
+generated yet." The viewer pages stay on disk; nothing serves them.
 
 `GET /api/brief/instructions` reads the rules the curator follows,
 `daily-brief/curator.md` (`DASHBOARD_BRIEF_INSTRUCTIONS`), and answers the
@@ -310,8 +344,8 @@ id is not a persona in the registry), 409 `persona_unavailable`, then the
 persona send refusals (409 `busy` and the rest). The dashboard never writes
 the file; the agent does.
 
-On the Brief tab, the Brief instructions button at the end of the tab row
-opens these rules above the brief with a box for the change; the sentence
+Instructions in the overlay's bar opens these rules above the brief with a
+box for the change; the sentence
 under the heading names the agent the change goes to, or says that none
 receives the brief.
 
@@ -444,20 +478,20 @@ here. The snapshot's `jobs` key, `public/jobs.js`, and
 `public/index.html`, `public/shell.js`, `public/agents.js`,
 `public/markdown.js`, `public/jobs.js`, `public/goals.js`,
 `public/feed.js`, `public/instructions.js` (the instructions panel the
-Feed and Brief tabs share), `public/notifications.js` (the header's count
-and list), and `public/styles.css` make up the
-page served at `/`, `/agents`, `/reading`, `/brief`, `/focus`, `/goals`,
-and `/health`. The Agents view is the page at `/`; `/agents` shows the same
-view. `/reading` and `/brief` show the Reading view, `/focus` Focus,
+Feed and the brief share), `public/notifications.js` (the header's count
+and list), `public/brief-overlay.js` (the brief), and `public/styles.css`
+make up the page served at `/`, `/agents`, `/brief`, `/feed`, `/focus`,
+`/goals`, and `/health`. The Agents view is the page at `/`; `/agents`
+shows the same view. `/feed` shows the Feed, `/brief` the Feed with the
+brief's overlay open (the address becomes `/feed`), `/focus` Focus,
 `/goals` Goals, and `/health` Health. The server redirects the old
-`/routines` to `/health`. The navigation is a rail of five icon links,
-Home, Reading, Focus, Goals, and Health; a path the shell does not know
+`/routines` to `/health` and `/reading` to `/feed`. The navigation is a
+rail of five icon links, Home, Feed, Focus, Goals, and Health; a path the shell does not know
 lands on Agents. The script switches views
 with the History API and handles
-Back and Forward, and a reload or bookmark opens the same view. Each frame
-is created the first time its view opens and stays in the page afterwards,
-hidden while another view is shown, so Focus keeps its state and the brief
-keeps its unsaved marks. The page has no inline script or style, as the
+Back and Forward, and a reload or bookmark opens the same view. The Focus
+frame is created the first time its view opens and stays in the page
+afterwards, hidden while another view is shown, so Focus keeps its state. The page has no inline script or style, as the
 shell CSP requires.
 
 The shell keeps one copy of the state and gets it from the event stream.
@@ -477,25 +511,16 @@ up. When a second attempt in a row has failed, the page shows "The
 dashboard is not responding." with Retry, which reconnects at once. Every
 view change also fetches `/api/state`, with a 5-second timeout.
 
-A frame is created only from state that has just arrived: a snapshot, a
-delta that changes `focus` or `brief`, or a finished `/api/state` fetch,
-never the copy kept since. What the shell does with `focus` and `brief`:
+The Focus frame is created only from state that has just arrived: a
+snapshot, a delta that changes `focus`, or a finished `/api/state` fetch,
+never the copy kept since. When Focus does not answer, the Focus view says
+"Focus is not responding." with Retry. A frame already open stays;
+otherwise none is created until Focus answers.
 
-- Focus not answering: the Focus view says "Focus is not responding." with
-  Retry. A frame already open stays; otherwise none is created until Focus
-  answers.
-- A different brief date or revision than the open frame: "A newer brief is
-  available." with "Load newer brief", which fetches `/api/state` and loads
-  what it names. The open frame stays until that is chosen.
-- A brief state other than `ready`: "No brief has been generated yet." for
-  `empty`, "The brief for <date> could not be opened." when the state names a
-  date, and "The latest brief file could not be read." otherwise. Focus is
-  unaffected.
-
-A frame stays hidden until its page loads. If the page comes back as a JSON
-error, such as a 409 for a brief replaced under the same date or a 502 from
-Focus, the frame stays hidden, the view shows its notice, and the state is
-fetched again at once. Retry reloads that frame.
+The frame stays hidden until its page loads. If the page comes back as a
+JSON error, such as a 502 from Focus, the frame stays hidden, the view
+shows its notice, and the state is fetched again at once. Retry reloads
+it.
 
 Wide screens get a navigation column; below 720px it becomes a row across the
 top. The page is exactly one screen tall and each frame fills the rest, so the
@@ -1695,7 +1720,7 @@ Requires Node 24 (`.nvmrc`).
   events on). Emulation does not test real touch hardware. Each test starts
   its own isolated Focus copy, the app over HTTP, and the same app over HTTPS
   with a throwaway self-signed certificate, all on ephemeral ports, with
-  invented brief viewers in a temporary directory, an in-memory registry
+  the invented brief JSON in a temporary directory, an in-memory registry
   and jobs, and personas on a fake Claude adapter over a thread store
   in that directory (`test/support/browser-server.mjs`). Shared fixtures are in
   `test/support/browser-test.mjs`. Only the HTTPS test's browser context
@@ -1728,7 +1753,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_BRIEFS_DIR` | `../../daily-brief/briefs` | Resolved from this directory, not the working directory. |
 | `DASHBOARD_FEED_DIR` | `../../feed/items` | The feed store the producers write. Resolved from this directory; does not need to exist at startup. |
 | `DASHBOARD_FEED_INSTRUCTIONS` | `../../daily-brief/watch/relevance.md` | The criteria file the watch job reads, shown on the Feed tab. Resolved from this directory; does not need to exist at startup. |
-| `DASHBOARD_BRIEF_INSTRUCTIONS` | `../../daily-brief/curator.md` | The rules the brief's curator follows, shown on the Brief tab. Resolved from this directory; does not need to exist at startup. |
+| `DASHBOARD_BRIEF_INSTRUCTIONS` | `../../daily-brief/curator.md` | The rules the brief's curator follows, shown from Instructions in the brief's overlay. Resolved from this directory; does not need to exist at startup. |
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
 | `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
