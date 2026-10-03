@@ -49,5 +49,6 @@ the builder refuses more than 550 words. Empty sections are omitted.
 
 ## After
 
-Feedback arrives per section in `briefs/feedback-<date>.md`. A mark
-changes one of the rules above, a domain's contract, or nothing.
+Feedback arrives per paragraph in `briefs/feedback-<date>.md`, keyed by the
+paragraph's id, with the paragraph's text quoted under the mark. A mark changes
+one of the rules above, a domain's contract, or nothing.

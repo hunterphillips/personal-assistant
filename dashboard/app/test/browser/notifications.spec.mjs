@@ -122,7 +122,9 @@ test.describe('feed and brief links', () => {
     },
   });
 
-  test('a feed link opens the Feed on that item, a brief link opens the Brief', async ({ page, hub }) => {
+  test('a feed link opens the Feed on that item, a brief link opens that brief over the view', async ({ page, hub }) => {
+    await hub.writeBrief('2026-10-03');
+    await hub.writeBrief('2026-10-04', { title: 'Invented later brief' });
     await page.goto(hub.origin + '/health');
     let panel = await openList(page);
     await expect(panel.locator('.notification-link')).toHaveText(['Brief for October 3', 'The last typewriter shop']);
@@ -135,8 +137,10 @@ test.describe('feed and brief links', () => {
 
     panel = await openList(page);
     await panel.getByRole('button', { name: 'Brief for October 3' }).click();
-    await expect(page).toHaveURL(hub.origin + '/brief');
-    await expect(page.locator('#reading-brief')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+    await expect(page.locator('.brief-date')).toHaveText(/^Saturday, October 3(, 2026)?$/);
+    await expect(page.locator('.brief-title')).toHaveText('Invented brief for tests, not a real day');
+    await expect(page).toHaveURL(hub.origin + '/feed');
   });
 });
 

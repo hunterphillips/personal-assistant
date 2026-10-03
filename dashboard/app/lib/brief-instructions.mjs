@@ -1,6 +1,6 @@
 // Brief instructions: the rules the Daily Brief's curator follows
 // (config.briefInstructionsPath, by default daily-brief/curator.md), read on
-// demand for the Brief tab as prose through instructions.mjs, and the two
+// demand for the brief's overlay as prose through instructions.mjs, and the two
 // routes over them (instructions-routes.mjs):
 //   GET  /api/brief/instructions          200 read()
 //   POST /api/brief/instructions/propose  { text } -> 202 { ok: true, agentId }

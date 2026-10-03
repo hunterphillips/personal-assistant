@@ -955,6 +955,9 @@
         case 'interrupt':
           if (agent) act(agent, 'interrupt');
           break;
+        case 'open-brief':
+          if (shell.openBrief) shell.openBrief(node.getAttribute('data-brief-date'), node);
+          break;
         case 'new-thread':
           confirming = true;
           render();

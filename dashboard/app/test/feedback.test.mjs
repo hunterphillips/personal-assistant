@@ -7,7 +7,9 @@ import {
   FeedbackError,
   createFeedbackWriter,
   createKeyedQueue,
+  parseSavedFeedback,
   renderFeedbackMarkdown,
+  savedFeedbackRecord,
   validateFeedbackForArtifact,
   validateFeedbackRequest,
 } from '../lib/feedback.mjs';
@@ -18,8 +20,8 @@ const artifact = {
   date: '2026-09-15',
   revision: REVISION,
   items: [
-    { id: 'alpha', section: 'Needs you', text: 'Invented item text.', shape: 'text' },
-    { id: 'beta', section: 'Money', text: 'Invented legacy line.', shape: 'lede' },
+    { id: 'alpha', section: 'Needs you', text: 'Invented item text.' },
+    { id: 'beta', section: 'Money', text: 'Invented second item.' },
   ],
 };
 
@@ -43,7 +45,7 @@ test('feedback validation accepts the exact contract', () => {
 test('feedback validation rejects unknown fields, bad marks, duplicates, and unknown or missing IDs', () => {
   const invalid = [
     null,
-    { ...feedback(), filename: 'viewer-2026-09-15.html' },
+    { ...feedback(), filename: 'brief-2026-09-15.json' },
     { ...feedback(), date: '../2026-09-15' },
     { ...feedback(), revision: 'A'.repeat(64) },
     { ...feedback(), items: [{ id: 'alpha', mark: 'maybe', note: '' }, feedback().items[1]] },
@@ -71,7 +73,7 @@ test('feedback size limits reject rather than truncate', () => {
   }
 });
 
-test('Markdown uses existing vocabulary, legacy lede text, and indented multiline notes', () => {
+test('Markdown keys each item by id under its section label, quotes its text, and indents multiline notes', () => {
   const value = validateFeedbackForArtifact(validateFeedbackRequest(feedback({
     overall: '  Useful overall thought.  ',
     items: [
@@ -80,7 +82,7 @@ test('Markdown uses existing vocabulary, legacy lede text, and indented multilin
     ],
   })), artifact);
   assert.equal(renderFeedbackMarkdown(artifact, value), [
-    '# Brief feedback — 2026-09-15',
+    '# Brief feedback for 2026-09-15',
     '',
     '## Overall',
     '',
@@ -88,23 +90,26 @@ test('Markdown uses existing vocabulary, legacy lede text, and indented multilin
     '',
     '## Needs you',
     '',
-    '- APPROVED — Invented item text.',
+    '- alpha: APPROVED',
+    '  > Invented item text.',
     '  - note: First line',
     '    second line',
     '    ',
     '    last line',
+    '',
     '## Money',
     '',
-    '- DISMISSED — Invented legacy line.',
+    '- beta: DISMISSED',
+    '  > Invented second item.',
     '',
   ].join('\n'));
 });
 
-test('whitespace-only notes emit no note line and item text stays on one line', () => {
+test('whitespace-only notes emit no note line and multiline text is quoted line by line', () => {
   const multiline = {
     ...artifact,
     items: [
-      { id: 'alpha', section: 'Needs you', text: 'Invented first\nsecond\r\nthird\u2028fourth', shape: 'text' },
+      { id: 'alpha', section: 'Needs you', text: '- Invented first\r\n\n- second', },
       artifact.items[1],
     ],
   };
@@ -114,17 +119,32 @@ test('whitespace-only notes emit no note line and item text stays on one line', 
       { id: 'beta', mark: null, note: '' },
     ],
   }));
-  assert.match(markdown, /^- APPROVED — Invented first second third fourth$/m);
+  assert.match(markdown, /^- alpha: APPROVED\n  > - Invented first\n  >\n  > - second\n/m);
   assert.doesNotMatch(markdown, /note:/);
 });
 
-test('empty feedback renders every artifact item with no mark and a trailing newline', () => {
+test('empty feedback renders every item with no mark and a trailing newline', () => {
   const empty = feedback({
     items: artifact.items.map((item) => ({ id: item.id, mark: null, note: '' })),
   });
   const markdown = renderFeedbackMarkdown(artifact, empty);
-  assert.match(markdown, /^# Brief feedback — 2026-09-15\n\n## Needs you\n\n- no mark/);
-  assert.match(markdown, /- no mark — Invented legacy line\.\n$/);
+  assert.match(markdown, /^# Brief feedback for 2026-09-15\n\n## Needs you\n\n- alpha: no mark\n/);
+  assert.match(markdown, /- beta: no mark\n  > Invented second item\.\n$/);
+});
+
+test('the writer saves the read-back record beside the Markdown and reads it again', async (t) => {
+  const dir = await tempDir(t);
+  const writer = createFeedbackWriter(dir);
+  assert.equal(await writer.read('2026-09-15'), null);
+  const record = savedFeedbackRecord(validateFeedbackRequest(feedback()), '2026-09-15T12:00:00.000Z');
+  await writer.save('2026-09-15', '# invented\n', record);
+  assert.deepEqual(await writer.read('2026-09-15'), record);
+  assert.equal(await readFile(path.join(dir, 'feedback-2026-09-15.md'), 'utf8'), '# invented\n');
+  assert.equal(parseSavedFeedback(JSON.stringify(record), '2026-09-14'), null);
+  assert.equal(parseSavedFeedback(JSON.stringify({ ...record, items: 'x' }), '2026-09-15'), null);
+  await symlink(path.join(dir, 'feedback-2026-09-15.json'), path.join(dir, 'feedback-2026-09-16.json'));
+  assert.equal(await writer.read('2026-09-16'), null);
+  await assert.rejects(writer.read('../2026-09-15'), FeedbackError);
 });
 
 test('keyed queue runs same-date saves in call order and the later save wins whole', async (t) => {

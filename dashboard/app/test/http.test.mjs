@@ -36,9 +36,13 @@ function recordingBrief() {
       calls.push({ route: 'latest' });
       res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"state":"empty"}');
     },
-    async handleEmbedded(_req, res, params) {
-      calls.push({ route: 'embedded', params });
-      res.writeHead(200, { 'Content-Type': 'text/html' }).end('<p>invented</p>');
+    async handleBrief(_req, res, params) {
+      calls.push({ route: 'brief', params });
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"state":"missing"}');
+    },
+    async handleFeedbackRead(_req, res, params) {
+      calls.push({ route: 'feedback-read', params });
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"savedAt":null}');
     },
     async handleFeedback(_req, res, body) {
       calls.push({ route: 'feedback', body });
@@ -171,7 +175,7 @@ function pipingFocus(upstreamPort) {
 test('shell routes serve the same HTML with the shell CSP', async (t) => {
   const app = await startApp(t);
   const bodies = [];
-  for (const path of ['/', '/focus', '/reading', '/brief', '/?view=x']) {
+  for (const path of ['/', '/focus', '/feed', '/brief', '/?view=x']) {
     const response = await request(app, 'GET', path);
     assert.equal(response.status, 200, path);
     assert.match(response.headers['content-type'], /^text\/html/);
@@ -195,6 +199,15 @@ test('trailing slashes on shell routes redirect to canonical paths', async (t) =
   const health = await request(app, 'GET', '/health/?a=1');
   assert.equal(health.status, 308);
   assert.equal(health.headers.location, '/health?a=1');
+});
+
+test('/reading moves to /feed, where the Feed now lives', async (t) => {
+  const app = await startApp(t);
+  for (const [path, location] of [['/reading', '/feed'], ['/reading/', '/feed'], ['/reading?a=1', '/feed?a=1']]) {
+    const response = await request(app, 'GET', path);
+    assert.equal(response.status, 302, path);
+    assert.equal(response.headers.location, location, path);
+  }
 });
 
 test('/health serves the shell, and /routines moves to it for one release', async (t) => {
@@ -235,7 +248,7 @@ test('missing briefs and unavailable Focus do not affect health or shell', async
   const app = await startApp(t, {
     env: { DASHBOARD_BRIEFS_DIR: path.join(await tempDir(t), 'missing') },
   });
-  for (const path of ['/', '/focus', '/reading', '/brief', '/healthz']) {
+  for (const path of ['/', '/focus', '/feed', '/brief', '/healthz']) {
     assert.equal((await request(app, 'GET', path)).status, 200, path);
   }
   const status = await request(app, 'GET', '/api/dashboard/status');
@@ -256,7 +269,8 @@ test('missing briefs and unavailable Focus do not affect health or shell', async
   const latest = await request(app, 'GET', '/api/brief/latest');
   assertJsonError(latest, 503);
   assert.deepEqual(latest.json, { error: 'brief_directory_unavailable' });
-  assertJsonError(await request(app, 'GET', `/embedded/brief/2026-01-02?revision=${REVISION}`), 404);
+  assert.deepEqual((await request(app, 'GET', '/api/brief/2026-01-02')).json,
+    { state: 'missing', date: '2026-01-02', error: 'brief_not_found' });
 });
 
 test('a readable briefs directory with no candidates reports empty', async (t) => {
@@ -314,7 +328,7 @@ test('status aborts the signal given to a hanging dependency', async (t) => {
 test('unknown routes and assets return 404 JSON', async (t) => {
   const app = await startApp(t);
   for (const path of ['/nope', '/save', '/index.html', '/assets/', '/assets/server.mjs', '/assets/index.html',
-    '/assets/nope.js', '/embedded/brief/2026-02-30', '/embedded/brief/latest', '/api', '/public/index.html']) {
+    '/assets/nope.js', '/embedded/brief/2026-01-02', '/api/brief/2026-02-30', '/api/brief/2026-01-02/other', '/api/brief/latest/feedback', '/api', '/public/index.html']) {
     assertJsonError(await request(app, 'GET', path), 404);
   }
 });
@@ -364,7 +378,8 @@ test('unsupported methods return 405 with Allow', async (t) => {
     ['PUT', '/api/dashboard/status'], ['HEAD', '/api/dashboard/status'], ['PUT', '/api/status'], ['HEAD', '/api/status'],
     ['GET', '/api/pause'], ['PUT', '/api/resume'], ['DELETE', '/api/refresh'],
     ['POST', '/api/focus'], ['DELETE', '/api/focus'], ['GET', '/api/brief/feedback'], ['PUT', '/api/brief/feedback'],
-    ['POST', '/embedded/focus'], ['POST', '/api/brief/latest'], ['PATCH', '/assets/brief-bridge.js'],
+    ['POST', '/embedded/focus'], ['POST', '/api/brief/latest'], ['PATCH', '/assets/brief-overlay.js'],
+    ['POST', '/api/brief/2026-01-02'], ['PUT', '/api/brief/2026-01-02/feedback'],
   ];
   for (const [method, path] of cases) {
     const response = await request(app, method, path, {
@@ -621,16 +636,19 @@ test('Focus GET reaches the proxy without a body stream', async (t) => {
   assert.equal((await request(app, 'GET', '/embedded/focus')).status, 200);
 });
 
-test('embedded brief validates date and revision before the adapter', async (t) => {
+test('brief date routes validate the date before the adapter', async (t) => {
   const brief = recordingBrief();
   const app = await startApp(t, { brief });
-  assert.equal((await request(app, 'GET', `/embedded/brief/2024-02-29?revision=${REVISION}`)).status, 200);
-  assert.deepEqual(brief.calls, [{ route: 'embedded', params: { date: '2024-02-29', revision: REVISION } }]);
-  for (const query of ['', '?revision=', `?revision=${'A'.repeat(64)}`, `?revision=${'a'.repeat(63)}`, '?rev=x']) {
-    assertJsonError(await request(app, 'GET', `/embedded/brief/2024-02-29${query}`), 400);
+  assert.equal((await request(app, 'GET', '/api/brief/2024-02-29')).status, 200);
+  assert.equal((await request(app, 'GET', '/api/brief/2024-02-29/feedback')).status, 200);
+  assert.deepEqual(brief.calls, [
+    { route: 'brief', params: { date: '2024-02-29' } },
+    { route: 'feedback-read', params: { date: '2024-02-29' } },
+  ]);
+  for (const path of ['/api/brief/2023-02-29', '/api/brief/2024-2-29', '/api/brief/2023-02-29/feedback']) {
+    assertJsonError(await request(app, 'GET', path), 404);
   }
-  assertJsonError(await request(app, 'GET', `/embedded/brief/2023-02-29?revision=${REVISION}`), 404);
-  assert.equal(brief.calls.length, 1);
+  assert.equal(brief.calls.length, 2);
 });
 
 test('handler failures become 500 JSON without details; HttpError keeps its status', async (t) => {
@@ -638,13 +656,13 @@ test('handler failures become 500 JSON without details; HttpError keeps its stat
     brief: {
       ...recordingBrief(),
       handleLatest: async () => { throw new Error('secret detail /Users/x/briefs'); },
-      handleEmbedded: async () => { throw new HttpError(409, 'revision_conflict'); },
+      handleBrief: async () => { throw new HttpError(409, 'revision_conflict'); },
     },
   });
   const failed = await request(app, 'GET', '/api/brief/latest');
   assertJsonError(failed, 500);
   assert.doesNotMatch(failed.text, /secret|Users/);
-  assertJsonError(await request(app, 'GET', `/embedded/brief/2026-01-02?revision=${REVISION}`), 409);
+  assertJsonError(await request(app, 'GET', '/api/brief/2026-01-02'), 409);
 });
 
 test('logs record route, status, and timing only', async (t) => {
@@ -654,12 +672,12 @@ test('logs record route, status, and timing only', async (t) => {
     headers: { origin: app.origin, 'content-type': 'application/json' },
     body: '{"note":"invented private words"}',
   });
-  await request(app, 'GET', `/embedded/brief/2026-01-02?revision=${REVISION}`);
+  await request(app, 'GET', '/api/brief/2026-01-02/feedback');
   await new Promise((resolve) => setImmediate(resolve));
   const text = JSON.stringify(app.logs);
-  assert.doesNotMatch(text, /invented|private|revision=/);
+  assert.doesNotMatch(text, /invented|private|2026-01-02/);
   assert.ok(app.logs.some((entry) => entry.route === '/api/brief/feedback' && entry.status === 200 && typeof entry.ms === 'number'));
-  assert.ok(app.logs.some((entry) => entry.route === '/embedded/brief/:date'));
+  assert.ok(app.logs.some((entry) => entry.route === '/api/brief/:date/feedback'));
 });
 
 test('child CSP helper builds a same-origin framing policy', () => {

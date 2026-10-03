@@ -431,7 +431,7 @@ test('with nothing listening on the Focus origin, shell and brief routes answer 
       DASHBOARD_BRIEFS_DIR: path.join(await tempDir(t), 'missing'),
     },
   });
-  for (const route of ['/', '/focus', '/reading', '/brief', '/healthz']) {
+  for (const route of ['/', '/focus', '/feed', '/brief', '/healthz']) {
     assert.equal((await request(app, 'GET', route)).status, 200, route);
   }
   const latest = await request(app, 'GET', '/api/brief/latest');

@@ -25,9 +25,11 @@ from here.
   level, Ask, Auto, or Full access, set in its gear panel; its routines,
   scheduled prompts the daemon runs itself as a turn in its thread at its
   level, are listed under its settings with a picker form and under the
-  groups in the list), Reading holds the Daily Brief and the Feed (what
-  the producers found, with images, and Discuss opening the Watch agent;
-  each tab opens its instructions and sends a change to its agent), Focus
+  groups in the list), Feed holds what the producers found (with images,
+  and Discuss opening the Watch agent; its instructions send a change to
+  Watch), the Daily Brief opens as an overlay from the header on any view
+  (rendered from the run's brief JSON, with Approve, Dismiss, notes, and its
+  own instructions), Focus
   is embedded through a proxy, Goals
   reads the vault's priorities with add and edit going through the
   Second brain agent, Health holds Settings (the default model, effort, and
@@ -115,7 +117,8 @@ picks one up and ends by updating it.
   like the registry; `runs/` beside them holds the runs logs, gitignored.
 - `daily-brief/`: contract, schema, curator rules, `bin/run-brief` and its
   prompts, `launchd/`, `watch/`. `contributions/` and `briefs/` are outputs,
-  gitignored; `build.py` and `check-viewer.mjs` beside the briefs are code.
+  gitignored; each build writes the viewer and structured brief data;
+  `build.py` and `check-viewer.mjs` beside the briefs are code.
 - `feed/`: the feed store's README; `items/` is its output, gitignored.
 - `systems/`: symlinks to the agents' repos.
 - `thoughts/shared/`: lanes, plans, research, tickets.
@@ -130,8 +133,9 @@ picks one up and ends by updating it.
   back, since `public/` is served per request. Reinstall with
   `bin/dashboard-install` (see `docs/operations.md`).
 - Brief: `daily-brief/bin/run-brief --dry-run`, `--force`, `--date <d>
-  --stage <gather|curate|verify>`. Idempotent by date: it exits if a viewer
-  exists. Never run it from a test against a real date.
+  --stage <gather|curate|verify>`. Idempotent by date: it exits only when the
+  viewer and valid brief data exist. Never run it from a test against a real
+  date.
 - The agents' repos: change them through `systems/<name>/` under that repo's own
   rules, and commit there.
 

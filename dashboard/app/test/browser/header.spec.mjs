@@ -25,7 +25,7 @@ test.describe('header shell', () => {
   test('every view keeps one header and only its left-side actions', async ({ page, hub }) => {
     const cases = [
       ['/?agent=assistant', 'agents', 'Agents', ['agents-toggle', 'agent-open-terminal', 'agent-details-toggle']],
-      ['/reading', 'reading', 'Reading', ['feed-instructions-toggle', 'brief-instructions-toggle']],
+      ['/feed', 'feed', 'Feed', ['feed-instructions-toggle']],
       ['/focus', 'focus', 'Focus', []],
       ['/goals', 'goals', 'Goals', ['goals-add']],
       ['/health', 'health', 'Health', ['jobs-refresh']],
@@ -35,7 +35,7 @@ test.describe('header shell', () => {
 
     for (const [route, view, title, ids] of cases) {
       await page.goto(hub.origin + route);
-      await expectView(page, view, view === 'reading' ? 'Feed' : title);
+      await expectView(page, view, title);
       const header = page.locator('.app-header');
       await expect(header).toHaveCount(1);
       await expect(header.locator('#app-header-title')).toHaveText(title);
@@ -46,6 +46,8 @@ test.describe('header shell', () => {
     }
 
     expect(new Set(heights).size).toBe(1);
+    // The brief's instructions live in its overlay, not in any view's header.
+    await expect(page.locator('.app-header #brief-instructions-toggle')).toHaveCount(0);
     await expect(page.locator('.header-right > .header-entry, .header-right > .header-menu-toggle'))
       .toHaveText(['Brief', 'Quick chat', 'Notifications', 'Menu']);
   });
@@ -76,7 +78,8 @@ test.describe('header shell', () => {
 test.describe('header entries', () => {
   test.use({ hubOptions: { agents: [ASSISTANT] } });
 
-  test('Brief opens the Brief tab from the header on a desk and from the menu on a phone, which also holds Theme and Settings', async ({ page, hub }) => {
+  test('Brief opens the overlay over the view from the header on a desk and from the menu on a phone, which also holds Theme and Settings', async ({ page, hub }) => {
+    await hub.writeBrief('2026-09-15');
     const onPhone = page.viewportSize().width < 720;
     await page.goto(hub.origin + '/goals');
     await expectView(page, 'goals', 'Goals');
@@ -88,15 +91,16 @@ test.describe('header entries', () => {
       await page.getByRole('button', { name: 'Menu', exact: true }).click();
       await expect(menu.locator('.menu-entry:visible')).toHaveText(['Brief', 'Quick chat', 'Notifications', 'Settings']);
       await expect(menu.getByRole('group', { name: 'Theme' })).toBeVisible();
-      await menu.getByRole('link', { name: 'Brief', exact: true }).click();
+      await menu.getByRole('button', { name: 'Brief', exact: true }).click();
       await expect(menu).toBeHidden();
     } else {
       await expect(menu.locator('.menu-mobile-only').first()).toBeHidden();
       await headerBrief.click();
     }
-    await expect(page).toHaveURL(hub.origin + '/brief');
-    await expect(page.locator('#view-reading')).toBeVisible();
-    await expect(page.locator('#reading-brief')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+    await expect(page.locator('.brief-title')).toHaveText('Invented brief for tests, not a real day');
+    await expect(page).toHaveURL(hub.origin + '/goals');
+    await expect(page.locator('#view-goals')).toBeVisible();
   });
 });
 

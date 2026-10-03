@@ -75,7 +75,7 @@ test.describe('quick chat', () => {
   test.use({ withFocus: false, hubOptions: hubOptions() });
 
   test('opens over every view with the agent Settings names, lists only Claude agents, and closes with Escape or Close', async ({ page, hub }) => {
-    const views = [['/', 'agents', 'Agents'], ['/reading', 'reading', 'Feed'], ['/focus', 'focus', 'Focus'], ['/goals', 'goals', 'Goals'], ['/health', 'health', 'Health']];
+    const views = [['/', 'agents', 'Agents'], ['/feed', 'feed', 'Feed'], ['/focus', 'focus', 'Focus'], ['/goals', 'goals', 'Goals'], ['/health', 'health', 'Health']];
     for (const [route, view, title] of views) {
       await page.goto(hub.origin + route);
       await expectView(page, view, title);
@@ -216,7 +216,7 @@ test.describe('quick chat over the Feed', () => {
   test.use({ withFocus: false, hubOptions: hubOptions({ feed: path.join(FIXTURES, 'feed') }) });
 
   test('the context is the topmost item in view', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/reading`);
+    await page.goto(`${hub.origin}/feed`);
     const items = page.locator('#feed-runs .feed-item');
     await expect(items.first()).toBeVisible();
     const second = await items.nth(1).locator('.feed-title').textContent();

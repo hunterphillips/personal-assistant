@@ -1,7 +1,7 @@
-// An instructions panel: a button in the Reading tab row that opens a
-// panel showing an agent's instructions file as prose (read each time it
-// opens) with a composer that sends a change to the agent that owns the
-// file and opens its thread. feed.js makes one for the feed's criteria,
+// An instructions panel: a button (in the header for the Feed, in the
+// brief's overlay for the brief) that opens a panel showing an agent's
+// instructions file as prose (read each time it opens) with a composer that
+// sends a change to the agent that owns the file and opens its thread. feed.js makes one for the feed's criteria,
 // shell.js one for the brief's rules; the markup for each is in the page,
 // its ids prefixed `<prefix>-instructions`.
 //

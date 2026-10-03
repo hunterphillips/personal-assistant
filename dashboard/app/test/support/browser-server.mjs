@@ -7,7 +7,7 @@
 //     certificate, with DASHBOARD_PUBLIC_ORIGIN set to that https origin so
 //     its Host and Origin pass the app's checks.
 // Briefs live in a new temporary directory and are invented by
-// writeBrief(). The registry and jobs are in-memory fakes seeded from
+// writeBrief() from the fixture brief JSON. The registry and jobs are in-memory fakes seeded from
 // the options (see controlledRegistry and controlledJobs); `state` is the
 // state hub itself. Personas run on a fake Claude adapter over a real thread
 // store in the temporary directory (see fakePersonas): a send is answered by
@@ -70,6 +70,7 @@ import { createSettings } from '../../lib/settings.mjs';
 import { contextLine, parseContext } from '../../lib/send-context.mjs';
 import { createReads } from '../../lib/reads.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
+import { fixtureBrief, writeViewer } from './brief-fixtures.mjs';
 import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } from './harness.mjs';
 import { focusSourceAvailable, startIsolatedFocus } from './isolated-focus.mjs';
 
@@ -316,8 +317,13 @@ export async function startHub({
       instructionsFile,
       briefInstructionsFile,
       focus,
-      writeBrief: (date, options) => writeFile(path.join(briefsDir, `viewer-${date}.html`), inventedViewer({ date, ...options })),
-      writeRawBrief: (date, html) => writeFile(path.join(briefsDir, `viewer-${date}.html`), html),
+      // The invented fixture brief (test/fixtures/brief) under `date`, with
+      // any top-level fields replaced; writeRawBrief writes the text as is;
+      // writeViewer a viewer page with no data beside it.
+      writeBrief: async (date, overrides = {}) => writeFile(path.join(briefsDir, `brief-${date}.json`),
+        `${JSON.stringify(await fixtureBrief(date, overrides), null, 2)}\n`),
+      writeRawBrief: (date, text) => writeFile(path.join(briefsDir, `brief-${date}.json`), text),
+      writeViewer: (date) => writeViewer(briefsDir, date),
       // A brief notice as the run writes it; the agent `settings` names in
       // brief.agent must be in `agents` as a started persona for the daemon
       // to post it.
@@ -326,6 +332,7 @@ export async function startHub({
       settings,
       settingsPath,
       readFeedback: (date) => readFile(path.join(briefsDir, `feedback-${date}.md`), 'utf8'),
+      readSavedFeedback: async (date) => JSON.parse(await readFile(path.join(briefsDir, `feedback-${date}.json`), 'utf8')),
       state: hub,
       // Requests the app received, with the status sent so far (null before
       // headers go out). An open event stream shows 200.
@@ -811,85 +818,4 @@ async function selfSignedCertificate(root) {
     '-keyout', key, '-out', cert,
   ], { stdio: 'ignore' });
   return { key: await readFile(key), cert: await readFile(cert) };
-}
-
-export const DEFAULT_ITEMS = Object.freeze([
-  { sec: 'Needs you', id: 'invented-one', text: 'Invented item one.' },
-  { sec: 'Needs you', id: 'invented-two', text: 'Invented item two.' },
-  { sec: 'Later', id: 'invented-three', text: 'Invented item three.' },
-]);
-
-// An invented viewer in the generated layout the adapter accepts: one inline
-// script, ITEMS then KEY, marks kept in localStorage under KEY, and a fixed
-// bar with Save, Copy, and Clear. Its own saveOut downloads a file, so a
-// download during a test means the bridge did not take over Save. The page
-// is taller than any test viewport so its own scrolling is exercised.
-export function inventedViewer({ date, items = DEFAULT_ITEMS, heading = `Daily Brief — ${date}` }) {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${heading}</title>
-<style>
-body { margin: 0; font-family: Georgia, serif; }
-.page { padding: 16px 16px 140px; }
-.item { min-height: 320px; padding: 12px 0; border-bottom: 1px solid #ddd; }
-.item button[aria-pressed="true"] { font-weight: 700; }
-.bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px; background: #fff; border-top: 1px solid #ccc; }
-</style>
-</head>
-<body>
-<div class="page">
-  <h1>${heading}</h1>
-  <div id="brief"></div>
-  <div class="overall"><textarea id="overall" rows="3" aria-label="Overall"></textarea></div>
-</div>
-<div class="bar">
-  <span id="status">No marks yet</span>
-  <button class="save" onclick="saveOut()">Save feedback</button>
-  <button class="ghost" onclick="copyOut()">Copy instead</button>
-  <button class="ghost" onclick="clearAll()">Clear</button>
-</div>
-<script>
-const ITEMS = ${JSON.stringify(items)};
-const KEY = 'db-items-${date}';
-let fb = {};
-try { fb = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { fb = {}; }
-function persist() {
-  try { localStorage.setItem(KEY, JSON.stringify(fb)); } catch (e) {}
-  const count = Object.keys(fb).filter(function (id) { return fb[id] && fb[id].m; }).length;
-  document.getElementById('status').textContent = count ? count + ' marked' : 'No marks yet';
-}
-function mark(id, m) {
-  const value = Object.assign({}, fb[id]);
-  value.m = value.m === m ? null : m;
-  fb[id] = value;
-  persist();
-  render();
-}
-function render() {
-  document.getElementById('brief').innerHTML = ITEMS.map(function (item) {
-    const m = fb[item.id] && fb[item.id].m;
-    return '<div class="item" data-id="' + item.id + '"><p>' + item.text + '</p>' +
-      '<button data-mark="a" aria-pressed="' + (m === 'a') + '" onclick="mark(\\'' + item.id + '\\', \\'a\\')">Approve</button> ' +
-      '<button data-mark="d" aria-pressed="' + (m === 'd') + '" onclick="mark(\\'' + item.id + '\\', \\'d\\')">Dismiss</button></div>';
-  }).join('');
-}
-function saveOut() {
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(new Blob([JSON.stringify(fb)], { type: 'text/markdown' }));
-  link.download = 'feedback-${date}.md';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-function copyOut() {}
-function clearAll() { fb = {}; persist(); render(); }
-render();
-persist();
-</script>
-</body>
-</html>
-`;
 }

@@ -674,13 +674,13 @@ test('with no agents, Home says so, and Health refreshes once when opened', asyn
   await expect.poll(() => hub.jobs.calls).toBe(1);
 });
 
-test('the rail holds five links without scrolling, and /brief shows the Brief tab, /reading the Feed tab', async ({ page, hub }) => {
+test('the rail holds five links without scrolling, and /brief and /reading land on the Feed', async ({ page, hub }) => {
   await page.goto(`${hub.origin}/goals`);
   await expectView(page, 'goals', 'Goals');
   await expect(page.locator('#app-header-title')).toHaveText('Goals');
   const links = page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link');
   await expect(links).toHaveCount(5);
-  for (const [i, name] of ['Home', 'Reading', 'Focus', 'Goals', 'Health'].entries()) {
+  for (const [i, name] of ['Home', 'Feed', 'Focus', 'Goals', 'Health'].entries()) {
     await expect(links.nth(i)).toHaveAccessibleName(name);
   }
   const onPhone = test.info().project.name === 'mobile-webkit';
@@ -703,12 +703,15 @@ test('the rail holds five links without scrolling, and /brief shows the Brief ta
   }
 
   await page.goto(`${hub.origin}/brief`);
-  await expect(page.locator('#view-reading')).toBeVisible();
-  await expect(page).toHaveTitle('Reading · Dashboard');
+  await expect(page).toHaveURL(`${hub.origin}/feed`);
+  await expect(page.locator('#view-feed')).toBeVisible();
+  await expect(page).toHaveTitle('Feed · Dashboard');
+  await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   await page.goto(`${hub.origin}/reading`);
-  await expect(page.locator('#view-reading')).toBeVisible();
-  await expect(page).toHaveTitle('Feed · Dashboard');
+  await expect(page).toHaveURL(`${hub.origin}/feed`);
+  await expectView(page, 'feed', 'Feed');
   await nav(page, 'Home').click();
   await expectView(page, 'agents', 'Agents');
   await nav(page, 'Goals').click();

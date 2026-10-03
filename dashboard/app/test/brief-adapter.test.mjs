@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { BRIEF_CSP, adaptViewer, createBriefRoutes } from '../lib/brief-adapter.mjs';
-import { MAX_VIEWER_BYTES, loadBriefArtifact } from '../lib/briefs.mjs';
+import { createBriefRoutes } from '../lib/brief-adapter.mjs';
+import { MAX_BRIEF_BYTES, loadBrief } from '../lib/briefs.mjs';
 import { request, startApp, tempDir } from './support/harness.mjs';
-import { viewerHtml, writeViewer } from './support/brief-fixtures.mjs';
+import { briefData, writeBrief, writeViewer } from './support/brief-fixtures.mjs';
 
 function focusAvailable() {
   return {
@@ -23,12 +23,12 @@ async function makeApp(t, dir) {
   });
 }
 
-function feedbackBody(artifact, overrides = {}) {
+function feedbackBody(brief, overrides = {}) {
   return {
-    date: artifact.date,
-    revision: artifact.revision,
+    date: brief.date,
+    revision: brief.revision,
     overall: '',
-    items: artifact.items.map((item) => ({ id: item.id, mark: null, note: '' })),
+    items: brief.items.map((item) => ({ id: item.id, mark: null, note: '' })),
     ...overrides,
   };
 }
@@ -40,178 +40,162 @@ async function postFeedback(app, body) {
   });
 }
 
-test('latest route returns ready metadata and an exact revision URL', async (t) => {
+test('latest returns the newest brief as the overlay renders it', async (t) => {
   const dir = await tempDir(t);
-  await writeViewer(dir, '2026-09-14');
-  await writeViewer(dir, '2026-09-15');
-  const artifact = await loadBriefArtifact(dir, '2026-09-15');
+  await writeBrief(dir, '2026-09-14');
+  const { data } = await writeBrief(dir, '2026-09-15');
+  const brief = await loadBrief(dir, '2026-09-15');
   const app = await makeApp(t, dir);
   const response = await request(app, 'GET', '/api/brief/latest');
   assert.equal(response.status, 200);
   assert.deepEqual(response.json, {
-    state: 'ready',
-    date: '2026-09-15',
-    revision: artifact.revision,
-    url: `/embedded/brief/2026-09-15?revision=${artifact.revision}`,
+    state: 'ready', date: '2026-09-15', revision: brief.revision, title: data.title, words: data.words,
+    opening: data.opening, sections: data.sections,
   });
+  const byDate = await request(app, 'GET', '/api/brief/2026-09-14');
+  assert.equal(byDate.status, 200);
+  assert.equal(byDate.json.date, '2026-09-14');
+  assert.equal(byDate.json.state, 'ready');
 });
 
-test('newest matching artifact reports its failure state without falling back', async (t) => {
+test('a newer viewer without data reports the brief missing for its date, never an older one', async (t) => {
   const dir = await tempDir(t);
-  await writeViewer(dir, '2026-09-14');
-  const broken = viewerHtml({ date: '2026-09-15', items: [] }).replace('const ITEMS', 'const DATA');
-  await writeFile(path.join(dir, 'viewer-2026-09-15.html'), broken);
+  await writeBrief(dir, '2026-09-14');
+  await writeViewer(dir, '2026-09-15');
+  const routes = createBriefRoutes({ briefsDir: dir });
+  assert.deepEqual(await routes.latestMetadata({}), { state: 'missing', date: '2026-09-15' });
+  const app = await makeApp(t, dir);
+  assert.deepEqual((await request(app, 'GET', '/api/brief/latest')).json,
+    { state: 'missing', date: '2026-09-15', error: 'brief_not_found' });
+  assert.deepEqual((await request(app, 'GET', '/api/brief/2026-09-13')).json,
+    { state: 'missing', date: '2026-09-13', error: 'brief_not_found' });
+});
+
+test('malformed and oversized data report their state and date, never content', async (t) => {
+  const dir = await tempDir(t);
+  await writeBrief(dir, '2026-09-15', { ...briefData('2026-09-15'), sections: 'invented' });
   const routes = createBriefRoutes({ briefsDir: dir });
   const metadata = await routes.latestMetadata({});
   assert.equal(metadata.state, 'unsupported');
   assert.equal(metadata.date, '2026-09-15');
   assert.match(metadata.revision, /^[0-9a-f]{64}$/);
-});
-
-test('latest metadata reports empty, incomplete, and oversized exactly', async (t) => {
-  const empty = await tempDir(t);
-  assert.deepEqual(await createBriefRoutes({ briefsDir: empty }).latestMetadata({}), { state: 'empty' });
-
-  const incomplete = await tempDir(t);
-  await writeFile(path.join(incomplete, 'viewer-2026-09-15.html'),
-    viewerHtml({ date: '2026-09-15', items: [] }).replace(/const KEY[^\n]+\n/, ''));
-  assert.equal((await createBriefRoutes({ briefsDir: incomplete }).latestMetadata({})).state, 'incomplete');
+  const app = await makeApp(t, dir);
+  const latest = await request(app, 'GET', '/api/brief/latest');
+  assert.equal(latest.json.state, 'unsupported');
+  assert.equal(latest.json.error, 'invalid_brief');
+  assert.equal(latest.json.sections, undefined);
 
   const oversized = await tempDir(t);
-  await writeFile(path.join(oversized, 'viewer-2026-09-15.html'), Buffer.alloc(MAX_VIEWER_BYTES + 1, 0x61));
+  await writeFile(path.join(oversized, 'brief-2026-09-15.json'), Buffer.alloc(MAX_BRIEF_BYTES + 1, 0x20));
   assert.deepEqual(await createBriefRoutes({ briefsDir: oversized }).latestMetadata({}), {
     state: 'oversized', date: '2026-09-15',
   });
 });
 
-test('directory read errors report unavailable rather than masquerading as empty', async (t) => {
+test('latest metadata reports empty, and directory read errors report unavailable', async (t) => {
+  const empty = await tempDir(t);
+  assert.deepEqual(await createBriefRoutes({ briefsDir: empty }).latestMetadata({}), { state: 'empty' });
   const parent = await tempDir(t);
   const routes = createBriefRoutes({ briefsDir: path.join(parent, 'missing') });
   assert.deepEqual(await routes.latestMetadata({}), { state: 'unavailable' });
   await assert.rejects(routes.handleLatest({}, {}), { name: 'HttpError', status: 503, code: 'brief_directory_unavailable' });
 });
 
-test('embedded route injects config and classic bridge after the original script with child CSP', async (t) => {
-  const dir = await tempDir(t);
-  const { html } = await writeViewer(dir, '2026-09-15', {
-    items: [{ sec: 'Invented', id: 'one', text: 'Unicode café.' }],
-  });
-  const artifact = await loadBriefArtifact(dir, '2026-09-15');
-  const app = await makeApp(t, dir);
-  const response = await request(app, 'GET', `/embedded/brief/2026-09-15?revision=${artifact.revision}`);
-  assert.equal(response.status, 200);
-  assert.equal(response.headers['content-security-policy'], BRIEF_CSP);
-  assert.match(BRIEF_CSP, /script-src 'self' 'unsafe-inline'/);
-  assert.match(BRIEF_CSP, /style-src 'self' 'unsafe-inline'/);
-  assert.match(BRIEF_CSP, /connect-src 'self'/);
-  assert.match(BRIEF_CSP, /frame-ancestors 'self'/);
-
-  const originalEnd = html.indexOf('</script>') + '</script>'.length;
-  const configAt = response.text.indexOf('<script id="brief-bridge-config" type="application/json">');
-  const bridgeAt = response.text.indexOf('<script src="/assets/brief-bridge.js"></script>');
-  assert.equal(response.text.slice(0, configAt).trimEnd(), html.slice(0, originalEnd));
-  assert.ok(configAt > originalEnd);
-  assert.ok(bridgeAt > configAt);
-  assert.equal(response.text.slice(bridgeAt + '<script src="/assets/brief-bridge.js"></script>'.length), html.slice(originalEnd));
-  assert.match(response.text, new RegExp(`"revision":"${artifact.revision}"`));
-});
-
-test('adapter JSON configuration escapes less-than characters', () => {
-  const bytes = Buffer.from('<script></script></body></html>');
-  const output = adaptViewer({ date: '</script>', revision: '<revision>', bytes, scriptEndByte: 17 }).toString();
-  assert.match(output, /\\u003c\/script>/);
-  assert.match(output, /\\u003crevision>/);
-});
-
-test('embedded route returns 404 for missing and 409 after same-date replacement or for an oversized viewer', async (t) => {
+test('the viewer is no longer served', async (t) => {
   const dir = await tempDir(t);
   await writeViewer(dir, '2026-09-15');
-  const artifact = await loadBriefArtifact(dir, '2026-09-15');
   const app = await makeApp(t, dir);
-  const missing = await request(app, 'GET', `/embedded/brief/2026-09-14?revision=${artifact.revision}`);
-  assert.equal(missing.status, 404);
-  assert.deepEqual(missing.json, { error: 'brief_not_found' });
-  await writeViewer(dir, '2026-09-15', { items: [{ sec: 'New', id: 'new', text: 'Replacement.' }] });
-  assert.equal((await request(app, 'GET', `/embedded/brief/2026-09-15?revision=${artifact.revision}`)).status, 409);
-  await writeFile(path.join(dir, 'viewer-2026-09-13.html'), Buffer.alloc(MAX_VIEWER_BYTES + 1, 0x61));
-  const oversized = await request(app, 'GET', `/embedded/brief/2026-09-13?revision=${artifact.revision}`);
-  assert.equal(oversized.status, 409);
-  assert.deepEqual(oversized.json, { error: 'brief_oversized' });
+  assert.equal((await request(app, 'GET', `/embedded/brief/2026-09-15?revision=${'a'.repeat(64)}`)).status, 404);
+  assert.equal((await request(app, 'GET', '/assets/brief-bridge.js')).status, 404);
 });
 
-test('embedded route injects after the original script when the viewer starts with a BOM', async (t) => {
+test('feedback saves Markdown the curator reads and JSON the overlay reads back, both private', async (t) => {
   const dir = await tempDir(t);
-  const html = viewerHtml({ date: '2026-09-15', items: [{ sec: 'A', id: 'one', text: 'Unicode café.' }] });
-  const original = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(html)]);
-  await writeFile(path.join(dir, 'viewer-2026-09-15.html'), original);
-  const artifact = await loadBriefArtifact(dir, '2026-09-15');
+  await writeBrief(dir, '2026-09-15');
+  const brief = await loadBrief(dir, '2026-09-15');
   const app = await makeApp(t, dir);
-  const response = await request(app, 'GET', `/embedded/brief/2026-09-15?revision=${artifact.revision}`);
-  assert.equal(response.status, 200);
-  const adapted = Buffer.from(response.text.startsWith('\ufeff') ? response.text : `\ufeff${response.text}`);
-  const close = Buffer.from('</script>');
-  const originalEnd = original.indexOf(close) + close.length;
-  assert.deepEqual(adapted.subarray(0, originalEnd), original.subarray(0, originalEnd));
-  assert.match(adapted.subarray(originalEnd).toString(),
-    /^\n<script id="brief-bridge-config" type="application\/json">[^<]*<\/script>\n<script src="\/assets\/brief-bridge.js"><\/script>\n<\/body>\n<\/html>\n$/);
-});
 
-test('feedback route saves verified Markdown and rejects invalid, missing, stale, and oversized input', async (t) => {
-  const dir = await tempDir(t);
-  await writeViewer(dir, '2026-09-15', {
+  const empty = await request(app, 'GET', '/api/brief/2026-09-15/feedback');
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.json, { date: '2026-09-15', revision: null, overall: '', items: [], savedAt: null });
+
+  const value = feedbackBody(brief, {
+    overall: 'Invented overall thought',
     items: [
-      { sec: 'Needs you', id: 'one', text: 'Invented text.' },
-      { sec: 'Needs you', id: 'two', lede: 'Legacy invented line.', body: 'Detail.' },
-    ],
-  });
-  const artifact = await loadBriefArtifact(dir, '2026-09-15');
-  const app = await makeApp(t, dir);
-  const value = feedbackBody(artifact, {
-    overall: 'Overall thought',
-    items: [
-      { id: 'one', mark: 'approved', note: 'Line one\nline two' },
-      { id: 'two', mark: 'dismissed', note: '' },
+      { id: 'opening', mark: null, note: '' },
+      { id: 'needs-you-1', mark: 'approved', note: 'Line one\nline two' },
+      { id: 'needs-you-2', mark: 'dismissed', note: '' },
+      { id: 'money-1', mark: null, note: 'Invented note only.' },
     ],
   });
   const saved = await postFeedback(app, value);
   assert.equal(saved.status, 200);
-  assert.deepEqual(saved.json, { saved: true, date: '2026-09-15' });
-  assert.equal(await readFile(path.join(dir, 'feedback-2026-09-15.md'), 'utf8'), [
-    '# Brief feedback — 2026-09-15', '', '## Overall', '', 'Overall thought', '',
-    '## Needs you', '', '- APPROVED — Invented text.', '  - note: Line one', '    line two',
-    '- DISMISSED — Legacy invented line.', '',
-  ].join('\n'));
+  assert.equal(saved.json.saved, true);
+  assert.equal(saved.json.date, '2026-09-15');
+  assert.ok(!Number.isNaN(Date.parse(saved.json.savedAt)));
 
+  assert.equal(await readFile(path.join(dir, 'feedback-2026-09-15.md'), 'utf8'), [
+    '# Brief feedback for 2026-09-15', '', '## Overall', '', 'Invented overall thought', '',
+    '## Opening', '',
+    '- opening: no mark',
+    '  > Invented opening: cash is fine and nothing is due before Thursday.',
+    '',
+    '## Needs you', '',
+    '- needs-you-1: APPROVED',
+    '  > An invented reply to **Sam** is owed about the lease.',
+    '  - note: Line one',
+    '    line two',
+    '- needs-you-2: DISMISSED',
+    '  > - One invented form waits for a signature.',
+    '  > - Another invented form is half done.',
+    '',
+    '## Money', '',
+    '- money-1: no mark',
+    '  > Invented drift is under a point, and the [policy](https://example.com/policy) holds.',
+    '  - note: Invented note only.',
+    '',
+  ].join('\n'));
+  for (const name of ['feedback-2026-09-15.md', 'feedback-2026-09-15.json']) {
+    assert.equal((await stat(path.join(dir, name))).mode & 0o777, 0o600, name);
+  }
+
+  const readBack = await request(app, 'GET', '/api/brief/2026-09-15/feedback');
+  assert.deepEqual(readBack.json, { ...value, savedAt: saved.json.savedAt });
+});
+
+test('feedback is refused for invalid, missing, stale, partial, and oversized input, keeping what was saved', async (t) => {
+  const dir = await tempDir(t);
+  await writeBrief(dir, '2026-09-15');
+  const brief = await loadBrief(dir, '2026-09-15');
+  const app = await makeApp(t, dir);
+  const value = feedbackBody(brief);
+  assert.equal((await postFeedback(app, value)).status, 200);
   const existing = await readFile(path.join(dir, 'feedback-2026-09-15.md'), 'utf8');
-  assert.equal((await postFeedback(app, { ...value, filename: 'viewer-2026-09-15.html' })).status, 400);
+
+  assert.equal((await postFeedback(app, { ...value, filename: 'brief-2026-09-15.json' })).status, 400);
+  assert.equal((await postFeedback(app, { ...value, date: '2026-09-14' })).status, 404);
+  assert.equal((await postFeedback(app, { ...value, revision: 'b'.repeat(64) })).status, 409);
+  assert.equal((await postFeedback(app, { ...value, items: value.items.slice(1) })).status, 400);
+  assert.equal((await postFeedback(app, { ...value, overall: 'x'.repeat(8_001) })).status, 413);
   assert.equal(await readFile(path.join(dir, 'feedback-2026-09-15.md'), 'utf8'), existing);
 
-  const missing = { ...value, date: '2026-09-14' };
-  assert.equal((await postFeedback(app, missing)).status, 404);
-  assert.equal((await postFeedback(app, { ...value, revision: 'b'.repeat(64) })).status, 409);
-  assert.equal((await postFeedback(app, { ...value, overall: 'x'.repeat(8_001) })).status, 413);
+  // A rebuilt brief for the same date refuses a save marked against the old one.
+  await writeBrief(dir, '2026-09-15', briefData('2026-09-15'));
+  assert.equal((await postFeedback(app, value)).status, 409);
+  assert.equal(await readFile(path.join(dir, 'feedback-2026-09-15.md'), 'utf8'), existing);
 });
 
-test('an older tab saves its own date while a stale same-date save preserves existing feedback', async (t) => {
+test('a saved feedback file that is not the writer\'s reads back as an empty draft', async (t) => {
   const dir = await tempDir(t);
-  await writeViewer(dir, '2026-09-14');
-  await writeViewer(dir, '2026-09-15', { items: [{ sec: 'New', id: 'new', text: 'Newer.' }] });
-  const older = await loadBriefArtifact(dir, '2026-09-14');
+  await writeBrief(dir, '2026-09-15');
   const app = await makeApp(t, dir);
-  assert.equal((await postFeedback(app, feedbackBody(older))).status, 200);
-  assert.match(await readFile(path.join(dir, 'feedback-2026-09-14.md'), 'utf8'), /Invented item/);
-
-  await writeFile(path.join(dir, 'feedback-2026-09-14.md'), 'keep existing');
-  await writeViewer(dir, '2026-09-14', { items: [{ sec: 'Changed', id: 'other', text: 'Changed.' }] });
-  assert.equal((await postFeedback(app, feedbackBody(older))).status, 409);
-  assert.equal(await readFile(path.join(dir, 'feedback-2026-09-14.md'), 'utf8'), 'keep existing');
-});
-
-test('bridge is classic JavaScript and contains no content logging', async () => {
-  const source = await readFile(new URL('../public/brief-bridge.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /\bimport\b|\bexport\b|console\./);
-  assert.doesNotMatch(source, /window\.ITEMS|window\.fb/);
-  assert.match(source, /credentials:\s*'same-origin'/);
-  assert.match(source, /button\.disabled = true/);
-  assert.match(source, /getElementById\('overall'\)/);
+  for (const text of ['not json', '{"date":"2026-09-15"}', JSON.stringify({
+    date: '2026-09-14', revision: 'a'.repeat(64), overall: '', items: [], savedAt: '2026-09-15T00:00:00.000Z',
+  })]) {
+    await writeFile(path.join(dir, 'feedback-2026-09-15.json'), text);
+    const response = await request(app, 'GET', '/api/brief/2026-09-15/feedback');
+    assert.equal(response.status, 200);
+    assert.equal(response.json.savedAt, null, text);
+  }
+  assert.equal((await request(app, 'GET', '/api/brief/2026-02-30/feedback')).status, 404);
 });

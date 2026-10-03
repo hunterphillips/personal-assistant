@@ -1,14 +1,45 @@
-// Filesystem boundary and parser for generated Daily Brief viewers.
+// Filesystem boundary and shape check for the Daily Brief's data. The morning
+// run (daily-brief/briefs/build.py) writes brief-<date>.json beside the
+// viewer page it keeps for the record; the dashboard reads only the JSON and
+// renders it as the overlay. A date that has a viewer but no JSON (a brief
+// from before the data existed, or a run that stopped between the two) is
+// newer than any JSON and reported as missing, never skipped for an older
+// date.
+//
+// selectLatestBrief(dir) -> { date, hasData } | null
+//   The newest date among brief-<date>.json and viewer-<date>.html regular
+//   files; `hasData` says whether that date has its JSON.
+//
+// loadBrief(dir, date, { expectedRevision, signal })
+//   -> { date, revision, title, words, opening, sections, items }
+//   Reads brief-<date>.json without following links, at most MAX_BRIEF_BYTES,
+//   and checks its shape (validateBriefData). The revision is the SHA-256 of
+//   the file's bytes; the run writes no revision of its own. `items` is every
+//   item in reading order, the opening first, each { id, section, text },
+//   where `section` is the section's label ('Opening' for the opening): what
+//   the feedback writer keys and labels its lines by. Throws BriefArtifactError
+//   with a state word the snapshot carries: unreadable (brief_not_found,
+//   brief_unreadable), oversized, unsupported (invalid_brief, revision
+//   conflicts).
 
 import { constants } from 'node:fs';
 import { lstat, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-export const MAX_VIEWER_BYTES = 2 * 1024 * 1024;
+export const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
+// The feedback route's own cap (feedback.mjs) and build.py's ITEM_CAP.
+export const MAX_ITEMS = 200;
+export const MAX_SECTIONS = 20;
+export const MAX_SECTION_ITEMS = 40;
+export const MAX_TEXT_CHARS = 8000;
+export const OPENING_LABEL = 'Opening';
 
+const DATA_NAME = /^brief-(\d{4}-\d{2}-\d{2})\.json$/;
 const VIEWER_NAME = /^viewer-(\d{4}-\d{2}-\d{2})\.html$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
+const DATA_KEYS = ['date', 'title', 'words', 'opening', 'sections'];
 
 export class BriefArtifactError extends Error {
   constructor(state, code, { date, revision, cause } = {}) {
@@ -32,22 +63,26 @@ export function isCalendarDate(value) {
 export async function selectLatestBrief(briefsDir, { signal } = {}) {
   signal?.throwIfAborted();
   const entries = await abortable(readdir(path.resolve(briefsDir), { withFileTypes: true }), signal);
+  const data = new Set();
   let latest = null;
   for (const entry of entries) {
     signal?.throwIfAborted();
-    const match = VIEWER_NAME.exec(entry.name);
-    if (!match || !entry.isFile() || !isCalendarDate(match[1])) continue;
-    if (latest === null || match[1] > latest.date) latest = { date: match[1], name: entry.name };
+    if (!entry.isFile()) continue;
+    const dataMatch = DATA_NAME.exec(entry.name);
+    const match = dataMatch ?? VIEWER_NAME.exec(entry.name);
+    if (!match || !isCalendarDate(match[1])) continue;
+    if (dataMatch) data.add(match[1]);
+    if (latest === null || match[1] > latest) latest = match[1];
   }
   signal?.throwIfAborted();
-  return latest;
+  return latest === null ? null : { date: latest, hasData: data.has(latest) };
 }
 
-export async function loadBriefArtifact(briefsDir, date, { expectedRevision, signal } = {}) {
+export async function loadBrief(briefsDir, date, { expectedRevision, signal } = {}) {
   if (!isCalendarDate(date)) throw new BriefArtifactError('unsupported', 'invalid_brief_date', { date });
   signal?.throwIfAborted();
   const root = path.resolve(briefsDir);
-  const filename = `viewer-${date}.html`;
+  const filename = `brief-${date}.json`;
   const file = path.resolve(root, filename);
   if (path.dirname(file) !== root || path.basename(file) !== filename) {
     throw new BriefArtifactError('unsupported', 'invalid_brief_path', { date });
@@ -72,21 +107,12 @@ export async function loadBriefArtifact(briefsDir, date, { expectedRevision, sig
   try {
     const stats = await abortable(handle.stat(), signal);
     if (!stats.isFile()) throw new BriefArtifactError('unreadable', 'brief_not_found', { date });
-    if (stats.size > MAX_VIEWER_BYTES) throw new BriefArtifactError('oversized', 'brief_oversized', { date });
+    if (stats.size > MAX_BRIEF_BYTES) throw new BriefArtifactError('oversized', 'brief_oversized', { date });
     const bytes = await readLimited(handle, stats.size, signal);
     const finalStats = await abortable(handle.stat(), signal);
-    const finalPathStats = await abortable(lstat(file), signal).catch((error) => {
-      if (error?.name === 'AbortError') throw error;
-      return null;
-    });
-    const changed = bytes.length !== stats.size || finalStats.size !== stats.size ||
-      finalStats.mtimeMs !== stats.mtimeMs || finalStats.ctimeMs !== stats.ctimeMs ||
-      !finalPathStats || !finalPathStats.isFile() || finalPathStats.isSymbolicLink() ||
-      finalPathStats.dev !== finalStats.dev || finalPathStats.ino !== finalStats.ino ||
-      finalPathStats.size !== finalStats.size || finalPathStats.mtimeMs !== finalStats.mtimeMs ||
-      finalPathStats.ctimeMs !== finalStats.ctimeMs;
-    if (finalStats.size > MAX_VIEWER_BYTES) throw new BriefArtifactError('oversized', 'brief_oversized', { date });
-    if (changed) {
+    // The run renames a finished file into place, so a change mid-read means
+    // a rebuild landed; the caller reads again rather than trusting a mix.
+    if (bytes.length !== stats.size || finalStats.size !== stats.size || finalStats.mtimeMs !== stats.mtimeMs) {
       const code = expectedRevision === undefined ? 'brief_changed_during_read' : 'revision_conflict';
       throw new BriefArtifactError('unreadable', code, { date });
     }
@@ -94,14 +120,16 @@ export async function loadBriefArtifact(briefsDir, date, { expectedRevision, sig
     if (expectedRevision !== undefined && revision !== expectedRevision) {
       throw new BriefArtifactError('unsupported', 'revision_conflict', { date, revision });
     }
+    let value;
     try {
-      const parsed = parseBriefViewer(bytes, date);
-      return { date, revision, bytes, ...parsed };
+      value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
     } catch (error) {
-      if (error instanceof BriefArtifactError) {
-        error.revision ??= revision;
-        throw error;
-      }
+      throw new BriefArtifactError('unsupported', 'invalid_brief', { date, revision, cause: error });
+    }
+    try {
+      return { revision, ...validateBriefData(value, date) };
+    } catch (error) {
+      if (error instanceof BriefArtifactError) error.revision ??= revision;
       throw error;
     }
   } finally {
@@ -109,103 +137,52 @@ export async function loadBriefArtifact(briefsDir, date, { expectedRevision, sig
   }
 }
 
-export function parseBriefViewer(bytes, date) {
-  if (!isCalendarDate(date)) throw new BriefArtifactError('unsupported', 'invalid_brief_date', { date });
-  let html;
-  try {
-    // ignoreBOM keeps a leading BOM in the string so character offsets map
-    // back to the same byte offsets used for injection.
-    html = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-  } catch (error) {
-    throw new BriefArtifactError('unsupported', 'invalid_viewer_encoding', { date, cause: error });
-  }
+// The shape build.py writes (data_for): { date, title, words, opening:
+// { id: 'opening', text } | null, sections: [{ id, label, items: [{ id,
+// text }] }] }. A brief that fails any check is refused whole, never shown
+// in part. Unknown top-level keys are refused too, so a change to the run's
+// output is noticed here rather than silently dropped.
+export function validateBriefData(value, date) {
+  const invalid = () => new BriefArtifactError('unsupported', 'invalid_brief', { date });
+  if (!isRecord(value) || !hasExactKeys(value, DATA_KEYS)) throw invalid();
+  if (value.date !== date) throw invalid();
+  if (typeof value.title !== 'string' || characterCount(value.title) > 500) throw invalid();
+  if (!Number.isSafeInteger(value.words) || value.words < 0) throw invalid();
+  if (!Array.isArray(value.sections) || value.sections.length > MAX_SECTIONS) throw invalid();
 
-  const scripts = [...html.matchAll(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi)];
-  if (scripts.length !== 1) throw new BriefArtifactError('unsupported', 'incompatible_script_boundaries', { date });
-  const scriptMatch = scripts[0];
-  if (!/^<script\s*>/i.test(scriptMatch[0])) {
-    throw new BriefArtifactError('unsupported', 'incompatible_script_element', { date });
+  const ids = new Set();
+  const items = [];
+  let opening = null;
+  if (value.opening !== null) {
+    const item = checkItem(value.opening, ids, invalid);
+    if (item.id !== 'opening') throw invalid();
+    opening = item;
+    items.push({ id: item.id, section: OPENING_LABEL, text: item.text });
   }
-  const scriptEnd = scriptMatch.index + scriptMatch[0].length;
-  if (!/^\s*<\/body>\s*<\/html>\s*$/i.test(html.slice(scriptEnd))) {
-    throw new BriefArtifactError('unsupported', 'incompatible_script_boundary', { date });
-  }
-  requireControls(html, date);
-
-  const openEnd = scriptMatch[0].indexOf('>') + 1;
-  const closeStart = scriptMatch[0].search(/<\/script\s*>$/i);
-  const script = scriptMatch[0].slice(openEnd, closeStart);
-  const marker = /^\s*const\s+ITEMS\s*=/.exec(script);
-  if (!marker) {
-    const code = /^\s*const\s+DATA\s*=/.test(script) ? 'unsupported_data_layout' : 'missing_items';
-    const state = code === 'missing_items' ? 'incomplete' : 'unsupported';
-    throw new BriefArtifactError(state, code, { date });
-  }
-
-  let cursor = marker.index + marker[0].length;
-  while (/\s/.test(script[cursor] ?? '')) cursor += 1;
-  if (script[cursor] !== '[') throw new BriefArtifactError('incomplete', 'invalid_items_array', { date });
-  const arrayEnd = findJsonArrayEnd(script, cursor);
-  if (arrayEnd === -1) throw new BriefArtifactError('incomplete', 'truncated_items_array', { date });
-
-  const afterArray = script.slice(arrayEnd + 1);
-  const keyMatch = /^\s*;\s*const\s+KEY\s*=\s*(['"])([^'"\\\r\n]*)\1\s*;/.exec(afterArray);
-  if (!keyMatch) throw new BriefArtifactError('incomplete', 'missing_storage_key', { date });
-  const key = keyMatch[2];
-  const keyDate = /^db-items-(\d{4}-\d{2}-\d{2})(?:[-_.][A-Za-z0-9._-]+)?$/.exec(key)?.[1];
-  if (keyDate !== date) throw new BriefArtifactError('unsupported', 'storage_key_date_mismatch', { date });
-  if (/\b(?:const|let|var)\s+ITEMS\b/.test(afterArray)) {
-    throw new BriefArtifactError('unsupported', 'duplicate_items_declaration', { date });
-  }
-  const supportedBindings = [
-    /\blet\s+fb\s*=/,
-    /\bfunction\s+saveOut\s*\(/,
-    /\bfunction\s+copyOut\s*\(/,
-    /\bfunction\s+clearAll\s*\(/,
-  ];
-  if (supportedBindings.some((pattern) => !pattern.test(script))) {
-    throw new BriefArtifactError('unsupported', 'missing_viewer_bindings', { date });
-  }
-
-  let rawItems;
-  try {
-    rawItems = JSON.parse(script.slice(cursor, arrayEnd + 1));
-  } catch (error) {
-    throw new BriefArtifactError('incomplete', 'invalid_items_json', { date, cause: error });
-  }
-  const items = validateArtifactItems(rawItems, date);
-  return {
-    html,
-    items,
-    key,
-    scriptEndByte: Buffer.byteLength(html.slice(0, scriptEnd)),
-  };
+  const sectionIds = new Set();
+  const sections = value.sections.map((section) => {
+    if (!isRecord(section) || !hasExactKeys(section, ['id', 'label', 'items'])) throw invalid();
+    if (typeof section.id !== 'string' || !ID.test(section.id) || sectionIds.has(section.id)) throw invalid();
+    sectionIds.add(section.id);
+    if (typeof section.label !== 'string' || !section.label.trim() || characterCount(section.label) > 200) throw invalid();
+    if (!Array.isArray(section.items) || section.items.length > MAX_SECTION_ITEMS) throw invalid();
+    const sectionItems = section.items.map((raw) => {
+      const item = checkItem(raw, ids, invalid);
+      items.push({ id: item.id, section: section.label, text: item.text });
+      return item;
+    });
+    return { id: section.id, label: section.label, items: sectionItems };
+  });
+  if (items.length > MAX_ITEMS) throw invalid();
+  return { date, title: value.title, words: value.words, opening, sections, items };
 }
 
-export function validateArtifactItems(rawItems, date) {
-  if (!Array.isArray(rawItems)) throw new BriefArtifactError('unsupported', 'items_not_array', { date });
-  if (rawItems.length > 200) throw new BriefArtifactError('unsupported', 'too_many_items', { date });
-  const ids = new Set();
-  return rawItems.map((item) => {
-    if (!isRecord(item) || typeof item.id !== 'string' || item.id.length === 0 ||
-        typeof item.sec !== 'string' || item.sec.length === 0) {
-      throw new BriefArtifactError('unsupported', 'invalid_item', { date });
-    }
-    if (ids.has(item.id)) throw new BriefArtifactError('unsupported', 'duplicate_item_id', { date });
-    ids.add(item.id);
-    let text;
-    let shape;
-    if (typeof item.text === 'string' && item.text.length > 0) {
-      text = item.text;
-      shape = 'text';
-    } else if (typeof item.lede === 'string' && item.lede.length > 0 && typeof item.body === 'string') {
-      text = item.lede;
-      shape = 'lede';
-    } else {
-      throw new BriefArtifactError('unsupported', 'invalid_item_text', { date });
-    }
-    return { id: item.id, section: item.sec, text, shape };
-  });
+function checkItem(item, ids, invalid) {
+  if (!isRecord(item) || !hasExactKeys(item, ['id', 'text'])) throw invalid();
+  if (typeof item.id !== 'string' || !ID.test(item.id) || ids.has(item.id)) throw invalid();
+  if (typeof item.text !== 'string' || !item.text.trim() || characterCount(item.text) > MAX_TEXT_CHARS) throw invalid();
+  ids.add(item.id);
+  return { id: item.id, text: item.text };
 }
 
 async function readLimited(handle, size, signal) {
@@ -220,37 +197,13 @@ async function readLimited(handle, size, signal) {
   return target.subarray(0, total);
 }
 
-function findJsonArrayEnd(source, start) {
-  let depth = 0;
-  let string = false;
-  let escaped = false;
-  for (let index = start; index < source.length; index += 1) {
-    const char = source[index];
-    if (string) {
-      if (escaped) escaped = false;
-      else if (char === '\\') escaped = true;
-      else if (char === '"') string = false;
-      continue;
-    }
-    if (char === '"') string = true;
-    else if (char === '[') depth += 1;
-    else if (char === ']' && --depth === 0) return index;
-  }
-  return -1;
+function characterCount(value) {
+  return [...value].length;
 }
 
-function requireControls(html, date) {
-  const required = [
-    /id=["']brief["']/,
-    /<textarea\b[^>]*id=["']overall["'][^>]*>/,
-    /id=["']status["']/,
-    /<button\b[^>]*class=["'][^"']*\bsave\b[^"']*["'][^>]*onclick=["']saveOut\(\)["'][^>]*>/,
-    /<button\b[^>]*onclick=["']copyOut\(\)["'][^>]*>/,
-    /<button\b[^>]*onclick=["']clearAll\(\)["'][^>]*>/,
-  ];
-  if (required.some((pattern) => !pattern.test(html))) {
-    throw new BriefArtifactError('unsupported', 'missing_viewer_controls', { date });
-  }
+function hasExactKeys(value, expected) {
+  const keys = Object.keys(value).sort();
+  return keys.length === expected.length && expected.slice().sort().every((key, index) => key === keys[index]);
 }
 
 function isRecord(value) {

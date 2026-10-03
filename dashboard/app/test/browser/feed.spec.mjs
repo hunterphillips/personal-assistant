@@ -1,4 +1,4 @@
-// The Feed tab of the Reading view against a temporary copy of
+// The Feed view against a temporary copy of
 // test/fixtures/feed, read by the real Feed routes, with the watch persona on
 // the fake Claude adapter of test/support/browser-server.mjs.
 
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
 
 import { WATCH } from '../support/browser-server.mjs';
-import { expect, expectView, nav, needsFocus, test } from '../support/browser-test.mjs';
+import { expect, expectView, nav, test } from '../support/browser-test.mjs';
 
 const FEED = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'feed');
 const INSTRUCTIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'feed-instructions', 'relevance.md');
@@ -39,12 +39,11 @@ function png(width, height) {
 
 const runs = (page) => page.locator('#feed-runs .feed-run');
 const item = (page, id) => page.locator(`[data-feed-item="${id}"]`);
-const tabs = (page) => page.getByRole('navigation', { name: 'Reading' });
 const messages = (page) => page.locator('#agent-messages .thread-message');
 
 async function openFeed(page, hub) {
   await page.goto(`${hub.origin}/feed`);
-  await expectView(page, 'reading', 'Feed');
+  await expectView(page, 'feed', 'Feed');
   await expect(runs(page)).toHaveCount(2);
 }
 
@@ -53,8 +52,7 @@ test.describe('with the fixture store', () => {
 
   test('renders each run as a group of posts, newest first', async ({ page, hub }) => {
     await openFeed(page, hub);
-    await expect(tabs(page).getByRole('link', { name: 'Feed' })).toHaveAttribute('aria-current', 'page');
-    await expect(tabs(page).getByRole('link', { name: 'Brief' })).not.toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('navigation', { name: 'Reading' })).toHaveCount(0);
     await expect(runs(page).locator('.feed-date')).toHaveText(['Monday, September 28', 'Monday, September 21']);
     await expect(runs(page).first().locator('.feed-since')).toHaveText('Since September 14');
     await expect(runs(page).first().locator('.feed-item')).toHaveCount(8);
@@ -67,7 +65,7 @@ test.describe('with the fixture store', () => {
     const next = await item(page, 'watch/2026-09-28/2').boundingBox();
     expect(Math.round(next.y - (post.y + post.height))).toBe(24);
     await expect(page.locator('#feed-message')).toBeHidden();
-    await expect(page.locator('#brief-frame')).toHaveCount(0);
+    await expect(page.locator('iframe')).toHaveCount(0);
 
     const robots = item(page, 'watch/2026-09-28/1');
     const badge = robots.locator('.feed-badge');
@@ -85,7 +83,7 @@ test.describe('with the fixture store', () => {
     await expect(discuss.locator('svg')).toHaveCount(1);
     await expect(discuss).toHaveCSS('border-top-width', '0px');
     await expect(discuss).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await expect(page.locator('#view-reading [data-action]')).toHaveCount(2);
+    await expect(page.locator('#view-feed [data-action]')).toHaveCount(0);
   });
 
   test('a source keeps its badge colour across posts', async ({ page, hub }) => {
@@ -108,7 +106,7 @@ test.describe('with the fixture store', () => {
     expect(title.x + title.width).toBeLessThanOrEqual(390);
     const overflow = await page.evaluate(() => ({
       page: document.documentElement.scrollWidth - window.innerWidth,
-      feed: document.getElementById('reading-feed').scrollWidth - document.getElementById('reading-feed').clientWidth,
+      feed: document.getElementById('feed-page').scrollWidth - document.getElementById('feed-page').clientWidth,
     }));
     expect(overflow).toEqual({ page: 0, feed: 0 });
   });
@@ -135,7 +133,7 @@ test.describe('with the fixture store', () => {
         ],
       }));
       await page.goto(`${hub.origin}/feed`);
-      await expectView(page, 'reading', 'Feed');
+      await expectView(page, 'feed', 'Feed');
       await expect(runs(page)).toHaveCount(3);
 
       const withImage = item(page, 'watch/2026-10-05/1');
@@ -187,44 +185,26 @@ test.describe('with the fixture store', () => {
     await openFeed(page, hub);
     await item(page, 'watch/2026-09-28/3').getByRole('button', { name: /^Discuss/ }).click();
     await expectView(page, 'agents', 'Agents');
-    await nav(page, 'Reading').click();
-    await tabs(page).getByRole('link', { name: 'Feed' }).click();
-    await expect(page).toHaveURL(`${hub.origin}/reading`);
+    await nav(page, 'Feed').click();
+    await expect(page).toHaveURL(`${hub.origin}/feed`);
     await item(page, 'watch/2026-09-28/4').getByRole('button', { name: /^Discuss/ }).click();
     await expect(item(page, 'watch/2026-09-28/4').locator('.feed-reason')).toHaveText(BUSY);
-    await expect(page).toHaveURL(`${hub.origin}/reading`);
+    await expect(page).toHaveURL(`${hub.origin}/feed`);
     expect(hub.requests('/api/feed/discuss').map((entry) => entry.status)).toEqual([202, 409]);
   });
 
-  test('the tabs switch between the brief and the feed and keep both', async ({ page, hub }) => {
-    needsFocus();
+  test('the brief opens over the Feed and leaves it as it was', async ({ page, hub }) => {
     await hub.writeBrief(DATE);
     await openFeed(page, hub);
-
-    await tabs(page).getByRole('link', { name: 'Brief' }).click();
-    await expect(page).toHaveURL(`${hub.origin}/brief`);
-    await expectView(page, 'reading', 'Reading');
-    await expect(page.frameLocator('#brief-frame').locator('h1')).toHaveText(`Daily Brief — ${DATE}`);
-    await expect(page.locator('#reading-feed')).toBeHidden();
-
-    await tabs(page).getByRole('link', { name: 'Feed' }).click();
-    await expect(page).toHaveURL(`${hub.origin}/reading`);
-    await expectView(page, 'reading', 'Feed');
-    await expect(page.locator('#brief-frame')).toBeHidden();
+    await page.goto(`${hub.origin}/brief`);
+    await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+    await expect(page).toHaveURL(`${hub.origin}/feed`);
+    await page.keyboard.press('Escape');
+    await expectView(page, 'feed', 'Feed');
     await expect(runs(page)).toHaveCount(2);
-
-    await page.goBack();
-    await expect(page).toHaveURL(`${hub.origin}/brief`);
-    await expectView(page, 'reading', 'Reading');
-    await expect(page.locator('#brief-frame')).toBeVisible();
-    await expect(page.locator('iframe#brief-frame')).toHaveCount(1);
-
-    await page.reload();
-    await expectView(page, 'reading', 'Reading');
-    await expect(page.frameLocator('#brief-frame').locator('h1')).toHaveText(`Daily Brief — ${DATE}`);
   });
 
-  test('the tab stops reading the store once it is left', async ({ page, hub }) => {
+  test('the view stops reading the store once it is left', async ({ page, hub }) => {
     await page.clock.install();
     await openFeed(page, hub);
     await nav(page, 'Home').click();
@@ -240,18 +220,16 @@ test.describe('with an empty store', () => {
 
   test('says the feed is empty', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/feed`);
-    await expectView(page, 'reading', 'Feed');
+    await expectView(page, 'feed', 'Feed');
     await expect(page.locator('#feed-message')).toHaveText(/^Nothing in the feed yet\./);
     await expect(runs(page)).toHaveCount(0);
   });
 
-  test('/reading opens on the Feed tab, which comes before Brief', async ({ page, hub }) => {
+  test('/reading moves to /feed', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/reading`);
-    await expectView(page, 'reading', 'Feed');
-    const links = tabs(page).getByRole('link');
-    await expect(links).toHaveText(['Feed', 'Brief']);
-    await expect(links.first()).toHaveAttribute('aria-current', 'page');
-    await expect(links.last()).not.toHaveAttribute('aria-current', 'page');
+    await expect(page).toHaveURL(`${hub.origin}/feed`);
+    await expectView(page, 'feed', 'Feed');
+    await expect(nav(page, 'Feed')).toHaveAttribute('title', 'Feed');
   });
 });
 
@@ -300,13 +278,12 @@ test.describe('with the feed instructions', () => {
     expect(hub.requests('/api/feed/instructions')).toEqual([{ method: 'GET', status: 200 }]);
   });
 
-  test('the button is only on the Feed tab', async ({ page, hub }) => {
-    await page.goto(`${hub.origin}/brief`);
-    await expectView(page, 'reading', 'Reading');
-    await expect(toggle(page)).toHaveCount(0);
-    await tabs(page).getByRole('link', { name: 'Feed' }).click();
+  test('the button is only on the Feed view', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/goals`);
+    await expect(toggle(page)).toBeHidden();
+    await nav(page, 'Feed').click();
     await expect(toggle(page)).toBeVisible();
-    await tabs(page).getByRole('link', { name: 'Brief' }).click();
+    await nav(page, 'Goals').click();
     await expect(toggle(page)).toBeHidden();
   });
 
@@ -357,13 +334,12 @@ test.describe('with the feed instructions', () => {
     await openFeed(page, hub);
     await item(page, 'watch/2026-09-28/3').getByRole('button', { name: /^Discuss/ }).click();
     await expectView(page, 'agents', 'Agents');
-    await nav(page, 'Reading').click();
-    await tabs(page).getByRole('link', { name: 'Feed' }).click();
+    await nav(page, 'Feed').click();
     await toggle(page).click();
     await input(page).fill('Drop the Invented Gazette.');
     await panel(page).getByRole('button', { name: 'Send' }).click();
     await expect(panel(page).locator('.composer-reason')).toHaveText(BUSY);
-    await expect(page).toHaveURL(`${hub.origin}/reading`);
+    await expect(page).toHaveURL(`${hub.origin}/feed`);
     await expect(input(page)).toHaveValue('Drop the Invented Gazette.');
     expect(hub.requests('/api/feed/instructions/propose')).toEqual([{ method: 'POST', status: 409 }]);
   });
@@ -393,7 +369,7 @@ test.describe('with the feed instructions', () => {
     expect(button.height).toBeGreaterThanOrEqual(44);
     const overflow = await page.evaluate(() => ({
       page: document.documentElement.scrollWidth - window.innerWidth,
-      feed: document.getElementById('reading-feed').scrollWidth - document.getElementById('reading-feed').clientWidth,
+      feed: document.getElementById('feed-page').scrollWidth - document.getElementById('feed-page').clientWidth,
     }));
     expect(overflow).toEqual({ page: 0, feed: 0 });
   });

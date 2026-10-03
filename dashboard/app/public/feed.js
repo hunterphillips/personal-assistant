@@ -2,12 +2,12 @@
 // items as posts (with the story's image under the summary when it has one),
 // each with a Discuss button that sends the item to the watch persona
 // (/api/feed/discuss) and opens its thread. A Feed instructions button in
-// the tab row opens a panel above the posts with the feed's criteria as
+// the header opens a panel above the posts with the feed's criteria as
 // prose (/api/feed/instructions, read each time it opens) and a composer
 // that sends a change to the watch persona
 // (/api/feed/instructions/propose) and opens its thread; the panel itself
 // is instructions.js's. The shell calls create(shellApi) once, then show()
-// and hide() as the Feed tab of the Reading view comes on and off screen.
+// and hide() as the Feed view comes on and off screen.
 //
 // While shown, the view fetches /api/feed on show() and every 60 seconds. An
 // answer identical to the last one rendered changes nothing; the panel is
@@ -333,7 +333,7 @@
     // scroll container's visible box (a pixel of slack, since a scrolled
     // edge lands on fractions).
     function itemInView() {
-      var scroller = document.getElementById('reading-feed');
+      var scroller = document.getElementById('feed-page');
       if (!scroller || !data) return null;
       var box = scroller.getBoundingClientRect();
       var nodes = runs.querySelectorAll('.feed-item[data-feed-item]');
