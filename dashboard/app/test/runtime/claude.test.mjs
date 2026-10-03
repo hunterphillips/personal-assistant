@@ -120,6 +120,7 @@ test('a turn emits state, messages, and usage, writes the pointer, and caches th
   assert.equal(prompt, 'How is cash?');
   assert.equal(options.cwd, '/invented/cfo');
   assert.equal(options.permissionMode, 'default');
+  assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code' });
   assert.equal(options.maxTurns, 7);
   assert.equal(typeof options.canUseTool, 'function');
   assert.ok(options.abortController instanceof AbortController);
@@ -168,6 +169,18 @@ test('a stored pointer is resumed, and a new session id from init replaces it', 
   assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-2', createdAt: AT });
   await adapter.send(AGENT, 'Again');
   assert.equal(query.calls[1].options.resume, 'session-2');
+});
+
+test('every turn runs with the Claude Code preset system prompt, on a plain send and on a resumed one', async (t) => {
+  const { adapter, store, query } = await setup(t);
+  await adapter.send(AGENT, 'How is cash?');
+  assert.equal('resume' in query.calls[0].options, false);
+  assert.deepEqual(query.calls[0].options.systemPrompt, { type: 'preset', preset: 'claude_code' });
+  assert.deepEqual(await store.readPointer('cfo'), { sessionId: 'session-1', createdAt: AT });
+
+  await adapter.send(AGENT, 'Again');
+  assert.equal(query.calls[1].options.resume, 'session-1');
+  assert.deepEqual(query.calls[1].options.systemPrompt, { type: 'preset', preset: 'claude_code' });
 });
 
 test('send loads the pointer itself when start was not called', async (t) => {
@@ -934,6 +947,7 @@ test('the tools hook adds mcpServers and allowedTools by name and cannot change 
       cwd: '/elsewhere',
       resume: 'forged',
       maxTurns: 999,
+      systemPrompt: { type: 'preset', preset: 'forged' },
     };
   };
   const { adapter, query } = await setup(t, { turnTools });
@@ -958,6 +972,7 @@ test('the tools hook adds mcpServers and allowedTools by name and cannot change 
   assert.equal(options.cwd, '/invented/cfo');
   assert.equal('resume' in options, false);
   assert.equal(options.maxTurns, LIMITS.turnMaxTurns);
+  assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code' }, 'the hook cannot replace the preset');
   // The adapter's prompt stands when the hook returns none.
   assert.equal(prompt, 'From Assistant: How is cash? @Brain');
 

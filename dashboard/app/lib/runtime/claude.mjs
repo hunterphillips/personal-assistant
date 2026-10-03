@@ -106,8 +106,10 @@
 // are ask, so a global mode such as auto never applies on its own, and the
 // tools hook cannot change it), maxTurns from limits.turnMaxTurns, the
 // turn's AbortController, and canUseTool on every turn (without it the SDK
-// drops AskUserQuestion; at Full access it still carries questions). The
-// init message's permissionMode is logged in persona_init; when it differs
+// drops AskUserQuestion; at Full access it still carries questions). Every
+// turn also runs with the Claude Code preset system prompt, so an agent
+// behaves as its repo's CLAUDE.md expects; CLAUDE.md itself loads through
+// the default setting sources. The init message's permissionMode is logged in persona_init; when it differs
 // from the mode requested (Auto is per model, and the user's
 // `permissions.disableAutoMode` can refuse it) one
 // persona_permission_mismatch line carries both and the turn goes on.
@@ -159,7 +161,7 @@
 // spreading it: `mcpServers` and `allowedTools` into the options (a later
 // phase adds `tools` here for a read-only chain), and `prompt` in place of
 // the text the model gets. A hook result cannot touch permissionMode,
-// canUseTool, cwd, resume, or anything else. A hook that throws is logged
+// canUseTool, cwd, resume, systemPrompt, or anything else. A hook that throws is logged
 // as persona_tools_error and the turn runs without tools. The result may
 // carry commit() and rollback(): commit() runs once init has been seen
 // (the prompt reached the model), rollback() when the turn ends without
@@ -464,6 +466,7 @@ export function createClaudeAdapter({
         cwd: entry.cwd,
         ...(entry.sessionId ? { resume: entry.sessionId } : {}),
         ...sdkModeFor(turn.permission),
+        systemPrompt: { type: 'preset', preset: 'claude_code' },
         maxTurns: limits.turnMaxTurns,
         abortController: turn.controller,
         canUseTool: makeCanUseTool(entry, turn),

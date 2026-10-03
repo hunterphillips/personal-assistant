@@ -1055,7 +1055,10 @@ read-only fake) both routes are 404.
   `maxTurns` 25 and the SDK permission mode the agent's level maps to
   (`permission` in the snapshot, the registry's level over the settings
   default; `lib/permissions.mjs`), so the global `auto` mode never applies
-  on its own and the tools hook cannot change it:
+  on its own and the tools hook cannot change it. Every turn also runs
+  with the Claude Code preset system prompt, so an agent behaves as its
+  repo's CLAUDE.md expects; CLAUDE.md itself loads through the default
+  setting sources:
 
   | Level | `permissionMode` | Also |
   | --- | --- | --- |
