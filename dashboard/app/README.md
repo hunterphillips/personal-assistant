@@ -919,7 +919,8 @@ folder under `agents/<id>/` as its registry `cwd`, with a `CLAUDE.md` that
 says what it does. A turn there loads that file, every `CLAUDE.md` above
 it up to the repo root, and skills from the folder's `.claude/skills/` and
 the root's. `.claude/settings.json` and `.mcp.json` are read from the
-folder only and are not inherited from the root.
+folder only and are not inherited from the root. A built-in agent names
+its folder in `registry/builtin.json` as `folder`, relative to the repo.
 
 ### State in the snapshot
 

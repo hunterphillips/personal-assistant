@@ -485,7 +485,7 @@ test('start seeds the built-in agents into a registry without them, lists them w
   t.after(() => dashboard.close());
   const file = JSON.parse(await readFile(env.DASHBOARD_REGISTRY_PATH, 'utf8'));
   assert.deepEqual(file.agents.map((entry) => entry.id), ['assistant', 'myos']);
-  assert.equal(file.agents[1].cwd, path.resolve(APP_DIR, '../..'));
+  assert.equal(file.agents[1].cwd, path.resolve(APP_DIR, '../../agents/myos'));
   assert.deepEqual(logs.filter((e) => e.event === 'builtins_seeded'), [{ event: 'builtins_seeded', agents: ['myos'] }]);
   const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
   const myos = state.agents.find((entry) => entry.id === 'myos');

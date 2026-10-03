@@ -1,14 +1,16 @@
 // Built-in agents: the registry entries that are part of the dashboard
 // itself (registry.mjs `builtin: true`), kept as data in
 // config.builtinPath (default registry/builtin.json, committed) so no agent
-// id lives in code. The file is the registry's shape without `cwd`:
+// id lives in code. The file is the registry's shape without `cwd`, plus an
+// optional `folder` relative to the repository:
 //
-//   { "agents": [ { "id": "myos", "name": "Myos", ..., "builtin": true } ] }
+//   { "agents": [ { "id": "myos", "name": "Myos", "folder": "agents/myos", ..., "builtin": true } ] }
 //
 // seedBuiltins({ registry, file, root, log }) -> Promise<string[]>
 //   At start, after registry.start() and before the hub starts: adds every
 //   entry whose id the registry lacks, in one registry.write, with `cwd`
-//   set to `root` (the repository the dashboard lives in) and, when its
+//   set to `folder` resolved against `root` (the repository the dashboard
+//   lives in), or to `root` without one, and `folder` dropped; when its
 //   group is not in the registry's `groups`, the first listed group's id.
 //   Resolves with the ids it added (logged once as builtins_seeded). A
 //   registry that is not loaded (missing or invalid: it keeps its last good
@@ -25,6 +27,7 @@
 //   the brief or quick chat off an agent being deleted.
 
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 
 const MAX_BYTES = 64 * 1024;
 
@@ -51,7 +54,8 @@ export async function seedBuiltins({ registry, file, root, log = () => {} }) {
       const groupIds = new Set(groups.map((group) => group?.id));
       const missing = entries.filter((entry) => !ids.has(entry.id)).map((entry) => {
         const group = groupIds.size > 0 && !groupIds.has(entry.group) ? groups[0].id : entry.group;
-        return { ...entry, group, cwd: root };
+        const { folder, ...rest } = entry;
+        return { ...rest, group, cwd: folder === undefined ? root : path.resolve(root, folder) };
       });
       added.push(...missing.map((entry) => entry.id));
       return { ...document, agents: [...agents, ...missing.map(inKeyOrder)] };
@@ -91,6 +95,9 @@ async function readEntries(file) {
   for (const entry of parsed.agents) {
     if (!isRecord(entry) || typeof entry.id !== 'string') throw new Error('builtins_invalid: every agent needs an id');
     if ('cwd' in entry) throw new Error(`builtins_invalid: ${entry.id} must not name a cwd`);
+    if ('folder' in entry && !isRelativeFolder(entry.folder)) {
+      throw new Error(`builtins_invalid: ${entry.id} folder must be a relative path inside the repository`);
+    }
   }
   return parsed.agents;
 }
@@ -104,6 +111,12 @@ function inKeyOrder(entry) {
   for (const key of KEY_ORDER) if (key in entry) ordered[key] = entry[key];
   for (const key of Object.keys(entry)) if (!(key in ordered)) ordered[key] = entry[key];
   return ordered;
+}
+
+function isRelativeFolder(folder) {
+  if (typeof folder !== 'string' || folder.trim() === '' || path.isAbsolute(folder)) return false;
+  const normal = path.normalize(folder);
+  return normal !== '.' && normal !== '..' && !normal.startsWith(`..${path.sep}`);
 }
 
 function isRecord(value) {
