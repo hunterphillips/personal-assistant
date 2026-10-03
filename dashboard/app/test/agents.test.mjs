@@ -423,13 +423,18 @@ test('settings PUT rewrites the entry in schema order, keeps jobs, omits accepts
   assert.deepEqual([cfo.name, cfo.pinned, cfo.accepts], ['Money desk', true, ['assistant']]);
   assert.deepEqual(cfo.model, { id: 'sonnet', effort: 'low', source: 'agent', default: { id: 'sonnet', effort: 'low' }, agent: { id: 'sonnet', effort: 'low' } });
 
-  // Everyone, as null or as an empty list, writes no accepts key.
-  for (const accepts of [null, []]) {
-    const again = await put(app, '/api/agents/cfo/settings', settingsBody({ accepts }));
-    assert.equal(again.status, 200);
-    assert.equal('accepts' in app.registry.writes.at(-1).agents[0], false);
-    assert.equal('accepts' in again.json.agent, false);
-  }
+  // Everyone, as null, writes no accepts key.
+  const everyone = await put(app, '/api/agents/cfo/settings', settingsBody({ accepts: null }));
+  assert.equal(everyone.status, 200);
+  assert.equal('accepts' in app.registry.writes.at(-1).agents[0], false);
+  assert.equal('accepts' in everyone.json.agent, false);
+
+  // No one, as an empty list, writes accepts: [].
+  const noOne = await put(app, '/api/agents/cfo/settings', settingsBody({ accepts: [] }));
+  assert.equal(noOne.status, 200);
+  assert.deepEqual(app.registry.writes.at(-1).agents[0].accepts, []);
+  assert.equal('accepts' in noOne.json.agent, true);
+  assert.deepEqual(noOne.json.agent.accepts, []);
 });
 
 test('settings PUT writes permission after effort when set, none for null or absent, refuses a bad level, and POST creates with none', async (t) => {

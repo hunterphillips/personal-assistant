@@ -15,9 +15,10 @@
 // EFFORTS; `permission` (optional, so a body from before the control
 // existed still saves) null or one of permissions.mjs PERMISSION_LEVELS,
 // where absent and null both mean the settings default and the written
-// entry carries no key; `accepts` null or a list of
-// agent ids, where null, an empty list, or every agent chosen all mean
-// everyone and the written entry carries no `accepts` key (never null);
+// entry carries no key; `accepts` null or a list of agent ids, where null
+// (or absent) means everyone and writes no `accepts` key, an empty list
+// means no one and is written as `accepts: []`, and a non-empty list means
+// only those agents and is written as given;
 // `pinned` a boolean; `group` a group id; `newGroup` { id, name } adds that
 // group to the registry's list when no group has the id yet (a slug that
 // matches an existing group joins it), and `group` must then equal its id.
@@ -230,8 +231,9 @@ function fieldsOf(body) {
   return fields;
 }
 
-// One agent entry in the schema's key order. `accepts` is written only
-// when it narrows; `model`, `effort`, `permission`, and `pinned` only when
+// One agent entry in the schema's key order. `accepts` is written whenever
+// the body gives an array (including empty, for "no one"), and omitted
+// when it's null; `model`, `effort`, `permission`, and `pinned` only when
 // set.
 function entryFor(fields) {
   const entry = {
@@ -247,7 +249,7 @@ function entryFor(fields) {
   if (fields.model !== null && fields.model !== undefined) entry.model = fields.model;
   if (fields.effort !== null && fields.effort !== undefined) entry.effort = fields.effort;
   if (fields.permission !== null && fields.permission !== undefined) entry.permission = fields.permission;
-  if (Array.isArray(fields.accepts) && fields.accepts.length > 0) entry.accepts = [...fields.accepts];
+  if (Array.isArray(fields.accepts)) entry.accepts = [...fields.accepts];
   if (Array.isArray(fields.jobs) && fields.jobs.length > 0) entry.jobs = [...fields.jobs];
   if (fields.pinned === true) entry.pinned = true;
   // Never in a body; an edit keeps the existing entry's flag.

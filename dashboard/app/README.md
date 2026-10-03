@@ -676,9 +676,10 @@ Auto, and Full access, with one sentence under it for the level in force:
 and asks only when it is unsure.", or "Runs every tool without asking.";
 the level shows nowhere else, so the row and the header carry no chip for
 it; a Codex persona reads "Codex, its own
-settings" in place of the three), Who may message (checkboxes: "Everyone" first,
-then the other personas; Everyone and the names exclude each other, and
-none chosen is everyone), and Pinned. Save is off until a field changed
+settings" in place of the three), Who may message (checkboxes: "Everyone"
+first, then "No one", then the other personas; Everyone, No one, and the
+names each exclude the rest, and none chosen is everyone; "No one" writes
+`accepts: []`), and Pinned. Save is off until a field changed
 and sends one `PUT /api/agents/<id>/settings`; Cancel puts the values
 back. The row, the header, and the form follow the registry change through
 the snapshot. A refused save lists the validator's problems under the form
@@ -1127,8 +1128,9 @@ in the registry; null is allowed),
 that write the registry file, through `registry.write(mutate)` in `lib/registry.mjs`. A
 body carries every field: `name`, `role`, `group`, `description`, `cwd`
 (absolute), `model` (null or an id or alias), `effort` (null or a level),
-`accepts` (null or a list of agent ids; null, an empty list, and every
-agent chosen all mean everyone and write no key), `pinned` (boolean), and
+`accepts` (null or a list of agent ids; null means everyone and writes no
+key, an empty list means no one and writes `accepts: []`, a non-empty list
+writes only those named), `pinned` (boolean), and
 for a create `id`; `permission` (`ask`, `auto`, `full`, or null for the
 settings default, which writes no key) may be left out, so a body from
 before the control existed still saves, and a level that is not one of

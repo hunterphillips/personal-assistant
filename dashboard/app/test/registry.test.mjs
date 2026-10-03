@@ -569,14 +569,16 @@ test('permission is one of ask, auto, full on a persona, absent for a system age
 test('accepts names other agents in the file; absent and null both load as everyone', async (t) => {
   const dir = await tempDir(t);
   const other = baseAgent(dir, { id: 'assistant', name: 'Assistant' });
-  const file = await write(dir, { version: 1, agents: [baseAgent(dir, { accepts: ['assistant'] }), { ...other, accepts: null }] });
+  const noOne = baseAgent(dir, { id: 'dev', name: 'Dev', accepts: [] });
+  const file = await write(dir, { version: 1, agents: [baseAgent(dir, { accepts: ['assistant'] }), { ...other, accepts: null }, noOne] });
   const registry = createRegistry({ path: file, pollMs: 10_000 });
   await registry.start();
   t.after(() => registry.stop());
-  const [cfo, assistant] = registry.current().agents;
+  const [cfo, assistant, dev] = registry.current().agents;
   assert.deepEqual(cfo.accepts, ['assistant']);
   assert.equal(Object.isFrozen(cfo.accepts), true);
   assert.equal('accepts' in assistant, false);
+  assert.deepEqual(dev.accepts, []);
 
   const cases = [
     [[baseAgent(dir, { accepts: ['nobody'] })], /accepts names no agent "nobody"/],

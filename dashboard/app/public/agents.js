@@ -93,6 +93,7 @@
   var NEW_AGENT = 'New agent';
   var NEW_GROUP = '__new__'; // the Group select's "New group…" value
   var EVERYONE = '*'; // the Who may message list's first checkbox
+  var NO_ONE_ACCEPTS = '!'; // the Who may message list's second checkbox
   var CODEX_NOTE = 'Codex, its own settings';
   var FOLDER_NOTE = 'The folder applies when a new thread starts.';
   var NOT_WRITTEN = 'The registry could not be written.';
@@ -1564,10 +1565,12 @@
       var newName = group === NEW_GROUP && groupNameField ? groupNameField.value.trim() : '';
       var accepts = [];
       var everyone = false;
+      var noOne = false;
       var boxes = detailsForm.querySelectorAll('input[name="accepts"]');
       for (var i = 0; i < boxes.length; i += 1) {
         if (!boxes[i].checked) continue;
         if (boxes[i].value === EVERYONE) everyone = true;
+        else if (boxes[i].value === NO_ONE_ACCEPTS) noOne = true;
         else accepts.push(boxes[i].value);
       }
       var model = control('model');
@@ -1586,7 +1589,7 @@
         model: model && model.value ? model.value : null,
         effort: effort && effort.value ? effort.value : null,
         permission: permission && permission.value ? permission.value : null,
-        accepts: everyone || accepts.length === 0 ? null : accepts,
+        accepts: noOne ? [] : (everyone || accepts.length === 0 ? null : accepts),
         pinned: !!(pinned && pinned.checked),
       };
     }
@@ -1661,10 +1664,11 @@
         detailsForm.appendChild(formField('Permissions', selectInput('permission', [defaultPermissionOption()].concat(levels), permission || ''), 'agent-form-permission'));
         detailsForm.appendChild(element('p', 'form-note form-note-permission'));
       }
-      var accepts = agent && Array.isArray(agent.accepts) && agent.accepts.length > 0 ? agent.accepts : null;
+      var accepts = agent && Array.isArray(agent.accepts) ? agent.accepts : null;
       var who = element('fieldset', 'form-fieldset');
       who.appendChild(element('legend', 'form-legend', 'Who may message'));
       who.appendChild(checkbox('accepts', EVERYONE, 'Everyone', !accepts));
+      who.appendChild(checkbox('accepts', NO_ONE_ACCEPTS, 'No one', !!accepts && accepts.length === 0));
       var others = otherPersonas(agent);
       for (var i = 0; i < others.length; i += 1) {
         who.appendChild(checkbox('accepts', others[i].id, others[i].name, !!accepts && accepts.indexOf(others[i].id) !== -1));
@@ -1772,17 +1776,20 @@
       newAgent.focus();
     }
 
-    // Everyone and the named agents exclude each other; no one chosen
-    // means everyone.
+    // Everyone, No one, and the named agents all exclude each other:
+    // checking Everyone or No one clears every other box, and checking a
+    // named agent clears both Everyone and No one. Nothing checked at all
+    // falls back to Everyone.
     function onAcceptsChange(box) {
       var boxes = detailsForm.querySelectorAll('input[name="accepts"]');
+      var exclusive = box.value === EVERYONE || box.value === NO_ONE_ACCEPTS;
       var any = false;
       for (var i = 0; i < boxes.length; i += 1) {
-        if (box.value === EVERYONE && box.checked && boxes[i] !== box) boxes[i].checked = false;
-        else if (box.value !== EVERYONE && box.checked && boxes[i].value === EVERYONE) boxes[i].checked = false;
-        if (boxes[i].checked && boxes[i].value !== EVERYONE) any = true;
+        if (exclusive && box.checked && boxes[i] !== box) boxes[i].checked = false;
+        else if (!exclusive && box.checked && (boxes[i].value === EVERYONE || boxes[i].value === NO_ONE_ACCEPTS)) boxes[i].checked = false;
+        if (boxes[i].checked && boxes[i].value !== EVERYONE && boxes[i].value !== NO_ONE_ACCEPTS) any = true;
       }
-      if (!any) {
+      if (!any && !(exclusive && box.checked && box.value === NO_ONE_ACCEPTS)) {
         for (var j = 0; j < boxes.length; j += 1) if (boxes[j].value === EVERYONE) boxes[j].checked = true;
       }
     }

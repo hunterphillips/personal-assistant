@@ -1300,26 +1300,58 @@ test.describe('the settings form', () => {
 
   test('Everyone and the named agents exclude each other, and no one chosen is everyone', async ({ page, hub }) => {
     await openForm(page, hub, 'cfo');
-    await expect(checks(page)).toHaveCount(3);
-    await expect(form(page).locator('.form-check')).toHaveText(['Everyone', 'Second brain', 'Dev', 'Pinned']);
+    await expect(checks(page)).toHaveCount(4);
+    await expect(form(page).locator('.form-check')).toHaveText(['Everyone', 'No one', 'Second brain', 'Dev', 'Pinned']);
     await expect(checks(page).nth(0)).toBeChecked();
-    await checks(page).nth(1).check();
-    await expect(checks(page).nth(0)).not.toBeChecked();
     await checks(page).nth(2).check();
+    await expect(checks(page).nth(0)).not.toBeChecked();
+    await checks(page).nth(3).check();
     await save(page).click();
     await expect(save(page)).toBeDisabled();
     expect(hub.registry.writes[0].agents.find((a) => a.id === 'cfo').accepts).toEqual(['brain', 'dev']);
-    await expect(checks(page).nth(1)).toBeChecked();
+    await expect(checks(page).nth(2)).toBeChecked();
 
     await checks(page).nth(0).check();
-    await expect(checks(page).nth(1)).not.toBeChecked();
     await expect(checks(page).nth(2)).not.toBeChecked();
+    await expect(checks(page).nth(3)).not.toBeChecked();
     await checks(page).nth(0).click();
     await expect(checks(page).nth(0)).toBeChecked();
     await expect(save(page)).toBeEnabled();
     await save(page).click();
     await expect(save(page)).toBeDisabled();
     expect('accepts' in hub.registry.writes[1].agents.find((a) => a.id === 'cfo')).toBe(false);
+  });
+
+  test('No one excludes Everyone and the named agents, saves as an empty list, and reopens checked', async ({ page, hub }) => {
+    await openForm(page, hub, 'cfo');
+    await expect(checks(page).nth(1)).not.toBeChecked();
+    await checks(page).nth(1).check();
+    await expect(checks(page).nth(0)).not.toBeChecked();
+    await save(page).click();
+    await expect(save(page)).toBeDisabled();
+    expect(hub.registry.writes[0].agents.find((a) => a.id === 'cfo').accepts).toEqual([]);
+    await expect(checks(page).nth(1)).toBeChecked();
+
+    // Reopening the form reads the stored empty list as No one, not Everyone.
+    await page.reload();
+    await page.locator('#agent-details-toggle').click();
+    await expect(field(page, 'name')).toBeVisible();
+    await expect(checks(page).nth(0)).not.toBeChecked();
+    await expect(checks(page).nth(1)).toBeChecked();
+
+    // A named agent clears No one.
+    await checks(page).nth(2).check();
+    await expect(checks(page).nth(1)).not.toBeChecked();
+
+    // Everyone clears No one and the named agent.
+    await checks(page).nth(1).check();
+    await checks(page).nth(0).check();
+    await expect(checks(page).nth(1)).not.toBeChecked();
+    await expect(checks(page).nth(2)).not.toBeChecked();
+
+    // Unchecking everything falls back to Everyone.
+    await checks(page).nth(0).click();
+    await expect(checks(page).nth(0)).toBeChecked();
   });
 
   test("a Codex persona's form says Codex, its own settings", async ({ page, hub }) => {
@@ -1391,7 +1423,7 @@ test.describe('the settings form', () => {
     await expect(field(page, 'effort').locator('option:checked')).toHaveText('Default (Claude Code)');
     await expect(field(page, 'permission').locator('option:checked')).toHaveText('System default (Ask)');
     await expect(field(page, 'cwd')).toHaveValue('');
-    await expect(checks(page)).toHaveCount(4);
+    await expect(checks(page)).toHaveCount(5);
     if (phone(page)) {
       await expect(page.locator('#agents-list')).toBeHidden();
       await expect(page.locator('#agent-name')).toHaveText('New agent');
