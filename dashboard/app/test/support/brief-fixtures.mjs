@@ -1,42 +1,51 @@
+// Invented briefs for the tests. test/fixtures/brief/brief-2026-09-15.json is
+// one brief in the shape build.py writes, labelled invented in its title;
+// briefData() builds others. Nothing here reads the real briefs directory.
+
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURES = path.resolve(fileURLToPath(new URL('../fixtures/', import.meta.url)));
+export const FIXTURE_DATE = '2026-09-15';
 
 export async function fixture(name) {
   return readFile(path.join(FIXTURES, name), 'utf8');
 }
 
-export function viewerHtml({ date, items, key = `db-items-${date}`, extraScript = '', controls = true }) {
-  const controlsHtml = controls ? `
-<div id="brief"></div>
-<textarea id="overall"></textarea>
-<span id="status"></span>
-<button class="save" onclick="saveOut()">Save</button>
-<button onclick="copyOut()">Copy</button>
-<button onclick="clearAll()">Clear</button>` : '<div>incompatible invented viewer</div>';
-  return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><style>.lede{font-weight:600}</style></head>
-<body>${controlsHtml}
-<script>
-const ITEMS = ${JSON.stringify(items)};
-const KEY = '${key}';
-let fb = {};
-function saveOut() {}
-function copyOut() {}
-function clearAll() { fb = {}; }
-${extraScript}
-</script>
-</body>
-</html>
-`;
+// The fixture brief, with its date (and anything else) replaced.
+export async function fixtureBrief(date = FIXTURE_DATE, overrides = {}) {
+  const value = JSON.parse(await fixture(`brief/brief-${FIXTURE_DATE}.json`));
+  return { ...value, date, ...overrides };
 }
 
-export async function writeViewer(dir, date, options = {}) {
-  const items = options.items ?? [{ sec: 'Invented', id: 'one', text: 'Invented item.' }];
-  const html = options.html ?? viewerHtml({ date, items, key: options.key ?? `db-items-${date}`, ...options });
+// A small invented brief: one section per entry of `sections`, each a list
+// of item texts.
+export function briefData(date, { title = `Invented brief ${date}`, opening = 'Invented opening.', sections = { Invented: ['Invented item.'] } } = {}) {
+  return {
+    date,
+    title,
+    words: 3,
+    opening: opening === null ? null : { id: 'opening', text: opening },
+    sections: Object.entries(sections).map(([label, texts]) => {
+      const id = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      return { id, label, items: texts.map((text, index) => ({ id: `${id}-${index + 1}`, text })) };
+    }),
+  };
+}
+
+export async function writeBrief(dir, date, value) {
+  const data = value ?? await fixtureBrief(date);
+  const text = typeof data === 'string' ? data : `${JSON.stringify(data, null, 2)}\n`;
+  const file = path.join(dir, `brief-${date}.json`);
+  await writeFile(file, text);
+  return { file, text, data };
+}
+
+// A viewer page the run keeps for the record; the dashboard only notices
+// its date.
+export async function writeViewer(dir, date) {
   const file = path.join(dir, `viewer-${date}.html`);
-  await writeFile(file, html);
-  return { file, html, items };
+  await writeFile(file, '<!doctype html><title>Invented viewer</title>\n');
+  return file;
 }

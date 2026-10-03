@@ -267,7 +267,7 @@ test('a failed forwarded pause does not refresh jobs', async (t) => {
 test('the new shell paths serve the shell and their slash forms redirect', async (t) => {
   const app = await startStreamingApp(t);
   const shell = await request(app, 'GET', '/');
-  for (const view of ['/health', '/agents', '/goals', '/reading']) {
+  for (const view of ['/health', '/agents', '/goals', '/feed']) {
     const response = await request(app, 'GET', view);
     assert.equal(response.status, 200, view);
     assert.equal(response.text, shell.text);

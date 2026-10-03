@@ -1205,8 +1205,9 @@
       return window.DashboardMarkdown.renderInto(element('div', className + ' markdown'), text, pills ? { mentions: pills } : undefined);
     }
 
-    // The morning brief's notice: one line that opens to the memo. A brief
-    // that did not build is the sentence alone.
+    // The morning brief's notice: one line that opens to the memo, and Open
+    // brief, which shows that date's brief in the overlay over this view. A
+    // brief that did not build is the sentence alone.
     function briefNode(entry) {
       var text = typeof entry.text === 'string' ? entry.text : '';
       if (entry.state === 'failed') {
@@ -1222,6 +1223,13 @@
       details.appendChild(element('summary', 'thread-brief-summary', 'Brief' + (day ? ', ' + day : '') + ': ' + window.DashboardMarkdown.plain(line)));
       details.appendChild(markdownNode('thread-brief-body', text));
       node.appendChild(details);
+      if (typeof entry.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry.date)) {
+        var openBrief = element('button', 'button thread-brief-open', 'Open brief');
+        openBrief.type = 'button';
+        openBrief.setAttribute('data-agent-action', 'open-brief');
+        openBrief.setAttribute('data-brief-date', entry.date);
+        node.appendChild(openBrief);
+      }
       node.appendChild(messageMeta(entry));
       return node;
     }
@@ -2937,6 +2945,9 @@
           break;
         case 'interrupt':
           if (agent) act(agent, 'interrupt');
+          break;
+        case 'open-brief':
+          if (shell.openBrief) shell.openBrief(node.getAttribute('data-brief-date'), node);
           break;
         case 'open-terminal':
           if (isSession(agent)) openSessionTerminal(agent);

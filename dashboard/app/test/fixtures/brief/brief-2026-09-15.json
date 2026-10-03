@@ -1,0 +1,35 @@
+{
+  "date": "2026-09-15",
+  "title": "Invented brief for tests, not a real day",
+  "words": 58,
+  "opening": {
+    "id": "opening",
+    "text": "Invented opening: cash is fine and nothing is due before Thursday."
+  },
+  "sections": [
+    {
+      "id": "needs-you",
+      "label": "Needs you",
+      "items": [
+        {
+          "id": "needs-you-1",
+          "text": "An invented reply to **Sam** is owed about the lease."
+        },
+        {
+          "id": "needs-you-2",
+          "text": "- One invented form waits for a signature.\n- Another invented form is half done."
+        }
+      ]
+    },
+    {
+      "id": "money",
+      "label": "Money",
+      "items": [
+        {
+          "id": "money-1",
+          "text": "Invented drift is under a point, and the [policy](https://example.com/policy) holds."
+        }
+      ]
+    }
+  ]
+}

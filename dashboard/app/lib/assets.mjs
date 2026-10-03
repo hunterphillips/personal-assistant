@@ -5,7 +5,7 @@ export const ASSETS = Object.freeze({
   'albert-sans-latin.woff2': { file: 'albert-sans-latin.woff2', type: 'font/woff2' },
   'agents.js': { file: 'agents.js', type: 'text/javascript; charset=utf-8' },
   'agents-sidebar.js': { file: 'agents-sidebar.js', type: 'text/javascript; charset=utf-8' },
-  'brief-bridge.js': { file: 'brief-bridge.js', type: 'text/javascript; charset=utf-8' },
+  'brief-overlay.js': { file: 'brief-overlay.js', type: 'text/javascript; charset=utf-8' },
   'feed.js': { file: 'feed.js', type: 'text/javascript; charset=utf-8' },
   'goals.js': { file: 'goals.js', type: 'text/javascript; charset=utf-8' },
   'instructions.js': { file: 'instructions.js', type: 'text/javascript; charset=utf-8' },

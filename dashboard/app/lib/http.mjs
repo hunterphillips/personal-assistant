@@ -35,7 +35,7 @@ export const DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'no
 
 const EXTERNAL_SOURCE = /^https:\/\/[a-z0-9.-]+$/;
 
-// Policy for an embedded child page (Focus UI, a brief viewer). Those pages
+// Policy for an embedded child page (the Focus UI). Such pages
 // carry their own inline scripts/styles and may load fonts from named
 // https origins. Framing stays limited to this origin.
 export function buildChildCsp({

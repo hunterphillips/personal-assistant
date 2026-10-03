@@ -1,4 +1,4 @@
-// The Brief instructions panel on the Reading view's Brief tab, against a
+// The Brief instructions panel inside the brief's overlay, against a
 // temporary copy of test/fixtures/brief-instructions/curator.md read by the
 // real routes, with an invented pinned Assistant on the fake Claude adapter
 // of test/support/browser-server.mjs as the agent Settings names.
@@ -14,16 +14,17 @@ const ASSISTANT = Object.freeze({
   cwd: '/invented', provider: 'claude', pinned: true,
 });
 
-const tabs = (page) => page.getByRole('navigation', { name: 'Reading' });
-const toggle = (page) => page.getByRole('button', { name: 'Brief instructions' });
+const overlay = (page) => page.getByRole('dialog', { name: 'Brief' });
+const toggle = (page) => overlay(page).getByRole('button', { name: 'Instructions', exact: true });
 const panel = (page) => page.locator('#brief-instructions');
 const input = (page) => panel(page).getByLabel('What should change?');
 const messages = (page) => page.locator('#agent-messages .thread-message');
 
+// The old /brief address lands on the Feed with the overlay open.
 async function openBrief(page, hub) {
   await page.goto(`${hub.origin}/brief`);
-  await expectView(page, 'reading', 'Reading');
-  await expect(tabs(page).getByRole('link', { name: 'Brief' })).toHaveAttribute('aria-current', 'page');
+  await expectView(page, 'feed', 'Feed');
+  await expect(overlay(page)).toBeVisible();
 }
 
 async function openPanel(page, hub) {
@@ -37,10 +38,10 @@ test.describe('with the brief instructions', () => {
   test.use({ hubOptions: { briefInstructions: INSTRUCTIONS, agents: [ASSISTANT] } });
 
   test('the button opens the rules as prose above the brief', async ({ page, hub }) => {
+    await hub.writeBrief('2026-09-15');
     await openBrief(page, hub);
     await expect(toggle(page)).toBeVisible();
     await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
-    if (page.viewportSize().width >= 720) await expect(toggle(page)).toHaveText('Brief instructions');
     await expect(panel(page)).toBeHidden();
     await toggle(page).click();
     await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true');
@@ -53,20 +54,18 @@ test.describe('with the brief instructions', () => {
     await expect(input(page)).toBeFocused();
     await expect(panel(page).getByRole('button', { name: 'Send' })).toBeVisible();
     const box = await panel(page).boundingBox();
-    const notice = await page.locator('#brief-notice').boundingBox();
-    expect(box.y + box.height).toBeLessThanOrEqual(notice.y);
+    const brief = await page.locator('#brief-doc').boundingBox();
+    expect(box.y + box.height).toBeLessThanOrEqual(brief.y);
     expect(hub.requests('/api/brief/instructions')).toEqual([{ method: 'GET', status: 200 }]);
   });
 
-  test('the button is only on the Brief tab, beside no Feed button', async ({ page, hub }) => {
+  test('the button is only in the overlay; the Feed view keeps its own', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/feed`);
-    await expectView(page, 'reading', 'Feed');
-    await expect(toggle(page)).toBeHidden();
-    await tabs(page).getByRole('link', { name: 'Brief' }).click();
+    await expectView(page, 'feed', 'Feed');
+    await expect(page.locator('#brief-instructions-toggle')).toBeHidden();
+    await expect(page.locator('.app-header #brief-instructions-toggle')).toHaveCount(0);
+    await page.goto(`${hub.origin}/brief`);
     await expect(toggle(page)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Feed instructions' })).toBeHidden();
-    await tabs(page).getByRole('link', { name: 'Feed' }).click();
-    await expect(toggle(page)).toBeHidden();
   });
 
   test('Send asks the agent for the change and opens its thread', async ({ page, hub }) => {
@@ -75,6 +74,7 @@ test.describe('with the brief instructions', () => {
     const posted = page.waitForRequest('**/api/brief/instructions/propose');
     await panel(page).getByRole('button', { name: 'Send' }).click();
     expect((await posted).postDataJSON()).toEqual({ text: 'Leave the weather out.' });
+    await expect(overlay(page)).toBeHidden();
     await expectView(page, 'agents', 'Agents');
     await expect(page).toHaveURL(`${hub.origin}/?agent=assistant`);
     await expect(messages(page).first()).toHaveText(/^Change the brief's instructions\./);
@@ -82,7 +82,7 @@ test.describe('with the brief instructions', () => {
     expect(hub.requests('/api/brief/instructions/propose')).toEqual([{ method: 'POST', status: 202 }]);
   });
 
-  test('Cancel and Escape close the panel and focus the button; the panel closes with the tab', async ({ page, hub }) => {
+  test('Cancel and Escape close the panel and focus the button; the panel closes with the overlay', async ({ page, hub }) => {
     await openPanel(page, hub);
     await panel(page).getByRole('button', { name: 'Cancel' }).click();
     await expect(panel(page)).toBeHidden();
@@ -91,11 +91,14 @@ test.describe('with the brief instructions', () => {
     await expect(panel(page)).toBeVisible();
     await input(page).press('Escape');
     await expect(panel(page)).toBeHidden();
+    await expect(overlay(page)).toBeVisible();
     await toggle(page).click();
     await expect(panel(page)).toBeVisible();
-    await tabs(page).getByRole('link', { name: 'Feed' }).click();
-    await expect(panel(page)).toBeHidden();
-    await tabs(page).getByRole('link', { name: 'Brief' }).click();
+    await overlay(page).getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(overlay(page)).toBeHidden();
+    await page.locator(page.viewportSize().width < 720 ? '#app-menu-toggle' : '.header-right > .header-brief').click();
+    if (page.viewportSize().width < 720) await page.locator('#brief-menu-entry').click();
+    await expect(overlay(page)).toBeVisible();
     await expect(panel(page)).toBeHidden();
     await expect(toggle(page)).toBeVisible();
   });

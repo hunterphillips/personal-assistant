@@ -1,15 +1,16 @@
-// Dashboard shell: switches between Agents (Home, agents.js), Reading (the
-// Daily Brief on its Brief tab, feed.js on its Feed tab), Focus, Goals
-// (goals.js), and Health (jobs.js, the launchd jobs) with the History
-// API, creates each child frame the first time its view is shown and keeps
-// it afterwards, and keeps one copy of the server's state, which it hands
-// to the Health, Agents, and Goals views and the header's notifications
-// (notifications.js), whose links open views through shellApi. Agents is the page at `/`;
-// `/agents` shows it too, `/reading` and `/feed` show Reading on the Feed
-// tab, `/brief` shows it on the Brief tab, `/health` shows Health (the server
-// redirects the old `/routines` there), and any unknown path lands on
-// Agents. The brief frame is created only on
-// the Brief tab and kept while the Feed tab is shown.
+// Dashboard shell: switches between Agents (Home, agents.js), the Feed
+// (feed.js), Focus, Goals (goals.js), and Health (jobs.js, the launchd jobs)
+// with the History API, creates the Focus frame the first time its view is
+// shown and keeps it afterwards, and keeps one copy of the server's state,
+// which it hands to the Health, Agents, and Goals views, the header's
+// notifications (notifications.js), and the brief's overlay
+// (brief-overlay.js), whose links open views through shellApi. Agents is the
+// page at `/`; `/agents` shows it too, `/feed` shows the Feed, `/health`
+// shows Health (the server redirects the old `/routines` there and the old
+// `/reading` to `/feed`), and any unknown path lands on Agents. `/brief`, the
+// brief's old page, shows the Feed with the brief's overlay open, and the
+// address becomes `/feed`. The overlay opens over any view from the header's
+// Brief entry and from links (shellApi.openBrief) and changes no address.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
 // `snapshot` replaces it, `delta` applies a patch when its revision is the
@@ -21,41 +22,34 @@
 // /api/state is fetched every 30 seconds, and after a second failed attempt
 // the shell notice offers Retry. Every view change also fetches /api/state.
 //
-// A frame is created only from state that has just arrived (a snapshot, a
-// delta touching focus or brief, or a finished /api/state fetch), never from
-// the copy kept since. A mounted frame is never replaced by a state change; a
-// newer brief waits until "Load newer brief" is chosen. A frame whose page
-// comes back as a JSON error is hidden and marked failed; the state is
-// fetched again at once, and Retry reloads it.
+// The Focus frame is created only from state that has just arrived (a
+// snapshot, a delta touching focus, or a finished /api/state fetch), never
+// from the copy kept since, and is never replaced by a state change. A frame
+// whose page comes back as a JSON error is hidden and marked failed; the
+// state is fetched again at once, and Retry reloads it.
 (function () {
   'use strict';
 
   var ROUTES = {
     '/': 'agents', '/agents': 'agents', '/focus': 'focus',
-    '/reading': 'reading', '/brief': 'reading', '/feed': 'reading', '/goals': 'goals', '/health': 'health',
+    '/brief': 'feed', '/feed': 'feed', '/goals': 'goals', '/health': 'health',
   };
-  var TITLES = { agents: 'Agents', reading: 'Reading', focus: 'Focus', goals: 'Goals', health: 'Health', feed: 'Feed' };
+  var TITLES = { agents: 'Agents', focus: 'Focus', goals: 'Goals', health: 'Health', feed: 'Feed' };
   var FALLBACK_POLL_MS = 30000;
   var STATE_TIMEOUT_MS = 5000;
   var BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
   var BYE_DELAY_MS = 500;
-  var BRIEF_EMPTY = 'No brief has been generated yet.';
-  var BRIEF_UNREADABLE = 'The latest brief file could not be read.';
   var BRIEF_RULES = 'The brief follows these rules.';
   var NO_ANSWER = 'The dashboard did not respond.';
   var FAILED = 'data-failed';
 
   var current = null;
-  var tab = 'feed'; // the Reading tab: 'brief' or 'feed'
   var state = null; // latest snapshot, or null before the first one
   var applied = 0; // counts snapshots and deltas applied, to order fetches
   var sequence = 0;
-  var frames = { focus: null, brief: null };
-  var mountedBrief = null; // { date, revision } of the brief frame
-  // Requests waiting for the next state that arrives: reload failed frames,
-  // load the newer brief.
+  var frames = { focus: null };
+  // A Retry waiting for the next state that arrives to reload a failed frame.
   var wantReload = false;
-  var wantNewer = false;
 
   // Event stream
   var source = null;
@@ -74,7 +68,8 @@
       show('agents');
     },
     // A notification's link (notifications.js): Health with that job
-    // selected, the Feed scrolled to an item, the Brief tab.
+    // selected, the Feed scrolled to an item, the brief's overlay over the
+    // current view.
     openJob: function (label) {
       go('/health');
       if (jobs) jobs.select(label);
@@ -83,8 +78,8 @@
       go('/feed');
       if (feed) feed.reveal(run, index);
     },
-    openBrief: function () {
-      go('/brief');
+    openBrief: function (date, from) {
+      if (overlay) overlay.open(date, from);
     },
   };
   var jobs = window.DashboardJobs ? window.DashboardJobs.create(shellApi) : null;
@@ -93,16 +88,23 @@
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
   var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
   var notifications = window.DashboardNotifications ? window.DashboardNotifications.create(shellApi) : null;
-  // The Brief instructions panel (instructions.js): the brief's rules and a
-  // change sent to the agent Settings names as receiving the brief.
+  // The Brief instructions panel (instructions.js), inside the overlay: the
+  // brief's rules and a change sent to the agent Settings names as receiving
+  // the brief. Sending closes the overlay and opens that agent's thread.
   var briefInstructions = window.DashboardInstructions
     ? window.DashboardInstructions.create({
       prefix: 'brief',
       readPath: '/api/brief/instructions',
       proposePath: '/api/brief/instructions/propose',
       refusalSentence: briefRefusalSentence,
-      openAgent: function (id) { if (id) shellApi.openAgent(id); },
+      openAgent: function (id) {
+        if (overlay) overlay.close(false);
+        if (id) shellApi.openAgent(id);
+      },
     })
+    : null;
+  var overlay = window.DashboardBriefOverlay
+    ? window.DashboardBriefOverlay.create({ instructions: briefInstructions, briefIntro: briefIntroSentence })
     : null;
 
   function $(id) { return document.getElementById(id); }
@@ -115,18 +117,6 @@
 
   function viewFor(pathname) {
     return Object.prototype.hasOwnProperty.call(ROUTES, pathname) ? ROUTES[pathname] : 'agents';
-  }
-
-  function tabFor(pathname) {
-    return pathname === '/brief' ? 'brief' : 'feed';
-  }
-
-  function onFeed() {
-    return current === 'reading' && tab === 'feed';
-  }
-
-  function onBrief() {
-    return current === 'reading' && tab === 'brief';
   }
 
   // The agent Settings names as receiving the brief, as listed, or null.
@@ -154,30 +144,8 @@
     return NO_ANSWER;
   }
 
-  function briefUrl(brief) {
-    return '/embedded/brief/' + brief.date + '?revision=' + brief.revision;
-  }
-
-  function openFailed(date) {
-    return 'The brief for ' + date + ' could not be opened.';
-  }
-
-  function briefSentence(brief) {
-    if (brief && brief.state === 'empty') return BRIEF_EMPTY;
-    return brief && typeof brief.date === 'string' ? openFailed(brief.date) : BRIEF_UNREADABLE;
-  }
-
   function failed(frame) {
     return !!frame && frame.hasAttribute(FAILED);
-  }
-
-  function isReady(brief) {
-    return !!brief && brief.state === 'ready' && typeof brief.date === 'string' && typeof brief.revision === 'string';
-  }
-
-  // The brief is known once the server has checked it at least once.
-  function briefKnown() {
-    return !!state && !!state.brief && state.brief.state !== 'unknown';
   }
 
   function focusAvailable() {
@@ -220,17 +188,9 @@
     frames.focus = createFrame($('focus-slot'), 'focus-frame', 'Focus', '/embedded/focus?theme=' + encodeURIComponent(theme));
   }
 
-  function mountBrief(brief) {
-    if (frames.brief) frames.brief.remove();
-    frames.brief = createFrame($('brief-slot'), 'brief-frame', 'Daily Brief ' + brief.date, briefUrl(brief));
-    mountedBrief = { date: brief.date, revision: brief.revision };
-  }
-
   // `fresh` is true only right after state arrives; frames are created only
   // then.
   function render(fresh) {
-    var brief = briefKnown() ? state.brief : null;
-
     $('shell-notice').hidden = !(failures >= 2 && !streaming);
     renderRailIndicators();
 
@@ -238,16 +198,7 @@
     if (fresh && current === 'focus' && !frames.focus && focusAvailable()) mountFocus();
     $('focus-notice').hidden = !(focusDown() || failed(frames.focus));
 
-    // Daily Brief, mounted only while its tab is the one shown.
-    if (fresh && current === 'reading' && tab === 'brief' && !frames.brief && isReady(brief)) mountBrief(brief);
     if (briefInstructions) briefInstructions.setIntro(briefIntroSentence());
-    var newer = !!frames.brief && isReady(brief) &&
-      (brief.date !== mountedBrief.date || brief.revision !== mountedBrief.revision);
-    $('brief-newer').hidden = !newer;
-    var notReady = !!brief && !isReady(brief);
-    var showState = notReady || (failed(frames.brief) && !newer);
-    $('brief-notice-text').textContent = !showState ? '' : notReady ? briefSentence(brief) : openFailed(mountedBrief.date);
-    $('brief-notice').hidden = !showState;
   }
 
   function renderRailIndicators() {
@@ -262,23 +213,17 @@
     $('health-indicator').hidden = !failedJob;
   }
 
-  // Acts on Retry and "Load newer brief" with the state that just arrived.
+  // Acts on Retry with the state that just arrived.
   function applyRequests() {
     var reload = wantReload;
-    var newer = wantNewer;
     wantReload = false;
-    wantNewer = false;
     if (!state) return;
-    var brief = state.brief;
     if (reload && failed(frames.focus) && focusAvailable()) mountFocus();
-    if (!isReady(brief) || !frames.brief) return;
-    var differs = brief.date !== mountedBrief.date || brief.revision !== mountedBrief.revision;
-    if ((reload && failed(frames.brief)) || (newer && differs)) mountBrief(brief);
   }
 
   // Replaces the state. `keys` names the top-level keys that changed, or is
-  // null for a whole new snapshot. `fresh` marks focus and brief as having
-  // just arrived.
+  // null for a whole new snapshot. `fresh` marks focus as having just
+  // arrived.
   function setState(next, keys, fresh) {
     state = next;
     applied += 1;
@@ -289,6 +234,7 @@
     if (agents) agents.update(state, keys);
     if (goals) goals.update(state, keys);
     if (notifications) notifications.update(state, keys);
+    if (overlay) overlay.update(state, keys);
   }
 
   function isSnapshot(body) {
@@ -325,7 +271,6 @@
       if (id !== sequence) return;
       if (!body) {
         wantReload = false;
-        wantNewer = false;
         render(false);
         return;
       }
@@ -430,7 +375,6 @@
 
   function show(view) {
     current = view;
-    tab = tabFor(location.pathname);
     var views = document.querySelectorAll('section.view');
     for (var i = 0; i < views.length; i += 1) views[i].hidden = views[i].getAttribute('data-view') !== view;
     var links = document.querySelectorAll('.nav a');
@@ -441,14 +385,7 @@
     $('app-header-title').textContent = TITLES[view];
     var actions = document.querySelectorAll('[data-actions-for]');
     for (var a = 0; a < actions.length; a += 1) actions[a].hidden = actions[a].getAttribute('data-actions-for') !== view;
-    $('reading-brief').hidden = tab !== 'brief';
-    $('reading-feed').hidden = tab !== 'feed';
-    var tabs = document.querySelectorAll('.reading-tabs a');
-    for (var k = 0; k < tabs.length; k += 1) {
-      if (tabs[k].getAttribute('data-tab') === tab) tabs[k].setAttribute('aria-current', 'page');
-      else tabs[k].removeAttribute('aria-current');
-    }
-    document.title = TITLES[onFeed() ? 'feed' : view] + ' · Dashboard';
+    document.title = TITLES[view] + ' · Dashboard';
     // Goals fetches the vault while shown, the Feed its store, and Health
     // refreshes stale jobs when it opens.
     if (jobs) {
@@ -468,12 +405,8 @@
       else goals.hide();
     }
     if (feed) {
-      if (onFeed()) feed.show();
+      if (view === 'feed') feed.show();
       else feed.hide();
-    }
-    if (briefInstructions) {
-      if (onBrief()) briefInstructions.show();
-      else briefInstructions.hide();
     }
     render(false);
     fetchState();
@@ -482,8 +415,7 @@
   document.addEventListener('click', function (event) {
     var action = event.target.closest && event.target.closest('button[data-action]');
     if (action) {
-      if (action.getAttribute('data-action') === 'load-newer') wantNewer = true;
-      else wantReload = true;
+      wantReload = true;
       if (action.closest('#shell-notice')) connect();
       fetchState();
       return;
@@ -497,6 +429,10 @@
     if (url.origin !== location.origin || url.hash || url.search) return;
     if (!Object.prototype.hasOwnProperty.call(ROUTES, url.pathname)) return;
     event.preventDefault();
+    if (url.pathname === '/brief' && overlay) {
+      overlay.open(null, link);
+      return;
+    }
     // A view link drops any query, so Agents from an open thread returns
     // to the list.
     if (url.pathname !== location.pathname || location.search) history.pushState(null, '', url.pathname);
@@ -521,18 +457,27 @@
       if (agents) agents.hide();
       if (goals) goals.hide();
       if (feed) feed.hide();
-      if (briefInstructions) briefInstructions.hide();
     } else {
       connect();
       if (jobs && current === 'health') jobs.show();
       if (settings && current === 'health') settings.show();
       if (agents && current === 'agents') agents.show();
       if (goals && current === 'goals') goals.show();
-      if (feed && onFeed()) feed.show();
-      if (briefInstructions && onBrief()) briefInstructions.show();
+      if (feed && current === 'feed') feed.show();
     }
   });
 
+  // The header's Brief entry, and the same entry in the phone menu.
+  ['brief-open', 'brief-menu-entry'].forEach(function (id) {
+    var button = $(id);
+    if (button && overlay) button.addEventListener('click', function () { overlay.open(null, button); });
+  });
+
+  // `/brief` was the brief's own tab; it now lands on the Feed with the
+  // overlay open, under the Feed's address.
+  var openOnLoad = location.pathname === '/brief';
+  if (openOnLoad) history.replaceState(null, '', '/feed' + location.search);
   show(viewFor(location.pathname));
   connect();
+  if (openOnLoad && overlay) overlay.open(null);
 }());

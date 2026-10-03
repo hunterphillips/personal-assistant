@@ -62,17 +62,21 @@ import {
 // Unreserved characters and ':', which session ids ('codex:<threadId>', 'claude:<id>') carry.
 const SAFE_PATH = /^\/[A-Za-z0-9._~\-:/]*$/;
 const ASSET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const REVISION = /^[0-9a-f]{64}$/;
 
 const READ = ['GET', 'HEAD'];
 
 // Exact-path routes. `methods` lists what is allowed; anything else is 405.
 const EXACT_ROUTES = new Map([
   ['/', { name: 'shell', methods: READ }],
-  ...['/focus', '/reading', '/brief', '/feed', '/agents', '/goals', '/health'].flatMap((view) => [
+  // `/brief` is the Feed view with the brief's overlay open (shell.js), so
+  // links from before the overlay still land on the brief.
+  ...['/focus', '/brief', '/feed', '/agents', '/goals', '/health'].flatMap((view) => [
     [view, { name: 'shell', methods: READ }],
     [`${view}/`, { name: 'slash-redirect', methods: READ }],
   ]),
+  // Reading became the Feed when the brief moved to the overlay.
+  ['/reading', { name: 'feed-redirect', methods: READ }],
+  ['/reading/', { name: 'feed-redirect', methods: READ }],
   // Kept for one release while the jobs move from Agents to Health.
   ['/routines', { name: 'health-redirect', methods: READ }],
   ['/routines/', { name: 'health-redirect', methods: READ }],
@@ -164,11 +168,13 @@ export function createApp({
     if (routineRoute) return routineRoute;
     const notificationRoute = notificationRoutes?.match(pathname);
     if (notificationRoute) return notificationRoute;
-    if (pathname.startsWith('/embedded/brief/')) {
-      const date = pathname.slice('/embedded/brief/'.length);
-      if (isCalendarDate(date)) {
-        return { name: 'brief-page', methods: ['GET'], label: '/embedded/brief/:date', params: { date } };
-      }
+    // /api/brief/<date> and /api/brief/<date>/feedback; the exact routes
+    // above (latest, feedback, instructions) are matched first.
+    const briefMatch = /^\/api\/brief\/([^/]+)(\/feedback)?$/.exec(pathname);
+    if (briefMatch && isCalendarDate(briefMatch[1])) {
+      return briefMatch[2]
+        ? { name: 'brief-feedback-read', methods: ['GET'], label: '/api/brief/:date/feedback', params: { date: briefMatch[1] } }
+        : { name: 'brief-date', methods: ['GET'], label: '/api/brief/:date', params: { date: briefMatch[1] } };
     }
     return null;
   }
@@ -248,6 +254,8 @@ export function createApp({
         return redirect(res, route.label.slice(0, -1) + search);
       case 'health-redirect':
         return redirect(res, '/health' + search, 302);
+      case 'feed-redirect':
+        return redirect(res, '/feed' + search, 302);
       case 'healthz':
         return sendJson(res, 200, { ok: true }, { head });
       case 'status':
@@ -274,11 +282,10 @@ export function createApp({
         return serveFocusControl(req, res, route.label);
       case 'brief-latest':
         return brief.handleLatest(req, res);
-      case 'brief-page': {
-        const revision = new URLSearchParams(search).get('revision');
-        if (!revision || !REVISION.test(revision)) throw new HttpError(400, 'invalid_revision');
-        return brief.handleEmbedded(req, res, { date: route.params.date, revision });
-      }
+      case 'brief-date':
+        return brief.handleBrief(req, res, { date: route.params.date });
+      case 'brief-feedback-read':
+        return brief.handleFeedbackRead(req, res, { date: route.params.date });
       case 'agent':
         return agents.serve(req, res, route);
       case 'agents-create':
