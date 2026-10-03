@@ -115,7 +115,8 @@ picks one up and ends by updating it.
   like the registry; `runs/` beside them holds the runs logs, gitignored.
 - `daily-brief/`: contract, schema, curator rules, `bin/run-brief` and its
   prompts, `launchd/`, `watch/`. `contributions/` and `briefs/` are outputs,
-  gitignored; `build.py` and `check-viewer.mjs` beside the briefs are code.
+  gitignored; each build writes the viewer and structured brief data;
+  `build.py` and `check-viewer.mjs` beside the briefs are code.
 - `feed/`: the feed store's README; `items/` is its output, gitignored.
 - `systems/`: symlinks to the agents' repos.
 - `thoughts/shared/`: lanes, plans, research, tickets.
@@ -130,8 +131,9 @@ picks one up and ends by updating it.
   back, since `public/` is served per request. Reinstall with
   `bin/dashboard-install` (see `docs/operations.md`).
 - Brief: `daily-brief/bin/run-brief --dry-run`, `--force`, `--date <d>
-  --stage <gather|curate|verify>`. Idempotent by date: it exits if a viewer
-  exists. Never run it from a test against a real date.
+  --stage <gather|curate|verify>`. Idempotent by date: it exits only when the
+  viewer and valid brief data exist. Never run it from a test against a real
+  date.
 - The agents' repos: change them through `systems/<name>/` under that repo's own
   rules, and commit there.
 
