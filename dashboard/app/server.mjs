@@ -41,6 +41,7 @@ import { createFocusProxy } from './lib/focus-proxy.mjs';
 import { createGoals } from './lib/goals.mjs';
 import { createHub } from './lib/hub.mjs';
 import { createNotices } from './lib/notices.mjs';
+import { createReads } from './lib/reads.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { createRoutines } from './lib/routines.mjs';
 import { createScheduler } from './lib/scheduler.mjs';
@@ -91,6 +92,9 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     log: logEntry,
   });
   const store = createThreadStore({ dir: config.threadsDir, limits: config.limits, log: logEntry });
+  // Keep the read store beside the thread directory so test and throwaway
+  // instances inherit the same isolation from DASHBOARD_THREADS_DIR.
+  const reads = createReads({ file: path.join(path.dirname(config.threadsDir), 'thread-reads.json'), log: logEntry });
   const apiKeyInEnv = API_KEY_VARS.some((name) => typeof env[name] === 'string' && env[name] !== '');
   let adapters = {};
   // Assigned once the hub exists; the adapters are created first because
@@ -131,6 +135,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     cmux,
     adaptersDisabled: apiKeyInEnv ? 'api_key_in_env' : null,
     settings,
+    reads,
     log: logEntry,
   });
   delegation = createDelegation({ hub, registry, limits: config.limits, timeouts: config.timeouts, log: logEntry });
@@ -168,8 +173,10 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   };
 
   await Promise.all([registry.start(), bindings.start()]);
+  await reads.load((registry.current()?.agents ?? []).filter((agent) => agent.kind === 'persona').map((agent) => agent.id));
   await seedSettings({ settings, registry, log: logEntry });
   await hub.start();
+  hub.keepJobsCurrent();
   // The brief notice waiting since the last run, if any; never fatal.
   await notices.reconcile();
   await scheduler.start();

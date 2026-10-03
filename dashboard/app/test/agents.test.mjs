@@ -92,11 +92,14 @@ function fakeAdapter() {
 
 const MESSAGES = [{ role: 'user', text: 'Hi', at: '2026-09-25T12:00:00.000Z' }, { role: 'assistant', text: 'Hello', at: '2026-09-25T12:00:01.000Z' }];
 
-async function startAgents(t, { agents = [agent('cfo'), agent('ops', { kind: 'system', provider: undefined }), agent('dev', { kind: 'persona', provider: 'codex' })] } = {}) {
+async function startAgents(t, {
+  agents = [agent('cfo'), agent('ops', { kind: 'system', provider: undefined }), agent('dev', { kind: 'persona', provider: 'codex' })],
+  readStore = null,
+} = {}) {
   const adapter = fakeAdapter();
   const reads = [];
   const store = { read: async (id) => { reads.push(id); return MESSAGES; } };
-  const app = await startApp(t, { ...status, registry: fakeRegistry(agents), adapters: { claude: adapter }, store });
+  const app = await startApp(t, { ...status, registry: fakeRegistry(agents), adapters: { claude: adapter }, store, reads: readStore });
   t.after(() => adapter.release());
   return { ...app, adapter, reads };
 }
@@ -295,6 +298,23 @@ test('thread returns the cached messages with no-store', async (t) => {
   assert.equal(response.headers['cache-control'], 'no-store');
   assert.deepEqual(response.json, { messages: MESSAGES });
   assert.deepEqual(app.reads.at(-1), 'cfo');
+});
+
+test('read records a shared read time for a persona and is bodyless', async (t) => {
+  let marked = null;
+  let readAt = '2026-09-25T12:00:00.000Z';
+  const readStore = {
+    readAt: () => readAt,
+    mark: async (id) => { marked = id; readAt = '2026-09-25T12:02:00.000Z'; },
+  };
+  const app = await startAgents(t, { readStore });
+  assert.equal(app.hub.snapshot().agents.find((entry) => entry.id === 'cfo').unread, true);
+  const response = await post(app, '/api/agents/cfo/read');
+  assert.deepEqual([response.status, response.json, marked], [200, { ok: true }, 'cfo']);
+  assert.equal(app.hub.snapshot().agents.find((entry) => entry.id === 'cfo').unread, false);
+  assert.equal((await post(app, '/api/agents/cfo/read', {})).status, 413);
+  assert.equal((await post(app, '/api/agents/ops/read')).status, 409);
+  assert.equal((await post(app, '/api/agents/missing/read')).status, 404);
 });
 
 test('the snapshot carries persona state and null state for other kinds', async (t) => {

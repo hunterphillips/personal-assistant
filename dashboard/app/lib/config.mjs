@@ -86,6 +86,7 @@ export const LIMITS = Object.freeze({
   routineMissedMax: 100, // missed occurrences counted before the count is capped
   routineCatchupDays: 7, // how far back a routine's marker may reach on start
   routinesMax: 100, // routine files
+  jobsRefreshMs: 5 * 60_000, // keep the rail's Health mark current without opening Health
 });
 
 export const TIMEOUTS = Object.freeze({

@@ -186,10 +186,10 @@ export function fakeSettings(initial = {}, { ok = true, error = null } = {}) {
 // adapters unless given.
 export function createTestHub({
   config, focus, brief, registry = fakeRegistry(), jobs = fakeJobs(), routines = null, adapters = {}, store = null, bindings = null,
-  cmux = null, settings = fakeSettings(), home = '/invented', log = () => {}, now = undefined,
+  cmux = null, settings = fakeSettings(), reads = null, home = '/invented', log = () => {}, now = undefined,
 }) {
   return createHub({
-    registry, jobs, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, home, log,
+    registry, jobs, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, reads, home, log,
     ...(now ? { now } : {}),
   });
 }
@@ -248,7 +248,7 @@ export function fakeCmux(inventory = null) {
 // adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), jobs, routines = null, scheduler = null, hub, adapters, store, bindings,
-  cmux = null, goals, feed, briefInstructions, notices = null, settings = fakeSettings(), configure = (c) => c, delegation = null,
+  cmux = null, goals, feed, briefInstructions, notices = null, settings = fakeSettings(), reads = null, configure = (c) => c, delegation = null,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
@@ -273,7 +273,7 @@ export async function startApp(t, {
   const jobsModule = jobs ?? fakeJobs();
   const stateHub = hub ?? createTestHub({
     config, focus: focusRoutes, brief: briefRoutes, registry, jobs: jobsModule, routines, adapters, store, bindings, cmux, log,
-    ...(settings ? { settings } : {}),
+    ...(settings ? { settings } : {}), ...(reads ? { reads } : {}),
   });
   if (!hub) await stateHub.start();
   const delegationService = typeof delegation === 'function' ? delegation(stateHub) : null;

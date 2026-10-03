@@ -14,6 +14,7 @@
 //                    key absent keeps it. Claude personas only: a Codex
 //                    persona is 409 not_supported.
 //   POST new-thread  bodyless -> 200 once both thread files are cleared
+//   POST read        bodyless -> 200 once the shared read time is recorded
 //   GET  thread      { messages } from store.read(id)
 //   PUT  settings    the agent's registry entry (agent-settings-routes.mjs);
 //                    POST /api/agents (serveCreate) adds one. Both need a
@@ -89,12 +90,13 @@ const ACTIONS = new Map([
   ['answer', { methods: ['POST'] }],
   ['interrupt', { methods: ['POST'], bodyless: true }],
   ['new-thread', { methods: ['POST'], bodyless: true }],
+  ['read', { methods: ['POST'], bodyless: true }],
   ['thread', { methods: ['GET'] }],
   ['settings', { methods: ['PUT'] }],
   ['open-terminal', { methods: ['POST'], bodyless: true }],
 ]);
 const SESSION_ACTIONS = new Set(['answer', 'interrupt', 'thread', 'open-terminal']);
-const PERSONA_ACTIONS = new Set(['send', 'model', 'answer', 'interrupt', 'new-thread', 'thread', 'settings']);
+const PERSONA_ACTIONS = new Set(['send', 'model', 'answer', 'interrupt', 'new-thread', 'read', 'thread', 'settings']);
 
 // Adapter refusal code -> HTTP status.
 const RUNTIME_STATUS = new Map([
@@ -242,6 +244,14 @@ export function createAgentRoutes({ hub, store = null, cmux = null, registry = n
     sendJson(res, 200, { messages });
   }
 
+  async function serveRead(res, id) {
+    const listed = hub.snapshot().agents.find((agent) => agent.id === id);
+    if (!listed) throw new HttpError(404, 'no_such_agent');
+    if (listed.kind !== 'persona') throw new HttpError(409, 'not_a_persona');
+    await hub.markRead(id);
+    sendJson(res, 200, { ok: true });
+  }
+
   async function serveSessionThread(res, id) {
     const { agent, adapter } = sessionFor(id);
     let thread;
@@ -290,6 +300,8 @@ export function createAgentRoutes({ hub, store = null, cmux = null, registry = n
         return serveNewThread(res, id);
       case 'thread':
         return session ? serveSessionThread(res, id) : serveThread(res, id);
+      case 'read':
+        return serveRead(res, id);
       case 'settings':
         return settingsRoutes.serveUpdate(req, res, id);
       case 'open-terminal':

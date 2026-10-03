@@ -7,7 +7,7 @@
 //
 // createHub({ registry, jobs, routines, schedule, timeZone, focus, brief,
 //             timeouts, limits, adapters, store, bindings, cmux,
-//             adaptersDisabled, settings, models, home, log, now }) returns:
+//             adaptersDisabled, settings, reads, models, home, log, now }) returns:
 //
 //   snapshot() -> frozen
 //     { revision,                 // integer, starts at 1, +1 on every change
@@ -22,7 +22,7 @@
 //       agents: [{ id, name, role, description, group, kind, cwd, jobs,
 //                  provider?, pinned?, state, pending?, lastMessage?,
 //                  lastError?, costUsd?, lastLineAt?, model?, permission?,
-//                  accepts? }],
+//                  accepts?, unread }],
 //       sessions: [{ id, provider, threadId, cwd, projectId, title, state,
 //                    pending, lastMessage, lastError, updatedAt, binding }
 //                  | { id, provider: 'claude', kind: 'terminal', cwd, projectId,
@@ -156,6 +156,10 @@
 //     refresh throws, refreshing is false and error 'refresh_failed' (bump),
 //     logged as { event: 'jobs_error', error }. Never rejects.
 //
+//   keepJobsCurrent()
+//     Calls refreshJobs() now and every limits.jobsRefreshMs until close(),
+//     so the rail's Health mark is current without Health open. Idempotent.
+//
 //   subscribe(fn) -> unsubscribe
 //     fn({ revision, patch }) runs after every bump; `patch` holds only the
 //     top-level content keys that changed (focus, brief, registry, agents,
@@ -276,12 +280,12 @@ const STATE_WORD = /^[a-z_]{1,40}$/;
 
 export function createHub({
   registry, jobs, routines = null, schedule = defaultSchedule, timeZone = TIME_ZONE, focus, brief, timeouts, limits = LIMITS,
-  adapters = {}, store = null, bindings = null, cmux = null, adaptersDisabled = null, settings = null, models = MODELS,
+  adapters = {}, store = null, bindings = null, cmux = null, adaptersDisabled = null, settings = null, reads = null, models = MODELS,
   home = os.homedir(), log = () => {}, now = () => new Date(),
 }) {
   const listeners = new Set();
   const settingsCurrent = () => settingsView(settings ? settings.current() : null);
-  const views = (current = registry.current()) => agentViews(current, personas, settingsCurrent(), routines);
+  const views = (current = registry.current()) => agentViews(current, personas, settingsCurrent(), routines, reads);
   const routinesCurrent = () => routinesView(registry.current(), routines, schedule, timeZone, now());
   const turnMaxMs = timeouts.turnMaxMs ?? TIMEOUTS.turnMaxMs;
   // agentId -> runtime entry for each registry persona (see personaEntry).
@@ -403,21 +407,27 @@ export function createHub({
     entry.costUsd = seeded.costUsd ?? null;
     entry.lastMessage ??= cached.lastMessage;
     entry.lastOwnMessageAt ??= cached.lastOwnMessageAt;
+    entry.lastReplyAt ??= cached.lastReplyAt;
     if (entry.state === 'busy' || entry.state === 'waiting') armTurnTimer(entry);
   }
 
-  // The thread cache's last preview-worthy message and the time of Hunter's
-  // own last message, each null when there is none.
+  // The thread cache's last preview-worthy message, Hunter's last message,
+  // and the newest reply, each null when there is none.
   async function lastCachedMessage(agentId) {
-    if (!store) return { lastMessage: null, lastOwnMessageAt: null };
+    if (!store) return { lastMessage: null, lastOwnMessageAt: null, lastReplyAt: null };
     try {
       const messages = await store.read(agentId);
       const last = messages.findLast(updatesPreview);
       const own = messages.findLast(isOwnMessage);
-      return { lastMessage: last ? preview(last, limits) : null, lastOwnMessageAt: typeof own?.at === 'string' ? own.at : null };
+      const reply = messages.findLast(isReply);
+      return {
+        lastMessage: last ? preview(last, limits) : null,
+        lastOwnMessageAt: typeof own?.at === 'string' ? own.at : null,
+        lastReplyAt: typeof reply?.at === 'string' ? reply.at : null,
+      };
     } catch (error) {
       log({ event: 'thread_cache_error', agentId, error: error?.message ?? String(error) });
-      return { lastMessage: null, lastOwnMessageAt: null };
+      return { lastMessage: null, lastOwnMessageAt: null, lastReplyAt: null };
     }
   }
 
@@ -501,6 +511,7 @@ export function createHub({
       case 'message':
         if (updatesPreview(event)) entry.lastMessage = preview(event, limits);
         if (isOwnMessage(event) && typeof event.at === 'string') entry.lastOwnMessageAt = event.at;
+        if (isReply(event) && typeof event.at === 'string') entry.lastReplyAt = event.at;
         break;
       case 'request':
         entry.pending = projectRequest(event, limits);
@@ -529,8 +540,14 @@ export function createHub({
 
   const unsubscribeRegistry = registry.onChange((current) => {
     if (started && !closed) {
-      syncPersonas(current?.agents ?? []).then(() => {
+      const agents = current?.agents ?? [];
+      const ensureReads = reads
+        ? reads.ensure(agents.filter((agent) => agent.kind === 'persona').map((agent) => agent.id))
+        : Promise.resolve();
+      Promise.all([syncPersonas(agents), ensureReads]).then(() => {
         if (!closed) commitAgents();
+      }, (error) => {
+        log({ event: 'thread_reads_error', error: error?.message ?? String(error) });
       });
     }
     commit({ ...registryFields(current, views), routines: routinesCurrent() });
@@ -606,6 +623,15 @@ export function createHub({
     }
   }
 
+  function refreshJobs({ signal } = {}) {
+    jobsRun ??= runJobs(signal).finally(() => {
+      jobsRun = null;
+    });
+    return jobsRun;
+  }
+
+  let jobsTimer = null;
+
   return {
     snapshot() {
       return state;
@@ -632,11 +658,18 @@ export function createHub({
       return untilAborted(sessionsRun, signal);
     },
 
-    refreshJobs({ signal } = {}) {
-      jobsRun ??= runJobs(signal).finally(() => {
-        jobsRun = null;
-      });
-      return jobsRun;
+    refreshJobs,
+
+    // The rail's Health mark reads jobs from the snapshot on every view, so
+    // the daemon refreshes them now and every limits.jobsRefreshMs instead of
+    // waiting for Health to open. Idempotent; close() stops the interval.
+    keepJobsCurrent() {
+      if (closed || jobsTimer !== null) return;
+      refreshJobs();
+      jobsTimer = setInterval(() => {
+        if (!closed) refreshJobs();
+      }, limits.jobsRefreshMs ?? LIMITS.jobsRefreshMs);
+      jobsTimer.unref?.();
     },
 
     subscribe(fn) {
@@ -656,6 +689,12 @@ export function createHub({
       if (closed) return;
       commitAgents();
       commitSessions();
+    },
+
+    async markRead(id) {
+      if (!reads) return;
+      await reads.mark(id);
+      if (!closed) commitAgents();
     },
 
     persona(id) {
@@ -699,6 +738,7 @@ export function createHub({
       if (entry && !closed) {
         if (updatesPreview(record)) entry.lastMessage = preview(record, limits);
         else entry.lastLineAt = record.at;
+        if (isReply(record)) entry.lastReplyAt = record.at;
         commitAgents();
       }
       return record;
@@ -721,6 +761,8 @@ export function createHub({
 
     close() {
       closed = true;
+      if (jobsTimer !== null) clearInterval(jobsTimer);
+      jobsTimer = null;
       unsubscribeRegistry();
       unsubscribeBindings();
       unsubscribeSettings();
@@ -738,7 +780,7 @@ export function createHub({
 function personaEntry(agent, adapter) {
   return {
     agent, adapter, ready: false, state: 'unavailable', pending: null, forwarded: [], lastMessage: null,
-    lastError: null, costUsd: null, lastLineAt: null, lastOwnMessageAt: null, timer: null,
+    lastError: null, costUsd: null, lastLineAt: null, lastOwnMessageAt: null, lastReplyAt: null, timer: null,
   };
 }
 
@@ -801,6 +843,19 @@ function isOwnMessage(message) {
   return message?.role === 'user' && !message.from && !message.routine;
 }
 
+// Lines that count as replies. Current writers use assistant for model text;
+// system/brief for the morning line; system/delegation with finished or
+// failed; and system/routine with finished or failed when an ending line is
+// written. Sent, waiting, model, and Hunter's own lines do not.
+const END_STATES = new Set(['finished', 'failed']);
+function isReply(message) {
+  if (message?.role === 'assistant') return true;
+  if (message?.role !== 'system') return false;
+  if (message.kind === 'brief') return true;
+  if (message.kind === 'delegation') return END_STATES.has(message.state);
+  return message.kind === 'routine' && END_STATES.has(message.state);
+}
+
 // The snapshot's `settings`: the store's view, or the defaults when the hub
 // runs without a store (tests, or a daemon built without one).
 function settingsView(current) {
@@ -855,7 +910,7 @@ function resolvePermission(agent, settingsState) {
   return { level: settingsState.permission.default, source: 'system' };
 }
 
-function agentViews(current, personas, settingsState, routines = null) {
+function agentViews(current, personas, settingsState, routines = null, reads = null) {
   return (current?.agents ?? []).map((agent) => {
     const view = {
       id: agent.id,
@@ -882,6 +937,8 @@ function agentViews(current, personas, settingsState, routines = null) {
     view.lastError = entry?.lastError ?? null;
     view.costUsd = entry?.costUsd ?? null;
     view.lastLineAt = entry?.lastLineAt ?? null;
+    const readAt = reads?.readAt(agent.id) ?? null;
+    view.unread = typeof entry?.lastReplyAt === 'string' && typeof readAt === 'string' && entry.lastReplyAt > readAt;
     if (agent.provider === 'claude') {
       const base = resolveModel(agent, null, settingsState);
       view.model = {

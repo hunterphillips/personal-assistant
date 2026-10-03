@@ -77,6 +77,7 @@ function makeHub(overrides = {}) {
     cmux: overrides.cmux ?? null,
     adaptersDisabled: overrides.adaptersDisabled ?? null,
     settings: overrides.settings ?? null,
+    reads: overrides.reads ?? null,
     routines: overrides.routines ?? null,
     log: (entry) => logs.push(entry),
     now: () => new Date(overrides.now ?? '2026-09-25T12:00:00.000Z'),
@@ -104,6 +105,7 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
     {
       id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
       provider: 'claude', state: 'unavailable', pending: null, forwarded: [], needsYou: false, lastMessage: null, lastError: null, costUsd: null, lastLineAt: null,
+      unread: false,
       model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } },
       permission: { level: 'ask', source: 'system', agent: null, default: 'ask' }, accepts: null,
     },
@@ -442,6 +444,7 @@ test('start seeds a persona from its adapter and the last cached message', async
     id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
     provider: 'claude', state: 'error', pending: null, forwarded: [], needsYou: false, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
     lastError: 'Invented failure', costUsd: 0.5, lastLineAt: null,
+    unread: false,
     model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } },
     permission: { level: 'ask', source: 'system', agent: null, default: 'ask' }, accepts: null,
   });
@@ -452,6 +455,75 @@ test('start seeds a persona from its adapter and the last cached message', async
   assert.equal(hub.persona('cfo').adapter, adapter);
   assert.equal(hub.persona('ops'), null);
   assert.equal(hub.persona('nobody'), null);
+});
+
+test('unread follows reply lines after the shared read time and markRead clears it', async () => {
+  const adapter = fakeAdapter();
+  let readAt = '2026-09-25T12:00:00.000Z';
+  const reads = {
+    readAt: () => readAt,
+    mark: async () => { readAt = '2026-09-25T12:02:00.000Z'; },
+  };
+  const store = { read: async () => [{ role: 'assistant', text: 'Reply', at: '2026-09-25T12:01:00.000Z' }] };
+  const { hub } = makeHub({ adapters: { claude: adapter }, store, reads });
+  await hub.start();
+  assert.equal(persona(hub).unread, true);
+
+  await hub.markRead('cfo');
+  assert.equal(persona(hub).unread, false);
+
+  adapter.emit('message', 'cfo', { role: 'system', kind: 'delegation', state: 'sent', text: 'Sent' });
+  assert.equal(persona(hub).unread, false);
+  adapter.emit('message', 'cfo', { role: 'system', kind: 'delegation', state: 'finished', text: 'Done', at: '2026-09-25T12:03:00.000Z' });
+  assert.equal(persona(hub).unread, true);
+});
+
+test('notify marks unread for the brief line and ending delegation lines, not for sent or plain lines', async () => {
+  const adapter = fakeAdapter();
+  const reads = { readAt: () => '2026-09-25T12:00:00.000Z' };
+  const store = { read: async () => [], append: async () => {} };
+  const { hub } = makeHub({ adapters: { claude: adapter }, store, reads });
+  await hub.start();
+  assert.equal(persona(hub).unread, false);
+
+  await hub.notify('cfo', { role: 'system', text: 'Plain note', at: '2026-09-25T12:01:00.000Z' });
+  await hub.notify('cfo', { role: 'system', kind: 'delegation', state: 'sent', text: 'Sent', at: '2026-09-25T12:02:00.000Z' });
+  await hub.notify('cfo', { role: 'system', kind: 'routine', state: 'waiting', text: 'Waiting', at: '2026-09-25T12:03:00.000Z' });
+  await hub.notify('cfo', { role: 'user', text: 'Mine', at: '2026-09-25T12:04:00.000Z' });
+  assert.equal(persona(hub).unread, false);
+
+  await hub.notify('cfo', { role: 'system', kind: 'delegation', state: 'failed', text: 'Failed', at: '2026-09-25T12:05:00.000Z' });
+  assert.equal(persona(hub).unread, true);
+});
+
+test('unread seeds from the thread tail at start: an older reply is read, a newer one is not', async () => {
+  const at = '2026-09-25T12:00:00.000Z';
+  for (const [replyAt, unread] of [['2026-09-25T11:59:00.000Z', false], ['2026-09-25T12:01:00.000Z', true]]) {
+    const store = { read: async () => [{ role: 'system', kind: 'brief', text: 'Brief', at: replyAt }, { role: 'user', text: 'Later', at: '2026-09-25T12:09:00.000Z' }] };
+    const { hub } = makeHub({ adapters: { claude: fakeAdapter() }, store, reads: { readAt: () => at } });
+    await hub.start();
+    assert.equal(persona(hub).unread, unread, replyAt);
+    hub.close();
+  }
+});
+
+test('keepJobsCurrent refreshes now and on the interval until close, once however often it is called', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const jobs = fakeJobs();
+  const { hub } = makeHub({ jobs });
+  hub.keepJobsCurrent();
+  hub.keepJobsCurrent();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(jobs.calls, 1);
+
+  t.mock.timers.tick(5 * 60_000);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(jobs.calls, 2);
+
+  hub.close();
+  t.mock.timers.tick(5 * 60_000);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(jobs.calls, 2);
 });
 
 test('a persona whose provider has no adapter is unavailable with the reason', async () => {
