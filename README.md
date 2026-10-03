@@ -15,7 +15,9 @@ direction took Meta Muse and GrokBot as reference; a clickable design
 study lives in `dashboard/prototype/` as visual reference. Current state
 lives in `thoughts/shared/lanes/assistant/handoff.md`; the design for the
 Assistant agent, delegation, routines, models, and Ideas is
-`thoughts/shared/plans/2026-09-30-assistant-system-design.md`.
+`thoughts/shared/plans/2026-09-30-assistant-system-design.md`; its
+phases through routines are live as of 2026-10-02, and the app header
+is designed in `thoughts/shared/plans/2026-10-03-app-header-design.md`.
 
 Deliberately thin. This holds the contract, the assembler, and the outputs. It
 does not hold shared libraries, and the agents keep their own repos.
@@ -87,7 +89,7 @@ The dashboard in `dashboard/app/` is installed as a
 user LaunchAgent and is what the tailnet URL serves since 2026-09-23. Phases
 1 to 3 of the
 [daemon plan](thoughts/shared/plans/2026-09-25-dashboard-assistant-daemon-implementation.md)
-shipped by 2026-09-28: the agent registry and routines, agent threads on
+shipped by 2026-09-28: the agent registry and its launchd jobs, agent threads on
 the Claude Agent SDK, the Agents home screen, Codex threads on a shared
 app-server started with `bin/codex-serve` and bound to cmux terminals with
 `bin/codex-new`, and cmux inventory with "Open terminal". Phase 4 shipped

@@ -22,18 +22,24 @@ from here.
   turn carries one tool, `ask`, that messages another agent in its own
   thread, with the exchange shown in both and a card the receiver raises
   shown where the exchange started; each agent runs at a permission
-  level, Ask, Auto, or Full access, set in its gear panel), Reading holds the Daily
-  Brief and the Feed (what the producers found, with images, and Discuss
-  opening the Watch agent), Focus is embedded through a proxy, Goals
+  level, Ask, Auto, or Full access, set in its gear panel; its routines,
+  scheduled prompts the daemon runs itself as a turn in its thread at its
+  level, are listed under its settings with a picker form and under the
+  groups in the list), Reading holds the Daily Brief and the Feed (what
+  the producers found, with images, and Discuss opening the Watch agent;
+  each tab opens its instructions and sends a change to its agent), Focus
+  is embedded through a proxy, Goals
   reads the vault's priorities with add and edit going through the
   Second brain agent, Health holds Settings (the default model, effort, and
   permission level, which agent receives the brief) and lists the launchd jobs and their
-  state. Routines, scheduled prompts the daemon runs itself as a turn in
-  the agent's thread at the agent's level, are stored and scheduled since
-  2026-10-02; their lists and form are the next build. The design (the
-  Assistant as the pinned agent, delegation, models, routines, and what
-  comes next: Ideas) is
-  `thoughts/shared/plans/2026-09-30-assistant-system-design.md`. The app
+  state. Every turn runs with the SDK's Claude Code preset system
+  prompt. The design (the Assistant as the pinned agent, delegation,
+  models, routines, and what comes next: Ideas) is
+  `thoughts/shared/plans/2026-09-30-assistant-system-design.md`; the
+  app header (quick chat, notifications, the brief as an overlay, the
+  embedded assistant) is designed in
+  `thoughts/shared/plans/2026-10-03-app-header-design.md` and not yet
+  built. The app
   README and `docs/operations.md` hold routes, snapshot shape, helpers, and
   setup.
 - **Registry**: `registry/agents.json`, the agents and project folders the
