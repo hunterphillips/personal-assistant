@@ -119,55 +119,7 @@
         <div class="agent-thread" id="agent-thread">
           <p class="thread-empty" id="agent-empty" hidden></p>
           <div class="thread-panel" id="agent-panel" hidden>
-            <div class="thread-main">
-              <div class="thread-header">
-                <a class="thread-back" id="agent-back" href="/">All agents</a>
-                <div class="thread-title">
-                  <h2 class="thread-name" id="agent-name"></h2>
-                  <span class="thread-chips" id="agent-chips"></span>
-                  <span class="thread-cost" id="agent-cost"></span>
-                </div>
-                <button type="button" class="button thread-new" id="agent-new-thread" data-agent-action="new-thread">New thread</button>
-              </div>
-              <div class="thread-confirm" id="agent-confirm" role="group" aria-label="New thread" hidden>
-                <span id="agent-confirm-text">Start a new thread? The agent will not remember this one.</span>
-                <button type="button" class="button button-primary" data-agent-action="confirm-new-thread">Start new thread</button>
-                <button type="button" class="button" data-agent-action="cancel-new-thread">Cancel</button>
-              </div>
-              <p class="thread-description" id="agent-description" hidden></p>
-              <p class="thread-notice" id="agent-notice" role="status" hidden></p>
-              <div class="thread-messages" id="agent-messages" aria-live="polite"></div>
-              <div class="thread-status" id="agent-status" role="status" tabindex="-1" hidden>
-                <span id="agent-status-text"></span>
-                <button type="button" class="button" data-agent-action="interrupt">Interrupt</button>
-              </div>
-              <div class="thread-request" id="agent-request" hidden></div>
-              <form class="composer" id="agent-composer" hidden>
-                <label class="composer-label" id="agent-input-label" for="agent-input"></label>
-                <div class="composer-row">
-                  <div class="mention-menu" id="agent-mention-menu" role="listbox" aria-label="Agents" hidden></div>
-                  <textarea class="composer-input" id="agent-input" rows="2" aria-autocomplete="list" aria-controls="agent-mention-menu" aria-expanded="false"></textarea>
-                  <button type="submit" class="button button-primary" id="agent-send">Send</button>
-                </div>
-                <div class="composer-tools">
-                  <button type="button" class="model-button" id="agent-model" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-model-menu" hidden>
-                    <span id="agent-model-label"></span>
-                    <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
-                  </button>
-                  <span class="composer-note" id="agent-model-note" hidden>Codex, its own settings</span>
-                  <div class="model-menu" id="agent-model-menu" role="dialog" aria-label="Model for this thread" hidden>
-                    <p class="model-menu-heading" id="agent-model-list-heading">Model</p>
-                    <div class="model-list" id="agent-model-list" role="listbox" aria-labelledby="agent-model-list-heading"></div>
-                    <p class="model-menu-heading" id="agent-effort-heading">Effort</p>
-                    <div class="effort-row" id="agent-effort-row" role="group" aria-labelledby="agent-effort-heading"></div>
-                    <button type="button" class="model-menu-reset" id="agent-model-reset">Use the agent's default</button>
-                  </div>
-                </div>
-                <p class="composer-reason" id="agent-composer-reason" hidden></p>
-              </form>
-              <p class="thread-foot" id="agent-foot" hidden></p>
-              <p class="thread-failure" id="agent-failure" role="status" hidden></p>
-            </div>
+            <div class="thread-main" id="agent-thread-main"></div>
             <aside class="thread-details" id="agent-details" aria-labelledby="agent-details-heading" hidden>
               <div class="details-top">
                 <h3 class="card-name" id="agent-details-heading">Settings</h3>
@@ -300,11 +252,65 @@
       </section>
     </main>
   </div>
+  <!-- One thread's column (thread-view.js clones it per instance: the Agents
+       view and the quick chat pane). data-part becomes the id
+       "<prefix>-<part>"; data-for, data-controls, and data-labelledby name a
+       part the same way. -->
+  <template id="thread-template">
+    <div class="thread-header">
+      <a class="thread-back" data-part="back" href="/">All agents</a>
+      <div class="thread-title">
+        <h2 class="thread-name" data-part="name"></h2>
+        <span class="thread-chips" data-part="chips"></span>
+        <span class="thread-cost" data-part="cost"></span>
+      </div>
+      <button type="button" class="button thread-new" data-part="new-thread" data-agent-action="new-thread">New thread</button>
+    </div>
+    <div class="thread-confirm" data-part="confirm" role="group" aria-label="New thread" hidden>
+      <span data-part="confirm-text">Start a new thread? The agent will not remember this one.</span>
+      <button type="button" class="button button-primary" data-agent-action="confirm-new-thread">Start new thread</button>
+      <button type="button" class="button" data-agent-action="cancel-new-thread">Cancel</button>
+    </div>
+    <p class="thread-description" data-part="description" hidden></p>
+    <p class="thread-notice" data-part="notice" role="status" hidden></p>
+    <div class="thread-messages" data-part="messages" aria-live="polite"></div>
+    <div class="thread-status" data-part="status" role="status" tabindex="-1" hidden>
+      <span data-part="status-text"></span>
+      <button type="button" class="button" data-agent-action="interrupt">Interrupt</button>
+    </div>
+    <div class="thread-request" data-part="request" hidden></div>
+    <form class="composer" data-part="composer" hidden>
+      <label class="composer-label" data-part="input-label" data-for="input"></label>
+      <div class="composer-row">
+        <div class="mention-menu" data-part="mention-menu" role="listbox" aria-label="Agents" hidden></div>
+        <textarea class="composer-input" data-part="input" rows="2" aria-autocomplete="list" data-controls="mention-menu" aria-expanded="false"></textarea>
+        <button type="submit" class="button button-primary" data-part="send">Send</button>
+      </div>
+      <div class="composer-tools">
+        <button type="button" class="model-button" data-part="model" aria-haspopup="dialog" aria-expanded="false" data-controls="model-menu" hidden>
+          <span data-part="model-label"></span>
+          <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <span class="composer-note" data-part="model-note" hidden>Codex, its own settings</span>
+        <div class="model-menu" data-part="model-menu" role="dialog" aria-label="Model for this thread" hidden>
+          <p class="model-menu-heading" data-part="model-list-heading">Model</p>
+          <div class="model-list" data-part="model-list" role="listbox" data-labelledby="model-list-heading"></div>
+          <p class="model-menu-heading" data-part="effort-heading">Effort</p>
+          <div class="effort-row" data-part="effort-row" role="group" data-labelledby="effort-heading"></div>
+          <button type="button" class="model-menu-reset" data-part="model-reset">Use the agent's default</button>
+        </div>
+      </div>
+      <p class="composer-reason" data-part="composer-reason" hidden></p>
+    </form>
+    <p class="thread-foot" data-part="foot" hidden></p>
+    <p class="thread-failure" data-part="failure" role="status" hidden></p>
+  </template>
   <script src="/assets/settings.js"></script>
   <script src="/assets/theme.js"></script>
   <script src="/assets/jobs.js"></script>
   <script src="/assets/markdown.js"></script>
   <script src="/assets/agents.js"></script>
+  <script src="/assets/thread-view.js"></script>
   <script src="/assets/goals.js"></script>
   <script src="/assets/instructions.js"></script>
   <script src="/assets/feed.js"></script>

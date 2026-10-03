@@ -859,15 +859,256 @@
     return (isSession(entry) ? '/api/sessions/' : '/api/agents/') + entry.id;
   }
 
+  // Resolves with { ok, status, code, reason, problems, note }, or null
+  // when the request itself failed.
+  function call(method, path, body) {
+    var init = { method: method, cache: 'no-store', credentials: 'same-origin' };
+    if (body !== undefined) {
+      init.headers = { 'content-type': 'application/json' };
+      init.body = JSON.stringify(body);
+    }
+    return fetch(path, init).then(function (response) {
+      return response.text().then(function (text) {
+        var json = parse(text);
+        return {
+          ok: response.ok,
+          status: response.status,
+          code: json && typeof json.error === 'string' ? json.error : null,
+          reason: json && typeof json.reason === 'string' ? json.reason : null,
+          problems: json && Array.isArray(json.problems) ? json.problems.filter(function (p) { return typeof p === 'string'; }) : [],
+          note: json && typeof json.note === 'string' ? json.note : null,
+        };
+      }, function () {
+        return { ok: response.ok, status: response.status, code: null, reason: null, problems: [], note: null };
+      });
+    }, function () {
+      return null;
+    });
+  }
+
+  function post(path, body) {
+    return call('POST', path, body);
+  }
+
+  function detail(label, body) {
+    var node = element('div', 'request-detail');
+    node.appendChild(element('span', 'request-detail-label', label));
+    node.appendChild(body);
+    return node;
+  }
+
+  function detailList(items) {
+    var list = element('ul');
+    for (var i = 0; i < items.length; i += 1) list.appendChild(element('li', null, items[i]));
+    return list;
+  }
+
+  // The view names a context line uses, by the send route's `view`.
+  var CONTEXT_VIEWS = { agents: 'Agents', feed: 'Feed', brief: 'Brief', focus: 'Focus', goals: 'Goals', health: 'Health' };
+
+  // "Sent from Health: Nightly sync", or "Sent from Focus." with no label.
+  function contextSummary(entry) {
+    var name = Object.prototype.hasOwnProperty.call(CONTEXT_VIEWS, entry.view) ? CONTEXT_VIEWS[entry.view] : 'the dashboard';
+    return typeof entry.label === 'string' && entry.label ? 'Sent from ' + name + ': ' + entry.label : 'Sent from ' + name + '.';
+  }
+
+  // A thread's messages as nodes, shared by every thread view. `agentsOf()`
+  // returns the snapshot's agents, for names and links.
+  function messageRenderer(agentsOf) {
+    function messageMeta(entry) {
+      var meta = element('div', 'thread-message-meta');
+      if (entry.truncated) meta.appendChild(element('span', null, 'Cut short. '));
+      meta.appendChild(timeSpan(null, entry.at));
+      return meta;
+    }
+
+    function messageNode(entry) {
+      if (entry.role === 'system' && entry.kind === 'brief') return briefNode(entry);
+      if (entry.role === 'system' && entry.kind === 'delegation') return delegationNode(entry);
+      if (entry.role === 'system' && entry.kind === 'routine') return routineLineNode(entry);
+      if (entry.role === 'system' && entry.kind === 'context') return contextNode(entry);
+      if (entry.role === 'user' && typeof entry.from === 'string' && entry.from) return agentMessageNode(entry);
+      if (entry.role === 'user' && entry.routine && typeof entry.routine === 'object') return routineMessageNode(entry);
+      var role = entry.role === 'user' || entry.role === 'system' ? entry.role : 'assistant';
+      var node = element('div', 'thread-message thread-message-' + role);
+      node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // A message another agent sent into this thread: on the left like a
+    // reply, with the sender's name above it linking to the sender's thread.
+    function agentMessageNode(entry) {
+      var node = element('div', 'thread-message thread-message-assistant thread-message-agent');
+      node.appendChild(agentLink(entry.from, 'thread-message-from'));
+      node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // A routine's instruction: on the right like Hunter's, with the
+    // routine's name above it.
+    function routineMessageNode(entry) {
+      var node = element('div', 'thread-message thread-message-user thread-message-routine');
+      var name = typeof entry.routine.name === 'string' && entry.routine.name ? entry.routine.name : 'routine';
+      node.appendChild(element('span', 'thread-message-label', 'Routine \u00b7 ' + name));
+      node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // The line a routine's run posts when it raises a card: centered like
+    // a delegation line, opening to the card's input.
+    function routineLineNode(entry) {
+      var summary = typeof entry.summary === 'string' && entry.summary ? entry.summary : (entry.text || '');
+      var body = typeof entry.text === 'string' && entry.text && entry.text !== summary ? entry.text : '';
+      if (!body) {
+        var line = element('div', 'thread-message thread-message-system thread-message-routine-line');
+        line.appendChild(element('div', 'thread-message-text', summary));
+        line.appendChild(messageMeta(entry));
+        return line;
+      }
+      var node = element('div', 'thread-message thread-message-system thread-message-brief thread-message-routine-line');
+      var details = element('details', 'thread-brief thread-routine');
+      details.appendChild(element('summary', 'thread-brief-summary', summary));
+      details.appendChild(element('pre', 'thread-brief-body thread-routine-input', body));
+      node.appendChild(details);
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // What quick chat sent along with Hunter's message: one centered line,
+    // "Sent from Health: <label>", opening to the detail the agent was
+    // given. A line with no detail is the sentence alone.
+    function contextNode(entry) {
+      var summary = contextSummary(entry);
+      var body = typeof entry.detail === 'string' ? entry.detail : '';
+      if (!body) {
+        var line = element('div', 'thread-message thread-message-system thread-message-context');
+        line.appendChild(element('div', 'thread-message-text', summary));
+        line.appendChild(messageMeta(entry));
+        return line;
+      }
+      var node = element('div', 'thread-message thread-message-system thread-message-brief thread-message-context');
+      var details = element('details', 'thread-brief thread-context');
+      details.appendChild(element('summary', 'thread-brief-summary', summary));
+      details.appendChild(element('pre', 'thread-brief-body thread-context-detail', body));
+      node.appendChild(details);
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // A line about a delegation, centered like a date line. A finished one
+    // opens to the reply, the way the brief notice opens to the memo.
+    function delegationNode(entry) {
+      var names = function (id) { return agentName(agentsOf(), id); };
+      if (entry.state === 'finished') {
+        var node = element('div', 'thread-message thread-message-system thread-message-brief thread-message-delegation');
+        var details = element('details', 'thread-brief thread-delegation');
+        var replied = typeof entry.summary === 'string' && entry.summary ? entry.summary : (entry.text || '');
+        var who = typeof entry.to === 'string' && entry.to ? names(entry.to) : (typeof entry.from === 'string' && entry.from ? names(entry.from) : 'The agent');
+        details.appendChild(element('summary', 'thread-brief-summary', who + ' replied: ' + window.DashboardMarkdown.plain(replied)));
+        details.appendChild(markdownNode('thread-brief-body', entry.text || ''));
+        node.appendChild(details);
+        var meta = messageMeta(entry);
+        var target = typeof entry.to === 'string' && entry.to ? entry.to : (typeof entry.from === 'string' ? entry.from : null);
+        if (target) {
+          meta.appendChild(document.createTextNode(' '));
+          meta.appendChild(agentLink(target, 'thread-delegation-link', 'Open ' + names(target)));
+        }
+        node.appendChild(meta);
+        return node;
+      }
+      var line = element('div', 'thread-message thread-message-system thread-message-delegation');
+      var text = element('div', 'thread-message-text thread-delegation-text');
+      var parts = delegationParts(entry, names);
+      for (var i = 0; i < parts.length; i += 1) {
+        var part = parts[i];
+        if (typeof part === 'string') text.appendChild(document.createTextNode(part));
+        else text.appendChild(agentLink(part.agent, null, part.text));
+      }
+      line.appendChild(text);
+      line.appendChild(messageMeta(entry));
+      return line;
+    }
+
+    // A link to an agent's thread by registry id, labeled with its name.
+    function agentLink(id, className, label) {
+      var link = element('a', className, label || agentName(agentsOf(), id));
+      link.setAttribute('href', '/?agent=' + encodeURIComponent(id));
+      link.setAttribute('data-agent', id);
+      return link;
+    }
+
+    // A message body rendered from its Markdown (markdown.js). `mentions`,
+    // when the message carries registry ids, turns their "@Name" into pills.
+    function markdownNode(className, text, mentions) {
+      var pills = null;
+      if (Array.isArray(mentions) && mentions.length > 0) {
+        pills = mentions.filter(function (id) { return typeof id === 'string' && id; }).map(function (id) {
+          return { id: id, name: agentName(agentsOf(), id) };
+        });
+      }
+      return window.DashboardMarkdown.renderInto(element('div', className + ' markdown'), text, pills ? { mentions: pills } : undefined);
+    }
+
+    // The morning brief's notice: one line that opens to the memo. A brief
+    // that did not build is the sentence alone.
+    function briefNode(entry) {
+      var text = typeof entry.text === 'string' ? entry.text : '';
+      if (entry.state === 'failed') {
+        var line = element('div', 'thread-message thread-message-system thread-message-brief-failed');
+        line.appendChild(element('div', 'thread-message-text', text));
+        line.appendChild(messageMeta(entry));
+        return line;
+      }
+      var node = element('div', 'thread-message thread-message-system thread-message-brief');
+      var details = element('details', 'thread-brief');
+      var line = typeof entry.summary === 'string' && entry.summary ? entry.summary : text;
+      var day = briefDay(entry.date);
+      details.appendChild(element('summary', 'thread-brief-summary', 'Brief' + (day ? ', ' + day : '') + ': ' + window.DashboardMarkdown.plain(line)));
+      details.appendChild(markdownNode('thread-brief-body', text));
+      node.appendChild(details);
+      node.appendChild(messageMeta(entry));
+      return node;
+    }
+
+    // "Tuesday, September 30" for a notice's YYYY-MM-DD, or ''.
+    function briefDay(date) {
+      var match = typeof date === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(date) : null;
+      if (!match) return '';
+      return dayLabel(new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    }
+
+    function dayLabel(date) {
+      var options = { weekday: 'long', month: 'long', day: 'numeric' };
+      if (date.getFullYear() !== new Date().getFullYear()) options.year = 'numeric';
+      return date.toLocaleDateString('en-US', options);
+    }
+
+    // The local calendar day a message was posted on, or null.
+    function dayKey(entry) {
+      var time = typeof entry.at === 'string' ? Date.parse(entry.at) : NaN;
+      if (isNaN(time)) return null;
+      var date = new Date(time);
+      return [date.getFullYear(), date.getMonth(), date.getDate()].join('-');
+    }
+
+    // A date line between messages posted on different local days, and one
+    // before the first message when the thread spans more than one day.
+    function dayLine(entry) {
+      return element('p', 'thread-day', dayLabel(new Date(Date.parse(entry.at))));
+    }
+
+    return { messageNode: messageNode, dayKey: dayKey, dayLine: dayLine };
+  }
+
   function create(shell) {
     var view = document.getElementById('view-agents');
     var message = document.getElementById('agents-message');
     var groupsNode = document.getElementById('agents-groups');
     var empty = document.getElementById('agent-empty');
     var panel = document.getElementById('agent-panel');
-    var nameNode = document.getElementById('agent-name');
-    var chips = document.getElementById('agent-chips');
-    var cost = document.getElementById('agent-cost');
     var detailsToggle = document.getElementById('agent-details-toggle');
     var details = document.getElementById('agent-details');
     var detailsName = document.getElementById('agent-details-name');
@@ -876,32 +1117,8 @@
     var detailsJobs = document.getElementById('agent-details-jobs');
     var detailsForm = document.getElementById('agent-form');
     var newAgent = document.getElementById('agents-new');
-    var newThread = document.getElementById('agent-new-thread');
     var openTerminal = document.getElementById('agent-open-terminal');
     var terminalLine = document.getElementById('agent-terminal-reason');
-    var foot = document.getElementById('agent-foot');
-    var confirmNode = document.getElementById('agent-confirm');
-    var confirmText = document.getElementById('agent-confirm-text');
-    var description = document.getElementById('agent-description');
-    var notice = document.getElementById('agent-notice');
-    var messagesNode = document.getElementById('agent-messages');
-    var status = document.getElementById('agent-status');
-    var statusText = document.getElementById('agent-status-text');
-    var request = document.getElementById('agent-request');
-    var composer = document.getElementById('agent-composer');
-    var inputLabel = document.getElementById('agent-input-label');
-    var input = document.getElementById('agent-input');
-    var send = document.getElementById('agent-send');
-    var reason = document.getElementById('agent-composer-reason');
-    var failure = document.getElementById('agent-failure');
-    var modelButton = document.getElementById('agent-model');
-    var modelLabel = document.getElementById('agent-model-label');
-    var modelNote = document.getElementById('agent-model-note');
-    var modelMenu = document.getElementById('agent-model-menu');
-    var modelList = document.getElementById('agent-model-list');
-    var effortRow = document.getElementById('agent-effort-row');
-    var modelReset = document.getElementById('agent-model-reset');
-    var mentionMenu = document.getElementById('agent-mention-menu');
     var routinesNode = document.getElementById('agent-routines');
     var deleteNode = document.getElementById('agent-delete');
     var deleteAgentButton = deleteNode.querySelector('[data-agent-action="delete-agent"]');
@@ -924,18 +1141,8 @@
     var formNoticeIsNote = false;
     var idTouched = false; // the New agent id was typed, so the name stops filling it
     var wide = window.matchMedia('(min-width: 720px)');
-    var thread = { id: null, messages: null, loading: false, error: false, fresh: true, version: 0 };
-    var renderedVersion = -1;
-    var threadKey = null; // what the thread was last fetched against
-    var threadSeq = 0;
-    var busy = false; // one of our POSTs is out
-    var actionError = ''; // why the selected agent's last POST failed, or ''
+    var busy = false; // one of the panel's or Open terminal's POSTs is out
     var terminalError = ''; // why the selected session's Open terminal was refused, or ''
-    var confirming = false; // New thread awaits confirmation
-    var drafts = {}; // unsent composer text by agent id, for agents not selected
-    var menuOpen = false; // the model picker is open for the selected agent
-    var menuKey = null; // what the picker was last built from
-    var mention = null; // the open @ picker: { start, candidates, index }, or null
     var tick = null;
     var routineForm = null; // { agentId, routineId | null } while the panel shows the routine form
     var routineNotice = []; // sentences under the routine form, until the next edit
@@ -946,30 +1153,17 @@
     var routineRuns = { key: null, id: null, runs: null, loading: false, error: false }; // the open routine's last runs
     var routineRunsRendered = null;
     var routinesSectionKey = null; // what the sidebar section was last built from
-    var markingRead = null; // the persona whose bodyless read request is out
     var deleteFor = null; // the agent id whose Delete awaits confirmation
     var deleteNotice = null; // { agentId, text }: why its Delete was refused
-
-    // The listed agent with this id, or null.
-    function agentById(id) {
-      var agents = (state && state.agents) || [];
-      for (var i = 0; i < agents.length; i += 1) if (agents[i].id === id) return agents[i];
-      return null;
-    }
-
-    // The card the thread shows: the agent's own request while it waits,
-    // else the oldest request forwarded here (raised by another agent
-    // while answering a delegation that started in this thread). `owner`
-    // is the agent whose request it is.
-    function shownRequest(agent) {
-      if (!agent || !hasThread(agent)) return null;
-      if (agent.state === 'waiting' && agent.pending) return { pending: agent.pending, owner: agent, forwarded: false };
-      if (isPersona(agent) && Array.isArray(agent.forwarded) && agent.forwarded.length > 0) {
-        var card = agent.forwarded[0];
-        return { pending: card, owner: agentById(card.agent) || { id: card.agent, name: card.agent }, forwarded: true };
-      }
-      return null;
-    }
+    // The thread column (thread-view.js): the messages, card, status line,
+    // and composer of the open agent or session. This view owns the list,
+    // the header's actions, and the settings panel beside it.
+    var thread = window.DashboardThreadView.create(document.getElementById('agent-thread-main'), {
+      prefix: 'agent',
+      shell: shell,
+      onBack: function () { select(null, true); },
+      onOpenAgent: function (id) { select(id, true); },
+    });
 
     // The open agent or session, or null.
     function selectedAgent() {
@@ -979,20 +1173,6 @@
         for (var i = 0; i < lists[l].length; i += 1) if (lists[l][i].id === selectedId) return lists[l][i];
       }
       return null;
-    }
-
-    function markRead(force) {
-      var agent = selectedAgent();
-      if (!visible || document.hidden || !isPersona(agent) || (!force && agent.unread !== true) || markingRead === agent.id) return;
-      markingRead = agent.id;
-      fetch('/api/agents/' + encodeURIComponent(agent.id) + '/read', {
-        method: 'POST', cache: 'no-store', credentials: 'same-origin',
-      }).then(function () {
-        markingRead = null;
-        if (!shell.isStreaming()) shell.requestState();
-      }, function () {
-        markingRead = null;
-      });
     }
 
     function chip(className, text) {
@@ -1101,419 +1281,6 @@
         var again = groupsNode.querySelector('[data-agent="' + CSS.escape(focusedId) + '"]');
         if (again) again.focus();
       }
-    }
-
-    function messageMeta(entry) {
-      var meta = element('div', 'thread-message-meta');
-      if (entry.truncated) meta.appendChild(element('span', null, 'Cut short. '));
-      meta.appendChild(timeSpan(null, entry.at));
-      return meta;
-    }
-
-    function messageNode(entry) {
-      if (entry.role === 'system' && entry.kind === 'brief') return briefNode(entry);
-      if (entry.role === 'system' && entry.kind === 'delegation') return delegationNode(entry);
-      if (entry.role === 'system' && entry.kind === 'routine') return routineLineNode(entry);
-      if (entry.role === 'user' && typeof entry.from === 'string' && entry.from) return agentMessageNode(entry);
-      if (entry.role === 'user' && entry.routine && typeof entry.routine === 'object') return routineMessageNode(entry);
-      var role = entry.role === 'user' || entry.role === 'system' ? entry.role : 'assistant';
-      var node = element('div', 'thread-message thread-message-' + role);
-      node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
-      node.appendChild(messageMeta(entry));
-      return node;
-    }
-
-    // A message another agent sent into this thread: on the left like a
-    // reply, with the sender's name above it linking to the sender's thread.
-    function agentMessageNode(entry) {
-      var node = element('div', 'thread-message thread-message-assistant thread-message-agent');
-      node.appendChild(agentLink(entry.from, 'thread-message-from'));
-      node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
-      node.appendChild(messageMeta(entry));
-      return node;
-    }
-
-    // A routine's instruction: on the right like Hunter's, with the
-    // routine's name above it.
-    function routineMessageNode(entry) {
-      var node = element('div', 'thread-message thread-message-user thread-message-routine');
-      var name = typeof entry.routine.name === 'string' && entry.routine.name ? entry.routine.name : 'routine';
-      node.appendChild(element('span', 'thread-message-label', 'Routine \u00b7 ' + name));
-      node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
-      node.appendChild(messageMeta(entry));
-      return node;
-    }
-
-    // The line a routine's run posts when it raises a card: centered like
-    // a delegation line, opening to the card's input.
-    function routineLineNode(entry) {
-      var summary = typeof entry.summary === 'string' && entry.summary ? entry.summary : (entry.text || '');
-      var body = typeof entry.text === 'string' && entry.text && entry.text !== summary ? entry.text : '';
-      if (!body) {
-        var line = element('div', 'thread-message thread-message-system thread-message-routine-line');
-        line.appendChild(element('div', 'thread-message-text', summary));
-        line.appendChild(messageMeta(entry));
-        return line;
-      }
-      var node = element('div', 'thread-message thread-message-system thread-message-brief thread-message-routine-line');
-      var details = element('details', 'thread-brief thread-routine');
-      details.appendChild(element('summary', 'thread-brief-summary', summary));
-      details.appendChild(element('pre', 'thread-brief-body thread-routine-input', body));
-      node.appendChild(details);
-      node.appendChild(messageMeta(entry));
-      return node;
-    }
-
-    // A line about a delegation, centered like a date line. A finished one
-    // opens to the reply, the way the brief notice opens to the memo.
-    function delegationNode(entry) {
-      var names = function (id) { return agentName(state.agents, id); };
-      if (entry.state === 'finished') {
-        var node = element('div', 'thread-message thread-message-system thread-message-brief thread-message-delegation');
-        var details = element('details', 'thread-brief thread-delegation');
-        var replied = typeof entry.summary === 'string' && entry.summary ? entry.summary : (entry.text || '');
-        var who = typeof entry.to === 'string' && entry.to ? names(entry.to) : (typeof entry.from === 'string' && entry.from ? names(entry.from) : 'The agent');
-        details.appendChild(element('summary', 'thread-brief-summary', who + ' replied: ' + window.DashboardMarkdown.plain(replied)));
-        details.appendChild(markdownNode('thread-brief-body', entry.text || ''));
-        node.appendChild(details);
-        var meta = messageMeta(entry);
-        var target = typeof entry.to === 'string' && entry.to ? entry.to : (typeof entry.from === 'string' ? entry.from : null);
-        if (target) {
-          meta.appendChild(document.createTextNode(' '));
-          meta.appendChild(agentLink(target, 'thread-delegation-link', 'Open ' + names(target)));
-        }
-        node.appendChild(meta);
-        return node;
-      }
-      var line = element('div', 'thread-message thread-message-system thread-message-delegation');
-      var text = element('div', 'thread-message-text thread-delegation-text');
-      var parts = delegationParts(entry, names);
-      for (var i = 0; i < parts.length; i += 1) {
-        var part = parts[i];
-        if (typeof part === 'string') text.appendChild(document.createTextNode(part));
-        else text.appendChild(agentLink(part.agent, null, part.text));
-      }
-      line.appendChild(text);
-      line.appendChild(messageMeta(entry));
-      return line;
-    }
-
-    // A link to an agent's thread by registry id, labeled with its name.
-    function agentLink(id, className, label) {
-      var link = element('a', className, label || agentName(state.agents, id));
-      link.setAttribute('href', '/?agent=' + encodeURIComponent(id));
-      link.setAttribute('data-agent', id);
-      return link;
-    }
-
-    // A message body rendered from its Markdown (markdown.js). `mentions`,
-    // when the message carries registry ids, turns their "@Name" into pills.
-    function markdownNode(className, text, mentions) {
-      var pills = null;
-      if (Array.isArray(mentions) && mentions.length > 0) {
-        pills = mentions.filter(function (id) { return typeof id === 'string' && id; }).map(function (id) {
-          return { id: id, name: agentName(state.agents, id) };
-        });
-      }
-      return window.DashboardMarkdown.renderInto(element('div', className + ' markdown'), text, pills ? { mentions: pills } : undefined);
-    }
-
-    // The morning brief's notice: one line that opens to the memo. A brief
-    // that did not build is the sentence alone.
-    function briefNode(entry) {
-      var text = typeof entry.text === 'string' ? entry.text : '';
-      if (entry.state === 'failed') {
-        var line = element('div', 'thread-message thread-message-system thread-message-brief-failed');
-        line.appendChild(element('div', 'thread-message-text', text));
-        line.appendChild(messageMeta(entry));
-        return line;
-      }
-      var node = element('div', 'thread-message thread-message-system thread-message-brief');
-      var details = element('details', 'thread-brief');
-      var line = typeof entry.summary === 'string' && entry.summary ? entry.summary : text;
-      var day = briefDay(entry.date);
-      details.appendChild(element('summary', 'thread-brief-summary', 'Brief' + (day ? ', ' + day : '') + ': ' + window.DashboardMarkdown.plain(line)));
-      details.appendChild(markdownNode('thread-brief-body', text));
-      node.appendChild(details);
-      node.appendChild(messageMeta(entry));
-      return node;
-    }
-
-    // "Tuesday, September 30" for a notice's YYYY-MM-DD, or ''.
-    function briefDay(date) {
-      var match = typeof date === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(date) : null;
-      if (!match) return '';
-      return dayLabel(new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
-    }
-
-    function dayLabel(date) {
-      var options = { weekday: 'long', month: 'long', day: 'numeric' };
-      if (date.getFullYear() !== new Date().getFullYear()) options.year = 'numeric';
-      return date.toLocaleDateString('en-US', options);
-    }
-
-    // The local calendar day a message was posted on, or null.
-    function dayKey(entry) {
-      var time = typeof entry.at === 'string' ? Date.parse(entry.at) : NaN;
-      if (isNaN(time)) return null;
-      var date = new Date(time);
-      return [date.getFullYear(), date.getMonth(), date.getDate()].join('-');
-    }
-
-    // A date line between messages posted on different local days, and one
-    // before the first message when the thread spans more than one day.
-    function dayLine(entry) {
-      return element('p', 'thread-day', dayLabel(new Date(Date.parse(entry.at))));
-    }
-
-    // The pane scrolls to the newest message when a thread first shows and
-    // when the reader is already at the end; a reader who scrolled up stays
-    // where they were. A Claude terminal has no messages: its pane is its
-    // state.
-    function renderMessages() {
-      var agent = selectedAgent();
-      var atEnd = messagesNode.scrollHeight - messagesNode.scrollTop - messagesNode.clientHeight <= SCROLL_END_PX;
-      var follow = thread.fresh || atEnd;
-      messagesNode.textContent = '';
-      renderedVersion = thread.version;
-      if (isTerminal(agent)) {
-        messagesNode.appendChild(element('p', 'thread-line', terminalState(agent)));
-        return;
-      }
-      if (!hasThread(agent) || agent.state === 'unavailable') return;
-      if (thread.error) {
-        var line = element('p', 'thread-line');
-        line.appendChild(document.createTextNode('The thread could not be loaded. '));
-        line.appendChild(button('link-button', 'Retry', 'retry-thread'));
-        messagesNode.appendChild(line);
-        if (thread.messages === null) return;
-      } else if (thread.messages === null) {
-        if (thread.loading) messagesNode.appendChild(element('p', 'thread-line', 'Opening thread.'));
-        return;
-      }
-      thread.fresh = false;
-      if (thread.messages.length === 0) {
-        messagesNode.appendChild(element('p', 'thread-line', 'No messages yet.'));
-        return;
-      }
-      var days = 0;
-      var previousDay = null;
-      for (var d = 0; d < thread.messages.length; d += 1) {
-        var key = dayKey(thread.messages[d]);
-        if (key !== null && key !== previousDay) days += 1;
-        if (key !== null) previousDay = key;
-      }
-      previousDay = null;
-      for (var i = 0; i < thread.messages.length; i += 1) {
-        var entry = thread.messages[i];
-        var entryDay = dayKey(entry);
-        if (days > 1 && entryDay !== null && entryDay !== previousDay) messagesNode.appendChild(dayLine(entry));
-        if (entryDay !== null) previousDay = entryDay;
-        messagesNode.appendChild(messageNode(entry));
-      }
-      if (follow) messagesNode.scrollTop = messagesNode.scrollHeight;
-    }
-
-    function optionButton(option) {
-      var node = button('option', undefined, 'choose');
-      node.setAttribute('aria-pressed', 'false');
-      node.setAttribute('data-label', option.label);
-      node.appendChild(element('span', 'option-label', option.label));
-      if (option.description) node.appendChild(element('span', 'option-description', option.description));
-      return node;
-    }
-
-    // A Codex question carries an id, which its answer is keyed by; a
-    // persona's is keyed by its text. Codex also says whether a free-text
-    // answer is allowed (`isOther`, on by default) and whether the answer
-    // is a secret, which is then typed into a password field.
-    function questionCard(question, index) {
-      var card = element('section', 'request-card');
-      card.setAttribute('data-question', typeof question.id === 'string' && question.id ? question.id : question.question);
-      if (question.multiSelect) card.setAttribute('data-multi', '');
-      var head = element('div', 'request-head');
-      if (question.header) head.appendChild(chip('request-chip', question.header));
-      head.appendChild(element('h3', 'request-title', question.question));
-      card.appendChild(head);
-      var options = element('div', 'request-options');
-      var list = Array.isArray(question.options) ? question.options : [];
-      for (var i = 0; i < list.length; i += 1) {
-        if (list[i] && typeof list[i].label === 'string') options.appendChild(optionButton(list[i]));
-      }
-      card.appendChild(options);
-      if (question.isOther === false) return card;
-      var other = element('label', 'request-other');
-      var otherId = 'agent-other-' + index;
-      var otherLabel = element('span', 'request-other-label', 'Other');
-      other.appendChild(otherLabel);
-      var field = element('input', 'request-other-field');
-      field.type = question.isSecret === true ? 'password' : 'text';
-      field.id = otherId;
-      field.setAttribute('aria-label', 'Other answer for: ' + question.question);
-      field.autocomplete = 'off';
-      other.appendChild(field);
-      card.appendChild(other);
-      return card;
-    }
-
-    // The approval's heading: what the agent asks, by Codex's item kinds or
-    // the persona's tool name. A session request of a kind this view does
-    // not know is answered in the terminal, and the heading says so.
-    function approvalTitle(agent, pending) {
-      var name = displayName(agent);
-      switch (pending.toolName) {
-        case 'commandExecution': return name + ' wants to run a command';
-        case 'fileChange': return name + ' wants to change files';
-        case 'permissions': return name + ' asks for permission';
-        default:
-          if (isSession(agent)) return name + ' is waiting on the terminal';
-          return name + ' wants to run ' + (pending.toolName || 'a tool');
-      }
-    }
-
-    function detail(label, body) {
-      var node = element('div', 'request-detail');
-      node.appendChild(element('span', 'request-detail-label', label));
-      node.appendChild(body);
-      return node;
-    }
-
-    function detailList(items) {
-      var list = element('ul');
-      for (var i = 0; i < items.length; i += 1) list.appendChild(element('li', null, items[i]));
-      return list;
-    }
-
-    // The permissions a Codex request asks for, as lines; [] when the
-    // shape is not the one Codex sends.
-    function permissionLines(permissions) {
-      if (!permissions || typeof permissions !== 'object') return [];
-      var lines = [];
-      var fs = permissions.fileSystem;
-      var entries = fs && Array.isArray(fs.entries) ? fs.entries : [];
-      for (var i = 0; i < entries.length; i += 1) {
-        var entry = entries[i];
-        var target = entry && entry.path && typeof entry.path.path === 'string' ? entry.path.path : null;
-        if (target) lines.push((typeof entry.access === 'string' ? entry.access + ' ' : '') + shortPath(target, state.home));
-      }
-      if (permissions.network) lines.push('network');
-      return lines;
-    }
-
-    // The parts of a Codex approval worth reading on their own: the command
-    // and folder of a command, the files of a change, the permissions asked
-    // for, and the reason given. Null when the input carries none of them
-    // or arrived cut short; a persona's input stays JSON.
-    function approvalDetails(agent, pending) {
-      if (!isSession(agent) || pending.truncated) return null;
-      var input = typeof pending.input === 'string' ? parse(pending.input) : pending.input;
-      if (!input || typeof input !== 'object') return null;
-      var node = element('div', 'request-details');
-      var command = Array.isArray(input.command) ? input.command.join(' ') : input.command;
-      if (typeof command === 'string' && command) node.appendChild(detail('Command', element('pre', 'request-input', command)));
-      var folder = typeof input.cwd === 'string' ? input.cwd : typeof input.grantRoot === 'string' ? input.grantRoot : '';
-      if (folder) node.appendChild(detail('Folder', element('span', 'request-detail-text', shortPath(folder, state.home))));
-      var files = [];
-      var changes = Array.isArray(input.changes) ? input.changes : [];
-      for (var i = 0; i < changes.length; i += 1) {
-        var file = typeof changes[i] === 'string' ? changes[i] : changes[i] && changes[i].path;
-        if (typeof file === 'string') files.push(shortPath(file, state.home));
-      }
-      if (files.length > 0) node.appendChild(detail('Files', detailList(files)));
-      var permissions = permissionLines(input.permissions);
-      if (permissions.length > 0) node.appendChild(detail('Permissions', detailList(permissions)));
-      if (typeof input.reason === 'string' && input.reason.trim()) {
-        node.appendChild(detail('Reason', element('span', 'request-detail-text', input.reason.trim())));
-      }
-      return node.childNodes.length > 0 ? node : null;
-    }
-
-    function renderRequest(agent) {
-      var shown = shownRequest(agent);
-      var pending = shown ? shown.pending : null;
-      var owner = shown ? shown.owner : agent;
-      var key = pending ? agent.id + '|' + pending.requestId + '|' + (shown.forwarded ? pending.agent : '') : '';
-      if (request.getAttribute('data-request') === key) {
-        setRequestBusy();
-        return;
-      }
-      request.setAttribute('data-request', key);
-      request.textContent = '';
-      request.hidden = !pending;
-      if (!pending) return;
-      var native = pending.native === true;
-      if (pending.kind === 'approval') {
-        var card = element('section', 'request-card');
-        card.appendChild(element('h3', 'request-title', approvalTitle(owner, pending)));
-        if (shown.forwarded) card.appendChild(element('p', 'request-note', FORWARDED_NOTE));
-        card.appendChild(approvalDetails(owner, pending) || element('pre', 'request-input', formatInput(pending)));
-        if (pending.truncated) card.appendChild(element('p', 'request-note', 'Input cut short.'));
-        if (native) {
-          card.appendChild(element('p', 'request-note', TERMINAL_ONLY));
-        } else {
-          var actions = element('div', 'request-actions');
-          actions.appendChild(button('button button-primary', 'Allow', 'allow'));
-          actions.appendChild(button('button', 'Deny', 'deny'));
-          card.appendChild(actions);
-        }
-        request.appendChild(card);
-      } else {
-        var questions = questionsOf(pending);
-        for (var i = 0; i < questions.length; i += 1) {
-          if (questions[i] && typeof questions[i].question === 'string') request.appendChild(questionCard(questions[i], i));
-        }
-        if (shown.forwarded) {
-          var firstHead = request.querySelector('.request-head');
-          var note = element('p', 'request-note', FORWARDED_NOTE);
-          if (firstHead) firstHead.parentNode.insertBefore(note, firstHead.nextSibling);
-          else request.insertBefore(note, request.firstChild);
-        }
-        if (native) {
-          request.appendChild(element('p', 'request-note', TERMINAL_ONLY));
-        } else {
-          var answerRow = element('div', 'request-actions');
-          answerRow.appendChild(button('button button-primary', 'Answer', 'answer'));
-          var missing = element('span', 'request-missing');
-          missing.setAttribute('role', 'status');
-          answerRow.appendChild(missing);
-          request.appendChild(answerRow);
-        }
-      }
-      setRequestBusy();
-    }
-
-    function setRequestBusy() {
-      var buttons = request.querySelectorAll('button');
-      for (var i = 0; i < buttons.length; i += 1) buttons[i].disabled = busy;
-    }
-
-    // One answer per question. A multi-select question sends its pressed
-    // labels plus the Other text when given; a single-select question sends
-    // the Other text when typed, else the pressed label. Returns null and
-    // marks the first unanswered question otherwise.
-    function collectAnswers() {
-      var cards = request.querySelectorAll('.request-card[data-question]');
-      var answers = {};
-      var missingNode = request.querySelector('.request-missing');
-      for (var i = 0; i < cards.length; i += 1) {
-        var card = cards[i];
-        var labels = [];
-        var pressed = card.querySelectorAll('.option[aria-pressed="true"]');
-        for (var j = 0; j < pressed.length; j += 1) labels.push(pressed[j].getAttribute('data-label'));
-        var otherField = card.querySelector('.request-other-field');
-        var other = otherField ? otherField.value.trim() : '';
-        var multi = card.hasAttribute('data-multi');
-        if (other && (multi || labels.length === 0)) labels.push(other);
-        if (labels.length === 0) {
-          if (missingNode) missingNode.textContent = 'Every question needs an answer.';
-          var first = card.querySelector('.option, .request-other-field');
-          if (first) first.focus();
-          return null;
-        }
-        answers[card.getAttribute('data-question')] = multi ? labels : other || labels[0];
-      }
-      if (missingNode) missingNode.textContent = '';
-      return answers;
     }
 
     // With no agent open the pane asks for one; on a phone the pane is
@@ -2019,35 +1786,10 @@
       }
     }
 
-    // The thread column while New agent is open with no agent chosen.
-    function renderBlankMain() {
-      nameNode.textContent = NEW_AGENT;
-      chips.textContent = '';
-      cost.textContent = '';
-      description.textContent = '';
-      description.hidden = true;
-      detailsToggle.hidden = true;
-      detailsToggle.setAttribute('aria-expanded', 'false');
-      newThread.hidden = true;
-      confirmNode.hidden = true;
-      openTerminal.hidden = true;
-      terminalLine.textContent = '';
-      terminalLine.hidden = true;
-      notice.textContent = '';
-      notice.hidden = true;
-      status.hidden = true;
-      request.textContent = '';
-      request.hidden = true;
-      messagesNode.textContent = '';
-      renderedVersion = -1;
-      composer.hidden = true;
-      if (menuOpen) closeModelMenu(false);
-      foot.textContent = '';
-      foot.hidden = true;
-      failure.textContent = '';
-      failure.hidden = true;
-    }
-
+    // The column beside the list: a sentence asking for an agent, the
+    // thread view with the panel beside it, or, for New agent with no
+    // thread open, the panel alone under the view's blank header. The
+    // header's gear and Open terminal follow the open entry.
     function renderThread() {
       var agent = selectedAgent();
       view.classList.toggle('agents-open', !!selectedId || creating);
@@ -2056,160 +1798,51 @@
         empty.textContent = CHOOSE;
         empty.hidden = false;
         panel.hidden = true;
+        renderHeaderActions(null);
         return;
       }
       if (!agent && !creating) {
         empty.textContent = SESSION_ID.test(selectedId) ? 'That session is not listed.' : 'No agent named ' + selectedId + ' is registered.';
         empty.hidden = false;
         panel.hidden = true;
+        renderHeaderActions(null);
         return;
       }
       empty.hidden = true;
       panel.hidden = false;
       if (!agent) {
-        // New agent with no thread open: the column holds only the form.
-        renderBlankMain();
+        thread.blank(NEW_AGENT);
+        renderHeaderActions(null);
         details.hidden = false;
         renderPanel(null);
         return;
       }
-      var persona = isPersona(agent);
       var session = isSession(agent);
-      var name = displayName(agent);
-
-      nameNode.textContent = name;
-      chips.textContent = '';
-      if (roleChip(agent)) chips.appendChild(chip('role-chip', agent.role));
-      if (providerName(agent)) chips.appendChild(chip('provider-chip', providerName(agent)));
-      cost.textContent = persona && typeof agent.costUsd === 'number' ? '$' + agent.costUsd.toFixed(2) + ' this session' : '';
-      description.textContent = session ? shortPath(agent.cwd, state.home) : persona ? '' : agent.description || '';
-      description.hidden = !description.textContent;
-
-      detailsToggle.hidden = session;
-      detailsToggle.setAttribute('aria-expanded', detailsOpen && !session ? 'true' : 'false');
+      thread.render();
+      renderHeaderActions(agent);
       details.hidden = creating ? false : !detailsOpen || session;
       if (!details.hidden) renderPanel(agent);
+    }
 
-      newThread.hidden = !persona;
-      newThread.disabled = busy || !persona || agent.state === 'unavailable' || turnOpen(agent);
-      confirmNode.hidden = !confirming;
-      confirmText.textContent = 'Start a new thread? ' + name + ' will not remember this one.';
-
-      // Open terminal: on only for a session whose terminal is bound, still
-      // open, and reachable; otherwise the line under it says why, or why
-      // the last attempt was refused.
+    // The gear, for every entry but a coding session, and Open terminal: on
+    // only for a session whose terminal is bound, still open, and
+    // reachable; otherwise the line under it says why, or why the last
+    // attempt was refused.
+    function renderHeaderActions(agent) {
+      var session = isSession(agent);
+      detailsToggle.hidden = !agent || session;
+      detailsToggle.setAttribute('aria-expanded', agent && detailsOpen && !session ? 'true' : 'false');
       openTerminal.hidden = !session;
       var why = session ? terminalReason(agent, state) : '';
       openTerminal.disabled = !session || busy || !!why;
-      terminalLine.textContent = why || terminalError;
+      terminalLine.textContent = session ? why || terminalError : '';
       terminalLine.hidden = !terminalLine.textContent;
-
-      // A failed turn, or a turn the clock stopped: the persona is idle
-      // again with the reason kept until its next turn. A Codex thread
-      // whose server went away says so the same way.
-      var failed = hasThread(agent) && (agent.state === 'error' || (agent.state === 'idle' && !!agent.lastError) ||
-        (session && agent.state === 'unavailable' && !!agent.lastError));
-      notice.textContent = failed ? errorSentence(agent) : '';
-      notice.hidden = !failed;
-
-      // The status line stays up while a forwarded card is open, naming
-      // its owner; Interrupt is for this agent's own turn only.
-      var shown = shownRequest(agent);
-      var forwardedOpen = !!(shown && shown.forwarded);
-      var open = hasThread(agent) && (turnOpen(agent) || forwardedOpen);
-      status.hidden = !open;
-      statusText.textContent = !open ? '' : forwardedOpen ? displayName(shown.owner) + ' is waiting for you.' : agent.state === 'busy' ? name + ' is working.' : name + ' is waiting for you.';
-      var interrupt = status.querySelector('button');
-      interrupt.hidden = !turnOpen(agent);
-      interrupt.disabled = busy;
-
-      renderRequest(agent);
-      // A terminal's pane is its state, so it follows every change.
-      if (isTerminal(agent) || thread.version !== renderedVersion) renderMessages();
-
-      composer.hidden = !persona;
-      if (persona) {
-        var reasonText = composerReason(agent);
-        inputLabel.textContent = 'Message ' + name;
-        input.disabled = agent.state === 'unavailable';
-        send.disabled = busy || !!reasonText;
-        reason.textContent = reasonText;
-        reason.hidden = !reasonText;
-        renderModelTools(agent);
-      }
-      foot.textContent = hasThread(agent) && session ? 'Type to this thread in its terminal.' : '';
-      foot.hidden = !foot.textContent;
-      failure.textContent = actionError;
-      failure.hidden = !actionError;
     }
 
     function render() {
       if (!state) return;
       renderList();
       renderThread();
-    }
-
-    // Fetches the thread when the selected persona's or Codex session's
-    // thread may have changed: a new selection, a new last message, a
-    // model change (its line is not the last message), a line the daemon
-    // wrote outside a turn (lastLineAt), or a turn that ended. `force`
-    // fetches it again regardless, for Retry.
-    function syncThread(force) {
-      var agent = selectedAgent();
-      if (!hasThread(agent) || agent.state === 'unavailable') return;
-      var key = agent.id + '|' + JSON.stringify(agent.lastMessage) + '|' + JSON.stringify(agent.model || null) + '|' + (agent.lastLineAt || '') + '|' + (turnOpen(agent) ? 'open' : 'closed');
-      if (key === threadKey && !force) return;
-      threadKey = key;
-      fetchThread(agent);
-    }
-
-    function fetchThread(agent) {
-      var id = agent.id;
-      var seq = ++threadSeq;
-      var controller = new AbortController();
-      var timer = setTimeout(function () { controller.abort(); }, THREAD_TIMEOUT_MS);
-      thread.loading = true;
-      if (thread.messages === null) bumpThread();
-      fetch(routeBase(agent) + '/thread', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
-        .then(function (response) { return response.ok ? response.json() : null; }, function () { return null; })
-        .then(function (body) {
-          clearTimeout(timer);
-          if (seq !== threadSeq || thread.id !== id) return;
-          thread.loading = false;
-          if (body && Array.isArray(body.messages)) {
-            thread.messages = body.messages;
-            thread.error = false;
-          } else {
-            // The last good messages stay; the next state change fetches again.
-            thread.error = true;
-            threadKey = null;
-          }
-          bumpThread();
-        });
-    }
-
-    function bumpThread() {
-      thread.version += 1;
-      if (visible) renderMessages();
-    }
-
-    function resetThread(id) {
-      threadSeq += 1;
-      thread = { id: id, messages: null, loading: false, error: false, fresh: true, version: thread.version + 1 };
-      threadKey = null;
-    }
-
-    // Puts the current draft away and brings out the chosen agent's.
-    function setSelected(id) {
-      if (menuOpen) closeModelMenu(false);
-      closeMentionMenu();
-      if (selectedId) drafts[selectedId] = input.value;
-      selectedId = id;
-      input.value = (id && drafts[id]) || '';
-      actionError = '';
-      terminalError = '';
-      confirming = false;
-      resetThread(id);
     }
 
     // On a desk with no agent in the URL the first pinned persona's thread
@@ -2237,65 +1870,15 @@
       if (id === selectedId) return;
       setSelected(id);
       render();
-      syncThread();
-      markRead(true);
-      if (isPersona(selectedAgent()) && wide.matches) input.focus();
+      if (isPersona(selectedAgent()) && wide.matches) thread.focusInput();
     }
 
-    // Resolves with { ok, status, code, reason, problems, note }, or null
-    // when the request itself failed.
-    function call(method, path, body) {
-      var init = { method: method, cache: 'no-store', credentials: 'same-origin' };
-      if (body !== undefined) {
-        init.headers = { 'content-type': 'application/json' };
-        init.body = JSON.stringify(body);
-      }
-      return fetch(path, init).then(function (response) {
-        return response.text().then(function (text) {
-          var json = parse(text);
-          return {
-            ok: response.ok,
-            status: response.status,
-            code: json && typeof json.error === 'string' ? json.error : null,
-            reason: json && typeof json.reason === 'string' ? json.reason : null,
-            problems: json && Array.isArray(json.problems) ? json.problems.filter(function (p) { return typeof p === 'string'; }) : [],
-            note: json && typeof json.note === 'string' ? json.note : null,
-          };
-        }, function () {
-          return { ok: response.ok, status: response.status, code: null, reason: null, problems: [], note: null };
-        });
-      }, function () {
-        return null;
-      });
-    }
-
-    function post(path, body) {
-      return call('POST', path, body);
-    }
-
-    // Runs one persona or session action; the outcome lands in the state,
-    // so a success only clears the failure line and asks for the state when
-    // not streaming. The failure line and onDone(ok) belong to the agent
-    // acted on: when another thread has been opened meanwhile, neither
-    // touches it.
-    function act(agent, action, body, onDone) {
-      if (busy) return;
-      busy = true;
-      actionError = '';
-      renderThread();
-      post(routeBase(agent) + '/' + action, body).then(function (result) {
-        busy = false;
-        var ok = !!(result && result.ok);
-        var current = agent.id === selectedId;
-        if (ok) {
-          if (!shell.isStreaming()) shell.requestState();
-        } else if (result && result.code === 'no_such_request') {
-          shell.requestState();
-        }
-        if (current && !ok) actionError = action === 'model' ? modelRefusal(result, agent) : refusalSentence(result, agent);
-        renderThread();
-        if (current && onDone) onDone(ok);
-      });
+    // The thread view puts the draft away and brings out the chosen
+    // agent's; the refusal under Open terminal belongs to the last entry.
+    function setSelected(id) {
+      selectedId = id;
+      terminalError = '';
+      thread.select(id);
     }
 
     // Asks cmux to focus the session's terminal. A success shows nothing:
@@ -2315,135 +1898,6 @@
         if (session.id === selectedId) openTerminal.focus();
       });
     }
-
-    // Where the keyboard lands once a request or approval is settled.
-    function focusComposer() {
-      if (!composer.hidden && !input.disabled) input.focus();
-      else if (!status.hidden) status.focus();
-    }
-
-    // The model and effort the next turn runs on, under the input: a button
-    // for a Claude persona (disabled while the persona cannot run), a note
-    // for a Codex one. The picker rebuilds only when what it shows changes,
-    // so an open one keeps its focus.
-    function renderModelTools(agent) {
-      var claude = isPersona(agent) && agent.provider === 'claude' && agent.model;
-      var codex = isPersona(agent) && agent.provider === 'codex';
-      modelButton.hidden = !claude;
-      modelNote.hidden = !codex;
-      if (!claude) {
-        if (menuOpen) closeModelMenu(false);
-        return;
-      }
-      modelLabel.textContent = modelButtonText(agent.model, state.models);
-      modelButton.disabled = agent.state === 'unavailable';
-      modelButton.setAttribute('aria-expanded', menuOpen ? 'true' : 'false');
-      modelMenu.hidden = !menuOpen;
-      if (menuOpen) renderModelMenu(agent);
-    }
-
-    function renderModelMenu(agent) {
-      var key = JSON.stringify([agent.id, agent.model, state.models, busy]);
-      if (key === menuKey) return;
-      menuKey = key;
-      var model = agent.model;
-      var models = state.models || [];
-      modelList.textContent = '';
-      for (var i = 0; i < models.length; i += 1) {
-        var option = element('button', 'model-option', models[i].name);
-        option.type = 'button';
-        option.setAttribute('role', 'option');
-        option.setAttribute('aria-selected', model.id === models[i].id ? 'true' : 'false');
-        option.setAttribute('data-model', models[i].id);
-        option.disabled = busy;
-        if (model.default && model.default.id === models[i].id) option.appendChild(element('span', 'model-option-default', 'Default'));
-        modelList.appendChild(option);
-      }
-      effortRow.textContent = '';
-      for (var j = 0; j < EFFORTS.length; j += 1) {
-        var level = element('button', 'effort-option', effortNameOf(EFFORTS[j]));
-        level.type = 'button';
-        level.setAttribute('aria-pressed', model.effort === EFFORTS[j] ? 'true' : 'false');
-        level.setAttribute('data-effort', EFFORTS[j]);
-        level.disabled = busy;
-        effortRow.appendChild(level);
-      }
-      modelReset.disabled = busy || model.source !== 'thread';
-    }
-
-    function openModelMenu() {
-      var agent = selectedAgent();
-      if (menuOpen || modelButton.hidden || modelButton.disabled || !agent) return;
-      menuOpen = true;
-      menuKey = null;
-      renderModelTools(agent);
-      var selected = modelList.querySelector('[aria-selected="true"]') || modelList.firstElementChild;
-      if (selected) selected.focus();
-      document.addEventListener('pointerdown', onOutsidePointer, true);
-    }
-
-    function closeModelMenu(refocus) {
-      if (!menuOpen) return;
-      menuOpen = false;
-      menuKey = null;
-      modelMenu.hidden = true;
-      modelButton.setAttribute('aria-expanded', 'false');
-      document.removeEventListener('pointerdown', onOutsidePointer, true);
-      if (refocus !== false && !modelButton.hidden) modelButton.focus();
-    }
-
-    function onOutsidePointer(event) {
-      if (modelMenu.contains(event.target) || modelButton.contains(event.target)) return;
-      closeModelMenu(false);
-    }
-
-    // Posts the thread's choice; the snapshot brings the new pair, and the
-    // thread is fetched again for its line, which the row preview does not
-    // carry. The picker closes on a choice and the button keeps focus.
-    function chooseModel(body) {
-      var agent = selectedAgent();
-      if (!isPersona(agent) || modelButton.disabled) return;
-      closeModelMenu(true);
-      act(agent, 'model', body, function (ok) {
-        if (ok) syncThread(true);
-      });
-    }
-
-    function sendMessage() {
-      var agent = selectedAgent();
-      if (!isPersona(agent) || send.disabled) return;
-      closeMentionMenu();
-      var text = input.value.trim();
-      if (!text) {
-        input.focus();
-        return;
-      }
-      var mentions = mentionIds(text, state && state.agents);
-      var body = mentions.length > 0 ? { text: text, mentions: mentions } : { text: text };
-      act(agent, 'send', body, function (ok) {
-        if (ok) input.value = '';
-        input.focus();
-      });
-    }
-
-    // Answers post to the open thread; the daemon settles a forwarded
-    // card through its owner.
-    function answerQuestion(agent, card) {
-      var answers = collectAnswers();
-      if (!answers) return;
-      act(agent, 'answer', { requestId: card.requestId, answers: answers }, focusComposer);
-    }
-
-    function toggleOption(node) {
-      var card = node.closest('.request-card');
-      var pressed = node.getAttribute('aria-pressed') === 'true';
-      if (!card.hasAttribute('data-multi')) {
-        var siblings = card.querySelectorAll('.option');
-        for (var i = 0; i < siblings.length; i += 1) siblings[i].setAttribute('aria-pressed', 'false');
-      }
-      node.setAttribute('aria-pressed', pressed ? 'false' : 'true');
-    }
-
 
     // --- Routines: the panel's list and form, the sidebar section ----------
 
@@ -2992,12 +2446,15 @@
     routinesNode.addEventListener('change', onRoutineFormEdit);
 
     // Header actions live outside #view-agents; one delegated listener keeps
-    // them on the same action path as the thread's own controls.
+    // them on the same action path as the panel's controls. The thread
+    // view handles its own controls and links on its root first and marks
+    // a link it took with preventDefault.
     document.addEventListener('click', function (event) {
       var target = event.target;
       var link = target.closest && target.closest('a[data-agent]');
       if (link) {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (!view.contains(link)) return;
         event.preventDefault();
         if (link.hasAttribute('data-routine')) {
           openRoutine(link.getAttribute('data-agent'), link.getAttribute('data-routine'));
@@ -3006,51 +2463,12 @@
         select(link.getAttribute('data-agent'), true);
         return;
       }
-      var back = target.closest && target.closest('#agent-back');
-      if (back) {
-        event.preventDefault();
-        select(null, true);
-        return;
-      }
       var node = target.closest && target.closest('button[data-agent-action]');
       if (!node || node.disabled) return;
       var agent = selectedAgent();
-      var shown = shownRequest(agent);
       switch (node.getAttribute('data-agent-action')) {
-        case 'choose':
-          toggleOption(node);
-          break;
-        case 'answer':
-          if (shown) answerQuestion(agent, shown.pending);
-          break;
-        case 'allow':
-        case 'deny':
-          if (shown) {
-            act(agent, 'answer', { requestId: shown.pending.requestId, decision: node.getAttribute('data-agent-action') }, focusComposer);
-          }
-          break;
-        case 'interrupt':
-          if (agent) act(agent, 'interrupt');
-          break;
         case 'open-terminal':
           if (isSession(agent)) openSessionTerminal(agent);
-          break;
-        case 'new-thread':
-          confirming = true;
-          renderThread();
-          confirmNode.querySelector('button').focus();
-          break;
-        case 'confirm-new-thread':
-          confirming = false;
-          if (agent) act(agent, 'new-thread', undefined, function () { newThread.focus(); });
-          break;
-        case 'cancel-new-thread':
-          confirming = false;
-          renderThread();
-          newThread.focus();
-          break;
-        case 'retry-thread':
-          syncThread(true);
           break;
         case 'toggle-details':
           detailsOpen = !detailsOpen;
@@ -3157,182 +2575,6 @@
       closeDetails();
     });
 
-    composer.addEventListener('submit', function (event) {
-      event.preventDefault();
-      sendMessage();
-    });
-
-    modelButton.addEventListener('click', function () {
-      if (menuOpen) closeModelMenu(true);
-      else openModelMenu();
-    });
-
-    modelMenu.addEventListener('click', function (event) {
-      var option = event.target.closest('.model-option');
-      if (option && !option.disabled) return chooseModel({ model: option.getAttribute('data-model') });
-      var level = event.target.closest('.effort-option');
-      if (level && !level.disabled) return chooseModel({ effort: level.getAttribute('data-effort') });
-      if (event.target.closest('#agent-model-reset') && !modelReset.disabled) chooseModel({ model: null, effort: null });
-    });
-
-    // Escape closes; arrows move within the model list or the effort row;
-    // Enter and Space choose, as buttons do.
-    modelMenu.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeModelMenu(true);
-        return;
-      }
-      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      var group = event.target.closest('.model-list, .effort-row');
-      if (!group) return;
-      var items = Array.prototype.filter.call(group.children, function (node) { return !node.disabled; });
-      var index = items.indexOf(event.target);
-      if (index === -1) return;
-      event.preventDefault();
-      var forward = event.key === 'ArrowDown' || event.key === 'ArrowRight';
-      items[(index + (forward ? 1 : items.length - 1)) % items.length].focus();
-    });
-
-    // A press on a picker button keeps the focus where it is (WebKit moves
-    // it on mousedown, which would close the picker before the click).
-    modelMenu.addEventListener('mousedown', function (event) {
-      if (event.target.closest('button')) event.preventDefault();
-    });
-
-    // Leaving the picker with the keyboard closes it.
-    modelMenu.addEventListener('focusout', function (event) {
-      if (!menuOpen || !event.relatedTarget) return;
-      if (modelMenu.contains(event.relatedTarget) || event.relatedTarget === modelButton) return;
-      closeModelMenu(false);
-    });
-
-    // The @ picker. While the caret follows "@" at a word start (the start
-    // of the text or after whitespace, with no line break since), a listbox
-    // over the input offers the agents that match what was typed after it.
-    // Up and Down move, Enter or Tab chooses, Escape closes; a click or a
-    // tap chooses too. Choosing replaces "@letters" with "@Name ".
-    function mentionToken() {
-      var caret = input.selectionStart;
-      if (typeof caret !== 'number' || caret !== input.selectionEnd) return null;
-      var before = input.value.slice(0, caret);
-      var at = before.lastIndexOf('@');
-      if (at === -1) return null;
-      if (at > 0 && !/\s/.test(before.charAt(at - 1))) return null;
-      var query = before.slice(at + 1);
-      if (query.indexOf('\n') !== -1) return null;
-      return { start: at, query: query };
-    }
-
-    function updateMentionMenu() {
-      var agent = selectedAgent();
-      var token = isPersona(agent) && !input.disabled ? mentionToken() : null;
-      if (!token) return closeMentionMenu();
-      var candidates = mentionCandidates(state && state.agents, state && state.groups, agent.id, token.query);
-      if (candidates.length === 0) return closeMentionMenu();
-      var keep = mention && mention.start === token.start ? mention.candidates[mention.index] : null;
-      var index = 0;
-      if (keep) {
-        for (var i = 0; i < candidates.length; i += 1) if (candidates[i].id === keep.id) index = i;
-      }
-      mention = { start: token.start, candidates: candidates, index: index };
-      renderMentionMenu();
-    }
-
-    function renderMentionMenu() {
-      mentionMenu.textContent = '';
-      for (var i = 0; i < mention.candidates.length; i += 1) {
-        var agent = mention.candidates[i];
-        var option = element('button', 'mention-option');
-        option.type = 'button';
-        option.id = 'agent-mention-' + agent.id;
-        option.setAttribute('role', 'option');
-        option.setAttribute('data-agent', agent.id);
-        option.setAttribute('aria-selected', i === mention.index ? 'true' : 'false');
-        option.appendChild(element('span', 'mention-option-name', agent.name));
-        if (roleChip(agent)) option.appendChild(chip('role-chip', agent.role));
-        mentionMenu.appendChild(option);
-      }
-      mentionMenu.hidden = false;
-      input.setAttribute('aria-expanded', 'true');
-      input.setAttribute('aria-activedescendant', 'agent-mention-' + mention.candidates[mention.index].id);
-    }
-
-    function closeMentionMenu() {
-      if (!mention) return;
-      mention = null;
-      mentionMenu.hidden = true;
-      mentionMenu.textContent = '';
-      input.setAttribute('aria-expanded', 'false');
-      input.removeAttribute('aria-activedescendant');
-    }
-
-    function moveMention(step) {
-      var count = mention.candidates.length;
-      mention.index = (mention.index + step + count) % count;
-      renderMentionMenu();
-    }
-
-    function chooseMention(agent) {
-      if (!mention || !agent) return;
-      var caret = input.selectionStart;
-      var inserted = '@' + agent.name + ' ';
-      input.value = input.value.slice(0, mention.start) + inserted + input.value.slice(caret);
-      var next = mention.start + inserted.length;
-      closeMentionMenu();
-      input.focus();
-      input.setSelectionRange(next, next);
-    }
-
-    input.addEventListener('input', updateMentionMenu);
-    input.addEventListener('click', updateMentionMenu);
-    input.addEventListener('blur', function () {
-      // A press on an option keeps the focus here (mousedown below), so a
-      // blur means the keyboard went somewhere else.
-      closeMentionMenu();
-    });
-
-    mentionMenu.addEventListener('mousedown', function (event) {
-      if (event.target.closest('button')) event.preventDefault();
-    });
-    mentionMenu.addEventListener('click', function (event) {
-      var option = event.target.closest('.mention-option');
-      if (!option || !mention) return;
-      var id = option.getAttribute('data-agent');
-      for (var i = 0; i < mention.candidates.length; i += 1) {
-        if (mention.candidates[i].id === id) return chooseMention(mention.candidates[i]);
-      }
-    });
-
-    input.addEventListener('keydown', function (event) {
-      if (event.isComposing) return;
-      if (mention) {
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-          event.preventDefault();
-          moveMention(event.key === 'ArrowDown' ? 1 : -1);
-          return;
-        }
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          closeMentionMenu();
-          return;
-        }
-        if ((event.key === 'Enter' && !event.shiftKey && !event.altKey) || event.key === 'Tab') {
-          event.preventDefault();
-          chooseMention(mention.candidates[mention.index]);
-          return;
-        }
-      }
-      if (event.key !== 'Enter') return;
-      if (event.shiftKey || event.altKey) return;
-      event.preventDefault();
-      sendMessage();
-    });
-    // Moving the caret with the keyboard can leave or enter an @ token.
-    input.addEventListener('keyup', function (event) {
-      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End') updateMentionMenu();
-    });
-
     // Turning a phone into a desk with nothing chosen opens the pinned
     // thread, the same as arriving on a desk; turning a desk into a phone
     // with only that default open goes back to the list.
@@ -3344,12 +2586,12 @@
       else if (id && !selectedId) setSelected(id);
       else return;
       render();
-      syncThread();
     });
 
     return {
       update: function (next, keys) {
         state = next;
+        thread.update(next, keys);
         var touched = !keys || keys.some(function (key) { return WATCHED.indexOf(key) !== -1; });
         if (touched && visible) {
           if (!selectedId && !agentFromUrl()) {
@@ -3357,8 +2599,6 @@
             if (id) setSelected(id);
           }
           render();
-          syncThread();
-          markRead(false);
         }
       },
       show: function () {
@@ -3366,20 +2606,62 @@
         var id = agentFromUrl() || defaultId();
         if (id !== selectedId) setSelected(id);
         if (tick === null) tick = setInterval(function () { refreshTimes(view); }, TICK_MS);
+        thread.show();
         render();
-        syncThread();
-        markRead(true);
       },
       hide: function () {
         visible = false;
+        thread.hide();
         if (tick !== null) clearInterval(tick);
         tick = null;
+      },
+      // What Hunter is looking at, for quick chat's context line: the open
+      // agent's name and state, or the view's name alone.
+      context: function () {
+        var agent = visible ? selectedAgent() : null;
+        if (!agent || !isPersona(agent)) return { view: 'agents' };
+        var line = stateLine(agent);
+        return { view: 'agents', label: agent.name, detail: 'State: ' + (line ? line.text : 'Idle') };
       },
     };
   }
 
   window.DashboardAgents = {
     create: create,
+    // For thread-view.js, which renders one thread's column with these.
+    shared: {
+      element: element,
+      button: button,
+      timeSpan: timeSpan,
+      refreshTimes: refreshTimes,
+      call: call,
+      post: post,
+      parse: parse,
+      detail: detail,
+      detailList: detailList,
+      isPersona: isPersona,
+      isSession: isSession,
+      isTerminal: isTerminal,
+      hasThread: hasThread,
+      turnOpen: turnOpen,
+      providerName: providerName,
+      shortPath: shortPath,
+      displayName: displayName,
+      modelNameOf: modelNameOf,
+      effortNameOf: effortNameOf,
+      modelRefusal: modelRefusal,
+      questionsOf: questionsOf,
+      routeBase: routeBase,
+      messageRenderer: messageRenderer,
+      EFFORTS: EFFORTS,
+      SESSION_ID: SESSION_ID,
+      TERMINAL_ONLY: TERMINAL_ONLY,
+      FORWARDED_NOTE: FORWARDED_NOTE,
+      SCROLL_END_PX: SCROLL_END_PX,
+      THREAD_TIMEOUT_MS: THREAD_TIMEOUT_MS,
+      TICK_MS: TICK_MS,
+    },
+    contextSummary: contextSummary,
     groups: groups,
     groupName: groupName,
     pinnedPersona: pinnedPersona,

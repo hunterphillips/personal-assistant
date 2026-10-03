@@ -1826,7 +1826,8 @@ test.describe('with the @ picker in the composer', () => {
     await input(page).press('Shift+Enter');
     await expect(input(page)).toHaveValue('@d\n');
     await expect(picker(page)).toBeHidden();
-    await expect(messages(page)).toHaveCount(3);
+    // Nothing more was sent (the reply to the first send may land meanwhile).
+    expect(hub.personas.sent).toHaveLength(1);
 
     await input(page).fill('mail a@d');
     await expect(picker(page)).toBeHidden();
