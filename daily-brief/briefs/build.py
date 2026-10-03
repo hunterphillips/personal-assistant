@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Build a Daily Brief memo into the markdown brief and the dashboard viewer.
+"""Build a Daily Brief memo into its markdown, viewer, and data artifacts.
 
     python3 build.py 2026-09-25 [--dir PATH]
 
 Reads memo-<date>.md from the briefs directory (or --dir) and writes
-<date>.md, viewer-<date>.html, and notice-<date>.json beside it. Standard
-library only. The notice is what the dashboard posts into the Assistant's
-thread: {date, state: "ready", opening, memo}, where opening is the memo's
-opening paragraph (the title when it has none) and memo is the memo without
-its title line, cut to NOTICE_MEMO_BYTES.
+<date>.md, viewer-<date>.html, brief-<date>.json, and notice-<date>.json
+beside it. Standard library only. The brief data keeps each parsed paragraph
+or list block as an item for the dashboard. The notice is what the dashboard
+posts into the Assistant's thread: {date, state: "ready", opening, memo},
+where opening is the memo's opening paragraph (the title when it has none)
+and memo is the memo without its title line, cut to NOTICE_MEMO_BYTES.
 
 The memo is markdown: an optional "# title" line, an optional opening
 paragraph with no heading, then "## <Heading>" sections in any order, each
@@ -16,7 +17,7 @@ holding paragraphs and/or "- " bullet lists. The
 viewer keeps the envelope the dashboard parses (dashboard/app/lib/briefs.mjs):
 one plain <script> holding `const ITEMS` and `const KEY`, six controls, and
 the script immediately before </body></html>. One ITEMS entry per section, so
-feedback is per section.
+the viewer's feedback remains per section.
 """
 import argparse
 import datetime as dt
@@ -27,6 +28,7 @@ import re
 import sys
 
 WORD_CAP = 550
+ITEM_CAP = 200
 NOTICE_MEMO_BYTES = 6 * 1024
 
 
@@ -142,6 +144,33 @@ def items_for(opening, sections):
         taken.add(slug)
         items.append({"sec": label, "id": slug, "text": "\n\n".join(paras)})
     return items
+
+
+def data_for(date, title, opening, sections, words):
+    opening_item = {"id": "opening", "text": opening} if opening else None
+    item_count = 1 if opening_item else 0
+    taken = set()
+    data_sections = []
+    for label, paras in sections:
+        slug = slug_for(label, taken)
+        taken.add(slug)
+        items = [
+            {"id": f"{slug}-{number}", "text": text}
+            for number, text in enumerate(paras, start=1)
+        ]
+        item_count += len(items)
+        data_sections.append({"id": slug, "label": label, "items": items})
+
+    if item_count > ITEM_CAP:
+        raise MemoError(f"{item_count} items; the cap is {ITEM_CAP}")
+
+    return {
+        "date": date,
+        "title": title,
+        "words": words,
+        "opening": opening_item,
+        "sections": data_sections,
+    }
 
 
 def render_viewer(date, title, items, words):
@@ -411,15 +440,26 @@ def main(argv):
         return fail(f"{words} words; the cap is {WORD_CAP}")
 
     items = items_for(opening, sections)
+    try:
+        brief_data = data_for(args.date, title, opening, sections, words)
+    except MemoError as e:
+        return fail(str(e))
     md_path = os.path.join(args.dir, f"{args.date}.md")
     viewer_path = os.path.join(args.dir, f"viewer-{args.date}.html")
+    data_path = os.path.join(args.dir, f"brief-{args.date}.json")
     notice_path = os.path.join(args.dir, f"notice-{args.date}.json")
     write_atomic(md_path, render_markdown(title, opening, sections))
     write_atomic(viewer_path, render_viewer(args.date, title, items, words))
+    write_atomic(
+        data_path,
+        json.dumps(brief_data, ensure_ascii=False, indent=2) + "\n",
+        mode=0o600,
+    )
     write_atomic(notice_path, render_notice(args.date, title, opening, text), mode=0o600)
     print(f"built {args.date}: {words} words, {len(sections)} sections" + (" + opening" if opening else ""))
     print(f"  {md_path}")
     print(f"  {viewer_path}")
+    print(f"  {data_path}")
     print(f"  {notice_path}")
     return 0
 
@@ -444,8 +484,9 @@ def render_notice(date, title, opening, text):
 
 def write_atomic(path, text, mode=None):
     """Write to a dotfile beside the target, then rename. The dashboard lists
-    viewer-<date>.html and notice-<date>.json by name, so it never sees a
-    half-written file. `mode` sets the file's permissions before the rename."""
+    viewer-<date>.html, brief-<date>.json, and notice-<date>.json by name, so
+    it never sees a half-written file. `mode` sets the file's permissions
+    before the rename."""
     directory, name = os.path.split(path)
     tmp = os.path.join(directory, f".{name}.tmp")
     with open(tmp, "w", encoding="utf-8") as f:

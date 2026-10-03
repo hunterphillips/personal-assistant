@@ -49,10 +49,10 @@ daily-brief/bin/run-brief --date 2026-09-27 --stage curate   # rerun one stage
 ```
 
 Stages are `gather`, `curate`, `verify`. Without `--force` a date that
-already has a viewer exits without running. Models: opus for cfo, focus,
-and second-brain; `claude-sonnet-5-5` at `--effort high` for the curator
-(Hunter's pick, 09-29; `DAILY_BRIEF_EFFORT_curator` overrides); sonnet for
-calendar.
+already has a viewer and valid brief data exits without running. Models:
+opus for cfo, focus, and second-brain; `claude-sonnet-5-5` at `--effort
+high` for the curator (Hunter's pick, 09-29;
+`DAILY_BRIEF_EFFORT_curator` overrides); sonnet for calendar.
 `DAILY_BRIEF_MODEL_<domain>=sonnet` overrides one for a run (hyphens become
 underscores: `DAILY_BRIEF_MODEL_second_brain`). Timeouts:
 `DAILY_BRIEF_WAIT_SECONDS`, `DAILY_BRIEF_GATHER_SECONDS`,
@@ -89,9 +89,10 @@ models. Log lines start with `watch`.
 - `contributions/<date>/` — `cfo.yaml`, `focus.yaml`, `second-brain.yaml`,
   `calendar.yaml`, `run.yaml`, and `work.md` on weekdays. Gitignored.
 - `briefs/memo-<date>.md` — the curator's memo; `<date>.md`,
-  `viewer-<date>.html`, and `notice-<date>.json` built from it. The
-  dashboard serves the newest viewer and posts the notice (the opening and
-  the memo, or `state: failed` when the run ended without a viewer) once
+  `viewer-<date>.html`, `brief-<date>.json`, and `notice-<date>.json` built
+  from it. The structured brief has one item per paragraph or list block.
+  The dashboard serves the newest viewer and posts the notice (the opening
+  and the memo, or `state: failed` when the run ended without a viewer) once
   into the Assistant's thread.
   Feedback saves beside it as `feedback-<date>.md`. Gitignored.
 - `~/Library/Logs/daily-brief.log` — one line per run:
