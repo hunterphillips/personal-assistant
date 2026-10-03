@@ -284,9 +284,11 @@ git history rather than assuming. Do not trigger scans, run curate, or modify
 `focus.json`.
 
 **second-brain** — personal context. Standing context as before; this domain
-supplies most of it. Since the cursor, what was written or revised in his
-world as `change`: a priorities change, a meeting digest, a new household
-fact, a note he distilled. Dated things only the vault knows as `upcoming`:
+supplies most of it. Since the cursor, what the vault learned about his
+world as `change`: a meeting digest, a household fact that arrived, a
+contradiction the audit found. A note he wrote or revised himself (his
+priorities, a distillation) is his own action, not a change; hand over its
+new content as standing context instead. Dated things only the vault knows as `upcoming`:
 a meetup theme, a series of standing meetings, a review date on a note.
 Unresolved contradictions and notes gone stale as `caveat`. Ground current
 priorities in `notes/current-priorities.md` and use the latest audit for

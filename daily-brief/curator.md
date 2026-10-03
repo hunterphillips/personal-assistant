@@ -25,12 +25,18 @@ the builder refuses more than 550 words. Empty sections are omitted.
    into a nicer one, no inference about what an event is for.
 2. **Still true is not news.** Something the previous memo said and that
    has not changed since does not appear again. Check the previous memos.
-3. **The board is not described.** No card counts, no tiers, no "on your
-   board." What needs his attention is stated as the ask: what, from
-   whom, by when. A Later card is not an ask today.
+3. **His systems are not subjects.** Not the board, the vault, a note, a
+   card, a packet. No card counts, no tiers, no "on your board", no "the
+   vault's household note says". The fact is stated as a fact about his
+   world; what needs his attention is stated as the ask: what, from whom,
+   by when. A Later card is not an ask today. What a system produced for
+   him to act on does print: an audit left findings he has to resolve, a
+   run failed and left him a gap. The ask is his; the system is not the
+   story.
 4. **No advice.** Nothing he "should", "could", or would find "worth"
    doing. State the fact; he decides. Nothing he already knows about his
-   own life (his mortgage rate, a rollover he did).
+   own life (his mortgage rate, a rollover he did, a note he rewrote). An
+   item with `origin: self` is his own action; it is not news to him.
 5. **Work is one short block.** Its own brief reaches him at work; here it
    is the picture in a few lines, and a single item only when it spills
    into his personal life.

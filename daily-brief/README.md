@@ -23,16 +23,20 @@ the memo reports under "Things to note".
 
 If the Mac is asleep, launchd fires every missed job at wake, and the wait
 above puts them back in order. A Mac that is shut down does not catch up.
-The runner is wrapped in `caffeinate -is`, so once it starts the Mac stays
-awake until it finishes. Waking a sleeping Mac on schedule is a separate,
-machine-wide power setting (root, one schedule for the whole machine). Apple
-documents it as working only when the Mac is plugged in. Set on 2026-09-28,
-not yet observed with the lid closed. You do not have to check: a run that
-starts more than 30 minutes after 06:05 on its own date adds a "Things to note" line
-to the memo saying when it was built. To check or change the wake:
+
+Staying awake is two pieces. A machine-wide power schedule (root, one for
+the whole machine) wakes the Mac at 05:00; it has to be plugged in. That
+wake is a dark wake and lasts seconds on its own, so
+`com.personal-assistant.morning-hold` (`launchd/` here) fires at it and
+runs `caffeinate -uis -t 10800`: a full wake with network, held until
+08:00, with the lid open or closed. On battery the hold is not honored and
+the morning plays out as before: jobs fire at whatever wake comes next, and
+a run that finds no network exits with `reason=no-network` in the log.
+Before 2026-10-02 nothing held the wake, and the brief only ran on mornings
+Hunter opened the lid. To check or change the wake:
 
 ```
-sudo pmset repeat wakeorpoweron MTWRFSU 05:10:00
+sudo pmset repeat wakeorpoweron MTWRFSU 05:00:00
 pmset -g sched
 ```
 

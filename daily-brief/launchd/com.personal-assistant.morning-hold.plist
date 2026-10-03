@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.personal-assistant.morning-hold</string>
+  <!-- Holds the Mac awake from the scheduled wake until 08:00 so every
+       morning job (catchup 05:15, cfo 05:30, watch 05:40, Focus scans 05:50
+       and 06:15, the brief 06:05, the hourly mail and calendar scans) runs
+       with network. -u declares user activity, which turns the dark wake
+       the power schedule produces into a full wake; -i and -s hold off
+       idle and system sleep for the three hours. System sleep is held
+       only on AC power. A launch agent cannot wake a sleeping Mac; the
+       power schedule (README) does that, and launchd fires this job at
+       that wake. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-uis</string>
+    <string>-t</string>
+    <string>10800</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>5</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
