@@ -38,12 +38,38 @@
   var NOT_SAVED = 'The feedback could not be saved.';
   var UNSAVED = 'You have changes that are not saved.';
   var MARKS = { approved: 'Approve', dismissed: 'Dismiss' };
+  var MARK_ICONS = {
+    approved: 'M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3',
+    dismissed: 'M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3',
+  };
+  var NOTE_ICON = 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z';
 
   function element(tag, className, text) {
     var node = document.createElement(tag);
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = text;
     return node;
+  }
+
+  // A 16x16 icon in the rail's stroke style, with `d` set on a path carrying
+  // brief-icon-path so CSS can fill it for the selected/filled look.
+  function icon(d) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke-width', '1.75');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('class', 'brief-icon-path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+    return svg;
   }
 
   function isDate(value) {
@@ -142,17 +168,24 @@
       row.setAttribute('role', 'group');
       row.setAttribute('aria-label', 'Feedback');
       Object.keys(MARKS).forEach(function (mark) {
-        var button = element('button', 'brief-mark brief-mark-' + mark, MARKS[mark]);
+        var button = element('button', 'brief-mark brief-mark-' + mark);
         button.type = 'button';
         button.setAttribute('data-brief-mark', mark);
         button.setAttribute('aria-pressed', String(item.mark === mark));
+        button.setAttribute('aria-label', MARKS[mark]);
+        button.title = MARKS[mark];
+        button.appendChild(icon(MARK_ICONS[mark]));
         row.appendChild(button);
       });
-      var noteToggle = element('button', 'brief-note-toggle', 'Note');
+      var noteToggle = element('button', 'brief-note-toggle');
       noteToggle.type = 'button';
       noteToggle.setAttribute('data-brief-note', '');
       noteToggle.setAttribute('aria-controls', noteId(id));
       noteToggle.setAttribute('aria-expanded', String(!!item.note));
+      noteToggle.setAttribute('aria-label', 'Note');
+      noteToggle.title = 'Note';
+      if (item.note) noteToggle.classList.add('brief-note-toggle-filled');
+      noteToggle.appendChild(icon(NOTE_ICON));
       row.appendChild(noteToggle);
       return row;
     }
@@ -432,6 +465,8 @@
       if (target.hasAttribute('data-brief-note-input')) {
         var item = target.closest('[data-brief-item]');
         draft.items[item.getAttribute('data-brief-item')].note = target.value;
+        var noteToggle = item.querySelector('[data-brief-note]');
+        if (noteToggle) noteToggle.classList.toggle('brief-note-toggle-filled', target.value.trim() !== '');
         markDirty();
       }
     });

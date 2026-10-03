@@ -86,7 +86,7 @@ test.describe('the overlay', () => {
     await approve.click();
     await expect(approve).toHaveAttribute('aria-pressed', 'true');
     await item(page, 'needs-you-1').getByRole('button', { name: 'Note' }).click();
-    await item(page, 'needs-you-1').getByLabel('Note').fill('Invented note on the lease.');
+    await item(page, 'needs-you-1').getByRole('textbox', { name: 'Note' }).fill('Invented note on the lease.');
     const dismiss = item(page, 'money-1').getByRole('button', { name: 'Dismiss' });
     await dismiss.click();
     await dismiss.click();
@@ -111,9 +111,9 @@ test.describe('the overlay', () => {
     await page.reload();
     await openFromHeader(page);
     await expect(item(page, 'needs-you-1').getByRole('button', { name: 'Approve' })).toHaveAttribute('aria-pressed', 'true');
-    await expect(item(page, 'needs-you-1').getByLabel('Note')).toHaveValue('Invented note on the lease.');
+    await expect(item(page, 'needs-you-1').getByRole('textbox', { name: 'Note' })).toHaveValue('Invented note on the lease.');
     await expect(item(page, 'needs-you-2').getByRole('button', { name: 'Dismiss' })).toHaveAttribute('aria-pressed', 'true');
-    await expect(item(page, 'money-1').getByLabel('Note')).toBeHidden();
+    await expect(item(page, 'money-1').getByRole('textbox', { name: 'Note' })).toBeHidden();
     await expect(page.getByLabel('Overall note')).toHaveValue('Invented overall note.');
     await expect(page.locator('#brief-saved')).toHaveText(/^Saved at /);
   });

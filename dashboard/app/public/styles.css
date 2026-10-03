@@ -2634,37 +2634,53 @@ textarea.form-input {
 
 .brief-marks {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-  font-family: var(--sans);
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: 6px;
 }
 .brief-mark,
 .brief-note-toggle {
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
   background: none;
-  color: var(--ink-soft);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
+  color: var(--muted);
   cursor: pointer;
 }
+.brief-mark svg,
+.brief-note-toggle svg { display: block; }
+.brief-item:hover .brief-mark,
+.brief-item:hover .brief-note-toggle,
+.brief-item:focus-within .brief-mark,
+.brief-item:focus-within .brief-note-toggle { color: var(--ink-soft); }
 .brief-mark:hover,
-.brief-note-toggle:hover { border-color: var(--rule); color: var(--ink); }
-.brief-mark-approved[aria-pressed="true"] {
-  border-color: var(--green);
-  background: var(--green-bg);
-  color: var(--green);
+.brief-note-toggle:hover,
+.brief-mark:focus-visible,
+.brief-note-toggle:focus-visible {
+  color: var(--ink);
+  background: var(--hover-tint);
 }
-.brief-mark-dismissed[aria-pressed="true"] {
-  border-color: var(--red);
-  background: var(--red-bg);
-  color: var(--red);
+@media (hover: none) {
+  .brief-mark,
+  .brief-note-toggle,
+  .brief-item:hover .brief-mark,
+  .brief-item:hover .brief-note-toggle,
+  .brief-item:focus-within .brief-mark,
+  .brief-item:focus-within .brief-note-toggle {
+    color: var(--muted);
+    background: none;
+  }
 }
-.brief-note-toggle[aria-expanded="true"] { color: var(--ink); }
+.brief-item .brief-mark-approved[aria-pressed="true"] { color: var(--green); }
+.brief-item .brief-mark-dismissed[aria-pressed="true"] { color: var(--red); }
+.brief-item .brief-note-toggle-filled { color: var(--amber); }
+.brief-item .brief-mark-approved[aria-pressed="true"] .brief-icon-path,
+.brief-item .brief-mark-dismissed[aria-pressed="true"] .brief-icon-path,
+.brief-item .brief-note-toggle-filled .brief-icon-path { fill: currentColor; fill-opacity: 0.18; }
 
 .brief-note,
 .brief-foot {
