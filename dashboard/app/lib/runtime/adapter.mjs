@@ -12,7 +12,7 @@
 //     'sdk_unavailable' when the rejection is a RuntimeError with that code
 //     (the provider's package could not be loaded) and 'start_failed'
 //     otherwise.
-//   send(agent, text, { model, effort, permission, from, mentions, prompt, chain, routine } = {}) -> Promise<void>
+//   send(agent, text, { model, effort, permission, from, mentions, prompt, chain, routine, context } = {}) -> Promise<void>
 //     Starts one turn on the given model id and effort level, each optional
 //     and passed to the provider only when set, at the given permission
 //     level (permissions.mjs; null and absent mean ask). `from` is the registry id
@@ -21,7 +21,10 @@
 //     of `text`, and `chain` the agents the text passed through before
 //     the sender (delegation.mjs); a provider records `from` and
 //     `mentions` on the user message, may ignore `prompt`, and never
-//     records `chain`. See the refusal rule below. Once accepted, the promise
+//     records `chain`. `context` is what quick chat sent along
+//     (send-context.mjs); a provider that takes it records it as a system
+//     line before the user message and gives the model the prompt with it
+//     in front, and one that does not ignores it. See the refusal rule below. Once accepted, the promise
 //     resolves when the turn ends and never rejects; failures arrive as
 //     `error` events and in state().
 //   answer(agent, requestId, answer) -> Promise<void>

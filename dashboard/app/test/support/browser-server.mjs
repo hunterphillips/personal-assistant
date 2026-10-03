@@ -67,6 +67,7 @@ import { createRoutines } from '../../lib/routines.mjs';
 import { describe, parseCron } from '../../lib/schedule.mjs';
 import { createScheduler } from '../../lib/scheduler.mjs';
 import { createSettings } from '../../lib/settings.mjs';
+import { contextLine, parseContext } from '../../lib/send-context.mjs';
 import { createReads } from '../../lib/reads.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } from './harness.mjs';
@@ -650,7 +651,10 @@ export function fakePersonas(seed, store) {
       // A sender's delegate seed may say what the receiver raises on
       // arrival; the receiver then waits for the answer before replying.
       const raised = current.from ? seed[current.from]?.delegate : null;
-      say(agent.id, 'user', text, fields).then(() => {
+      // As the real adapter: the context line, then the message as typed.
+      const sendContext = context.context ? parseContext(context.context) : null;
+      const before = sendContext ? say(agent.id, 'system', contextLine(sendContext), { kind: 'context', ...sendContext }) : Promise.resolve();
+      before.then(() => say(agent.id, 'user', text, fields)).then(() => {
         if (delegate && !current.from) return delegateTurn(agent.id, delegate, context);
         const notify = seed[agent.id]?.notify;
         if (notify && !current.from) return notifyTurn(agent.id, notify);

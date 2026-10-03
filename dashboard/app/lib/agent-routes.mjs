@@ -1,6 +1,9 @@
 // Persona routes, /api/agents/:id/:action (id matches the registry pattern):
-//   POST send        { text } -> 202 { ok: true } once the adapter accepts the
-//                    turn; the handler never waits for the turn itself.
+//   POST send        { text, mentions?, context? } -> 202 { ok: true } once the
+//                    adapter accepts the turn; the handler never waits for
+//                    the turn itself. `context` is what quick chat sends
+//                    along (send-context.mjs: { view, label?, detail? });
+//                    a wrong shape is 400 invalid_context.
 //   POST answer      { requestId, answers } or { requestId, decision } -> 200
 //                    for the agent's own request, or one forwarded to this
 //                    thread (hub.requestOwner names the owner after the
@@ -64,13 +67,14 @@
 //   personaFor(hub, id) -> { agent, adapter } of the started persona, or
 //                          throws the HttpError above (404 no_such_agent,
 //                          409 not_a_persona, 409 persona_unavailable)
-//   startTurn({ hub, log, shuttingDown }, id, text, { mentions }) -> Promise<void>
+//   startTurn({ hub, log, shuttingDown }, id, text, { mentions, context }) -> Promise<void>
 //     503 shutting_down once closeStreams() has run, then personaFor(id),
 //     then adapter.send(agent, text, { model, effort, permission, mentions })
 //     with the model from hub.modelFor(id), the level from
 //     hub.permissionFor(id) (null for an agent that is not a Claude
 //     persona), and `mentions` the registry ids the
-//     message names with @ (absent when none). Resolves as soon as the adapter has
+//     message names with @ (absent when none), and `context` the parsed
+//     send context (absent when none). Resolves as soon as the adapter has
 //     accepted the turn and rejects with the mapped HttpError when it
 //     refuses; a turn rejected after acceptance is logged as
 //     persona_turn_rejected. The caller validates `text` and sends the reply.
@@ -78,6 +82,7 @@
 import { AGENT_ID } from './registry.mjs';
 import { createAgentSettingsRoutes } from './agent-settings-routes.mjs';
 import { HttpError, readJsonBody, sendJson } from './http.mjs';
+import { parseContext } from './send-context.mjs';
 import { isEffort } from './models.mjs';
 
 const PREFIX = '/api/agents/';
@@ -166,7 +171,12 @@ export function createAgentRoutes({
     if (typeof text !== 'string' || text.trim() === '') throw new HttpError(400, 'invalid_text');
     if (Buffer.byteLength(text, 'utf8') > limits.sendTextBytes) throw new HttpError(413, 'payload_too_large');
     const mentions = mentionsIn(body, hub);
-    await startTurn({ hub, log, shuttingDown }, id, text, mentions.length > 0 ? { mentions } : undefined);
+    const context = contextIn(body);
+    const extra = {
+      ...(mentions.length > 0 ? { mentions } : {}),
+      ...(context ? { context } : {}),
+    };
+    await startTurn({ hub, log, shuttingDown }, id, text, Object.keys(extra).length > 0 ? extra : undefined);
     sendJson(res, 202, { ok: true });
   }
 
@@ -333,7 +343,7 @@ export function personaFor(hub, id) {
   return persona;
 }
 
-export async function startTurn({ hub, log, shuttingDown }, id, text, { mentions = null } = {}) {
+export async function startTurn({ hub, log, shuttingDown }, id, text, { mentions = null, context = null } = {}) {
   if (shuttingDown()) throw new HttpError(503, 'shutting_down');
   const { agent, adapter } = personaFor(hub, id);
   // The adapter refuses (busy, shutting_down, invalid_*) before its first
@@ -350,6 +360,7 @@ export async function startTurn({ hub, log, shuttingDown }, id, text, { mentions
     ...(resolved ? { model: resolved.id, effort: resolved.effort } : {}),
     ...(typeof hub.permissionFor === 'function' ? { permission: hub.permissionFor(id) } : {}),
     ...(Array.isArray(mentions) && mentions.length > 0 ? { mentions: [...mentions] } : {}),
+    ...(context ? { context } : {}),
   };
   const turn = adapter.send(agent, text, Object.keys(options).length > 0 ? options : undefined);
   let accepted = false;
@@ -376,6 +387,15 @@ function mentionsIn(body, hub) {
   if (!mentions.every((id) => typeof id === 'string' && AGENT_ID.test(id))) throw new HttpError(400, 'invalid_mentions');
   const known = new Set(hub.snapshot().agents.map((agent) => agent.id));
   return [...new Set(mentions.filter((id) => known.has(id)))];
+}
+
+// The body's optional `context`, parsed, or null when absent; a wrong
+// shape is 400 invalid_context.
+function contextIn(body) {
+  if (!('context' in body) || body.context === null) return null;
+  const context = parseContext(body.context);
+  if (!context) throw new HttpError(400, 'invalid_context');
+  return context;
 }
 
 function runtimeRefusal(error) {

@@ -546,6 +546,27 @@ test('POST /api/agents creates a Claude persona with the defaults, starts it, an
   assert.equal((await request(app, 'GET', '/api/agents')).status, 405);
 });
 
+test('send passes a quick chat context to the adapter and refuses a malformed one', async (t) => {
+  const app = await startAgents(t);
+  const context = { view: 'health', label: 'Nightly sync', detail: 'Outcome: Failed' };
+  const response = await post(app, '/api/agents/cfo/send', { text: 'Can you find a fix?', context });
+  assert.equal(response.status, 202);
+  assert.deepEqual(app.adapter.calls, [['send', 'cfo', 'Can you find a fix?']]);
+  assert.deepEqual(app.adapter.sendOptions, [{ model: null, effort: null, permission: 'ask', context }]);
+  app.adapter.sendOptions.length = 0;
+
+  // A null context is the same as none.
+  assert.equal((await post(app, '/api/agents/cfo/send', { text: 'Hi', context: null })).status, 202);
+  assert.deepEqual(app.adapter.sendOptions, [{ model: null, effort: null, permission: 'ask' }]);
+  app.adapter.sendOptions.length = 0;
+
+  for (const bad of ['health', { view: 'reading' }, { view: 'health', label: 7 }, { view: 'health', label: 'x'.repeat(201) }, { view: 'focus', more: true }]) {
+    const refused = await post(app, '/api/agents/cfo/send', { text: 'Hi', context: bad });
+    assert.deepEqual([refused.status, refused.json], [400, { error: 'invalid_context' }], JSON.stringify(bad));
+  }
+  assert.deepEqual(app.adapter.sendOptions, []);
+});
+
 test('without a writable registry the settings routes are not there', async (t) => {
   const registry = { ...fakeRegistry([agent('cfo')]) };
   delete registry.write;

@@ -118,7 +118,7 @@
 // from the mode requested (Auto is per model, and the user's
 // `permissions.disableAutoMode` can refuse it) one
 // persona_permission_mismatch line carries both and the turn goes on.
-// send(agent, text, { model, effort, permission, from, mentions, prompt, chain, routine }): `from` is the
+// send(agent, text, { model, effort, permission, from, mentions, prompt, chain, routine, context }): `from` is the
 // registry id of the agent that sent the text (absent for the user) and
 // `mentions` the ids it named with @; both are recorded on the user message
 // and carried by its event. `routine` is { id, name } when the text is a
@@ -127,7 +127,11 @@
 // persona_init as `routine: <id>`; the options, the mode, canUseTool, and
 // the tools hook are those of any other turn at the same level. `prompt`, when given, is what the SDK receives
 // in place of `text`, so the thread shows what was written while the model
-// gets the daemon's prefixed form (delegation.mjs). `chain` is the list of
+// gets the daemon's prefixed form (delegation.mjs). `context` is what quick
+// chat sent along (send-context.mjs); a valid one is recorded as a system
+// line { kind: 'context', view, label?, detail } just before the user
+// message, and the prompt (text, or `prompt` when given) is prefixed with
+// it, so the user message keeps the text as typed. `chain` is the list of
 // agents the message passed through before the sender; it is not recorded,
 // only handed to the tools hook. { model, effort } takes the resolved pair for this turn
 // (hub.modelFor decides it from thread, agent, and system settings); each is
@@ -178,6 +182,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { TIMEOUTS } from '../config.mjs';
+import { contextLine, contextPrompt, parseContext } from '../send-context.mjs';
 import { effortName, isEffort, modelName } from '../models.mjs';
 import { isPermission, sdkModeFor } from '../permissions.mjs';
 import { AGENT_ID } from '../registry.mjs';
@@ -456,6 +461,7 @@ export function createClaudeAdapter({
     let detail = null;
     let resumed = false;
     try {
+      if (turn.context) await record(entry, 'system', contextLine(turn.context), { kind: 'context', ...turn.context });
       await record(entry, 'user', text, {
         ...(turn.routine ? { routine: turn.routine } : {}),
         ...(turn.from ? { from: turn.from } : {}),
@@ -541,7 +547,7 @@ export function createClaudeAdapter({
       return { threadId: agent.id };
     },
 
-    send(agent, text, { model = null, effort = null, permission = null, from = null, mentions = null, prompt = null, chain = null, routine = null } = {}) {
+    send(agent, text, { model = null, effort = null, permission = null, from = null, mentions = null, prompt = null, chain = null, routine = null, context = null } = {}) {
       try {
         checkAgent(agent);
       } catch (error) {
@@ -574,7 +580,9 @@ export function createClaudeAdapter({
         mentions: Array.isArray(mentions) ? mentions.filter((id) => typeof id === 'string' && id !== '') : [],
         prompt: typeof prompt === 'string' && prompt.trim() !== '' ? prompt : null,
         chain: Array.isArray(chain) ? chain.filter((id) => typeof id === 'string' && id !== '') : [],
+        context: context ? parseContext(context) : null,
       };
+      if (turn.context) turn.prompt = contextPrompt(turn.context, turn.prompt ?? text);
       entry.turn = turn;
       turn.done = runTurn(entry, agent, text, turn);
       return turn.done;

@@ -931,6 +931,34 @@ test('send records who sent the text and whom it mentions, and the SDK gets the 
   assert.equal(query.calls[2].prompt, 'Third');
 });
 
+test('a quick chat context is recorded as a line before the message, and only the prompt carries it', async (t) => {
+  const seen = [];
+  const turnTools = (agent, context) => {
+    seen.push(context);
+    return null;
+  };
+  const { adapter, store, events, query } = await setup(t, { turnTools });
+  const context = { view: 'health', label: 'Nightly sync', detail: 'Outcome: Failed' };
+  await adapter.send(AGENT, 'Can you find a fix?', { context });
+  const messages = events.filter((event) => event.type === 'message');
+  assert.deepEqual(messages.slice(0, 2).map((event) => [event.role, event.kind ?? null, event.text]), [
+    ['system', 'context', 'Sent from Health: Nightly sync'],
+    ['user', null, 'Can you find a fix?'],
+  ]);
+  const cached = await store.read('cfo');
+  assert.deepEqual([cached[0].kind, cached[0].view, cached[0].label, cached[0].detail], ['context', 'health', 'Nightly sync', 'Outcome: Failed']);
+  assert.equal(cached[1].text, 'Can you find a fix?');
+  const prompt = 'Hunter sent this from the Health view, looking at: Nightly sync\nOutcome: Failed\n\nCan you find a fix?';
+  assert.equal(query.calls[0].prompt, prompt);
+  assert.equal(seen[0].text, 'Can you find a fix?');
+  assert.equal(seen[0].prompt, prompt);
+
+  // A malformed context is dropped: no line, and the text is the prompt.
+  await adapter.send(AGENT, 'Plain', { context: { view: 'nowhere' } });
+  assert.equal(query.calls[1].prompt, 'Plain');
+  assert.equal((await store.read('cfo')).filter((message) => message.kind === 'context').length, 1);
+});
+
 // The per-turn tools hook (delegation.mjs provides the real one).
 
 test('the tools hook adds mcpServers and allowedTools by name and cannot change anything else', async (t) => {
