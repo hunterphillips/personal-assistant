@@ -11,7 +11,11 @@
 // module reads back on the next open (GET /api/brief/<date>/feedback).
 //
 // DashboardBriefOverlay.create({ instructions, briefIntro }) returns
-// { open(date, opener), close(restore), update(state, keys), isOpen }.
+// { open(date, opener), close(restore), update(state, keys), isOpen,
+// context() }. context() is what quick chat sends along while the overlay
+// is open: the brief's date and the item whose top edge is highest inside
+// the scrolling sheet, below its sticky bar (the section's label and the
+// item's text).
 // open(null) shows the newest brief, open(date) that date's. The overlay
 // scrolls on its own, closes with its Close button or Escape, and returns
 // focus to what opened it; the page behind is inert while it is open. The
@@ -440,10 +444,33 @@
       }
     });
 
+    // The drawn item the reader is at, as "Section: <label>" and its text.
+    function itemInView() {
+      var bar = sheet.querySelector('.brief-bar');
+      var box = sheet.getBoundingClientRect();
+      var top = bar ? bar.getBoundingClientRect().bottom : box.top;
+      var nodes = doc.querySelectorAll('[data-brief-item]');
+      for (var i = 0; i < nodes.length; i += 1) {
+        var edge = nodes[i].getBoundingClientRect().top;
+        if (edge < top - 1 || edge >= box.bottom) continue;
+        var section = nodes[i].closest('[data-brief-section]');
+        var heading = section ? section.querySelector('.brief-section-label') : null;
+        var label = heading ? heading.textContent : 'Opening';
+        var text = nodes[i].querySelector('.brief-text');
+        return 'Section: ' + label + '\n' + (text ? text.textContent.trim() : '');
+      }
+      return '';
+    }
+
     return {
       open: openOverlay,
       close: closeOverlay,
       isOpen: function () { return open; },
+      context: function () {
+        if (!open || !shown || doc.hidden) return { view: 'brief' };
+        var detail = itemInView();
+        return detail ? { view: 'brief', label: shown.date, detail: detail } : { view: 'brief', label: shown.date };
+      },
       update: function (state, keys) {
         if (keys && keys.indexOf('brief') === -1) return;
         snapshotBrief = state && state.brief ? state.brief : null;

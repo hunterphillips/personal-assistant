@@ -837,7 +837,11 @@ The first message after the pane opens, or after the view under it
 changes, carries `context`: Health's selected job (name, label, agent,
 schedule, last run, outcome), the Feed item whose top edge is highest in
 the list, the Agents view's open agent and its state, or the view's name
-alone on the Brief tab, Focus, and Goals. The adapter records it as a
+alone on Focus and Goals. While the brief's overlay is open it wins over
+the view under it: the context is the brief's date and the item at the
+top of the sheet (its section's label and text). The overlay covers the
+header, so its bar has its own Quick chat button, and the pane opens
+above the overlay; Escape closes the pane first. The adapter records it as a
 system line (`kind: 'context'`) before the message, shown as a collapsed
 "Sent from Health: <job>" that opens to the detail, and the agent's prompt
 starts "Hunter sent this from the Health view, looking at: <job>" with the

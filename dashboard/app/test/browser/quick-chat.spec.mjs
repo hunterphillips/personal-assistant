@@ -6,6 +6,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { fixtureBrief } from '../support/brief-fixtures.mjs';
 import { expect, expectView, nav, test } from '../support/browser-test.mjs';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
@@ -240,5 +241,56 @@ test.describe('quick chat with no Claude agent', () => {
     await expect(page.locator('#quick-chat-empty')).toHaveText('No Claude agent is registered.');
     await expect(picker(page)).toBeHidden();
     await expect(paneInput(page)).toBeHidden();
+  });
+});
+
+test.describe('quick chat over the brief', () => {
+  test.use({ withFocus: false, hubOptions: hubOptions() });
+
+  test('with the overlay open, the context is the brief\'s date and the item in view, over the view underneath', async ({ page, hub }) => {
+    // The fixture brief with a long invented section after Money, so the
+    // sheet can scroll Money to its top.
+    const { sections } = await fixtureBrief('2026-09-15');
+    const later = { id: 'later', label: 'Later', items: Array.from({ length: 12 }, (_, i) => ({ id: `later-${i + 1}`, text: `Invented later item ${i + 1}, long enough to take a few lines of the sheet when it is drawn.` })) };
+    await hub.writeBrief('2026-09-15', { sections: [...sections, later] });
+    await page.goto(`${hub.origin}/health`);
+    await page.locator('.job-row', { hasText: 'cfo.daily' }).click();
+    if (phone(page)) {
+      await page.getByRole('button', { name: 'Menu', exact: true }).click();
+      await page.locator('#app-menu').getByRole('button', { name: 'Brief', exact: true }).click();
+    } else {
+      await page.locator('.header-right > .header-brief').click();
+    }
+    const overlay = page.getByRole('dialog', { name: 'Brief' });
+    await expect(overlay.locator('[data-brief-item="money-1"]')).toBeVisible();
+    // Scroll the sheet so the Money item is the topmost one under the bar.
+    await page.locator('#brief-sheet').evaluate((sheet) => {
+      const target = sheet.querySelector('[data-brief-item="money-1"]');
+      const bar = sheet.querySelector('.brief-bar');
+      sheet.scrollTop += target.getBoundingClientRect().top - bar.getBoundingClientRect().bottom;
+    });
+
+    // The overlay covers the header, so it carries its own way in.
+    await overlay.getByRole('button', { name: 'Quick chat', exact: true }).click();
+    await expect(pane(page)).toBeVisible();
+    await send(page, 'Is the drift worth acting on?');
+    await expect(page.locator('#quick-chat-messages .thread-message-context')).toHaveText(/Sent from Brief: 2026-09-15/);
+    const context = hub.personas.sent[0].context.context;
+    expect(context.view).toBe('brief');
+    expect(context.label).toBe('2026-09-15');
+    expect(context.detail).toBe('Section: Money\nInvented drift is under a point, and the policy holds.');
+
+    // Escape closes the pane first, then the overlay; with both gone the
+    // next message from a reopened pane is about Health again.
+    await paneInput(page).focus();
+    await page.keyboard.press('Escape');
+    await expect(pane(page)).toBeHidden();
+    await expect(overlay).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(overlay).toBeHidden();
+    await openPane(page);
+    await send(page, 'And the job?');
+    await expect(page.locator('#quick-chat-messages .thread-message-context')).toHaveCount(2);
+    expect(hub.personas.sent[1].context.context.view).toBe('health');
   });
 });

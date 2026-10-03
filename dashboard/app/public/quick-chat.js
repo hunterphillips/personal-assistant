@@ -8,7 +8,10 @@
 // default is the agent Settings names under "Quick chat talks to"; a choice
 // made in the picker is remembered for the page session (sessionStorage,
 // when the browser allows it) and wins while that agent is listed.
-// Escape and the close button close the pane; closing keeps the thread
+// The brief's overlay has its own Quick chat button, since the overlay
+// covers the header; the pane sits above the overlay, outside the shell the
+// overlay makes inert. Escape and the close button close the pane (Escape
+// closes the pane before the overlay under it); closing keeps the thread
 // where it was. While the pane shows an agent in a visible document, the
 // thread view marks its reply read.
 //
@@ -75,6 +78,8 @@
     var closeButton = document.getElementById('quick-chat-close');
     var empty = document.getElementById('quick-chat-empty');
     var mount = document.getElementById('quick-chat-thread');
+    var briefEntry = document.getElementById('brief-quick-chat');
+    var header = document.querySelector('.app-header');
     if (!toggle || !pane || !window.DashboardThreadView) return null;
 
     var state = null;
@@ -82,6 +87,8 @@
     var shownId = null; // the agent the thread view is bound to
     var pickerKey = null; // what the picker was last built from
     var contextPending = false; // the next send carries the view's context
+    var sentView = null; // the view the last context named
+    var pendingView = null; // the view the context on the send in flight names
     var opener = toggle;
 
     var thread = window.DashboardThreadView.create(mount, {
@@ -92,14 +99,21 @@
         close(false);
         shellApi.openAgent(id);
       },
+      // A context goes along when the pane has just opened or the view
+      // changed, or when what is in front changed under an open pane (the
+      // brief's overlay opened or closed).
       decorate: function (body) {
-        if (!contextPending) return body;
         var context = fitContext(shellApi.context());
-        if (context) body.context = context;
+        if (context && (contextPending || context.view !== sentView)) {
+          body.context = context;
+          pendingView = context.view;
+        }
         return body;
       },
       onSent: function () {
         contextPending = false;
+        if (pendingView) sentView = pendingView;
+        pendingView = null;
       },
     });
 
@@ -147,9 +161,15 @@
       }
     }
 
+    // The pane starts under the header, whose height differs on a phone.
+    function place() {
+      if (header) pane.style.top = Math.round(header.getBoundingClientRect().bottom) + 'px';
+    }
+
     function open(from) {
       opener = from || toggle;
       contextPending = true;
+      place();
       pane.hidden = false;
       toggle.setAttribute('aria-expanded', 'true');
       render();
@@ -180,6 +200,13 @@
         if (!isOpen()) open(menuToggle);
       });
     }
+    if (briefEntry) {
+      briefEntry.addEventListener('click', function () {
+        if (isOpen()) close(true);
+        else open(briefEntry);
+      });
+    }
+    window.addEventListener('resize', function () { if (isOpen()) place(); });
     closeButton.addEventListener('click', function () { close(true); });
     picker.addEventListener('change', function () {
       choice = picker.value;
