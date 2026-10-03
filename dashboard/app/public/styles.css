@@ -2126,9 +2126,17 @@ textarea.form-input {
 }
 
 @media (max-width: 719.98px) {
+  /* The rail becomes a fixed tab bar along the bottom; .content reserves
+     its height with matching padding so nothing scrolls behind it, and any
+     fixed layer that would otherwise reach the physical bottom (the model
+     menu) stops above it instead. */
+  :root {
+    --nav-bar-h: calc(48px + max(8px, env(safe-area-inset-bottom)));
+  }
+
   .shell {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .settings-row {
@@ -2139,22 +2147,25 @@ textarea.form-input {
     grid-column: 1;
   }
 
+  .content {
+    padding-bottom: var(--nav-bar-h);
+  }
+
   .nav {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 6;
     flex-direction: row;
     align-items: stretch;
     gap: 2px;
-    padding: 4px 8px;
-    padding-top: max(4px, env(safe-area-inset-top));
-    padding-right: max(8px, env(safe-area-inset-right));
-    padding-left: max(8px, env(safe-area-inset-left));
+    padding: 4px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
     border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 0;
+    border-top: 1px solid var(--line);
   }
 
   .nav a {
     flex: 1;
-    flex-direction: column;
-    gap: 2px;
     width: auto;
     height: auto;
     min-width: 0;
@@ -2162,9 +2173,11 @@ textarea.form-input {
     padding: 4px 0;
   }
 
+  /* Icon only: the label stays the accessible name, hidden the same way
+     it is on a desk (see the base .nav-label rule above). */
   .nav-indicator {
-    top: 3px;
-    right: calc(50% - 19px);
+    top: 6px;
+    right: calc(50% - 16px);
   }
 
   .app-header {
@@ -2204,21 +2217,12 @@ textarea.form-input {
   .header-action-reason { display: none; }
   .quick-chat {
     left: 0;
+    /* Stops above the bottom nav bar, so its links stay reachable while
+       the pane is open. */
+    bottom: var(--nav-bar-h);
     width: auto;
     border-left: 0;
     box-shadow: none;
-  }
-
-  .nav-label {
-    position: static;
-    width: auto;
-    height: auto;
-    margin: 0;
-    overflow: visible;
-    clip: auto;
-    clip-path: none;
-    font-size: 11px;
-    line-height: 1.2;
   }
 
   .notice { padding: 8px 14px; }
@@ -2284,9 +2288,10 @@ textarea.form-input {
   .mention-menu { max-height: 200px; }
   .model-menu {
     position: fixed;
-    inset: auto 0 0;
+    inset: auto 0 var(--nav-bar-h);
+    z-index: 7;
     width: auto;
-    padding: 16px 16px max(16px, env(safe-area-inset-bottom));
+    padding: 16px;
     border-radius: 14px 14px 0 0;
     box-shadow: 0 -8px 24px var(--shadow-sheet);
   }

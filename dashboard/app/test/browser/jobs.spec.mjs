@@ -688,17 +688,16 @@ test('the rail holds five links without scrolling, and /brief and /reading land 
     const box = await link.boundingBox();
     expect(box.width).toBeGreaterThanOrEqual(44);
     expect(box.height).toBeGreaterThanOrEqual(44);
-    const label = link.locator('.nav-label');
-    if (onPhone) {
-      await expect(label).toBeVisible();
-    } else {
-      const labelBox = await label.boundingBox();
-      expect(labelBox.width).toBeLessThanOrEqual(1);
-      expect(labelBox.height).toBeLessThanOrEqual(1);
-    }
+    // Icon only on both a desk and a phone; the label stays the accessible name.
+    const labelBox = await link.locator('.nav-label').boundingBox();
+    expect(labelBox.width).toBeLessThanOrEqual(1);
+    expect(labelBox.height).toBeLessThanOrEqual(1);
   }
-  // The phone rail runs across the top; all five links fit without scrolling.
+  // The phone rail is a fixed bar along the bottom; all five links fit without scrolling.
   if (onPhone) {
+    const navBox = await page.locator('.nav').boundingBox();
+    const viewport = page.viewportSize();
+    expect(Math.round(navBox.y + navBox.height)).toBe(viewport.height);
     expect(await page.locator('.nav').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   }
 

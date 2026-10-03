@@ -1178,9 +1178,11 @@ test.describe('with a model picker under the composer', () => {
     await button(page).click();
     await expect(menu(page)).toBeVisible();
     const box = await menu(page).boundingBox();
+    const navBox = await page.locator('.nav').boundingBox();
     expect(box.x).toBe(0);
     expect(box.width).toBe(390);
-    expect(Math.round(box.y + box.height)).toBe(844);
+    // The sheet stops above the bottom nav bar, not under it.
+    expect(Math.abs(box.y + box.height - navBox.y)).toBeLessThanOrEqual(1);
     await expect(menu(page).locator('.effort-option')).toHaveCount(5);
 
     await page.keyboard.press('Escape');
