@@ -284,6 +284,20 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 .menu-count { display: none; }
 
+/* The Notifications icon button: the count badge sits on the icon's
+   corner instead of trailing text. */
+#notifications-toggle { position: relative; }
+#notifications-toggle .header-count {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 0;
+  padding: 0 4px;
+  font-size: 10px;
+}
+
 /* The list under the header, over the current view. */
 .notifications-panel {
   position: absolute;

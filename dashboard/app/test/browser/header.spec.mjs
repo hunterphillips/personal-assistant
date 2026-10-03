@@ -48,8 +48,17 @@ test.describe('header shell', () => {
     expect(new Set(heights).size).toBe(1);
     // The brief's instructions live in its overlay, not in any view's header.
     await expect(page.locator('.app-header #brief-instructions-toggle')).toHaveCount(0);
-    await expect(page.locator('.header-right > .header-entry, .header-right > .header-menu-toggle'))
-      .toHaveText(['Brief', 'Quick chat', 'Notifications', 'Menu']);
+    const headerEntries = page.locator('.header-right > .header-entry, .header-right > .header-menu-toggle');
+    await expect(headerEntries).toHaveCount(4);
+    await expect(headerEntries.nth(0)).toHaveText('Brief');
+    await expect(headerEntries.nth(1)).toHaveText('Quick chat');
+    // toHaveAccessibleName triggers WebKit's native accessible-name lookup,
+    // which mobile-webkit cannot complete under this shell's strict CSP (it
+    // logs a stylesheet-blocked violation and fails even for untouched
+    // elements, e.g. .header-brief) -- unrelated to this button; the label
+    // is checked on the attribute that is its source instead.
+    await expect(headerEntries.nth(2)).toHaveAttribute('aria-label', 'Notifications');
+    await expect(headerEntries.nth(3)).toHaveText('Menu');
   });
 
   test('Menu closes with Escape or an outside click, and Settings opens Health', async ({ page, hub }) => {
@@ -118,7 +127,7 @@ test('theme choice persists, follows the system, and reloads Focus with its reso
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 
   await page.getByRole('button', { name: 'Menu', exact: true }).click();
-  await menu.getByLabel('Follow the system', { exact: true }).check();
+  await menu.getByLabel('System', { exact: true }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
