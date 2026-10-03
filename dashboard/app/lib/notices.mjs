@@ -22,12 +22,15 @@
 //     the opening for a failed one; the store cuts text to
 //     limits.messageTextBytes. A pair is recorded after its append
 //     succeeds; the posted file is written atomically (mode 600).
-//     Concurrent callers share one run. When target() is null nothing is
-//     posted and `notice_skipped` is logged with reason 'no_target'; when
-//     hub.persona(target()) is null (the agent has not started, or its
-//     adapter is missing) likewise with reason 'agent_not_started'; the
-//     next reconcile retries either, so a target set later gets the day's
-//     notice. A
+//     Concurrent callers share one run. When target() is null (no thread
+//     set in Settings) nothing is posted, `notice_skipped` is logged with
+//     reason 'no_target', and the pair is recorded as posted anyway — it is
+//     handled, not retried, so turning a thread back on later never
+//     backfills notices from the no-thread period. When hub.persona(target())
+//     is null instead (the agent named has not started, or its adapter is
+//     missing) `notice_skipped` logs reason 'agent_not_started' and the pair
+//     is left unposted; the next reconcile retries it, so an agent that
+//     starts later still gets the day's notice. A
 //     malformed or oversized file is logged as `notice_invalid` and skipped,
 //     never deleted; a missing briefs directory posts nothing. Never rejects:
 //     a failed read, append, or record is logged as `notice_error`.
@@ -79,7 +82,9 @@ export function createNotices({
       agentId ??= target();
       if (typeof agentId !== 'string' || agentId === '') {
         log({ event: 'notice_skipped', agentId: null, date, state: notice.state, reason: 'no_target' });
-        return;
+        posted[date] = [...(posted[date] ?? []), notice.state];
+        await writePosted(posted);
+        continue;
       }
       if (!hub.persona(agentId)) {
         log({ event: 'notice_skipped', agentId, date, state: notice.state, reason: 'agent_not_started' });

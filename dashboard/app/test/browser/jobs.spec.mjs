@@ -523,7 +523,7 @@ test.describe('Settings', () => {
     expect(await select(page, 'Default model').locator('option').allTextContents()).toEqual(['Claude Code default', 'Fable', 'Opus', 'Sonnet', 'Haiku']);
     expect(await select(page, 'Default effort').locator('option').allTextContents()).toEqual(['Claude Code default', 'Low', 'Medium', 'High', 'Extra high', 'Max']);
     // Claude personas only: not the Codex one, not the system entry.
-    expect(await select(page, 'Brief goes to').locator('option').allTextContents()).toEqual(['No one', 'Second brain']);
+    expect(await select(page, 'Brief goes to').locator('option').allTextContents()).toEqual(['No thread', 'Second brain']);
     await expect(select(page, 'Default permissions')).toHaveValue('ask');
     expect(await select(page, 'Default permissions').locator('option').allTextContents()).toEqual(['Ask', 'Auto', 'Full access']);
     await expect(page.locator('#settings-permission-note')).toHaveText('Asks before each tool that is not already allowed.');
@@ -619,7 +619,7 @@ test.describe('Settings', () => {
 test.describe('Settings with no file', () => {
   test.use({ hubOptions: seeded() });
 
-  test('every select reads Claude Code default or No one, and the card says no agent receives the brief', async ({ page, hub }) => {
+  test('every select reads Claude Code default or No thread, and the card says no agent receives the brief', async ({ page, hub }) => {
     await openHealth(page, hub);
     const card = page.locator('#settings-card');
     await expect(card.getByLabel('Default model', { exact: true })).toHaveValue('');

@@ -388,7 +388,7 @@ test('first start seeds the settings file with the brief going to the pinned Cla
   assert.deepEqual(next.agents.find((a) => a.id === 'cfo').model, { id: 'haiku', effort: 'max', source: 'system', default: { id: 'haiku', effort: 'max' }, agent: { id: null, effort: null } });
 });
 
-test('with no pinned Claude persona the seed names no one, and the notice waits for a target', async (t) => {
+test('with no pinned Claude persona the seed names no one; an old notice from before a target is set never backfills, but a later one posts', async (t) => {
   const env = await testEnv(t);
   await writeRegistry(env, [await personaEntry(t)]);
   await writeNotice(env, '2026-09-30');
@@ -400,7 +400,7 @@ test('with no pinned Claude persona the seed names no one, and the notice waits 
   assert.ok(logs.some((e) => e.event === 'notice_skipped' && e.reason === 'no_target'));
   assert.deepEqual(await readThread(dashboard, 'cfo'), []);
 
-  // Pointing the brief at the persona through the route posts it on the next reconcile.
+  // Pointing the brief at the persona through the route does not backfill the notice from before the target was set.
   const put = await fetch(`http://127.0.0.1:${dashboard.config.port}/api/settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${dashboard.config.port}` },
@@ -414,9 +414,18 @@ test('with no pinned Claude persona the seed names no one, and the notice waits 
   t.after(() => stream.close());
   await stream.next();
   await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(await readThread(dashboard, 'cfo'), []);
+
+  // A notice written after the target is set posts normally, on the next reconcile.
+  await writeNotice(env, '2026-10-01');
+  const stream2 = await openEvents(app);
+  t.after(() => stream2.close());
+  await stream2.next();
+  await new Promise((resolve) => setTimeout(resolve, 50));
   const messages = await readThread(dashboard, 'cfo');
   assert.equal(messages.length, 1);
   assert.equal(messages[0].kind, 'brief');
+  assert.equal(messages[0].date, '2026-10-01');
 });
 
 test('a notice waits for the Assistant when its adapter fails to start, and no persona means no post', async (t) => {

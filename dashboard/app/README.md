@@ -338,13 +338,14 @@ instructions file.
 
 `POST /api/brief/instructions/propose` takes `{"text": "..."}` and sends the
 agent Settings names under "Brief goes to" one message asking it to change
-the rules and say what changed; the shell then opens its thread. It refuses
-with 400 `invalid_body`, 400 `invalid_text` (blank), 413
-`payload_too_large` (over the send limit), 503 `shutting_down`, 409
-`no_brief_agent` (Settings names no agent), 404 `no_such_agent` (the named
-id is not a persona in the registry), 409 `persona_unavailable`, then the
-persona send refusals (409 `busy` and the rest). The dashboard never writes
-the file; the agent does.
+the rules and say what changed; the shell then opens its thread. With "No
+thread" chosen there, it falls back to the first pinned Claude persona,
+else the first built-in one. It refuses with 400 `invalid_body`, 400
+`invalid_text` (blank), 413 `payload_too_large` (over the send limit), 503
+`shutting_down`, 409 `no_brief_agent` (no agent is named and neither
+fallback exists), 404 `no_such_agent` (the named id is not a persona in the
+registry), 409 `persona_unavailable`, then the persona send refusals (409
+`busy` and the rest). The dashboard never writes the file; the agent does.
 
 Instructions in the overlay's bar opens these rules above the brief with a
 box for the change; the sentence
@@ -856,8 +857,8 @@ under the heading "Jobs". It scrolls on its own, in a 720px column.
 The Settings card has five rows, each a select. "Default model" offers
 "Claude Code default" and the model table's names (Fable, Opus, Sonnet,
 Haiku); "Default effort" offers "Claude Code default" and the five levels
-(Low, Medium, High, Extra high, Max); "Brief goes to" offers "No one" and
-every Claude agent by name; "Quick chat talks to" offers every Claude
+(Low, Medium, High, Extra high, Max); "Brief goes to" offers "No thread"
+and every Claude agent by name; "Quick chat talks to" offers every Claude
 agent by name (and "No one" only while nothing is set), the agent the
 header's quick chat opens on; "Default permissions" offers Ask, Auto, and
 Full access, seeded Ask, with the level's sentence under it (the same
@@ -1062,8 +1063,13 @@ seconds for it to exit; see [docs/operations.md](docs/operations.md).
 - `brief-notices.json` records which morning notices `lib/notices.mjs` has
   posted into the thread of the agent the settings name (`brief.agent`),
   as `{ version: 1, posted: { "<date>": ["ready", "failed"] } }`, replaced
-  atomically. With no agent named, nothing is posted (logged as
-  `notice_skipped` with reason `no_target`) and the notice waits for one. The brief run writes
+  atomically. With "No thread" chosen (`brief.agent: null`), nothing is
+  posted (logged as `notice_skipped` with reason `no_target`) and the
+  pair is recorded here anyway, as handled: choosing a thread again later
+  never backfills a notice from while none was set, only later ones post.
+  (A named agent that has not started yet is different: that pair is left
+  unposted, logged with reason `agent_not_started`, and does post once the
+  agent starts.) The brief run writes
   `notice-<date>.json` beside each viewer; the daemon reads the newest two
   on start, on each event stream connect, and once a minute while a stream
   is open, and posts every date and state not recorded here as a system

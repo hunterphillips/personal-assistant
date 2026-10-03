@@ -36,6 +36,7 @@
   };
   var CLAUDE_CODE_DEFAULT = 'Claude Code default';
   var NO_ONE = 'No one';
+  var NO_THREAD = 'No thread';
   var NO_TARGET = 'No agent receives the brief.';
   var SAVED = 'Saved.';
   var FILE_UNREADABLE = 'The settings file could not be read. Fix or delete it.';
@@ -124,10 +125,11 @@
       // Quick chat always has an agent once seeded; "No one" shows only
       // while the value is null, so the select never claims an agent.
       var quickChatAgents = (quickChat ? [] : [{ id: '', name: NO_ONE }]).concat(agents.slice(1));
+      var briefAgents = [{ id: '', name: NO_THREAD }].concat(agents.slice(1));
       var level = (settings.permission && settings.permission.default) || 'ask';
       fill(selects.model, models, settings.model.default);
       fill(selects.effort, efforts, settings.model.effort);
-      fill(selects.brief, agents, settings.brief.agent);
+      fill(selects.brief, briefAgents, settings.brief.agent);
       if (selects.quickChat) fill(selects.quickChat, quickChatAgents, quickChat);
       fill(selects.permission, PERMISSIONS, level);
       if (permissionNote) permissionNote.textContent = PERMISSION_NOTES[level] || '';

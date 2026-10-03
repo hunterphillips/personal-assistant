@@ -138,12 +138,24 @@
     return Object.prototype.hasOwnProperty.call(ROUTES, pathname) ? ROUTES[pathname] : 'agents';
   }
 
-  // The agent Settings names as receiving the brief, as listed, or null.
+  // The agent Settings names as receiving the brief, as listed; with no
+  // thread named, the first pinned Claude persona, else the first built-in
+  // one, else null.
   function briefAgent() {
     var id = state && state.settings && state.settings.brief ? state.settings.brief.agent : null;
-    if (typeof id !== 'string' || !state || !Array.isArray(state.agents)) return null;
-    for (var i = 0; i < state.agents.length; i += 1) if (state.agents[i].id === id) return state.agents[i];
-    return null;
+    if (!state || !Array.isArray(state.agents)) return null;
+    if (typeof id === 'string' && id !== '') {
+      for (var i = 0; i < state.agents.length; i += 1) if (state.agents[i].id === id) return state.agents[i];
+      return null;
+    }
+    var claude = state.agents.filter(function (agent) { return agent.kind === 'persona' && agent.provider === 'claude'; });
+    var pinned = null;
+    var builtin = null;
+    for (var j = 0; j < claude.length; j += 1) {
+      if (!pinned && claude[j].pinned === true) pinned = claude[j];
+      if (!builtin && claude[j].builtin === true) builtin = claude[j];
+    }
+    return pinned || builtin || null;
   }
 
   function briefIntroSentence() {

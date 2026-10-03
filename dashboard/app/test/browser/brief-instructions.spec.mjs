@@ -13,6 +13,12 @@ const ASSISTANT = Object.freeze({
   id: 'assistant', name: 'Assistant', role: 'Assistant', description: 'Invented.', group: 'personal', kind: 'persona',
   cwd: '/invented', provider: 'claude', pinned: true,
 });
+// Neither pinned nor built-in: with no thread named in Settings, nothing
+// stands in for it.
+const UNPINNED_ASSISTANT = Object.freeze({
+  id: 'assistant', name: 'Assistant', role: 'Assistant', description: 'Invented.', group: 'personal', kind: 'persona',
+  cwd: '/invented', provider: 'claude',
+});
 
 const overlay = (page) => page.getByRole('dialog', { name: 'Brief' });
 const toggle = (page) => overlay(page).getByRole('button', { name: 'Instructions', exact: true });
@@ -119,7 +125,7 @@ test.describe('with the brief instructions', () => {
 
 test.describe('with no agent receiving the brief', () => {
   test.use({ hubOptions: {
-    briefInstructions: INSTRUCTIONS, agents: [ASSISTANT],
+    briefInstructions: INSTRUCTIONS, agents: [UNPINNED_ASSISTANT],
     settings: { model: { default: null, effort: null }, brief: { agent: null } },
   } });
 
@@ -131,6 +137,28 @@ test.describe('with no agent receiving the brief', () => {
     await panel(page).getByRole('button', { name: 'Send' }).click();
     await expect(panel(page).locator('#brief-instructions-reason')).toHaveText('No agent receives the brief. Choose one in Settings.');
     expect(hub.requests('/api/brief/instructions/propose')).toEqual([{ method: 'POST', status: 409 }]);
+  });
+});
+
+test.describe('with no agent receiving the brief but a pinned one', () => {
+  test.use({ hubOptions: {
+    briefInstructions: INSTRUCTIONS, agents: [ASSISTANT],
+    settings: { model: { default: null, effort: null }, brief: { agent: null } },
+  } });
+
+  test('the panel falls back to the pinned agent and Send still opens its thread', async ({ page, hub }) => {
+    await openPanel(page, hub);
+    await expect(panel(page).locator('.instructions-intro'))
+      .toHaveText('The brief follows these rules. A change goes to Assistant, which edits the file.');
+    await input(page).fill('Leave the weather out.');
+    const posted = page.waitForRequest('**/api/brief/instructions/propose');
+    await panel(page).getByRole('button', { name: 'Send' }).click();
+    expect((await posted).postDataJSON()).toEqual({ text: 'Leave the weather out.' });
+    await expect(overlay(page)).toBeHidden();
+    await expectView(page, 'agents', 'Agents');
+    await expect(page).toHaveURL(`${hub.origin}/?agent=assistant`);
+    await expect(messages(page).first()).toHaveText(/^Change the brief's instructions\./);
+    expect(hub.requests('/api/brief/instructions/propose')).toEqual([{ method: 'POST', status: 202 }]);
   });
 });
 

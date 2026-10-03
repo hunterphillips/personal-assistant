@@ -168,6 +168,26 @@ test('propose with no agent receiving the brief is 409 no_brief_agent', async (t
   assert.deepEqual(app.adapter.calls, []);
 });
 
+test('propose with no thread set falls back to the first pinned agent', async (t) => {
+  const app = await startBrief(t, {
+    target: null,
+    agents: [agent('assistant'), agent('cfo', { pinned: true }), agent('focus', { builtin: true })],
+  });
+  const response = await post(app, { text: 'Leave the weather out.' });
+  assert.deepEqual([response.status, response.json], [202, { ok: true, agentId: 'cfo' }]);
+  assert.deepEqual(app.adapter.calls.map(([id]) => id), ['cfo']);
+});
+
+test('propose with no thread set and no pinned agent falls back to the first built-in agent', async (t) => {
+  const app = await startBrief(t, {
+    target: null,
+    agents: [agent('assistant'), agent('focus', { builtin: true })],
+  });
+  const response = await post(app, { text: 'Leave the weather out.' });
+  assert.deepEqual([response.status, response.json], [202, { ok: true, agentId: 'focus' }]);
+  assert.deepEqual(app.adapter.calls.map(([id]) => id), ['focus']);
+});
+
 test('propose refuses without a started persona under that id', async (t) => {
   for (const [options, expected] of [
     [{ agents: [agent('cfo')] }, [404, 'no_such_agent']],

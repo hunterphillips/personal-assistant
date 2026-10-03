@@ -51,20 +51,24 @@ async function setup(t, { started = true, limits = LIMITS, target = 'assistant' 
   return { briefsDir, threadsDir, store, hub, logs, notices, writeNotice, posted, targets };
 }
 
-test('no target posts nothing, logs no_target, and a target set later gets the notice once', async (t) => {
-  const { hub, notices, logs, writeNotice, threadsDir, targets } = await setup(t, { target: null });
+test('no target logs no_target and marks the notice handled, so a target set later never backfills it', async (t) => {
+  const { hub, notices, logs, writeNotice, posted, targets } = await setup(t, { target: null });
   await writeNotice('2026-09-30');
   await notices.reconcile();
   assert.equal(hub.notified.length, 0);
   assert.deepEqual(logs.filter((e) => e.event === 'notice_skipped'), [
     { event: 'notice_skipped', agentId: null, date: '2026-09-30', state: 'ready', reason: 'no_target' },
   ]);
-  await assert.rejects(stat(path.join(threadsDir, POSTED_FILE)), { code: 'ENOENT' });
+  assert.deepEqual((await posted()).posted, { '2026-09-30': ['ready'] });
 
   targets.current = 'assistant';
   await notices.reconcile();
   await notices.reconcile();
-  assert.deepEqual(hub.notified.map((m) => [m.agentId, m.date]), [['assistant', '2026-09-30']]);
+  assert.equal(hub.notified.length, 0);
+
+  await writeNotice('2026-10-01');
+  await notices.reconcile();
+  assert.deepEqual(hub.notified.map((m) => [m.agentId, m.date]), [['assistant', '2026-10-01']]);
 });
 
 test('a changed target receives the next notice, and the posted file keys on date, not agent', async (t) => {

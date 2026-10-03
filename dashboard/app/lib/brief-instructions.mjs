@@ -6,8 +6,12 @@
 //   POST /api/brief/instructions/propose  { text } -> 202 { ok: true, agentId }
 // A change goes to the agent Settings names under "Brief goes to"
 // (the snapshot's settings.brief.agent, read at request time; no agent is
-// named here). With none named, propose is 409 no_brief_agent, before the
-// registry and running checks; the rest of the refusals are
+// named here). With none named (brief.agent is null, meaning "No thread"),
+// it falls back to the first pinned Claude persona, else the first built-in
+// Claude persona; only when neither exists is propose 409 no_brief_agent,
+// before the registry and running checks. A named id that just does not
+// resolve to anything live is left to the existing downstream checks in
+// instructions-routes.mjs; the rest of the refusals are
 // instructions-routes.mjs's.
 //
 // createBriefInstructions({ file, limits, log }) returns { read }, as
@@ -41,8 +45,19 @@ export function instructionsMessage(text) {
 export function createBriefInstructionsRoutes({ instructions, hub, log, limits, shuttingDown }) {
   function resolveAgent() {
     const agentId = hub.snapshot().settings?.brief?.agent ?? null;
-    if (typeof agentId !== 'string' || agentId === '') throw new HttpError(409, 'no_brief_agent');
-    return agentId;
+    if (typeof agentId === 'string' && agentId !== '') return agentId;
+    const fallback = fallbackAgentId(hub);
+    if (!fallback) throw new HttpError(409, 'no_brief_agent');
+    return fallback;
   }
   return createInstructionsRoutes({ instructions, hub, log, limits, shuttingDown, resolveAgent, message: instructionsMessage });
+}
+
+// The first pinned Claude persona, else the first built-in Claude persona,
+// else null: who stands in for "Brief goes to" when Settings names no
+// thread.
+function fallbackAgentId(hub) {
+  const claude = (hub.snapshot().agents ?? []).filter((agent) => agent.kind === 'persona' && agent.provider === 'claude');
+  const chosen = claude.find((agent) => agent.pinned === true) ?? claude.find((agent) => agent.builtin === true) ?? null;
+  return chosen ? chosen.id : null;
 }
