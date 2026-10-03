@@ -135,6 +135,8 @@ picks one up and ends by updating it.
   gitignored; each build writes the viewer and `brief-<date>.json`;
   `build.py` and `check-viewer.mjs` beside the briefs are code.
 - `feed/`: the feed store's README; `items/` is its output, gitignored.
+- `agents/`: one folder per agent that lives in this repo (Assistant,
+  Watch, Myos), its CLAUDE.md and skills; the folder is the agent's `cwd`.
 - `systems/`: symlinks to the agents' repos.
 - `thoughts/shared/`: lanes, plans, research, tickets.
 

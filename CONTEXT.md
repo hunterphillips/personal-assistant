@@ -9,8 +9,9 @@ built.
 
 **Agent**:
 Something Hunter can talk to that has a name, a description, a folder it
-works in, and a thread. CFO, Focus, Second brain, Watch, and the Assistant
-are agents.
+works in, and a thread. Its instructions are the CLAUDE.md in its folder:
+its own repo's, or `agents/<id>/` for one that lives in this repo. CFO,
+Focus, Second brain, Watch, and the Assistant are agents.
 _Avoid_: persona, domain, domain persona, domain system, bot
 
 **Assistant**:

@@ -65,7 +65,7 @@
       "description": "I read the newsletters he does not, and keep only what bears on a decision he is making.",
       "group": "personal",
       "kind": "persona",
-      "cwd": "/Users/hunterphillips/workspace/personal-assistant",
+      "cwd": "/Users/hunterphillips/workspace/personal-assistant/agents/watch",
       "provider": "claude",
       "jobs": [
         "com.personal-assistant.watch"
@@ -91,7 +91,7 @@
       "description": "I am the way in. I read anything of Hunter's, hand judgment to the agent that owns it, and keep the morning brief.",
       "group": "personal",
       "kind": "persona",
-      "cwd": "/Users/hunterphillips/workspace/personal-assistant",
+      "cwd": "/Users/hunterphillips/workspace/personal-assistant/agents/assistant",
       "provider": "claude",
       "pinned": true,
       "jobs": [
@@ -105,7 +105,7 @@
       "description": "I know how this dashboard and its agents work. I explain what Hunter is looking at, answer what the system is doing, and pass a message or a task to the agent that owns it.",
       "group": "personal",
       "kind": "persona",
-      "cwd": "/Users/hunterphillips/workspace/personal-assistant",
+      "cwd": "/Users/hunterphillips/workspace/personal-assistant/agents/myos",
       "provider": "claude",
       "builtin": true
     }

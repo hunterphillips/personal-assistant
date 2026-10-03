@@ -912,6 +912,15 @@ means re-running `scripts/spike-claude-sdk.mjs` and confirming the
 and events, is in `lib/runtime/adapter.mjs`. The routes below are wired to
 it and the Agents view (above) drives them.
 
+### Agent folders
+
+An agent that lives in this repo (the Assistant, Watch, Myos) has its own
+folder under `agents/<id>/` as its registry `cwd`, with a `CLAUDE.md` that
+says what it does. A turn there loads that file, every `CLAUDE.md` above
+it up to the repo root, and skills from the folder's `.claude/skills/` and
+the root's. `.claude/settings.json` and `.mcp.json` are read from the
+folder only and are not inherited from the root.
+
 ### State in the snapshot
 
 At startup the hub starts each persona in the registry and follows its
@@ -1179,8 +1188,8 @@ read-only fake) both routes are 404.
   repo's CLAUDE.md expects; CLAUDE.md itself loads through the default
   setting sources. The preset carries an `append` from the agent's
   registry entry: "You are Myos, one of Hunter's agents in his personal
-  assistant system. Your role: Guide. In your own words: …", since
-  several agents share this repo's folder. The SDK records it on a
+  assistant system. Your role: Guide. In your own words: …", so an
+  agent knows which entry it is whatever its folder holds. The SDK records it on a
   session's first request, so it reaches an existing thread, and a rename
   takes effect, only after New thread:
 
