@@ -25,9 +25,11 @@ from here.
   level, Ask, Auto, or Full access, set in its gear panel; its routines,
   scheduled prompts the daemon runs itself as a turn in its thread at its
   level, are listed under its settings with a picker form and under the
-  groups in the list), Reading holds the Daily Brief and the Feed (what
-  the producers found, with images, and Discuss opening the Watch agent;
-  each tab opens its instructions and sends a change to its agent), Focus
+  groups in the list), Feed holds what the producers found (with images,
+  and Discuss opening the Watch agent; its instructions send a change to
+  Watch), the Daily Brief opens as an overlay from the header on any view
+  (rendered from the run's brief JSON, with Approve, Dismiss, notes, and its
+  own instructions), Focus
   is embedded through a proxy, Goals
   reads the vault's priorities with add and edit going through the
   Second brain agent, Health holds Settings (the default model, effort, and
