@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "daily-drift",
+  "name": "Daily drift",
+  "agent": "cfo",
+  "instruction": "Compute drift against the policy and say which bands are out.",
+  "schedule": {
+    "cron": "30 6 * * 1-5",
+    "text": "Weekdays at 6:30"
+  },
+  "active": true,
+  "created": "2026-10-03T02:29:16.966Z",
+  "updated": "2026-10-03T02:29:51.278Z"
+}
