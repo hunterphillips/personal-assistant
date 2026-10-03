@@ -34,3 +34,6 @@ feed/items/
 # Routine runs: each routine's runs log, local only; the routine files
 # beside it are committed like the registry.
 routines/runs/
+
+# Notifications agents raise: a sentence may carry a figure, local only.
+/notifications/

@@ -1,13 +1,15 @@
 // State hub: one in-memory snapshot of what the dashboard knows (Focus
 // health, the latest brief, the agent registry, persona state, coding
-// sessions and the cmux terminals behind them, jobs, and routines), with a
+// sessions and the cmux terminals behind them, jobs, routines, and
+// notifications), with a
 // revision that bumps on every change and a subscriber list for the event
 // stream. It owns no persistence and no refresh timers; callers decide when
 // to refresh. Its only timers are the persona turn wall clocks.
 //
 // createHub({ registry, jobs, routines, schedule, timeZone, focus, brief,
 //             timeouts, limits, adapters, store, bindings, cmux,
-//             adaptersDisabled, settings, reads, models, home, log, now }) returns:
+//             adaptersDisabled, settings, reads, notifications, models, home, log,
+//             now }) returns:
 //
 //   snapshot() -> frozen
 //     { revision,                 // integer, starts at 1, +1 on every change
@@ -35,6 +37,8 @@
 //                             updated, nextAt, lastRun }] },
 //       settings: { ok, error, model: { default, effort }, brief: { agent },
 //                   permission: { default } },
+//       notifications: { open, items: [{ id, agent, text, link, at,
+//                                         acknowledgedAt }] },
 //       models: [{ id, name }] }
 //     An agent's cwd is the registry's, or null, and jobs is how many
 //     launchd labels its registry jobs name; agents never carry the
@@ -94,6 +98,9 @@
 //     store's newest folded run or null. Rebuilt on the store's onChange,
 //     on a registry change, and by runEnded(). Without a `routines` store
 //     the list is empty.
+//     `notifications` is the notification store's view (notifications.mjs):
+//     every retained item, newest first, and the count still open. Rebuilt
+//     on the store's onChange. Without a store it is { open: 0, items: [] }.
 //     `sessions` is the union of every adapter's sessions() (adapter.mjs),
 //     threads the dashboard follows but does not own, and the Claude
 //     terminals cmux has registered (`cmux`, runtime/cmux.mjs), newest
@@ -163,7 +170,7 @@
 //   subscribe(fn) -> unsubscribe
 //     fn({ revision, patch }) runs after every bump; `patch` holds only the
 //     top-level content keys that changed (focus, brief, registry, agents,
-//     sessions, codex, cmux, jobs, routines), never revision or updatedAt. A throwing listener is logged
+//     sessions, codex, cmux, jobs, routines, settings, notifications), never revision or updatedAt. A throwing listener is logged
 //     as { event: 'hub_listener_error', error } and the rest still run.
 //
 //   start() -> Promise<void>
@@ -280,13 +287,14 @@ const STATE_WORD = /^[a-z_]{1,40}$/;
 
 export function createHub({
   registry, jobs, routines = null, schedule = defaultSchedule, timeZone = TIME_ZONE, focus, brief, timeouts, limits = LIMITS,
-  adapters = {}, store = null, bindings = null, cmux = null, adaptersDisabled = null, settings = null, reads = null, models = MODELS,
+  adapters = {}, store = null, bindings = null, cmux = null, adaptersDisabled = null, settings = null, reads = null, notifications = null, models = MODELS,
   home = os.homedir(), log = () => {}, now = () => new Date(),
 }) {
   const listeners = new Set();
   const settingsCurrent = () => settingsView(settings ? settings.current() : null);
   const views = (current = registry.current()) => agentViews(current, personas, settingsCurrent(), routines, reads);
   const routinesCurrent = () => routinesView(registry.current(), routines, schedule, timeZone, now());
+  const notificationsCurrent = () => (notifications ? notifications.view() : { open: 0, items: [] });
   const turnMaxMs = timeouts.turnMaxMs ?? TIMEOUTS.turnMaxMs;
   // agentId -> runtime entry for each registry persona (see personaEntry).
   const personas = new Map();
@@ -306,6 +314,7 @@ export function createHub({
     jobs: { refreshedAt: null, focusAvailable: null, refreshing: false, error: null, items: [] },
     routines: routinesCurrent(),
     settings: settingsCurrent(),
+    notifications: notificationsCurrent(),
     models: models.map((model) => ({ id: model.id, name: model.name })),
   });
   let statusRun = null;
@@ -558,6 +567,10 @@ export function createHub({
     if (!closed) commitRoutines();
   }) : () => {};
 
+  const unsubscribeNotifications = notifications && typeof notifications.onChange === 'function' ? notifications.onChange(() => {
+    if (!closed) commit({ notifications: notificationsCurrent() });
+  }) : () => {};
+
   const unsubscribeSettings = settings && typeof settings.onChange === 'function' ? settings.onChange(() => {
     if (closed) return;
     const patch = {};
@@ -767,6 +780,7 @@ export function createHub({
       unsubscribeBindings();
       unsubscribeSettings();
       unsubscribeRoutines();
+      unsubscribeNotifications();
       for (const unsubscribe of adapterUnsubscribes.splice(0)) unsubscribe();
       for (const entry of personas.values()) {
         clearTimeout(entry.timer);

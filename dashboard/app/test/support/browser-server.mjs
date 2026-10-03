@@ -28,7 +28,11 @@
 // the `routines` option, and the real scheduler (scheduler.mjs) runs over
 // the hub on an injected clock: it never ticks on its own, so a test
 // calls `scheduler.tick()` and moves `clock.advance(ms)`; a test run goes
-// through the route as the form sends it.
+// through the route as the form sends it. Notifications are the real store
+// (notifications.mjs) over a temporary file seeded from the `notifications`
+// option, given to the hub, the routes, and the delegation service, so a
+// persona seeded with `notify` raises one through the same path the tool
+// takes.
 // stopStreams() ends every event stream with `bye` and
 // leaves the app refusing new ones (503 shutting_down), as during shutdown;
 // restartApp() then puts a new app handler over the same hub, as after a
@@ -56,6 +60,7 @@ import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
 import { RuntimeError } from '../../lib/runtime/adapter.mjs';
 import { createNotices } from '../../lib/notices.mjs';
+import { NOTIFICATIONS_FILE, createNotifications } from '../../lib/notifications.mjs';
 import { RegistryError, validateDocument } from '../../lib/registry.mjs';
 import { createRoutines } from '../../lib/routines.mjs';
 import { describe, parseCron } from '../../lib/schedule.mjs';
@@ -122,11 +127,16 @@ export { focusSourceAvailable };
 //              `routinesDir` the directory, `scheduler` { tick, testRun },
 //              and `clock` { now, advance(ms) } the scheduler's and hub's
 //              clock, the real time moved ahead by what `advance` adds.
+//   notifications  [{ id?, agent, text, link?, at?, acknowledgedAt? }]
+//              written as the store's lines, oldest first, before it loads
+//              (`at` defaults to now, `link` and `acknowledgedAt` to null).
+//              `notifications` on the result is the store and
+//              `notificationsFile` the file.
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, jobs: jobsSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
   vault = null, feed = null, instructions = null, briefInstructions = null, settings: settingsSeed = null, delegationWaitMs = null,
-  routines: routineSeed = null,
+  routines: routineSeed = null, notifications: notificationSeed = null,
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
     throw new Error('startHub: the vault option adds second-brain; remove it from agents.');
@@ -223,14 +233,26 @@ export async function startHub({
     await routines.load();
     // Shared read times, seeded at now like a first start, so seeded thread
     // history never shows as unread.
+    const notificationsFile = path.join(root, 'notifications', NOTIFICATIONS_FILE);
+    if (notificationSeed) {
+      await mkdir(path.dirname(notificationsFile), { recursive: true, mode: 0o700 });
+      const stamp = clock.now().toISOString();
+      const lines = notificationSeed.map((seed, i) => JSON.stringify({
+        id: seed.id ?? `seed-${i + 1}`, agent: seed.agent, text: seed.text, link: seed.link ?? null,
+        at: seed.at ?? stamp, acknowledgedAt: seed.acknowledgedAt ?? null,
+      }));
+      await writeFile(notificationsFile, lines.map((line) => `${line}\n`).join(''), { mode: 0o600 });
+    }
+    const notifications = createNotifications({ file: notificationsFile, limits: config.limits, now: clock.now });
+    await notifications.load();
     const reads = createReads({ file: path.join(root, 'thread-reads.json'), now: clock.now });
     await reads.load((registry.current()?.agents ?? []).filter((agent) => agent.kind === 'persona').map((agent) => agent.id));
     const hub = createTestHub({
       config, focus: focusRoutes, brief: briefRoutes, registry, jobs, routines, adapters, store, bindings, cmux, settings, reads, home,
-      now: clock.now,
+      notifications, now: clock.now,
     });
     await hub.start();
-    const delegation = createDelegation({ hub, registry, limits: config.limits, timeouts: config.timeouts });
+    const delegation = createDelegation({ hub, registry, notifications, limits: config.limits, timeouts: config.timeouts });
     personas.adapter.setDelegation(delegation);
     // The scheduler never arms a timer here; a test ticks it.
     const scheduler = createScheduler({
@@ -267,7 +289,7 @@ export async function startHub({
     });
     const newHandler = () => createApp({
       config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, feedInstructions,
-      briefInstructions: briefInstructionsReader, notices, settings, registry, routines, scheduler, log: () => {},
+      briefInstructions: briefInstructionsReader, notices, settings, registry, routines, scheduler, notifications, log: () => {},
     });
     let handler = newHandler();
     cleanups.push(async () => {
@@ -313,6 +335,8 @@ export async function startHub({
       delegation,
       routines,
       routinesDir,
+      notifications,
+      notificationsFile,
       scheduler: { tick: () => scheduler.tick(), testRun: (id) => scheduler.testRun(id) },
       clock,
       codex,
@@ -459,7 +483,10 @@ function controlledJobs({ items = [], focusAvailable = null, refreshedAt = null 
 // (context.from absent) and replies with what the tool answered, as a
 // model that repeats the tool's text would; with `raise: { kind, toolName,
 // input }` on that seed, the receiver raises that request on arrival and
-// replies only once it is answered. answer() resolves the pending
+// replies only once it is answered. A persona seeded with `notify: { text,
+// link }` raises that notification through the delegation service's notify
+// (the notify tool's handler) on each of the user's own turns and replies
+// with what the tool answered. answer() resolves the pending
 // request and continues the turn the same way. The open turn's `from` and
 // `chain` are kept on the entry and stamped on every request and resolved
 // event, as the real adapter does, so the real hub relays the card. A send
@@ -566,6 +593,13 @@ export function fakePersonas(seed, store) {
     if (entry(id).state === 'busy' && !held.has(id)) await finish(id, outcome.text);
   }
 
+  // The seeded notification, raised as the tool handler would, then the reply.
+  async function notifyTurn(id, notify) {
+    if (!delegation) throw new Error('fakePersonas: a notify seed needs setDelegation()');
+    const outcome = await delegation.notify({ from: id, text: notify.text, link: notify.link ?? null });
+    if (entry(id).state === 'busy' && !held.has(id)) await finish(id, outcome.text);
+  }
+
   // A request on the persona's open turn, stamped with the turn's sender
   // and chain as the real adapter stamps it.
   function raise(id, request) {
@@ -616,6 +650,8 @@ export function fakePersonas(seed, store) {
       const raised = current.from ? seed[current.from]?.delegate : null;
       say(agent.id, 'user', text, fields).then(() => {
         if (delegate && !current.from) return delegateTurn(agent.id, delegate, context);
+        const notify = seed[agent.id]?.notify;
+        if (notify && !current.from) return notifyTurn(agent.id, notify);
         if (raised && raised.to === agent.id && raised.raise) return raise(agent.id, raised.raise);
         return continueTurn(agent.id, text);
       });

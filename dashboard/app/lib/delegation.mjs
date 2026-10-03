@@ -1,7 +1,8 @@
-// Messages between agents: the ask tool and the lines it writes.
+// Messages between agents: the ask tool and the lines it writes, and the
+// notify tool beside it.
 //
 // Every Claude agent's turn gets one in-process MCP server named `agents`
-// with one tool, `ask({ to, message })`, through the adapter's turnTools
+// with the tool `ask({ to, message })`, through the adapter's turnTools
 // hook (runtime/claude.mjs). The tool sends `message` to the agent `to` as
 // a turn of its own, waits a few seconds for the reply, and answers the
 // caller with the reply text, or with a pending sentence when the receiver
@@ -9,7 +10,13 @@
 // go. The sender is the agent whose turn is running, taken from the hook's
 // closure; nothing in the tool's arguments can forge it.
 //
-// createDelegation({ hub, registry, limits, timeouts, log, now, randomUUID, importSdk })
+// With a notification store (`notifications`, notifications.mjs) the same
+// server also carries `notify({ text, link? })`: one sentence for Hunter's
+// header list, raised under the agent whose turn is running (the same
+// closure; no argument names the agent). It posts nothing in any thread.
+//
+// createDelegation({ hub, registry, notifications, limits, timeouts, log, now,
+//                    randomUUID, importSdk })
 // returns:
 //
 //   toolsFor(agent, { text, prompt, from, chain, mentions, turnId })
@@ -63,6 +70,12 @@
 //     answered with no text.". Text that arrived is a reply even if the
 //     turn then failed.
 //
+//   notify({ from, text, link }) -> Promise<result>
+//     The notify tool's work: { status: 'raised', id, text } or { status:
+//     'refused', reason, text }, `text` the sentence the tool answers. A
+//     refusal (empty, too long, a link in no known shape, no store, or a
+//     write that failed, logged as notification_error) stores nothing.
+//
 //   pendingFor(agentId, sessionId) -> [{ delegationId, from, to, reply, at }]
 //     Replies queued for the sender, newest last, at most
 //     limits.delegationPendingReplies kept, for that session only;
@@ -87,19 +100,29 @@ import { randomUUID as cryptoRandomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
+import { NotificationError } from './notifications.mjs';
 import { firstSentence } from './notices.mjs';
 import { RuntimeError } from './runtime/adapter.mjs';
 
 export const SERVER_NAME = 'agents';
 export const TOOL_NAME = 'ask';
 export const ASK_TOOL = `mcp__${SERVER_NAME}__${TOOL_NAME}`;
+export const NOTIFY_TOOL_NAME = 'notify';
+export const NOTIFY_TOOL = `mcp__${SERVER_NAME}__${NOTIFY_TOOL_NAME}`;
+
+// What a notification is for, in two sentences; the agent's own prompt and
+// repo rules carry the rest of the judgment.
+export const NOTIFY_DESCRIPTION = 'Raise a notification the user sees soon in the dashboard header: one sentence about something that needs their attention, '
+  + 'such as unusual account activity or an audit waiting for them. '
+  + 'Never use it for a chat reply, routine status, or a failed job, unless you judge that the failure needs their attention.';
+const LINK_SENTENCE = 'The link must be agent:<id>, feed:<run>/<index>, brief:<date>, or job:<label>.';
 
 const SERVER_VERSION = '1.0.0';
 const ERROR_TEXT_MAX = 500;
 const importClaudeSdk = () => import('@anthropic-ai/claude-agent-sdk');
 
 export function createDelegation({
-  hub, registry, limits, timeouts, log = () => {}, now = () => new Date(),
+  hub, registry, notifications = null, limits, timeouts, log = () => {}, now = () => new Date(),
   randomUUID = cryptoRandomUUID, importSdk = importClaudeSdk,
 }) {
   let sdk = null;
@@ -359,6 +382,24 @@ export function createDelegation({
     return blocks.join('\n\n');
   }
 
+  async function notify({ from, text, link = null }) {
+    const refused = (reason, sentence) => ({ status: 'refused', reason, text: sentence });
+    if (!notifications) return refused('unavailable', 'Notifications are not available.');
+    try {
+      const item = await notifications.raise({ agent: from, text, link: link ?? null });
+      log({ event: 'notification_raised', agentId: from, notificationId: item.id });
+      return { status: 'raised', id: item.id, text: `Raised notification ${item.id}.` };
+    } catch (error) {
+      if (error instanceof NotificationError) {
+        if (error.code === 'empty_text') return refused(error.code, 'The notification is empty.');
+        if (error.code === 'text_too_long') return refused(error.code, `The notification is too long: ${limits.notificationTextChars} characters at most.`);
+        if (error.code === 'invalid_link') return refused(error.code, LINK_SENTENCE);
+      }
+      log({ event: 'notification_error', agentId: typeof from === 'string' ? from : null, error: bound(error?.message ?? String(error)) });
+      return refused('write_failed', 'The notification could not be saved.');
+    }
+  }
+
   async function toolsFor(agent, context = {}) {
     const { tool, createSdkMcpServer } = await ensureSdk();
     const sender = agent.id;
@@ -384,11 +425,23 @@ export function createDelegation({
         return result('The message could not be sent.');
       }
     });
-    const server = createSdkMcpServer({ name: SERVER_NAME, version: SERVER_VERSION, tools: [askTool] });
+    const tools = [askTool];
+    if (notifications) {
+      const notifySchema = {
+        text: z.string().min(1).max(limits.notificationTextChars).describe('One sentence saying what needs attention'),
+        link: z.string().max(200).optional().describe('What to open: agent:<id>, feed:<run>/<index>, brief:<date>, or job:<label>'),
+      };
+      tools.push(tool(NOTIFY_TOOL_NAME, NOTIFY_DESCRIPTION, notifySchema, async (args) => {
+        // The raising agent comes from this turn, never from the arguments.
+        const outcome = await notify({ from: sender, text: args?.text, link: typeof args?.link === 'string' ? args.link : null });
+        return result(outcome.text);
+      }));
+    }
+    const server = createSdkMcpServer({ name: SERVER_NAME, version: SERVER_VERSION, tools });
     const prompt = compose(context, taken);
     return {
       mcpServers: { [SERVER_NAME]: server },
-      allowedTools: [ASK_TOOL],
+      allowedTools: notifications ? [ASK_TOOL, NOTIFY_TOOL] : [ASK_TOOL],
       ...(prompt ? { prompt } : {}),
       commit() {
         settled = true;
@@ -401,7 +454,7 @@ export function createDelegation({
     };
   }
 
-  return { toolsFor, ask, pendingFor, takePending, restorePending };
+  return { toolsFor, ask, notify, pendingFor, takePending, restorePending };
 }
 
 function result(text) {

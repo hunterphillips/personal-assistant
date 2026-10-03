@@ -186,10 +186,11 @@ export function fakeSettings(initial = {}, { ok = true, error = null } = {}) {
 // adapters unless given.
 export function createTestHub({
   config, focus, brief, registry = fakeRegistry(), jobs = fakeJobs(), routines = null, adapters = {}, store = null, bindings = null,
-  cmux = null, settings = fakeSettings(), reads = null, home = '/invented', log = () => {}, now = undefined,
+  cmux = null, settings = fakeSettings(), reads = null, notifications = null, home = '/invented', log = () => {}, now = undefined,
 }) {
   return createHub({
-    registry, jobs, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, reads, home, log,
+    registry, jobs, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, reads,
+    notifications, home, log,
     ...(now ? { now } : {}),
   });
 }
@@ -244,11 +245,13 @@ export function fakeCmux(inventory = null) {
 // every adapter that has setDelegation() and returned as `delegation`.
 // `notices` (notices.mjs) is optional and goes to the event stream.
 // `settings` defaults to a fakeSettings() shared by the hub and the PUT
-// route; pass null for an app without the settings route. `configure` may
-// adjust config.
+// route; pass null for an app without the settings route. `notifications`
+// (notifications.mjs, optional) goes to the hub and the routes. `configure`
+// may adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), jobs, routines = null, scheduler = null, hub, adapters, store, bindings,
-  cmux = null, goals, feed, briefInstructions, notices = null, settings = fakeSettings(), reads = null, configure = (c) => c, delegation = null,
+  cmux = null, goals, feed, briefInstructions, notices = null, settings = fakeSettings(), reads = null, notifications = null, configure = (c) => c,
+  delegation = null,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
@@ -273,7 +276,7 @@ export async function startApp(t, {
   const jobsModule = jobs ?? fakeJobs();
   const stateHub = hub ?? createTestHub({
     config, focus: focusRoutes, brief: briefRoutes, registry, jobs: jobsModule, routines, adapters, store, bindings, cmux, log,
-    ...(settings ? { settings } : {}), ...(reads ? { reads } : {}),
+    ...(settings ? { settings } : {}), ...(reads ? { reads } : {}), notifications,
   });
   if (!hub) await stateHub.start();
   const delegationService = typeof delegation === 'function' ? delegation(stateHub) : null;
@@ -290,7 +293,7 @@ export async function startApp(t, {
   const handler = createApp({
     config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader,
     feedInstructions: instructionsReader, briefInstructions: briefInstructionsReader, notices, settings, registry, routines,
-    scheduler: schedulerService, log,
+    scheduler: schedulerService, notifications, log,
   });
   server.on('request', handler);
   t.after(() => {
@@ -301,7 +304,7 @@ export async function startApp(t, {
   const authority = `127.0.0.1:${port}`;
   return {
     port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, jobs: jobsModule, routines, settings, handler,
-    delegation: delegationService, scheduler: schedulerService,
+    delegation: delegationService, scheduler: schedulerService, notifications,
   };
 }
 

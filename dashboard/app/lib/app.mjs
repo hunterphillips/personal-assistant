@@ -10,15 +10,18 @@
 // injected `feed` (feed.mjs) and `feedInstructions` (feed-instructions.mjs),
 // the brief instructions routes brief-instructions.mjs over the injected
 // `briefInstructions` (the same module's reader), the routine routes routine-routes.mjs over the injected `routines` store
-// (routines.mjs) and `scheduler` (scheduler.mjs), and the event stream is
+// (routines.mjs) and `scheduler` (scheduler.mjs), the notification routes
+// notification-routes.mjs over the injected `notifications` store
+// (notifications.mjs), and the event stream is
 // events.mjs; this module builds them and dispatches to them. Without
 // `goals`, /api/goals and /api/goals/propose answer 404 not_found; without
 // `feed` or `feedInstructions`, /api/feed and the routes under it do,
 // without `briefInstructions` the two under /api/brief/instructions do, and
-// without `routines` so does everything under /api/routines.
+// without `routines` so does everything under /api/routines, and without
+// `notifications` everything under /api/notifications.
 //
 // createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, briefInstructions, notices,
-//             settings, registry, routines, scheduler, log })
+//             settings, registry, routines, scheduler, notifications, log })
 // returns a (req, res) handler and opens nothing; server.mjs owns listening.
 // `notices` (notices.mjs, optional) is handed to the event stream, which
 // reconciles the brief notice on each connect and runs its timer while a
@@ -36,6 +39,7 @@ import { createBriefInstructionsRoutes } from './brief-instructions.mjs';
 import { createEvents } from './events.mjs';
 import { createFeedRoutes } from './feed-routes.mjs';
 import { createGoalsRoutes } from './goals-routes.mjs';
+import { createNotificationRoutes } from './notification-routes.mjs';
 import { createRoutineRoutes } from './routine-routes.mjs';
 import { createSettingsRoutes } from './settings-routes.mjs';
 import { isCalendarDate } from './hub.mjs';
@@ -114,7 +118,8 @@ export function defaultLog(entry) {
 
 export function createApp({
   config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, feedInstructions = null,
-  briefInstructions = null, notices = null, settings = null, registry = null, routines = null, scheduler = null, log = defaultLog,
+  briefInstructions = null, notices = null, settings = null, registry = null, routines = null, scheduler = null, notifications = null,
+  log = defaultLog,
 }) {
   if (!hub) throw new TypeError('createApp requires a hub');
   const allowedHosts = new Set(config.allowedHosts);
@@ -137,6 +142,9 @@ export function createApp({
   const routineRoutes = routines
     ? createRoutineRoutes({ routines, hub, scheduler, log, limits: config.limits, shuttingDown: isShuttingDown })
     : null;
+  const notificationRoutes = notifications
+    ? createNotificationRoutes({ notifications, log, shuttingDown: isShuttingDown })
+    : null;
   const briefInstructionRoutes = briefInstructions
     ? createBriefInstructionsRoutes({
       instructions: briefInstructions, hub, log, limits: config.limits, shuttingDown: isShuttingDown,
@@ -154,6 +162,8 @@ export function createApp({
     if (agentRoute) return agentRoute;
     const routineRoute = routineRoutes?.match(pathname);
     if (routineRoute) return routineRoute;
+    const notificationRoute = notificationRoutes?.match(pathname);
+    if (notificationRoute) return notificationRoute;
     if (pathname.startsWith('/embedded/brief/')) {
       const date = pathname.slice('/embedded/brief/'.length);
       if (isCalendarDate(date)) {
@@ -275,6 +285,8 @@ export function createApp({
         return agents.serveCreate(req, res);
       case 'routine':
         return routineRoutes.serve(req, res, route);
+      case 'notification':
+        return notificationRoutes.serve(req, res, route);
       case 'brief-feedback': {
         const body = await readJsonBody(req, { limit: config.limits.feedbackBodyBytes });
         return brief.handleFeedback(req, res, body);

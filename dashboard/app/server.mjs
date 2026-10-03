@@ -2,7 +2,8 @@
 // terminal bindings, compose the jobs view, thread store, runtime
 // adapters (Claude for personas, Codex for the shared app-server's threads),
 // the cmux client, the routine store (loaded before the hub, so its
-// snapshot lists them) and the scheduler that runs them, state hub, the Goals, Feed, and feed instructions
+// snapshot lists them) and the scheduler that runs them, the notification
+// store (loaded before the hub too), state hub, the Goals, Feed, and feed instructions
 // readers, the settings store, the brief notices, and app, start the
 // personas, seed the settings file on first start, post any brief notice
 // not yet in the thread of the agent the settings name, start the
@@ -41,6 +42,7 @@ import { createFocusProxy } from './lib/focus-proxy.mjs';
 import { createGoals } from './lib/goals.mjs';
 import { createHub } from './lib/hub.mjs';
 import { createNotices } from './lib/notices.mjs';
+import { NOTIFICATIONS_FILE, createNotifications } from './lib/notifications.mjs';
 import { createReads } from './lib/reads.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { createRoutines } from './lib/routines.mjs';
@@ -120,6 +122,11 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   await settings.load();
   const routines = createRoutines({ dir: config.routinesDir, limits: config.limits, log: logEntry });
   await routines.load();
+  const notifications = createNotifications({
+    file: path.join(config.notificationsDir, NOTIFICATIONS_FILE), limits: config.limits, log: logEntry,
+  });
+  // An unreadable file leaves the list empty rather than the daemon down.
+  await notifications.load().catch((error) => logEntry({ event: 'notifications_load_error', error: error?.message ?? String(error) }));
   const hub = createHub({
     registry,
     jobs,
@@ -136,9 +143,10 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     adaptersDisabled: apiKeyInEnv ? 'api_key_in_env' : null,
     settings,
     reads,
+    notifications,
     log: logEntry,
   });
-  delegation = createDelegation({ hub, registry, limits: config.limits, timeouts: config.timeouts, log: logEntry });
+  delegation = createDelegation({ hub, registry, notifications, limits: config.limits, timeouts: config.timeouts, log: logEntry });
   const scheduler = createScheduler({ routines, hub, zone: config.timeZone, timeouts: config.timeouts, limits: config.limits, log: logEntry });
   const goals = createGoals({ registry, limits: config.limits, log: logEntry });
   const feed = createFeed({ dir: config.feedDir, limits: config.limits, log: logEntry });
@@ -154,7 +162,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   });
   const app = createApp({
     config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, briefInstructions, notices, settings, registry, routines,
-    scheduler, log: logEntry,
+    scheduler, notifications, log: logEntry,
   });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;

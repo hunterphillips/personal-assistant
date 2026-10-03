@@ -15,6 +15,8 @@
 //   DASHBOARD_REGISTRY_PATH     agent registry JSON file (default ../../registry/agents.json)
 //   DASHBOARD_ROUTINES_DIR      the routine files and their runs log (default ../../routines,
 //                               beside registry/; need not exist)
+//   DASHBOARD_NOTIFICATIONS_DIR the notifications file agents raise into (default
+//                               ../../notifications, beside registry/; need not exist)
 //   DASHBOARD_LAUNCH_AGENTS_DIR directory holding launchd plists (default ~/Library/LaunchAgents)
 //   DASHBOARD_THREADS_DIR       persona session pointers and message caches (default var/threads)
 //   DASHBOARD_SETTINGS_PATH     the settings file the interface writes (default var/settings.json;
@@ -42,6 +44,7 @@ const DEFAULT_FEED_INSTRUCTIONS = '../../daily-brief/watch/relevance.md';
 const DEFAULT_BRIEF_INSTRUCTIONS = '../../daily-brief/curator.md';
 const DEFAULT_REGISTRY_PATH = '../../registry/agents.json';
 const DEFAULT_ROUTINES_DIR = '../../routines';
+const DEFAULT_NOTIFICATIONS_DIR = '../../notifications';
 // Routine schedules run on this clock, following its changes. A constant
 // until someone else runs the daemon (no configurability ahead of need).
 export const TIME_ZONE = 'America/Chicago';
@@ -86,6 +89,8 @@ export const LIMITS = Object.freeze({
   routineMissedMax: 100, // missed occurrences counted before the count is capped
   routineCatchupDays: 7, // how far back a routine's marker may reach on start
   routinesMax: 100, // routine files
+  notificationsMax: 200, // notifications kept in the file; acknowledged ones roll off first
+  notificationTextChars: 500, // one notification's sentence
   jobsRefreshMs: 5 * 60_000, // keep the rail's Health mark current without opening Health
 });
 
@@ -135,6 +140,7 @@ export function loadConfig(env = process.env) {
   const briefInstructionsPath = parsePath(env.DASHBOARD_BRIEF_INSTRUCTIONS, DEFAULT_BRIEF_INSTRUCTIONS);
   const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, DEFAULT_REGISTRY_PATH);
   const routinesDir = parsePath(env.DASHBOARD_ROUTINES_DIR, DEFAULT_ROUTINES_DIR);
+  const notificationsDir = parsePath(env.DASHBOARD_NOTIFICATIONS_DIR, DEFAULT_NOTIFICATIONS_DIR);
   // The default is already absolute, so path.resolve keeps it as-is; only a
   // relative override is resolved from APP_ROOT.
   const launchAgentsDir = parsePath(env.DASHBOARD_LAUNCH_AGENTS_DIR, path.join(os.homedir(), 'Library', 'LaunchAgents'));
@@ -175,6 +181,7 @@ export function loadConfig(env = process.env) {
     briefInstructionsPath,
     registryPath,
     routinesDir,
+    notificationsDir,
     timeZone: TIME_ZONE,
     launchAgentsDir,
     threadsDir,

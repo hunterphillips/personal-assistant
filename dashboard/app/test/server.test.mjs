@@ -36,6 +36,7 @@ async function testEnv(t) {
     DASHBOARD_CMUX_PASSWORD_FILE: path.join(await tempDir(t), 'no-cmux-password'),
     DASHBOARD_CMUX_CLI: path.join(await tempDir(t), 'no-cmux'),
     DASHBOARD_SETTINGS_PATH: path.join(await tempDir(t), 'settings.json'),
+    DASHBOARD_NOTIFICATIONS_DIR: path.join(await tempDir(t), 'notifications'),
   };
 }
 
@@ -262,7 +263,7 @@ async function readThread(dashboard, id = 'assistant') {
   return (await response.json()).messages;
 }
 
-test('startDashboard hands the Claude adapter a tools hook that gives every turn the ask tool over the real SDK', async (t) => {
+test('startDashboard hands the Claude adapter a tools hook that gives every turn the ask and notify tools over the real SDK', async (t) => {
   const env = await testEnv(t);
   await writeRegistry(env, [await assistantEntry(t), await personaEntry(t, 'cfo')]);
   let hook = null;
@@ -277,7 +278,7 @@ test('startDashboard hands the Claude adapter a tools hook that gives every turn
   t.after(() => dashboard.close());
   assert.equal(typeof hook, 'function');
   const tools = await hook({ id: 'assistant' }, { text: 'Hi', prompt: 'Hi', from: null, chain: [], mentions: ['cfo'], turnId: 't-1' });
-  assert.deepEqual(tools.allowedTools, ['mcp__agents__ask']);
+  assert.deepEqual(tools.allowedTools, ['mcp__agents__ask', 'mcp__agents__notify']);
   assert.equal(tools.mcpServers.agents.type, 'sdk');
   assert.equal(tools.mcpServers.agents.name, 'agents');
   assert.ok(tools.mcpServers.agents.instance, 'a real McpServer instance');
