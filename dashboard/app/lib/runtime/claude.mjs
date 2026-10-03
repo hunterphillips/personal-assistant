@@ -109,7 +109,12 @@
 // drops AskUserQuestion; at Full access it still carries questions). Every
 // turn also runs with the Claude Code preset system prompt, so an agent
 // behaves as its repo's CLAUDE.md expects; CLAUDE.md itself loads through
-// the default setting sources. The init message's permissionMode is logged in persona_init; when it differs
+// the default setting sources. The preset carries an `append` naming the
+// agent from its registry entry (identityPrompt below), built per turn,
+// since several agents share one folder and could not tell which they
+// are. The SDK records the system prompt on a session's first request, so
+// the append reaches an existing thread, and a rename takes effect, only
+// after New thread. The init message's permissionMode is logged in persona_init; when it differs
 // from the mode requested (Auto is per model, and the user's
 // `permissions.disableAutoMode` can refuse it) one
 // persona_permission_mismatch line carries both and the turn goes on.
@@ -466,7 +471,7 @@ export function createClaudeAdapter({
         cwd: entry.cwd,
         ...(entry.sessionId ? { resume: entry.sessionId } : {}),
         ...sdkModeFor(turn.permission),
-        systemPrompt: { type: 'preset', preset: 'claude_code' },
+        systemPrompt: systemPromptFor(agent),
         maxTurns: limits.turnMaxTurns,
         abortController: turn.controller,
         canUseTool: makeCanUseTool(entry, turn),
@@ -783,4 +788,19 @@ function isRecord(value) {
 function isRoutineRef(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     && typeof value.id === 'string' && value.id !== '' && typeof value.name === 'string' && value.name !== '';
+}
+
+// The preset with the agent's identity appended, or the bare preset for an
+// entry without a name (a registry entry always has one).
+function systemPromptFor(agent) {
+  const append = identityPrompt(agent);
+  return append ? { type: 'preset', preset: 'claude_code', append } : { type: 'preset', preset: 'claude_code' };
+}
+
+export function identityPrompt(agent) {
+  if (typeof agent?.name !== 'string' || agent.name === '') return null;
+  const parts = [`You are ${agent.name}, one of Hunter's agents in his personal assistant system.`];
+  if (typeof agent.role === 'string' && agent.role !== '') parts.push(`Your role: ${agent.role}.`);
+  if (typeof agent.description === 'string' && agent.description !== '') parts.push(`In your own words: ${agent.description}`);
+  return parts.join(' ');
 }
