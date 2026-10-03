@@ -347,7 +347,7 @@ test('a brief page that fails to load is hidden, and Retry loads it', async ({ p
 test('a Focus page that fails at mount is hidden, and Retry loads it once Focus answers', async ({ page, hub }) => {
   needsFocus();
   let refuse = true;
-  await page.route('**/embedded/focus', (route) => {
+  await page.route('**/embedded/focus?*', (route) => {
     if (!refuse) return route.continue();
     refuse = false;
     return route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"upstream_unavailable"}' });

@@ -14,4 +14,6 @@ export const ASSETS = Object.freeze({
   'settings.js': { file: 'settings.js', type: 'text/javascript; charset=utf-8' },
   'shell.js': { file: 'shell.js', type: 'text/javascript; charset=utf-8' },
   'styles.css': { file: 'styles.css', type: 'text/css; charset=utf-8' },
+  'theme-boot.js': { file: 'theme-boot.js', type: 'text/javascript; charset=utf-8' },
+  'theme.js': { file: 'theme.js', type: 'text/javascript; charset=utf-8' },
 });

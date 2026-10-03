@@ -61,6 +61,7 @@ import { createRoutines } from '../../lib/routines.mjs';
 import { describe, parseCron } from '../../lib/schedule.mjs';
 import { createScheduler } from '../../lib/scheduler.mjs';
 import { createSettings } from '../../lib/settings.mjs';
+import { createReads } from '../../lib/reads.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } from './harness.mjs';
 import { focusSourceAvailable, startIsolatedFocus } from './isolated-focus.mjs';
@@ -220,8 +221,13 @@ export async function startHub({
     if (codex) adapters.codex = codex.adapter;
     const routines = createRoutines({ dir: routinesDir, limits: config.limits, now: clock.now });
     await routines.load();
+    // Shared read times, seeded at now like a first start, so seeded thread
+    // history never shows as unread.
+    const reads = createReads({ file: path.join(root, 'thread-reads.json'), now: clock.now });
+    await reads.load((registry.current()?.agents ?? []).filter((agent) => agent.kind === 'persona').map((agent) => agent.id));
     const hub = createTestHub({
-      config, focus: focusRoutes, brief: briefRoutes, registry, jobs, routines, adapters, store, bindings, cmux, settings, home, now: clock.now,
+      config, focus: focusRoutes, brief: briefRoutes, registry, jobs, routines, adapters, store, bindings, cmux, settings, reads, home,
+      now: clock.now,
     });
     await hub.start();
     const delegation = createDelegation({ hub, registry, limits: config.limits, timeouts: config.timeouts });

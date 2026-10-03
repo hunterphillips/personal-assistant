@@ -4,15 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Dashboard</title>
+  <script src="/assets/theme-boot.js"></script>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
   <a class="skip" href="#content">Skip to content</a>
   <div class="shell">
     <nav class="nav" aria-label="Dashboard">
-      <a href="/" data-view="agents" title="Home">
+      <a href="/" data-view="agents" title="Home" aria-label="Home">
         <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10.7 19.4 A8 8 0 1 0 5.1 15.4 C3.5 16.4 2.9 18.6 5.5 20 C6.9 19.3 8.7 19 10.7 19.4 Z"/></svg>
         <span class="nav-label">Home</span>
+        <span class="nav-indicator" id="agents-indicator" aria-hidden="true" hidden></span>
       </a>
       <a href="/reading" data-view="reading" title="Reading">
         <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><rect x="7" y="8" width="4" height="4" rx="0.5"/><path d="M14 8.5h3"/><path d="M14 11.5h3"/><path d="M7 15.5h10"/></svg>
@@ -26,12 +28,65 @@
         <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4.5L17 13H5"/></svg>
         <span class="nav-label">Goals</span>
       </a>
-      <a href="/health" data-view="health" title="Health">
+      <a href="/health" data-view="health" title="Health" aria-label="Health">
         <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 12h4l2.5-6 5 12 2.5-6H21"/></svg>
         <span class="nav-label">Health</span>
+        <span class="nav-indicator nav-indicator-health" id="health-indicator" aria-hidden="true" hidden></span>
       </a>
     </nav>
     <main id="content" class="content" tabindex="-1">
+      <header class="app-header">
+        <div class="header-left">
+          <h1 class="header-title" id="app-header-title">Agents</h1>
+          <div class="header-actions">
+            <div class="header-action-group" data-actions-for="agents">
+              <button type="button" class="agents-toggle" id="agents-toggle" aria-label="Hide agents" aria-expanded="true" aria-controls="agents-list">
+                <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+              </button>
+              <button type="button" class="button" id="agent-open-terminal" data-agent-action="open-terminal" hidden>Open terminal</button>
+              <button type="button" class="button icon-button" id="agent-details-toggle" data-agent-action="toggle-details" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="agent-details" hidden>
+                <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
+              <p class="thread-terminal-reason header-action-reason" id="agent-terminal-reason" role="status" hidden></p>
+            </div>
+            <div class="header-action-group" data-actions-for="reading" hidden>
+              <button type="button" class="instructions-toggle" id="feed-instructions-toggle" aria-label="Feed instructions" aria-expanded="false" aria-controls="feed-instructions" hidden>
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4h12M2 8h12M2 12h12"/><circle cx="5" cy="4" r="1.5"/><circle cx="10.5" cy="8" r="1.5"/><circle cx="7" cy="12" r="1.5"/></svg>
+                <span class="instructions-label">Feed instructions</span>
+              </button>
+              <button type="button" class="instructions-toggle" id="brief-instructions-toggle" aria-label="Brief instructions" aria-expanded="false" aria-controls="brief-instructions" hidden>
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4h12M2 8h12M2 12h12"/><circle cx="5" cy="4" r="1.5"/><circle cx="10.5" cy="8" r="1.5"/><circle cx="7" cy="12" r="1.5"/></svg>
+                <span class="instructions-label">Brief instructions</span>
+              </button>
+            </div>
+            <div class="header-action-group" data-actions-for="focus" hidden></div>
+            <div class="header-action-group" data-actions-for="goals" hidden>
+              <button type="button" class="button" id="goals-add">Add goal</button>
+            </div>
+            <div class="header-action-group" data-actions-for="health" hidden>
+              <button type="button" class="button" id="jobs-refresh">Refresh</button>
+            </div>
+          </div>
+        </div>
+        <div class="header-right">
+          <a class="header-entry header-brief" href="/brief">Brief</a>
+          <button type="button" class="header-entry" id="quick-chat-toggle" hidden>Quick chat</button>
+          <button type="button" class="header-entry" id="notifications-toggle" hidden>Notifications</button>
+          <button type="button" class="header-menu-toggle" id="app-menu-toggle" aria-expanded="false" aria-controls="app-menu">Menu</button>
+          <div class="app-menu" id="app-menu" hidden>
+            <a class="menu-entry menu-mobile-only" href="/brief">Brief</a>
+            <button type="button" class="menu-entry menu-mobile-only" hidden>Quick chat</button>
+            <button type="button" class="menu-entry menu-mobile-only" hidden>Notifications</button>
+            <fieldset class="theme-options">
+              <legend>Theme</legend>
+              <label><input type="radio" name="dashboard-theme" value="light"> Light</label>
+              <label><input type="radio" name="dashboard-theme" value="dark"> Dark</label>
+              <label><input type="radio" name="dashboard-theme" value="system"> Follow the system</label>
+            </fieldset>
+            <a class="menu-entry" id="settings-link" href="/health">Settings</a>
+          </div>
+        </div>
+      </header>
       <div class="notice" id="shell-notice" role="status" hidden>
         <span>The dashboard is not responding.</span>
         <button type="button" data-action="retry">Retry</button>
@@ -39,9 +94,6 @@
 
       <section class="view agents" id="view-agents" data-view="agents" aria-label="Agents">
         <div class="agents-list" id="agents-list">
-          <div class="agents-list-head" id="agents-list-head">
-            <h1 class="agents-heading">Agents</h1>
-          </div>
           <p class="agents-message" id="agents-message" hidden></p>
           <div id="agents-groups">
             <details class="agents-routines" id="agents-routines" hidden>
@@ -58,9 +110,6 @@
           <div class="thread-panel" id="agent-panel" hidden>
             <div class="thread-main">
               <div class="thread-header">
-                <button type="button" class="agents-toggle" id="agents-toggle" aria-label="Hide agents" aria-expanded="true" aria-controls="agents-list">
-                  <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
-                </button>
                 <a class="thread-back" id="agent-back" href="/">All agents</a>
                 <div class="thread-title">
                   <h2 class="thread-name" id="agent-name"></h2>
@@ -68,14 +117,9 @@
                   <span class="thread-cost" id="agent-cost"></span>
                 </div>
                 <button type="button" class="button thread-new" id="agent-new-thread" data-agent-action="new-thread">New thread</button>
-                <button type="button" class="button" id="agent-open-terminal" data-agent-action="open-terminal" hidden>Open terminal</button>
-                <button type="button" class="button icon-button" id="agent-details-toggle" data-agent-action="toggle-details" aria-label="Details" title="Details" aria-expanded="false" aria-controls="agent-details" hidden>
-                  <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                </button>
-                <p class="thread-terminal-reason" id="agent-terminal-reason" role="status" hidden></p>
               </div>
               <div class="thread-confirm" id="agent-confirm" role="group" aria-label="New thread" hidden>
-                <span id="agent-confirm-text">Start a new thread? The persona will not remember this one.</span>
+                <span id="agent-confirm-text">Start a new thread? The agent will not remember this one.</span>
                 <button type="button" class="button button-primary" data-agent-action="confirm-new-thread">Start new thread</button>
                 <button type="button" class="button" data-agent-action="cancel-new-thread">Cancel</button>
               </div>
@@ -143,28 +187,6 @@
         <nav class="reading-tabs" aria-label="Reading">
           <a href="/reading" data-tab="feed">Feed</a>
           <a href="/brief" data-tab="brief">Brief</a>
-          <button type="button" class="instructions-toggle" id="feed-instructions-toggle" aria-label="Feed instructions"
-                  aria-expanded="false" aria-controls="feed-instructions" hidden>
-            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none"
-                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-              <path d="M2 4h12M2 8h12M2 12h12"/>
-              <circle cx="5" cy="4" r="1.5"/>
-              <circle cx="10.5" cy="8" r="1.5"/>
-              <circle cx="7" cy="12" r="1.5"/>
-            </svg>
-            <span class="instructions-label">Feed instructions</span>
-          </button>
-          <button type="button" class="instructions-toggle" id="brief-instructions-toggle" aria-label="Brief instructions"
-                  aria-expanded="false" aria-controls="brief-instructions" hidden>
-            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none"
-                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-              <path d="M2 4h12M2 8h12M2 12h12"/>
-              <circle cx="5" cy="4" r="1.5"/>
-              <circle cx="10.5" cy="8" r="1.5"/>
-              <circle cx="7" cy="12" r="1.5"/>
-            </svg>
-            <span class="instructions-label">Brief instructions</span>
-          </button>
         </nav>
         <div class="reading-brief" id="reading-brief">
           <section class="instructions" id="brief-instructions" aria-labelledby="brief-instructions-heading" hidden>
@@ -212,10 +234,6 @@
       </section>
 
       <section class="view" id="view-goals" data-view="goals" aria-label="Goals" hidden>
-        <div class="routines-header">
-          <h1 class="goals-heading">Goals</h1>
-          <button type="button" class="button" id="goals-add">Add goal</button>
-        </div>
         <p class="routines-message" id="goals-message" role="status" hidden></p>
         <div class="routines-cards" id="goals-cards"></div>
       </section>
@@ -250,7 +268,6 @@
             <h1 class="health-heading">Jobs</h1>
             <p class="jobs-updated" id="jobs-updated"></p>
           </div>
-          <button type="button" class="button" id="jobs-refresh">Refresh</button>
         </div>
         <p class="routines-message" id="jobs-message" hidden></p>
         <div class="routines-cards" id="jobs-cards"></div>
@@ -258,6 +275,7 @@
     </main>
   </div>
   <script src="/assets/settings.js"></script>
+  <script src="/assets/theme.js"></script>
   <script src="/assets/jobs.js"></script>
   <script src="/assets/markdown.js"></script>
   <script src="/assets/agents.js"></script>

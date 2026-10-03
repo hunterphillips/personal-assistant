@@ -146,8 +146,8 @@ test.describe('with seeded jobs', () => {
 
     const focus = card(page, 'Focus');
     await expect(focus.locator('.card-header .badge')).toHaveText('Paused');
-    await expect(focus.getByRole('button')).toHaveText(['Resume']);
-    await expect(card(page, 'Second brain').getByRole('button')).toHaveCount(0);
+    await expect(focus.locator('[data-jobs-action]')).toHaveText('Resume');
+    await expect(card(page, 'Second brain').locator('[data-jobs-action]')).toHaveCount(0);
     await expect(focus.locator('.card-note')).toHaveCount(0);
 
     // A fresh refreshedAt means opening the view did not refresh.
@@ -156,6 +156,24 @@ test.describe('with seeded jobs', () => {
     for (const button of await page.locator('#view-health button').all()) {
       expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);
     }
+  });
+
+  test('a job row is selected by pointer or keyboard and stays selected through a refresh', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    const first = row(page, 'scan-gmail');
+    const second = row(page, 'scan-git');
+
+    await first.click();
+    await expect(first).toHaveAttribute('aria-current', 'true');
+    await expect(second).not.toHaveAttribute('aria-current', 'true');
+
+    await second.focus();
+    await page.keyboard.press('Enter');
+    await expect(second).toHaveAttribute('aria-current', 'true');
+    await expect(first).not.toHaveAttribute('aria-current', 'true');
+
+    await hub.state.refreshJobs();
+    await expect(row(page, 'scan-git')).toHaveAttribute('aria-current', 'true');
   });
 
   test('/routines lands on /health, and Agents holds no jobs', async ({ page, hub }) => {
@@ -184,9 +202,9 @@ test.describe('with seeded jobs', () => {
   test('the gear opens the agent\'s settings and a jobs line pointing at Health', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=brain`);
     await expect(page.locator('#agent-name')).toHaveText('Second brain');
-    const gear = page.getByRole('button', { name: 'Details', exact: true });
+    const gear = page.locator('.app-header').getByRole('button', { name: 'Settings', exact: true });
     await expect(gear).toBeVisible();
-    await expect(gear).toHaveAttribute('title', 'Details');
+    await expect(gear).toHaveAttribute('title', 'Settings');
     await expect(gear).toHaveAttribute('aria-expanded', 'false');
     await expect(gear).toHaveAttribute('aria-controls', 'agent-details');
     await expect(page.getByRole('button', { name: /^Jobs/ })).toHaveCount(0);
@@ -367,7 +385,7 @@ test.describe('with seeded jobs', () => {
     // What the server does after a real resume: refresh jobs.
     hub.jobs.items = items({ paused: false });
     await hub.state.refreshJobs();
-    await expect(focus.getByRole('button')).toHaveText(['Pause']);
+    await expect(focus.locator('[data-jobs-action]')).toHaveText('Pause');
     await expect(focus.locator('.card-header .badge')).toHaveCount(0);
     await expect(focus.locator('.card-error')).toHaveCount(0);
   });
@@ -394,7 +412,7 @@ test.describe('with seeded jobs', () => {
 
     hub.jobs.items = items({ paused: false });
     await hub.state.refreshJobs();
-    await expect(focus.getByRole('button')).toHaveText(['Pause']);
+    await expect(focus.locator('[data-jobs-action]')).toHaveText('Pause');
     await expect(focus.locator('.card-error')).toHaveCount(0);
   });
 
@@ -658,7 +676,7 @@ test('with no agents, Home says so, and Health refreshes once when opened', asyn
 test('the rail holds five links without scrolling, and /brief shows the Brief tab, /reading the Feed tab', async ({ page, hub }) => {
   await page.goto(`${hub.origin}/goals`);
   await expectView(page, 'goals', 'Goals');
-  await expect(page.locator('#view-goals h1')).toHaveText('Goals');
+  await expect(page.locator('#app-header-title')).toHaveText('Goals');
   const links = page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link');
   await expect(links).toHaveCount(5);
   for (const [i, name] of ['Home', 'Reading', 'Focus', 'Goals', 'Health'].entries()) {

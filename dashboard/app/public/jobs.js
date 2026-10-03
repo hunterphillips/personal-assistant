@@ -131,9 +131,14 @@
     var pauseBusy = false;
     var pauseError = ''; // why the last Pause or Resume failed, or ''
     var tick = null;
+    var selectedLabel = null; // one job row, remembered for this page
 
     function row(item) {
-      var li = element('li', 'routine-row');
+      var li = element('li', 'routine-row job-row');
+      li.tabIndex = 0;
+      li.setAttribute('role', 'button');
+      li.setAttribute('data-job-label', item.label);
+      if (item.label === selectedLabel) li.setAttribute('aria-current', 'true');
       li.appendChild(element('span', 'routine-name', item.name));
       var when = element('span', 'routine-when');
       when.appendChild(element('span', 'routine-schedule', item.schedule && item.schedule.text ? item.schedule.text : ''));
@@ -226,6 +231,7 @@
     function render() {
       if (!state || !visible) return;
       var jobs = state.jobs;
+      if (selectedLabel && !(jobs.items || []).some(function (item) { return item.label === selectedLabel; })) selectedLabel = null;
       var busy = refreshing || jobs.refreshing === true;
       refreshButton.textContent = busy ? 'Refreshing…' : 'Refresh';
       refreshButton.disabled = busy;
@@ -295,6 +301,22 @@
       var button = event.target.closest && event.target.closest('button[data-jobs-action]');
       if (button && !button.disabled) togglePause(button.getAttribute('data-jobs-action'));
     });
+    cards.addEventListener('click', function (event) {
+      var row = event.target.closest && event.target.closest('[data-job-label]');
+      if (!row) return;
+      selectedLabel = row.getAttribute('data-job-label');
+      rebuildCards();
+    });
+    cards.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      var row = event.target.closest && event.target.closest('[data-job-label]');
+      if (!row) return;
+      event.preventDefault();
+      selectedLabel = row.getAttribute('data-job-label');
+      rebuildCards();
+      var selected = cards.querySelector('[data-job-label][aria-current="true"]');
+      if (selected) selected.focus();
+    });
 
     return {
       update: function (next, keys) {
@@ -319,6 +341,11 @@
         visible = false;
         if (tick !== null) clearInterval(tick);
         tick = null;
+      },
+      selected: function () {
+        return state && state.jobs && Array.isArray(state.jobs.items)
+          ? state.jobs.items.find(function (item) { return item.label === selectedLabel; }) || null
+          : null;
       },
     };
   }

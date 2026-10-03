@@ -195,7 +195,8 @@
 
   function mountFocus() {
     if (frames.focus) frames.focus.remove();
-    frames.focus = createFrame($('focus-slot'), 'focus-frame', 'Focus', '/embedded/focus');
+    var theme = window.DashboardTheme ? window.DashboardTheme.resolved() : 'light';
+    frames.focus = createFrame($('focus-slot'), 'focus-frame', 'Focus', '/embedded/focus?theme=' + encodeURIComponent(theme));
   }
 
   function mountBrief(brief) {
@@ -210,6 +211,7 @@
     var brief = briefKnown() ? state.brief : null;
 
     $('shell-notice').hidden = !(failures >= 2 && !streaming);
+    renderRailIndicators();
 
     // Focus: mount once it answers; afterwards keep the frame and only report.
     if (fresh && current === 'focus' && !frames.focus && focusAvailable()) mountFocus();
@@ -225,6 +227,18 @@
     var showState = notReady || (failed(frames.brief) && !newer);
     $('brief-notice-text').textContent = !showState ? '' : notReady ? briefSentence(brief) : openFailed(mountedBrief.date);
     $('brief-notice').hidden = !showState;
+  }
+
+  function renderRailIndicators() {
+    var agentsNeedYou = !!(state && Array.isArray(state.agents) && state.agents.some(function (agent) {
+      return agent.state === 'waiting' || agent.needsYou === true || agent.unread === true ||
+        (Array.isArray(agent.forwarded) && agent.forwarded.length > 0);
+    }));
+    var failedJob = !!(state && state.jobs && Array.isArray(state.jobs.items) && state.jobs.items.some(function (job) {
+      return job.outcome === 'failed';
+    }));
+    $('agents-indicator').hidden = !agentsNeedYou;
+    $('health-indicator').hidden = !failedJob;
   }
 
   // Acts on Retry and "Load newer brief" with the state that just arrived.
@@ -402,6 +416,9 @@
       if (links[j].getAttribute('data-view') === view) links[j].setAttribute('aria-current', 'page');
       else links[j].removeAttribute('aria-current');
     }
+    $('app-header-title').textContent = TITLES[view];
+    var actions = document.querySelectorAll('[data-actions-for]');
+    for (var a = 0; a < actions.length; a += 1) actions[a].hidden = actions[a].getAttribute('data-actions-for') !== view;
     $('reading-brief').hidden = tab !== 'brief';
     $('reading-feed').hidden = tab !== 'feed';
     var tabs = document.querySelectorAll('.reading-tabs a');
@@ -466,6 +483,12 @@
 
   window.addEventListener('popstate', function () {
     show(viewFor(location.pathname));
+  });
+
+  window.addEventListener('dashboardthemechange', function () {
+    // Focus reads the query during its own load; rebuilding is simpler than
+    // maintaining a cross-frame message protocol for this rare choice.
+    if (frames.focus) mountFocus();
   });
 
   document.addEventListener('visibilitychange', function () {

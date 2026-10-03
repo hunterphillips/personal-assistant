@@ -125,7 +125,7 @@ test('/embedded/focus reaches upstream / with a child CSP; /focus is the shell a
   });
   const app = await appFor(t, upstream);
 
-  const embedded = await request(app, 'GET', '/embedded/focus');
+  const embedded = await request(app, 'GET', '/embedded/focus?theme=dark');
   assert.equal(embedded.status, 200);
   assert.match(embedded.headers['content-type'], /^text\/html/);
   assert.equal(embedded.text, page);
@@ -793,4 +793,3 @@ test('isolated Focus: an invalid PUT returns Focus\'s error and changes nothing'
   assert.equal(await focus.readRaw(), raw);
   assert.deepEqual(focus.commitSubjects(), subjects);
 });
-

@@ -793,6 +793,7 @@
     if (agent.state !== 'waiting' && isPersona(agent) && Array.isArray(agent.forwarded) && agent.forwarded.length > 0) return { text: 'Waiting for you', tone: 'wait' };
     // A routine's run left a card unanswered; the row says so until Hunter writes.
     if (agent.state === 'idle' && isPersona(agent) && agent.needsYou === true) return { text: 'Needs you', tone: 'wait' };
+    if (isPersona(agent) && agent.unread === true) return { text: 'New reply', tone: 'wait' };
     switch (agent.state) {
       case 'waiting': return { text: 'Waiting for you', tone: 'wait' };
       case 'busy': return { text: 'Working', tone: 'muted' };
@@ -934,6 +935,7 @@
     var routineRuns = { key: null, id: null, runs: null, loading: false, error: false }; // the open routine's last runs
     var routineRunsRendered = null;
     var routinesSectionKey = null; // what the sidebar section was last built from
+    var markingRead = null; // the persona whose bodyless read request is out
 
     // The listed agent with this id, or null.
     function agentById(id) {
@@ -964,6 +966,20 @@
         for (var i = 0; i < lists[l].length; i += 1) if (lists[l][i].id === selectedId) return lists[l][i];
       }
       return null;
+    }
+
+    function markRead(force) {
+      var agent = selectedAgent();
+      if (!visible || document.hidden || !isPersona(agent) || (!force && agent.unread !== true) || markingRead === agent.id) return;
+      markingRead = agent.id;
+      fetch('/api/agents/' + encodeURIComponent(agent.id) + '/read', {
+        method: 'POST', cache: 'no-store', credentials: 'same-origin',
+      }).then(function () {
+        markingRead = null;
+        if (!shell.isStreaming()) shell.requestState();
+      }, function () {
+        markingRead = null;
+      });
     }
 
     function chip(className, text) {
@@ -2128,6 +2144,7 @@
       setSelected(id);
       render();
       syncThread();
+      markRead(true);
       if (isPersona(selectedAgent()) && wide.matches) input.focus();
     }
 
@@ -2880,7 +2897,9 @@
     routinesNode.addEventListener('input', onRoutineFormEdit);
     routinesNode.addEventListener('change', onRoutineFormEdit);
 
-    view.addEventListener('click', function (event) {
+    // Header actions live outside #view-agents; one delegated listener keeps
+    // them on the same action path as the thread's own controls.
+    document.addEventListener('click', function (event) {
       var target = event.target;
       var link = target.closest && target.closest('a[data-agent]');
       if (link) {
@@ -3230,6 +3249,7 @@
           }
           render();
           syncThread();
+          markRead(false);
         }
       },
       show: function () {
@@ -3239,6 +3259,7 @@
         if (tick === null) tick = setInterval(function () { refreshTimes(view); }, TICK_MS);
         render();
         syncThread();
+        markRead(true);
       },
       hide: function () {
         visible = false;
