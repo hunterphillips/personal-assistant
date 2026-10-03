@@ -1976,12 +1976,13 @@ textarea.form-input {
 }
 .routine-form .form-when-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 .routine-form .form-when-row input[type="time"] {
   width: auto;
   min-width: 128px;
+  justify-self: start;
 }
 .routine-form .form-when-row input[hidden] { display: none; }
 .routine-form .form-days {
