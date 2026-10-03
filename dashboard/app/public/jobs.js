@@ -117,6 +117,26 @@
     return items.some(function (item) { return isFocusScan(item) && item.paused === true; });
   }
 
+  // A job's facts as lines for an agent to read: the label, the agent, the
+  // schedule, the last run, the outcome, and whatever else the snapshot
+  // carries for it.
+  function jobDetail(job, state) {
+    var agents = (state && state.agents) || [];
+    var agent = null;
+    for (var i = 0; i < agents.length; i += 1) if (agents[i].id === job.agentId) agent = agents[i];
+    var lines = ['Job: ' + job.label];
+    var agentName = agent ? agent.name : job.agentName || job.agentId;
+    if (agentName) lines.push('Agent: ' + agentName);
+    if (job.schedule && job.schedule.text) lines.push('Schedule: ' + job.schedule.text);
+    lines.push('Last run: ' + (job.lastRun || 'never'));
+    lines.push('Outcome: ' + (job.available === false ? 'unknown' : job.outcome || 'unknown') +
+      (typeof job.exitStatus === 'number' ? ' (exit ' + job.exitStatus + ')' : ''));
+    if (typeof job.failures24h === 'number' && job.failures24h > 0) lines.push('Failures in the last day: ' + job.failures24h);
+    if (job.paused === true) lines.push('Paused');
+    if (job.source) lines.push('Source: ' + job.source);
+    return lines.join('\n');
+  }
+
   function create(shell) {
     var updated = document.getElementById('jobs-updated');
     var refreshButton = document.getElementById('jobs-refresh');
@@ -318,6 +338,12 @@
       if (selected) selected.focus();
     });
 
+    function selectedJob() {
+      return state && state.jobs && Array.isArray(state.jobs.items)
+        ? state.jobs.items.find(function (item) { return item.label === selectedLabel; }) || null
+        : null;
+    }
+
     return {
       update: function (next, keys) {
         if (pauseError && state && focusPaused(state) !== focusPaused(next)) pauseError = '';
@@ -354,12 +380,17 @@
         }
       },
       selected: function () {
-        return state && state.jobs && Array.isArray(state.jobs.items)
-          ? state.jobs.items.find(function (item) { return item.label === selectedLabel; }) || null
-          : null;
+        return selectedJob();
+      },
+      // What quick chat sends along from Health: the selected job as the
+      // snapshot has it, or the view's name alone.
+      context: function () {
+        var job = selectedJob();
+        if (!job) return { view: 'health' };
+        return { view: 'health', label: job.name || job.label, detail: jobDetail(job, state) };
       },
     };
   }
 
-  window.DashboardJobs = { create: create, formatTime: formatTime };
+  window.DashboardJobs = { create: create, formatTime: formatTime, jobDetail: jobDetail };
 }());

@@ -329,6 +329,29 @@
       })
       : null;
 
+    // The item the reader is at: the first whose top edge is within the
+    // scroll container's visible box (a pixel of slack, since a scrolled
+    // edge lands on fractions).
+    function itemInView() {
+      var scroller = document.getElementById('reading-feed');
+      if (!scroller || !data) return null;
+      var box = scroller.getBoundingClientRect();
+      var nodes = runs.querySelectorAll('.feed-item[data-feed-item]');
+      for (var i = 0; i < nodes.length; i += 1) {
+        var top = nodes[i].getBoundingClientRect().top;
+        if (top >= box.top - 1 && top < box.bottom) return itemById(nodes[i].getAttribute('data-feed-item'));
+      }
+      return null;
+    }
+
+    function itemById(id) {
+      var found = null;
+      objectsIn(data.runs).forEach(function (run) {
+        objectsIn(run.items).forEach(function (item) { if (!found && item.id === id) found = item; });
+      });
+      return found;
+    }
+
     runs.addEventListener('click', function (event) {
       var button = event.target.closest && event.target.closest('button[data-feed-action="discuss"]');
       if (!button) return;
@@ -349,6 +372,17 @@
       reveal: function (run, index) {
         target = { run: run, index: index };
         revealTarget(false);
+      },
+      // What quick chat sends along from the Feed: the topmost item whose
+      // top edge is inside the scrolling list, or the view's name alone.
+      context: function () {
+        var item = visible ? itemInView() : null;
+        if (!item) return { view: 'feed' };
+        var lines = [];
+        if (item.source) lines.push('Source: ' + item.source);
+        if (item.url) lines.push('URL: ' + item.url);
+        if (item.summary) lines.push('Summary: ' + item.summary);
+        return { view: 'feed', label: item.title, detail: lines.join('\n') };
       },
       hide: function () {
         visible = false;

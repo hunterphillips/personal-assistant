@@ -37,7 +37,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/brief/feedback` | Saves feedback for one brief. |
 | `GET /api/brief/instructions` | The brief's rules file, read as prose (below). |
 | `POST /api/brief/instructions/propose` | Sends a change to the rules to the agent Settings names as receiving the brief; 202 `{"ok": true, "agentId": "<id>"}` once the turn has started (below). |
-| `POST /api/agents/<id>/send` | Sends `{"text": "...", "mentions": [...]}` to a persona (`mentions`, the agent ids the text names with @, is optional); 202 once the turn has started (below). |
+| `POST /api/agents/<id>/send` | Sends `{"text": "...", "mentions": [...], "context": {...}}` to a persona (`mentions`, the agent ids the text names with @, and `context`, what quick chat sends along, are optional); 202 once the turn has started (below). |
 | `POST /api/agents/<id>/answer` | Answers the persona's open question or approval, or a request forwarded to this thread (raised by another agent while answering a delegation that started here; the owner's adapter settles it). |
 | `POST /api/agents/<id>/interrupt` | Stops the persona's turn. |
 | `POST /api/agents/<id>/new-thread` | Starts the persona on a new session. |
@@ -444,7 +444,8 @@ here. The snapshot's `jobs` key, `public/jobs.js`, and
 ### Shell
 
 `public/index.html`, `public/shell.js`, `public/agents.js`,
-`public/markdown.js`, `public/jobs.js`, `public/goals.js`,
+`public/thread-view.js` (one thread's column, mounted by the Agents view
+and quick chat), `public/quick-chat.js`, `public/markdown.js`, `public/jobs.js`, `public/goals.js`,
 `public/feed.js`, `public/instructions.js` (the instructions panel the
 Feed and Brief tabs share), `public/notifications.js` (the header's count
 and list), and `public/styles.css` make up the
@@ -795,6 +796,28 @@ agent's prompt names them. A mention is a reference, not a delivery: the
 agent decides whether to message the agent named. On a phone the list
 sits over the input the same way, so what is typed stays in view.
 
+### Quick chat
+
+Quick chat in the header (in the menu on a phone) opens a pane on the
+right of any view: over the view on a desk, across the width on a phone.
+At its top a picker lists every Claude agent; it starts on the agent
+Settings names under "Quick chat talks to", and a choice made in it holds
+for the browser session. Below the picker is the same thread column the
+Agents view renders, bound to the same thread, so a message sent from
+either shows in both. A draft typed in the pane is in the Agents view's
+composer when that agent opens there. Escape or Close closes the pane.
+Showing an agent's thread in the pane marks its reply read.
+
+The first message after the pane opens, or after the view under it
+changes, carries `context`: Health's selected job (name, label, agent,
+schedule, last run, outcome), the Feed item whose top edge is highest in
+the list, the Agents view's open agent and its state, or the view's name
+alone on the Brief tab, Focus, and Goals. The adapter records it as a
+system line (`kind: 'context'`) before the message, shown as a collapsed
+"Sent from Health: <job>" that opens to the detail, and the agent's prompt
+starts "Hunter sent this from the Health view, looking at: <job>" with the
+detail under it. The message itself is recorded as typed.
+
 ### Health view
 
 The Health view, at `/health` and the last entry on the rail, opens with
@@ -949,7 +972,7 @@ exact `Origin`, JSON for `send` and `answer`, no body for `interrupt` and
 
 | Route | Success | Refusals |
 | --- | --- | --- |
-| `POST send` `{"text": "...", "mentions"?: ["cfo"]}` | 202 `{"ok": true}` | 400 `invalid_body` (JSON that is not an object), 400 `invalid_text` (missing or blank), 400 `invalid_mentions` (not an array of at most 20 agent ids; ids the registry does not list are dropped, not refused), 413 `payload_too_large` over 16 KiB of text or 32 KiB of body, 409 `busy`, 503 `shutting_down` |
+| `POST send` `{"text": "...", "mentions"?: ["cfo"]}` | 202 `{"ok": true}` | 400 `invalid_body` (JSON that is not an object), 400 `invalid_text` (missing or blank), 400 `invalid_mentions` (not an array of at most 20 agent ids; ids the registry does not list are dropped, not refused), 400 `invalid_context` (not `{ view, label?, detail? }` with `view` one of agents, feed, brief, focus, goals, health, `label` at most 200 characters, `detail` at most 2000), 413 `payload_too_large` over 16 KiB of text or 32 KiB of body, 409 `busy`, 503 `shutting_down` |
 | `POST answer` `{"requestId", "answers"}` or `{"requestId", "decision"}` | 200 `{"ok": true}` | 400 `invalid_answer`, 413 `payload_too_large` over 32 KiB, 409 `no_such_request` |
 | `POST interrupt` | 200 `{"ok": true}` | |
 | `POST new-thread` | 200 `{"ok": true}` | 409 `busy`, 503 `shutting_down`, 500 `thread_reset_failed` |

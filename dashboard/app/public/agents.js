@@ -44,18 +44,11 @@
 // whose routine last ended waiting shows "Needs you" on its row until
 // Hunter writes in its thread.
 //
-// The thread is fetched from /api/agents/<id>/thread when a persona opens
-// and again whenever the snapshot shows its last message, its turn, or
-// the time of its last line outside a turn (`lastLineAt`, a delegation
-// line landing after a pending reply) changed, so the pane follows the
-// turn without rebuilding it from deltas.
-// A question or approval is rendered from the snapshot's `pending`; the
-// card is rebuilt only when the request changes, so choices survive other
-// state changes. Send, Answer, Allow, Deny, Interrupt, and New thread post
-// to the persona routes; a refusal is reported under the composer until the
-// next attempt. The composer's draft and the refusal belong to the agent
-// they were typed for: a draft is kept while another thread is open and put
-// back when its agent is chosen again.
+// The thread column itself (messages, the question or approval card, the
+// status line, the composer, drafts, and marking a reply read) is a thread
+// view (thread-view.js) mounted in #agent-thread-main; quick chat mounts a
+// second one. This file keeps the pure helpers both use, including the
+// message renderer, and passes them on as DashboardAgents.shared.
 //
 // The snapshot's coding sessions (Codex threads and Claude terminals in
 // cmux) are rows too, each under the project row the hub named in its

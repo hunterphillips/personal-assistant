@@ -70,12 +70,12 @@
         </div>
         <div class="header-right">
           <a class="header-entry header-brief" href="/brief">Brief</a>
-          <button type="button" class="header-entry" id="quick-chat-toggle" hidden>Quick chat</button>
+          <button type="button" class="header-entry" id="quick-chat-toggle">Quick chat</button>
           <button type="button" class="header-entry" id="notifications-toggle">Notifications<span class="header-count" id="notifications-count" aria-hidden="true" hidden></span></button>
           <button type="button" class="header-menu-toggle" id="app-menu-toggle" aria-expanded="false" aria-controls="app-menu">Menu<span class="header-count menu-count" id="app-menu-count" aria-hidden="true" hidden></span></button>
           <div class="app-menu" id="app-menu" hidden>
             <a class="menu-entry menu-mobile-only" href="/brief">Brief</a>
-            <button type="button" class="menu-entry menu-mobile-only" hidden>Quick chat</button>
+            <button type="button" class="menu-entry menu-mobile-only" id="quick-chat-menu-entry">Quick chat</button>
             <button type="button" class="menu-entry menu-mobile-only" id="notifications-menu-entry">Notifications<span class="header-count" id="notifications-menu-count" aria-hidden="true" hidden></span></button>
             <fieldset class="theme-options">
               <legend>Theme</legend>
@@ -98,6 +98,16 @@
           <ol class="notifications-list notifications-done" id="notifications-acknowledged" aria-labelledby="notifications-divider" hidden></ol>
         </div>
       </header>
+      <aside class="quick-chat" id="quick-chat" aria-label="Quick chat" hidden>
+        <div class="quick-chat-head">
+          <select class="settings-select quick-chat-agent" id="quick-chat-agent" aria-label="Agent"></select>
+          <button type="button" class="button icon-button" id="quick-chat-close" aria-label="Close quick chat" title="Close quick chat">
+            <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+        <p class="quick-chat-empty" id="quick-chat-empty" hidden></p>
+        <div class="thread-main quick-chat-thread" id="quick-chat-thread"></div>
+      </aside>
       <div class="notice" id="shell-notice" role="status" hidden>
         <span>The dashboard is not responding.</span>
         <button type="button" data-action="retry">Retry</button>
@@ -315,6 +325,7 @@
   <script src="/assets/instructions.js"></script>
   <script src="/assets/feed.js"></script>
   <script src="/assets/notifications.js"></script>
+  <script src="/assets/quick-chat.js"></script>
   <script src="/assets/shell.js"></script>
   <script src="/assets/agents-sidebar.js"></script>
 </body>

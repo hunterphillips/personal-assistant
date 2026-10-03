@@ -159,6 +159,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 
 .content {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -283,6 +284,57 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   line-height: 1;
 }
 .menu-count { display: none; }
+
+/* Quick chat: a pane under the header on the right, over the current
+   view, holding one thread column (thread-view.js). */
+.quick-chat {
+  position: absolute;
+  top: 64px;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  border-left: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: -8px 0 24px var(--shadow-sheet);
+}
+.quick-chat-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.quick-chat-agent {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.quick-chat-empty {
+  margin: 0;
+  padding: 20px 16px;
+  color: var(--muted);
+}
+/* The picker names the agent, so the thread's own heading steps aside;
+   the chips, cost, and New thread stay. */
+.quick-chat .thread-name { display: none; }
+.quick-chat .thread-header,
+.quick-chat .thread-confirm,
+.quick-chat .thread-notice,
+.quick-chat .thread-description,
+.quick-chat .thread-messages,
+.quick-chat .thread-status,
+.quick-chat .thread-request,
+.quick-chat .composer,
+.quick-chat .thread-foot,
+.quick-chat .thread-failure {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.quick-chat .thread-header { padding-top: 10px; padding-bottom: 10px; }
 
 /* The list under the header, over the current view. */
 .notifications-panel {
@@ -2176,6 +2228,13 @@ textarea.form-input {
     border-radius: 0;
   }
   .header-action-reason { display: none; }
+  .quick-chat {
+    top: 56px;
+    left: 0;
+    width: auto;
+    border-left: 0;
+    box-shadow: none;
+  }
 
   .nav-label {
     position: static;
@@ -2223,6 +2282,8 @@ textarea.form-input {
 
   /* The name and chips take a line; the buttons sit under them. */
   .thread-title { flex-basis: 100%; }
+  /* The pane has no name in its header, so chips and New thread share a line. */
+  .quick-chat .thread-title { flex-basis: auto; }
 
   /* The settings cover the whole thread, its way back included. */
   .thread-details {
@@ -2472,4 +2533,11 @@ textarea.form-input {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
+}
+
+/* What quick chat sent along: the detail keeps its lines. */
+.thread-context-detail {
+  margin: 0;
+  font-family: var(--sans);
+  white-space: pre-wrap;
 }

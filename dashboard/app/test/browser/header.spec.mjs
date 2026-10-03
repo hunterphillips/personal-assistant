@@ -86,7 +86,7 @@ test.describe('header entries', () => {
     if (onPhone) {
       await expect(headerBrief).toBeHidden();
       await page.getByRole('button', { name: 'Menu', exact: true }).click();
-      await expect(menu.locator('.menu-entry:visible')).toHaveText(['Brief', 'Notifications', 'Settings']);
+      await expect(menu.locator('.menu-entry:visible')).toHaveText(['Brief', 'Quick chat', 'Notifications', 'Settings']);
       await expect(menu.getByRole('group', { name: 'Theme' })).toBeVisible();
       await menu.getByRole('link', { name: 'Brief', exact: true }).click();
       await expect(menu).toBeHidden();

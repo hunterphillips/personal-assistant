@@ -18,4 +18,5 @@ export const ASSETS = Object.freeze({
   'theme-boot.js': { file: 'theme-boot.js', type: 'text/javascript; charset=utf-8' },
   'theme.js': { file: 'theme.js', type: 'text/javascript; charset=utf-8' },
   'thread-view.js': { file: 'thread-view.js', type: 'text/javascript; charset=utf-8' },
+  'quick-chat.js': { file: 'quick-chat.js', type: 'text/javascript; charset=utf-8' },
 });

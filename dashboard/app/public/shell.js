@@ -3,8 +3,9 @@
 // (goals.js), and Health (jobs.js, the launchd jobs) with the History
 // API, creates each child frame the first time its view is shown and keeps
 // it afterwards, and keeps one copy of the server's state, which it hands
-// to the Health, Agents, and Goals views and the header's notifications
-// (notifications.js), whose links open views through shellApi. Agents is the page at `/`;
+// to the Health, Agents, and Goals views, the header's notifications
+// (notifications.js), whose links open views through shellApi, and quick
+// chat (quick-chat.js), which asks shellApi.context() what the view shows. Agents is the page at `/`;
 // `/agents` shows it too, `/reading` and `/feed` show Reading on the Feed
 // tab, `/brief` shows it on the Brief tab, `/health` shows Health (the server
 // redirects the old `/routines` there), and any unknown path lands on
@@ -86,6 +87,8 @@
     openBrief: function () {
       go('/brief');
     },
+    // What Hunter is looking at, for quick chat's context line.
+    context: function () { return viewContext(); },
   };
   var jobs = window.DashboardJobs ? window.DashboardJobs.create(shellApi) : null;
   var settings = window.DashboardSettings ? window.DashboardSettings.create(shellApi) : null;
@@ -93,6 +96,8 @@
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
   var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
   var notifications = window.DashboardNotifications ? window.DashboardNotifications.create(shellApi) : null;
+  // The pane over every view (quick-chat.js), with its own thread view.
+  var quickChat = window.DashboardQuickChat ? window.DashboardQuickChat.create(shellApi) : null;
   // The Brief instructions panel (instructions.js): the brief's rules and a
   // change sent to the agent Settings names as receiving the brief.
   var briefInstructions = window.DashboardInstructions
@@ -106,6 +111,19 @@
     : null;
 
   function $(id) { return document.getElementById(id); }
+
+  // The view under quick chat and the object in it, as the send route's
+  // `context`: Health's selected job, the feed item in view, the open
+  // agent; the Brief tab, Focus, and Goals give the view's name alone.
+  function viewContext() {
+    if (current === 'health') return jobs ? jobs.context() : { view: 'health' };
+    if (current === 'agents') return agents ? agents.context() : { view: 'agents' };
+    if (current === 'reading') {
+      if (onFeed()) return feed ? feed.context() : { view: 'feed' };
+      return { view: 'brief' };
+    }
+    return current ? { view: current } : null;
+  }
 
   // Shows the view at `pathname`, adding a history entry when it changes.
   function go(pathname) {
@@ -289,6 +307,7 @@
     if (agents) agents.update(state, keys);
     if (goals) goals.update(state, keys);
     if (notifications) notifications.update(state, keys);
+    if (quickChat) quickChat.update(state, keys);
   }
 
   function isSnapshot(body) {
@@ -429,6 +448,7 @@
   }
 
   function show(view) {
+    var changed = view !== current || (view === 'reading' && tabFor(location.pathname) !== tab);
     current = view;
     tab = tabFor(location.pathname);
     var views = document.querySelectorAll('section.view');
@@ -475,6 +495,7 @@
       if (onBrief()) briefInstructions.show();
       else briefInstructions.hide();
     }
+    if (quickChat && changed) quickChat.viewChanged();
     render(false);
     fetchState();
   }
@@ -522,6 +543,7 @@
       if (goals) goals.hide();
       if (feed) feed.hide();
       if (briefInstructions) briefInstructions.hide();
+      if (quickChat) quickChat.visibility(true);
     } else {
       connect();
       if (jobs && current === 'health') jobs.show();
@@ -530,6 +552,7 @@
       if (goals && current === 'goals') goals.show();
       if (feed && onFeed()) feed.show();
       if (briefInstructions && onBrief()) briefInstructions.show();
+      if (quickChat) quickChat.visibility(false);
     }
   });
 
