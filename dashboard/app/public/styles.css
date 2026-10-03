@@ -518,8 +518,8 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 .reading-tabs a:hover { color: var(--ink); }
 
-/* The Feed instructions button sits at the right end of the tab row. */
-.feed-instructions-toggle {
+/* An instructions button sits at the right end of the tab row. */
+.instructions-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -534,11 +534,11 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   font-weight: 600;
   cursor: pointer;
 }
-.feed-instructions-toggle:hover,
-.feed-instructions-toggle:focus-visible,
-.feed-instructions-toggle[aria-expanded="true"] { color: var(--ink); }
-.feed-instructions-toggle svg { flex: none; }
-.feed-instructions-toggle circle { fill: var(--paper); }
+.instructions-toggle:hover,
+.instructions-toggle:focus-visible,
+.instructions-toggle[aria-expanded="true"] { color: var(--ink); }
+.instructions-toggle svg { flex: none; }
+.instructions-toggle circle { fill: var(--paper); }
 .reading-tabs a[aria-current="page"] {
   border-bottom-color: var(--green);
   color: var(--ink);
@@ -565,21 +565,31 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   margin-right: auto;
 }
 
-.feed-instructions {
+/* The brief's rules open above the brief, as wide as the feed's column. */
+.reading-brief > .instructions {
+  flex: none;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 748px;
+  margin: 24px auto 0;
+  padding: 0 34px 24px;
+}
+
+.instructions {
   margin-bottom: 32px;
   padding-bottom: 24px;
   border-bottom: 1px solid var(--line);
 }
 
-.feed-instructions-heading {
+.instructions-heading {
   margin: 0;
   font-family: var(--serif);
   font-size: 20px;
   font-weight: 400;
 }
 
-.feed-instructions-intro,
-.feed-instructions-problem {
+.instructions-intro,
+.instructions-problem {
   margin: 6px 0 0;
   color: var(--muted);
   overflow-wrap: anywhere;
@@ -589,7 +599,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 
 /* The criteria's sources table scrolls on its own rather than widening the
    page. */
-.feed-instructions-table {
+.instructions-table {
   display: block;
   max-width: 100%;
   margin: 6px 0 0;
@@ -597,26 +607,26 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   border-collapse: collapse;
   font-size: 14px;
 }
-.feed-instructions-table th,
-.feed-instructions-table td {
+.instructions-table th,
+.instructions-table td {
   padding: 4px 12px 4px 0;
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
 }
 
-.composer.feed-instructions-composer {
+.composer.instructions-composer {
   margin: 16px 0 0;
   padding: 0;
   border-top: 0;
 }
 
-.feed-instructions-composer .composer-input {
+.instructions-composer .composer-input {
   display: block;
   width: 100%;
 }
 
-.feed-instructions-actions { margin-top: 8px; }
+.instructions-actions { margin-top: 8px; }
 
 .feed-run + .feed-run { margin-top: 32px; }
 
@@ -1833,9 +1843,10 @@ textarea.form-input {
   #view-health { padding: 20px 16px; }
 
   .reading-tabs { padding: 0 8px; }
-  .feed-instructions-toggle { min-width: 44px; justify-content: center; }
-  .feed-instructions-label { display: none; }
+  .instructions-toggle { min-width: 44px; justify-content: center; }
+  .instructions-label { display: none; }
   .reading-feed { padding: 16px 16px 24px; }
+  .reading-brief > .instructions { margin-top: 16px; padding: 0 16px 16px; }
   .feed-item { grid-template-columns: 24px minmax(0, 1fr); }
   .feed-badge { width: 24px; height: 24px; }
 

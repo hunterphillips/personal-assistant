@@ -40,6 +40,8 @@
   var BYE_DELAY_MS = 500;
   var BRIEF_EMPTY = 'No brief has been generated yet.';
   var BRIEF_UNREADABLE = 'The latest brief file could not be read.';
+  var BRIEF_RULES = 'The brief follows these rules.';
+  var NO_ANSWER = 'The dashboard did not respond.';
   var FAILED = 'data-failed';
 
   var current = null;
@@ -76,6 +78,17 @@
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
   var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
+  // The Brief instructions panel (instructions.js): the brief's rules and a
+  // change sent to the agent Settings names as receiving the brief.
+  var briefInstructions = window.DashboardInstructions
+    ? window.DashboardInstructions.create({
+      prefix: 'brief',
+      readPath: '/api/brief/instructions',
+      proposePath: '/api/brief/instructions/propose',
+      refusalSentence: briefRefusalSentence,
+      openAgent: function (id) { if (id) shellApi.openAgent(id); },
+    })
+    : null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -89,6 +102,35 @@
 
   function onFeed() {
     return current === 'reading' && tab === 'feed';
+  }
+
+  function onBrief() {
+    return current === 'reading' && tab === 'brief';
+  }
+
+  // The agent Settings names as receiving the brief, as listed, or null.
+  function briefAgent() {
+    var id = state && state.settings && state.settings.brief ? state.settings.brief.agent : null;
+    if (typeof id !== 'string' || !state || !Array.isArray(state.agents)) return null;
+    for (var i = 0; i < state.agents.length; i += 1) if (state.agents[i].id === id) return state.agents[i];
+    return null;
+  }
+
+  function briefIntroSentence() {
+    var agent = briefAgent();
+    if (!agent) return BRIEF_RULES + ' No agent receives the brief, so a change has nowhere to go. Choose one in Settings.';
+    return BRIEF_RULES + ' A change goes to ' + agent.name + ', which edits the file.';
+  }
+
+  function briefRefusalSentence(status, code) {
+    var agent = briefAgent();
+    var name = agent ? agent.name : 'That agent';
+    if (status === 409 && code === 'no_brief_agent') return 'No agent receives the brief. Choose one in Settings.';
+    if (status === 409 && code === 'busy') return name + ' is in the middle of a turn. Try again when it is idle.';
+    if (status === 503 || (status === 409 && code === 'persona_unavailable') ||
+        (status === 404 && code === 'no_such_agent')) return name + ' is not running.';
+    if (status === 413) return 'That is too long for one message.';
+    return NO_ANSWER;
   }
 
   function briefUrl(brief) {
@@ -175,6 +217,7 @@
 
     // Daily Brief, mounted only while its tab is the one shown.
     if (fresh && current === 'reading' && tab === 'brief' && !frames.brief && isReady(brief)) mountBrief(brief);
+    if (briefInstructions) briefInstructions.setIntro(briefIntroSentence());
     var newer = !!frames.brief && isReady(brief) &&
       (brief.date !== mountedBrief.date || brief.revision !== mountedBrief.revision);
     $('brief-newer').hidden = !newer;
@@ -389,6 +432,10 @@
       if (onFeed()) feed.show();
       else feed.hide();
     }
+    if (briefInstructions) {
+      if (onBrief()) briefInstructions.show();
+      else briefInstructions.hide();
+    }
     render(false);
     fetchState();
   }
@@ -429,6 +476,7 @@
       if (agents) agents.hide();
       if (goals) goals.hide();
       if (feed) feed.hide();
+      if (briefInstructions) briefInstructions.hide();
     } else {
       connect();
       if (jobs && current === 'health') jobs.show();
@@ -436,6 +484,7 @@
       if (agents && current === 'agents') agents.show();
       if (goals && current === 'goals') goals.show();
       if (feed && onFeed()) feed.show();
+      if (briefInstructions && onBrief()) briefInstructions.show();
     }
   });
 

@@ -8,6 +8,7 @@ export const ASSETS = Object.freeze({
   'brief-bridge.js': { file: 'brief-bridge.js', type: 'text/javascript; charset=utf-8' },
   'feed.js': { file: 'feed.js', type: 'text/javascript; charset=utf-8' },
   'goals.js': { file: 'goals.js', type: 'text/javascript; charset=utf-8' },
+  'instructions.js': { file: 'instructions.js', type: 'text/javascript; charset=utf-8' },
   'markdown.js': { file: 'markdown.js', type: 'text/javascript; charset=utf-8' },
   'jobs.js': { file: 'jobs.js', type: 'text/javascript; charset=utf-8' },
   'settings.js': { file: 'settings.js', type: 'text/javascript; charset=utf-8' },

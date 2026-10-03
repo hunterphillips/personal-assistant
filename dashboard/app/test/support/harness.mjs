@@ -9,6 +9,7 @@ import path from 'node:path';
 import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { createFeed } from '../../lib/feed.mjs';
+import { createBriefInstructions } from '../../lib/brief-instructions.mjs';
 import { createFeedInstructions } from '../../lib/feed-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
@@ -233,8 +234,11 @@ export function fakeCmux(inventory = null) {
 // `feed` defaults to createFeed over the feed directory, which is a missing
 // path in a temporary directory unless `env` names DASHBOARD_FEED_DIR, so no
 // test reads the real store; pass null for an app without the Feed routes.
-// The feed instructions reader reads DASHBOARD_FEED_INSTRUCTIONS, which is
-// likewise a missing path in a temporary directory unless `env` names it.
+// The feed instructions reader reads DASHBOARD_FEED_INSTRUCTIONS, and the
+// brief instructions reader DASHBOARD_BRIEF_INSTRUCTIONS, each likewise a
+// missing path in a temporary directory unless `env` names it; pass
+// `briefInstructions: null` for an app without the brief instructions
+// routes.
 // `delegation(hub)` is optional: a factory for the delegation service
 // (delegation.mjs), called once the hub exists; its result is handed to
 // every adapter that has setDelegation() and returned as `delegation`.
@@ -244,13 +248,14 @@ export function fakeCmux(inventory = null) {
 // adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), jobs, routines = null, scheduler = null, hub, adapters, store, bindings,
-  cmux = null, goals, feed, notices = null, settings = fakeSettings(), configure = (c) => c, delegation = null,
+  cmux = null, goals, feed, briefInstructions, notices = null, settings = fakeSettings(), configure = (c) => c, delegation = null,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
   const briefsDir = env.DASHBOARD_BRIEFS_DIR ?? path.join(await tempDir(t), 'briefs-missing');
   const feedDir = env.DASHBOARD_FEED_DIR ?? path.join(await tempDir(t), 'feed-missing');
   const feedInstructions = env.DASHBOARD_FEED_INSTRUCTIONS ?? path.join(await tempDir(t), 'relevance-missing.md');
+  const briefInstructionsFile = env.DASHBOARD_BRIEF_INSTRUCTIONS ?? path.join(await tempDir(t), 'curator-missing.md');
   const focusOrigin = env.DASHBOARD_FOCUS_ORIGIN ?? `http://127.0.0.1:${await freePort()}`;
   const config = configure(loadConfig({
     ...env,
@@ -258,6 +263,7 @@ export async function startApp(t, {
     DASHBOARD_BRIEFS_DIR: briefsDir,
     DASHBOARD_FEED_DIR: feedDir,
     DASHBOARD_FEED_INSTRUCTIONS: feedInstructions,
+    DASHBOARD_BRIEF_INSTRUCTIONS: briefInstructionsFile,
     DASHBOARD_FOCUS_ORIGIN: focusOrigin,
   }));
   const logs = [];
@@ -278,9 +284,13 @@ export async function startApp(t, {
   const goalsReader = goals === undefined ? createGoals({ registry, limits: config.limits, log }) : goals;
   const feedReader = feed === undefined ? createFeed({ dir: config.feedDir, limits: config.limits, log }) : feed;
   const instructionsReader = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log });
+  const briefInstructionsReader = briefInstructions === undefined
+    ? createBriefInstructions({ file: config.briefInstructionsPath, limits: config.limits, log })
+    : briefInstructions;
   const handler = createApp({
     config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader,
-    feedInstructions: instructionsReader, notices, settings, registry, routines, scheduler: schedulerService, log,
+    feedInstructions: instructionsReader, briefInstructions: briefInstructionsReader, notices, settings, registry, routines,
+    scheduler: schedulerService, log,
   });
   server.on('request', handler);
   t.after(() => {

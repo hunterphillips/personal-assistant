@@ -35,6 +35,8 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/brief/latest` | Latest brief metadata. |
 | `GET /embedded/brief/<date>?revision=<revision>` | One brief viewer. |
 | `POST /api/brief/feedback` | Saves feedback for one brief. |
+| `GET /api/brief/instructions` | The brief's rules file, read as prose (below). |
+| `POST /api/brief/instructions/propose` | Sends a change to the rules to the agent Settings names as receiving the brief; 202 `{"ok": true, "agentId": "<id>"}` once the turn has started (below). |
 | `POST /api/agents/<id>/send` | Sends `{"text": "...", "mentions": [...]}` to a persona (`mentions`, the agent ids the text names with @, is optional); 202 once the turn has started (below). |
 | `POST /api/agents/<id>/answer` | Answers the persona's open question or approval, or a request forwarded to this thread (raised by another agent while answering a delegation that started here; the owner's adapter settles it). |
 | `POST /api/agents/<id>/interrupt` | Stops the persona's turn. |
@@ -75,6 +77,7 @@ what `lib/app.mjs` expects from it.
 - `lib/goals-routes.mjs` serves the Goals routes over `lib/goals.mjs`, which reads the vault.
 - `lib/routine-routes.mjs` serves the routine routes over `lib/routines.mjs`, the routine files and their runs logs, and `lib/schedule.mjs`, the cron subset and its occurrences in Chicago time; `lib/scheduler.mjs` runs them.
 - `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store, and `lib/feed-instructions.mjs`, which reads the criteria file.
+- `lib/brief-instructions.mjs` reads the brief's rules file and serves the two routes under `/api/brief/instructions`; `lib/instructions.mjs` is the prose reader both instructions files share, and `lib/instructions-routes.mjs` their two routes.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
 - `lib/focus-proxy.mjs` forwards the Focus routes.
@@ -260,6 +263,27 @@ matches the file is 409. On success the server writes
 `feedback-<date>.md` beside the viewer, replacing any earlier one for that
 date, with one write per date at a time.
 
+`GET /api/brief/instructions` reads the rules the curator follows,
+`daily-brief/curator.md` (`DASHBOARD_BRIEF_INSTRUCTIONS`), and answers the
+same shape as `GET /api/feed/instructions` below, with `path`
+`daily-brief/curator.md` and the problem sentences naming the brief
+instructions file.
+
+`POST /api/brief/instructions/propose` takes `{"text": "..."}` and sends the
+agent Settings names under "Brief goes to" one message asking it to change
+the rules and say what changed; the shell then opens its thread. It refuses
+with 400 `invalid_body`, 400 `invalid_text` (blank), 413
+`payload_too_large` (over the send limit), 503 `shutting_down`, 409
+`no_brief_agent` (Settings names no agent), 404 `no_such_agent` (the named
+id is not a persona in the registry), 409 `persona_unavailable`, then the
+persona send refusals (409 `busy` and the rest). The dashboard never writes
+the file; the agent does.
+
+On the Brief tab, the Brief instructions button at the end of the tab row
+opens these rules above the brief with a box for the change; the sentence
+under the heading names the agent the change goes to, or says that none
+receives the brief.
+
 ### Goals
 
 `GET /api/goals` reads three sources under the second-brain persona's cwd:
@@ -387,8 +411,9 @@ here. The snapshot's `jobs` key, `public/jobs.js`, and
 ### Shell
 
 `public/index.html`, `public/shell.js`, `public/agents.js`,
-`public/markdown.js`, `public/jobs.js`, `public/goals.js`, and
-`public/styles.css` make up the
+`public/markdown.js`, `public/jobs.js`, `public/goals.js`,
+`public/feed.js`, `public/instructions.js` (the instructions panel the
+Feed and Brief tabs share), and `public/styles.css` make up the
 page served at `/`, `/agents`, `/reading`, `/brief`, `/focus`, `/goals`,
 and `/health`. The Agents view is the page at `/`; `/agents` shows the same
 view. `/reading` and `/brief` show the Reading view, `/focus` Focus,
@@ -1656,6 +1681,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_BRIEFS_DIR` | `../../daily-brief/briefs` | Resolved from this directory, not the working directory. |
 | `DASHBOARD_FEED_DIR` | `../../feed/items` | The feed store the producers write. Resolved from this directory; does not need to exist at startup. |
 | `DASHBOARD_FEED_INSTRUCTIONS` | `../../daily-brief/watch/relevance.md` | The criteria file the watch job reads, shown on the Feed tab. Resolved from this directory; does not need to exist at startup. |
+| `DASHBOARD_BRIEF_INSTRUCTIONS` | `../../daily-brief/curator.md` | The rules the brief's curator follows, shown on the Brief tab. Resolved from this directory; does not need to exist at startup. |
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
 | `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |

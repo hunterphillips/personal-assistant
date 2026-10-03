@@ -8,15 +8,17 @@
 // routes are agent-routes.mjs, the Goals routes goals-routes.mjs over the
 // injected `goals` (goals.mjs), the Feed routes feed-routes.mjs over the
 // injected `feed` (feed.mjs) and `feedInstructions` (feed-instructions.mjs),
-// the routine routes routine-routes.mjs over the injected `routines` store
+// the brief instructions routes brief-instructions.mjs over the injected
+// `briefInstructions` (the same module's reader), the routine routes routine-routes.mjs over the injected `routines` store
 // (routines.mjs) and `scheduler` (scheduler.mjs), and the event stream is
 // events.mjs; this module builds them and dispatches to them. Without
 // `goals`, /api/goals and /api/goals/propose answer 404 not_found; without
-// `feed` or `feedInstructions`, /api/feed and the routes under it do, and
+// `feed` or `feedInstructions`, /api/feed and the routes under it do,
+// without `briefInstructions` the two under /api/brief/instructions do, and
 // without `routines` so does everything under /api/routines.
 //
-// createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, registry,
-//             routines, scheduler, log })
+// createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, briefInstructions, notices,
+//             settings, registry, routines, scheduler, log })
 // returns a (req, res) handler and opens nothing; server.mjs owns listening.
 // `notices` (notices.mjs, optional) is handed to the event stream, which
 // reconciles the brief notice on each connect and runs its timer while a
@@ -30,6 +32,7 @@ import path from 'node:path';
 
 import { createAgentRoutes } from './agent-routes.mjs';
 import { ASSETS } from './assets.mjs';
+import { createBriefInstructionsRoutes } from './brief-instructions.mjs';
 import { createEvents } from './events.mjs';
 import { createFeedRoutes } from './feed-routes.mjs';
 import { createGoalsRoutes } from './goals-routes.mjs';
@@ -88,6 +91,8 @@ const EXACT_ROUTES = new Map([
   ['/api/refresh', { name: 'focus-control', methods: ['POST'], bodyless: true }],
   ['/api/brief/latest', { name: 'brief-latest', methods: ['GET'] }],
   ['/api/brief/feedback', { name: 'brief-feedback', methods: ['POST'] }],
+  ['/api/brief/instructions', { name: 'brief-instructions', methods: ['GET'] }],
+  ['/api/brief/instructions/propose', { name: 'brief-instructions-propose', methods: ['POST'] }],
   ['/api/goals', { name: 'goals', methods: ['GET'] }],
   ['/api/goals/propose', { name: 'goals-propose', methods: ['POST'] }],
   ['/api/feed', { name: 'feed', methods: ['GET'] }],
@@ -108,8 +113,8 @@ export function defaultLog(entry) {
 }
 
 export function createApp({
-  config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, feedInstructions = null, notices = null,
-  settings = null, registry = null, routines = null, scheduler = null, log = defaultLog,
+  config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, feedInstructions = null,
+  briefInstructions = null, notices = null, settings = null, registry = null, routines = null, scheduler = null, log = defaultLog,
 }) {
   if (!hub) throw new TypeError('createApp requires a hub');
   const allowedHosts = new Set(config.allowedHosts);
@@ -131,6 +136,11 @@ export function createApp({
     : null;
   const routineRoutes = routines
     ? createRoutineRoutes({ routines, hub, scheduler, log, limits: config.limits, shuttingDown: isShuttingDown })
+    : null;
+  const briefInstructionRoutes = briefInstructions
+    ? createBriefInstructionsRoutes({
+      instructions: briefInstructions, hub, log, limits: config.limits, shuttingDown: isShuttingDown,
+    })
     : null;
 
   function matchRoute(pathname) {
@@ -290,6 +300,12 @@ export function createApp({
       case 'feed-instructions-propose':
         if (!feedRoutes) throw new HttpError(404, 'not_found');
         return feedRoutes.serveProposeInstructions(req, res);
+      case 'brief-instructions':
+        if (!briefInstructionRoutes) throw new HttpError(404, 'not_found');
+        return briefInstructionRoutes.serveInstructions(res);
+      case 'brief-instructions-propose':
+        if (!briefInstructionRoutes) throw new HttpError(404, 'not_found');
+        return briefInstructionRoutes.serveProposeInstructions(req, res);
       default:
         throw new HttpError(404, 'not_found');
     }

@@ -49,6 +49,7 @@ import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { createDelegation } from '../../lib/delegation.mjs';
 import { createFeed } from '../../lib/feed.mjs';
+import { createBriefInstructions } from '../../lib/brief-instructions.mjs';
 import { createFeedInstructions } from '../../lib/feed-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
@@ -100,6 +101,10 @@ export { focusSourceAvailable };
 //              test/fixtures/feed-instructions/relevance.md) copied into the
 //              temporary directory as DASHBOARD_FEED_INSTRUCTIONS.
 //              `instructionsFile` is the copy's path.
+//   briefInstructions  the brief's rules file (such as
+//              test/fixtures/brief-instructions/curator.md) copied into the
+//              temporary directory as DASHBOARD_BRIEF_INSTRUCTIONS.
+//              `briefInstructionsFile` is the copy's path.
 //   settings   { model: { default, effort }, brief: { agent } } written to a
 //              real settings file in the temporary directory before the
 //              store loads it, so PUT /api/settings writes there; without it
@@ -119,7 +124,7 @@ export { focusSourceAvailable };
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, jobs: jobsSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
-  vault = null, feed = null, instructions = null, settings: settingsSeed = null, delegationWaitMs = null,
+  vault = null, feed = null, instructions = null, briefInstructions = null, settings: settingsSeed = null, delegationWaitMs = null,
   routines: routineSeed = null,
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
@@ -148,6 +153,8 @@ export async function startHub({
     if (feed) await cp(feed, feedDir, { recursive: true });
     const instructionsFile = path.join(root, instructions ? 'relevance.md' : 'relevance-missing.md');
     if (instructions) await cp(instructions, instructionsFile);
+    const briefInstructionsFile = path.join(root, briefInstructions ? 'curator.md' : 'curator-missing.md');
+    if (briefInstructions) await cp(briefInstructions, briefInstructionsFile);
     const routinesDir = path.join(root, 'routines');
     // The clock runs with the real one, moved ahead by what tests advance.
     const clock = {
@@ -180,6 +187,7 @@ export async function startHub({
       DASHBOARD_BRIEFS_DIR: briefsDir,
       DASHBOARD_FEED_DIR: feedDir,
       DASHBOARD_FEED_INSTRUCTIONS: instructionsFile,
+      DASHBOARD_BRIEF_INSTRUCTIONS: briefInstructionsFile,
       DASHBOARD_FOCUS_ORIGIN: focusOrigin,
       DASHBOARD_SETTINGS_PATH: settingsPath,
       DASHBOARD_ROUTINES_DIR: routinesDir,
@@ -247,12 +255,13 @@ export async function startHub({
     const goals = createGoals({ registry, limits: config.limits });
     const feedReader = createFeed({ dir: feedDir, limits: config.limits });
     const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits });
+    const briefInstructionsReader = createBriefInstructions({ file: config.briefInstructionsPath, limits: config.limits });
     const notices = createNotices({
       briefsDir, threadsDir, hub, target: () => settings.current().settings.brief.agent, limits: config.limits,
     });
     const newHandler = () => createApp({
       config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, feedInstructions,
-      notices, settings, registry, routines, scheduler, log: () => {},
+      briefInstructions: briefInstructionsReader, notices, settings, registry, routines, scheduler, log: () => {},
     });
     let handler = newHandler();
     cleanups.push(async () => {
@@ -274,6 +283,7 @@ export async function startHub({
       vaultDir,
       feedDir,
       instructionsFile,
+      briefInstructionsFile,
       focus,
       writeBrief: (date, options) => writeFile(path.join(briefsDir, `viewer-${date}.html`), inventedViewer({ date, ...options })),
       writeRawBrief: (date, html) => writeFile(path.join(briefsDir, `viewer-${date}.html`), html),

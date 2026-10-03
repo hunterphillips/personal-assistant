@@ -34,6 +34,7 @@ import { createBindings } from './lib/bindings.mjs';
 import { createBriefRoutes } from './lib/brief-adapter.mjs';
 import { createDelegation } from './lib/delegation.mjs';
 import { createFeed } from './lib/feed.mjs';
+import { createBriefInstructions } from './lib/brief-instructions.mjs';
 import { createFeedInstructions } from './lib/feed-instructions.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
@@ -137,6 +138,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   const goals = createGoals({ registry, limits: config.limits, log: logEntry });
   const feed = createFeed({ dir: config.feedDir, limits: config.limits, log: logEntry });
   const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log: logEntry });
+  const briefInstructions = createBriefInstructions({ file: config.briefInstructionsPath, limits: config.limits, log: logEntry });
   const notices = createNotices({
     briefsDir: config.briefsDir,
     threadsDir: config.threadsDir,
@@ -146,7 +148,8 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     log: logEntry,
   });
   const app = createApp({
-    config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, notices, settings, registry, routines, scheduler, log: logEntry,
+    config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, briefInstructions, notices, settings, registry, routines,
+    scheduler, log: logEntry,
   });
   const server = http.createServer(app);
   server.headersTimeout = config.timeouts.headersMs;

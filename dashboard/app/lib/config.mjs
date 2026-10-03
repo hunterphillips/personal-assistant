@@ -9,6 +9,8 @@
 //   DASHBOARD_FEED_DIR          the feed store the producers write (default ../../feed/items)
 //   DASHBOARD_FEED_INSTRUCTIONS the criteria file the watch job reads
 //                               (default ../../daily-brief/watch/relevance.md)
+//   DASHBOARD_BRIEF_INSTRUCTIONS the rules the brief's curator follows
+//                               (default ../../daily-brief/curator.md)
 //   DASHBOARD_FOCUS_ORIGIN      Focus server, http:// loopback only (default http://127.0.0.1:4242)
 //   DASHBOARD_REGISTRY_PATH     agent registry JSON file (default ../../registry/agents.json)
 //   DASHBOARD_ROUTINES_DIR      the routine files and their runs log (default ../../routines,
@@ -37,6 +39,7 @@ const DEFAULT_FOCUS_ORIGIN = 'http://127.0.0.1:4242';
 const DEFAULT_BRIEFS_DIR = '../../daily-brief/briefs';
 const DEFAULT_FEED_DIR = '../../feed/items';
 const DEFAULT_FEED_INSTRUCTIONS = '../../daily-brief/watch/relevance.md';
+const DEFAULT_BRIEF_INSTRUCTIONS = '../../daily-brief/curator.md';
 const DEFAULT_REGISTRY_PATH = '../../registry/agents.json';
 const DEFAULT_ROUTINES_DIR = '../../routines';
 // Routine schedules run on this clock, following its changes. A constant
@@ -68,6 +71,7 @@ export const LIMITS = Object.freeze({
   feedFileBytes: 256 * 1024, // one feed run file read by the Feed view
   feedFiles: 30, // newest feed run files read
   feedInstructionsBytes: 64 * 1024, // the feed's criteria file read by the Feed view
+  briefInstructionsBytes: 64 * 1024, // the brief's rules file read by the Brief tab
   settingsBodyBytes: 4 * 1024, // one PUT /api/settings body
   agentBodyBytes: 16 * 1024, // one PUT /api/agents/:id/settings or POST /api/agents body
   delegationDepth: 2, // agents a message may pass through before the sender (delegation.mjs)
@@ -127,6 +131,7 @@ export function loadConfig(env = process.env) {
   const briefsDir = parsePath(env.DASHBOARD_BRIEFS_DIR, DEFAULT_BRIEFS_DIR);
   const feedDir = parsePath(env.DASHBOARD_FEED_DIR, DEFAULT_FEED_DIR);
   const feedInstructionsPath = parsePath(env.DASHBOARD_FEED_INSTRUCTIONS, DEFAULT_FEED_INSTRUCTIONS);
+  const briefInstructionsPath = parsePath(env.DASHBOARD_BRIEF_INSTRUCTIONS, DEFAULT_BRIEF_INSTRUCTIONS);
   const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, DEFAULT_REGISTRY_PATH);
   const routinesDir = parsePath(env.DASHBOARD_ROUTINES_DIR, DEFAULT_ROUTINES_DIR);
   // The default is already absolute, so path.resolve keeps it as-is; only a
@@ -166,6 +171,7 @@ export function loadConfig(env = process.env) {
     briefsDir,
     feedDir,
     feedInstructionsPath,
+    briefInstructionsPath,
     registryPath,
     routinesDir,
     timeZone: TIME_ZONE,

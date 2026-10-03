@@ -138,6 +138,8 @@ test('persona limits and timeouts are exposed', () => {
 
 test('the feed instructions path defaults beside the watch job and takes an override', () => {
   assert.equal(loadConfig({}).feedInstructionsPath, path.resolve(APP_ROOT, '../../daily-brief/watch/relevance.md'));
+  assert.equal(loadConfig({}).briefInstructionsPath, path.resolve(APP_ROOT, '../../daily-brief/curator.md'));
+  assert.equal(loadConfig({ DASHBOARD_BRIEF_INSTRUCTIONS: '/tmp/rules.md' }).briefInstructionsPath, '/tmp/rules.md');
   assert.equal(loadConfig({ DASHBOARD_FEED_INSTRUCTIONS: '/tmp/criteria.md' }).feedInstructionsPath, '/tmp/criteria.md');
   assert.equal(loadConfig({ DASHBOARD_FEED_INSTRUCTIONS: 'var/criteria.md' }).feedInstructionsPath,
     path.resolve(APP_ROOT, 'var/criteria.md'));
