@@ -270,12 +270,12 @@ test.describe('with seeded routines', () => {
     await line.locator('.thread-brief-summary').click();
     await expect(line.locator('.thread-routine-input')).toHaveText('{"command":"python3 snapshot.py"}');
     if (page.viewportSize().width < 720) await page.locator('#agent-back').click();
-    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'CFO').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
 
     // The card goes unanswered; the turn ends; the run is `waiting`.
     hub.personas.expire('cfo');
     await hub.personas.reply('cfo', 'Done without it.');
-    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Needs you');
+    await expect(row(page, 'CFO').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Needs you');
     await expect.poll(() => hub.routines.lastRun('morning-drift').outcome).toBe('waiting');
 
     // The form stayed open on the routine; the panel reopens on it.

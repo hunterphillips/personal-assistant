@@ -477,12 +477,13 @@ names; a group an agent names that the file leaves out follows them under
 its id with the first letter raised), in registry order within a group:
 name, role (left out when it only repeats the name), provider (Claude or
 Codex), and for a persona its last message
-with a relative time, plus a line for its state: "Waiting for you" on a
-question or approval, "Working" during a turn, "The last turn failed",
-"Unavailable", or "Needs you" when a routine's run left a card unanswered
-and nothing has been written in the thread since (Routines under
-Personas). A persona marked `pinned` in the registry sits above the
-groups under no heading. A project folder or system agent shows its
+with a relative time. A row wanting Hunter shows an amber dot beside its
+name, titled and labelled "Waiting for you" (a question or approval open)
+or "Needs you" (a routine's run left a card unanswered and nothing has
+been written in the thread since; Routines under Personas) rather than a
+text chip. Otherwise a line gives its state: "Working" during a turn,
+"The last turn failed", or "Unavailable". A persona marked `pinned` in
+the registry sits above the groups under no heading. A project folder or system agent shows its
 description instead and opens nothing. Choosing a persona opens its thread
 and puts `?agent=<id>` in the URL (`/?agent=cfo`; `/agents?agent=cfo` opens
 the same thread), so a reload or a shared link lands on the same thread;
@@ -521,13 +522,14 @@ too. Each sits under the project row its `projectId` names, indented,
 newest first; sessions under no project sit in an "Other sessions" group
 after Personal. A session row shows its provider chip, a title (a Codex
 thread's title, else the last segment of its folder; a Claude terminal
-always uses the folder), the folder with the home directory as `~`, a
-relative time, and a state line: "Waiting for you" on a question or
-approval, "Working" during a turn, "The last turn failed", "Server
-stopped" while the Codex server is down, or "Terminal closed" when the
-terminal it was started in has gone. A Codex thread with an open turn
-says the turn, since it can still be answered here; a Claude terminal
-that has closed says only that. When there are no sessions and both the
+always uses the folder), the folder with the home directory as `~`, and a
+relative time. A session wanting Hunter shows the same amber dot beside
+its name, titled and labelled "Waiting for you", in place of a state
+line; otherwise the line reads "Working" during a turn, "The last turn
+failed", "Server stopped" while the Codex server is down, or "Terminal
+closed" when the terminal it was started in has gone. A Codex thread with
+an open turn says the turn, since it can still be answered here; a Claude
+terminal that has closed says only that. When there are no sessions and both the
 Codex server and cmux are off, one sentence ends the list: "No coding
 sessions. Start the Codex server or open a terminal in cmux." With only
 one of them off the list says nothing; the Health view carries one

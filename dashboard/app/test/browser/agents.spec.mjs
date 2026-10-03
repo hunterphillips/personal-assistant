@@ -118,7 +118,7 @@ test.describe('with seeded agents', () => {
     await expect(catchup.locator('.agent-row-preview')).toHaveText('Invented work folder.');
     await expect(catchup.locator('.agent-row-state')).toHaveCount(0);
 
-    await expect(row(page, 'Second brain').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'Second brain').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
     await expect(row(page, 'Dev').locator('.agent-row-state')).toHaveText('Unavailable');
     await expect(row(page, 'Focus').locator('.provider-chip')).toHaveCount(0);
     await expect(row(page, 'Focus').locator('.agent-row-state')).toHaveCount(0);
@@ -355,7 +355,7 @@ test.describe('with seeded agents', () => {
     await expect(page.locator('#agent-composer-reason')).toHaveText('Answer the question first.');
     await expect(page.locator('#agent-status-text')).toHaveText('Second brain is waiting for you.');
     await expect(page.locator('#agent-status').getByRole('button', { name: 'Interrupt' })).toBeEnabled();
-    await expect(row(page, 'Second brain').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'Second brain').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
     for (const button of await request.getByRole('button').all()) {
       expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);
     }
@@ -439,7 +439,7 @@ test.describe('with seeded agents', () => {
     await expect(request.locator('.request-note')).toHaveCount(0);
     await expect(request.getByRole('button')).toHaveText(['Allow', 'Deny']);
     await expect(page.locator('#agent-composer-reason')).toHaveText('Allow or deny the request first.');
-    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'CFO').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
 
     await request.getByRole('button', { name: 'Deny' }).click();
     await expect(request).toBeHidden();
@@ -1639,8 +1639,8 @@ test.describe('with a live exchange between agents', () => {
     await expect(request).toBeVisible();
     await expect(request.locator('.request-title')).toHaveText(QUESTION);
     await expect(request.locator('.request-note')).toHaveText('Asked while answering you.');
-    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Waiting for you');
-    await expect(row(page, 'Assistant').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'CFO').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
+    await expect(row(page, 'Assistant').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
     // The Assistant's own turn is over: the status line names CFO, Interrupt is gone, and the composer stays open.
     await expect(page.locator('#agent-status-text')).toHaveText('CFO is waiting for you.');
     await expect(page.locator('#agent-status').getByRole('button', { name: 'Interrupt' })).toBeHidden();
@@ -1713,8 +1713,8 @@ test.describe('with an approval raised while answering a delegation', () => {
     await expect(request.locator('.request-note')).toHaveText('Asked while answering you.');
     await expect(request.locator('.request-input')).toHaveText('{\n  "command": "ls",\n  "description": "List files"\n}');
     await expect(request.getByRole('button')).toHaveText(['Allow', 'Deny']);
-    await expect(row(page, 'Assistant').locator('.agent-row-state')).toHaveText('Waiting for you');
-    await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'Assistant').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
+    await expect(row(page, 'CFO').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
     // Past the wait the ask goes pending and the Assistant's own turn ends; the card stays, with the status line naming CFO.
     await expect(messages(page)).toHaveCount(5);
     await expect(messages(page).nth(4).locator('.thread-message-text')).toHaveText('CFO is still working. The reply will arrive in this thread.');

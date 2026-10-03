@@ -970,6 +970,17 @@
       return element('span', className, text);
     }
 
+    // A row wanting Hunter ("Waiting for you", "Needs you") shows a small
+    // dot beside the name instead of the text chip; the sentence stays as
+    // the dot's title and aria-label for anyone not reading color.
+    function stateDot(line) {
+      var dot = element('span', 'agent-row-dot agent-row-dot-' + line.tone);
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', line.text);
+      dot.title = line.text;
+      return dot;
+    }
+
     function row(agent) {
       var persona = isPersona(agent);
       var node = persona ? element('a', 'agent-row') : element('div', 'agent-row agent-row-plain');
@@ -977,8 +988,10 @@
       node.setAttribute('data-agent', agent.id);
       if (agent.id === selectedId) node.setAttribute('aria-current', 'true');
 
+      var line = stateLine(agent);
       var head = element('span', 'agent-row-head');
       head.appendChild(element('span', 'agent-row-name', agent.name));
+      if (line && line.tone === 'wait') head.appendChild(stateDot(line));
       if (roleChip(agent)) head.appendChild(chip('role-chip', agent.role));
       if (providerName(agent)) head.appendChild(chip('provider-chip', providerName(agent)));
       if (persona && agent.lastMessage) head.appendChild(timeSpan('agent-row-time', agent.lastMessage.at));
@@ -986,8 +999,7 @@
 
       var preview = previewText(agent, state.agents);
       if (preview) node.appendChild(element('span', 'agent-row-preview', preview));
-      var line = stateLine(agent);
-      if (line) node.appendChild(element('span', 'agent-row-state agent-row-state-' + line.tone, line.text));
+      if (line && line.tone !== 'wait') node.appendChild(element('span', 'agent-row-state agent-row-state-' + line.tone, line.text));
       return node;
     }
 
@@ -997,16 +1009,17 @@
       node.setAttribute('data-agent', session.id);
       if (session.id === selectedId) node.setAttribute('aria-current', 'true');
 
+      var line = stateLine(session);
       var head = element('span', 'agent-row-head');
       head.appendChild(element('span', 'agent-row-name', displayName(session)));
+      if (line && line.tone === 'wait') head.appendChild(stateDot(line));
       if (providerName(session)) head.appendChild(chip('provider-chip', providerName(session)));
       if (session.updatedAt) head.appendChild(timeSpan('agent-row-time', session.updatedAt));
       node.appendChild(head);
 
       var folder = shortPath(session.cwd, state.home);
       if (folder) node.appendChild(element('span', 'agent-row-preview', folder));
-      var line = stateLine(session);
-      if (line) node.appendChild(element('span', 'agent-row-state agent-row-state-' + line.tone, line.text));
+      if (line && line.tone !== 'wait') node.appendChild(element('span', 'agent-row-state agent-row-state-' + line.tone, line.text));
       return node;
     }
 

@@ -136,8 +136,8 @@ test.describe('with sessions', () => {
     await expect(fix.locator('.role-chip')).toHaveCount(0);
     await expect(fix.locator('.agent-row-preview')).toHaveText('~/work/catchup/sub');
     await expect(fix.locator('.agent-row-time')).toHaveText('5 minutes ago');
-    await expect(fix.locator('.agent-row-state')).toHaveText('Waiting for you');
-    await expect(fix.locator('.agent-row-state')).toHaveClass(/agent-row-state-wait/);
+    await expect(fix.locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
+    await expect(fix.locator('.agent-row-dot')).toHaveClass(/agent-row-dot-wait/);
 
     const terminal = row(page, 'catchup');
     await expect(terminal).toHaveAttribute('href', `/?agent=claude%3A${C_BUSY}`);
@@ -214,7 +214,7 @@ test.describe('with sessions', () => {
     await expect(request.getByRole('button')).toHaveText(['Allow', 'Deny']);
     await expect(request.locator('.request-note')).toHaveCount(0);
     await expect(page.locator('#agent-status-text')).toHaveText('other is waiting for you.');
-    await expect(row(page, 'other').locator('.agent-row-state')).toHaveText('Waiting for you');
+    await expect(row(page, 'other').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
 
     await request.getByRole('button', { name: 'Deny' }).click();
     await expect(request).toBeHidden();
@@ -337,8 +337,8 @@ test.describe('with sessions', () => {
     hub.cmux.set(inventory({ agents: [{ ...inventory().agents[0], state: 'needsInput' }, inventory().agents[1]] }));
     await hub.state.refreshSessions();
     await expect(page.locator('#agent-messages .thread-line')).toHaveText(['Claude is waiting for you.']);
-    await expect(row(page, 'catchup').locator('.agent-row-state')).toHaveText('Waiting for you');
-    await expect(row(page, 'catchup').locator('.agent-row-state')).toHaveClass(/agent-row-state-wait/);
+    await expect(row(page, 'catchup').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
+    await expect(row(page, 'catchup').locator('.agent-row-dot')).toHaveClass(/agent-row-dot-wait/);
 
     // A closed terminal says so and cannot be opened.
     await page.goto(`${hub.origin}/?agent=claude:${C_GONE}`);

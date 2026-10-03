@@ -953,6 +953,15 @@ a.agent-row[aria-current="true"] {
 .agent-row-state-muted { color: var(--muted); font-weight: 400; }
 .agent-row-state-bad { color: var(--red); }
 
+/* Beside the name on a row wanting Hunter: a dot, not a text chip. */
+.agent-row-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.agent-row-dot-wait { background: var(--amber); }
+
 .agent-thread {
   display: flex;
   flex-direction: column;
