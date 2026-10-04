@@ -2,11 +2,12 @@
 
 The assistant daemon and the tailnet-only hub it serves. A local Node server
 on `127.0.0.1:4243`; Tailscale serves it to the tailnet over HTTPS. The page
-is a shell with a rail of five views. Home is the Agents view at `/`; Feed
-lists what the producers found; Focus and Goals are their own views; Health
-lists the launchd jobs. The Daily Brief opens from the header as an overlay
-over any view. Personas run on the Claude Agent SDK, Codex threads are observed
-on a shared app-server, and cmux terminals are listed with their state.
+is a shell with a rail of six views. Home is the Agents view at `/`; Feed
+lists what the producers found; Focus and Goals are their own views;
+Ideas lists the week's suggestions; Health lists the launchd jobs. The
+Daily Brief opens from the header as an overlay over any view. Personas
+run on the Claude Agent SDK, Codex threads are observed on a shared
+app-server, and cmux terminals are listed with their state.
 Focus runs in an iframe through a proxy to its own server. Briefs are read
 from `daily-brief/briefs/` as data, and feedback is saved beside them.
 
@@ -497,8 +498,8 @@ shows the same view. `/feed` shows the Feed, `/brief` the Feed with the
 brief's overlay open (the address becomes `/feed`), `/focus` Focus,
 `/goals` Goals, and `/health` Health. The server redirects the old
 `/routines` to `/health` and `/reading` to `/feed`. The navigation is a
-rail of five icon links, Home, Feed, Focus, Goals, and Health; a path the shell does not know
-lands on Agents. The script switches views
+rail of six icon links, Home, Feed, Focus, Goals, Ideas, and Health; a
+path the shell does not know lands on Agents. The script switches views
 with the History API and handles
 Back and Forward, and a reload or bookmark opens the same view. The Focus
 frame is created the first time its view opens and stays in the page

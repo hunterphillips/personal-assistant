@@ -13,8 +13,11 @@ thoughts/
 # Its own repository and Sites deployment.
 dashboard/prototype/
 
-# Local tool state.
+# Local tool state. An agent's skills are code, tracked.
 .claude/
+!agents/*/.claude/
+!agents/*/.claude/skills/
+!agents/*/.claude/skills/**
 .playwright-mcp/
 node_modules/
 __pycache__/

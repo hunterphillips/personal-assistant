@@ -50,6 +50,9 @@ asks you to.
 `notify` is for a problem Hunter should see soon, such as a job that
 failed or an agent that stopped. Use it rarely.
 
-## Later
+## Ideas
 
-You will own the weekly Ideas run.
+You own the weekly Ideas run. The Weekly ideas routine sends "Run the
+weekly-ideas skill" on Mondays at 04:00; the skill is `weekly-ideas` in
+this folder. Ideas opens quick chat on you through Discuss, so a message
+that starts "Sent from Ideas:" is about that idea.

@@ -19,7 +19,7 @@ from here.
   has an unread reply, Health a mark when a job's last run failed; Quick
   chat opens any Claude agent's thread in a pane over any view, defaulting
   to Myos, and sends what Hunter is looking at as a context line. A rail
-  of five views: Home is the Agents view (the Assistant pinned above the
+  of six views: Home is the Agents view (the Assistant pinned above the
   groups the registry lists, agents on the Claude Agent SDK, Codex
   threads on a shared app-server, Claude Code terminals in cmux; a gear
   opens each agent's settings beside its thread; on a desk the
@@ -43,7 +43,11 @@ from here.
   JSON, with Approve, Dismiss, notes, and its own instructions), Focus is
   embedded through a proxy and takes the dashboard's theme, Goals reads
   the vault's priorities with add and edit going through the Second
-  brain agent, Health holds Settings (the default model, effort, and
+  brain agent, Ideas lists what the weekly run on Myos suggests (at most
+  five a week, from the criteria file), with Discuss opening quick chat,
+  Start handing the idea to the pinned agent, Dismiss, and Add idea for
+  his own; the ideas live in `ideas/items/`, the marks in
+  `ideas/marks.json`, Health holds Settings (the default model, effort, and
   permission level, which agent receives the brief, which agent quick
   chat talks to) and lists the launchd jobs and their state. Every turn
   runs with the SDK's Claude Code preset system prompt. The design (the
@@ -135,6 +139,8 @@ picks one up and ends by updating it.
   gitignored; each build writes the viewer and `brief-<date>.json`;
   `build.py` and `check-viewer.mjs` beside the briefs are code.
 - `feed/`: the feed store's README; `items/` is its output, gitignored.
+- `ideas/`: the store's README and criteria; `items/` and `marks.json`
+  are outputs, gitignored.
 - `agents/`: one folder per agent that lives in this repo (Assistant,
   Watch, Myos), its CLAUDE.md and skills; the folder is the agent's `cwd`.
 - `systems/`: symlinks to the agents' repos.
@@ -167,10 +173,12 @@ picks one up and ends by updating it.
   the curator toward all of them. The Daily Brief writes contribution files,
   briefs, and the feedback file saved beside a brief. The dashboard forwards
   Focus actions to Focus unchanged and holds no task state; Goals reads the
-  vault and only messages the Second brain agent. Agents act under
-  Hunter's inline approvals; the dashboard never sends a Codex turn and
-  answers one request with one decision. Agent turns bill the Claude
-  subscription; an API key in the daemon's environment disables them.
+  vault and only messages the Second brain agent. The dashboard writes
+  Ideas marks and manual ideas; Myos's weekly run writes one run file.
+  Agents act under Hunter's inline approvals; the dashboard never sends a
+  Codex turn and answers one request with one decision. Agent turns bill
+  the Claude subscription; an API key in the daemon's environment
+  disables them.
 - **Raw external content never reaches the curator.** A contributing domain
   summarizes it into a claim marked external.
 - **One Daily Brief run, owned here.** The agents keep their own state current

@@ -62,7 +62,8 @@ _Avoid_: news, digest, stream
 
 **Ideas**:
 Suggestions about the system as a whole, in their own view, that Hunter
-looks at on purpose. Never a message.
+looks at on purpose: a weekly run on Myos against `ideas/criteria.md`,
+and his own typed in. Never a message.
 _Avoid_: offers, suggestions feed, recommendations
 
 **Health**:
