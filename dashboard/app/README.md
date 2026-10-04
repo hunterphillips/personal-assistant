@@ -24,7 +24,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 
 | Route | Purpose |
 | --- | --- |
-| `GET /`, `/agents`, `/focus`, `/brief`, `/feed`, `/goals`, `/health` | The shell. `/` and `/agents` show the Agents view; `/feed` shows the Feed, and `/brief` the Feed with the brief's overlay open; `/health` shows Health. |
+| `GET /`, `/agents`, `/focus`, `/brief`, `/feed`, `/goals`, `/ideas`, `/health` | The shell. `/` and `/agents` show the Agents view; `/feed` shows the Feed, `/brief` the Feed with the brief's overlay open, and `/health` shows Health. |
 | `GET /routines`, `/routines/` | 302 to `/health`, keeping the query. Kept for one release while the jobs move from Agents to Health. |
 | `GET /reading`, `/reading/` | 302 to `/feed`, keeping the query. Reading became the Feed when the brief moved to the overlay. |
 | `GET /healthz` | `{"ok": true}` whenever the server is up, whatever Focus and the brief are doing. |
@@ -60,6 +60,12 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/feed/discuss` | Sends one feed item to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
 | `GET /api/feed/instructions` | The feed's criteria file, read as prose (below). |
 | `POST /api/feed/instructions/propose` | Sends a change to the criteria to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
+| `GET /api/ideas` | The Ideas runs, marks, and producing agent, newest first. |
+| `POST /api/ideas` | Adds a manual idea and returns the fresh Ideas store. |
+| `POST /api/ideas/dismiss` | Dismisses an idea and returns the fresh Ideas store. |
+| `POST /api/ideas/start` | Starts the pinned agent on an idea, marks it taken, and returns the fresh Ideas store. |
+| `GET /api/ideas/instructions` | The Ideas criteria, read as prose. |
+| `POST /api/ideas/instructions/propose` | Sends a criteria change to the newest listed producer. |
 | `PUT /api/settings` | Saves a partial patch of the settings (default model and effort, which agent receives the brief, which agent quick chat opens on, the default permission level) and answers the whole document (below). |
 | `GET /api/routines` | The routines as the snapshot lists them (below). |
 | `POST /api/routines` | Adds a routine from `{"name", "agent", "instruction", "schedule", "active"}`, `schedule` a cron line; 201 with the stored routine (below). |
@@ -85,6 +91,7 @@ what `lib/app.mjs` expects from it.
 - `lib/routine-routes.mjs` serves the routine routes over `lib/routines.mjs`, the routine files and their runs logs, and `lib/schedule.mjs`, the cron subset and its occurrences in Chicago time; `lib/scheduler.mjs` runs them.
 - `lib/notification-routes.mjs` serves the notification routes over `lib/notifications.mjs`, the notifications file.
 - `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store, and `lib/feed-instructions.mjs`, which reads the criteria file.
+- `lib/ideas-routes.mjs` serves Ideas over `lib/ideas.mjs` and `ideas/criteria.md`.
 - `lib/brief-instructions.mjs` reads the brief's rules file and serves the two routes under `/api/brief/instructions`; `lib/instructions.mjs` is the prose reader both instructions files share, and `lib/instructions-routes.mjs` their two routes.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.

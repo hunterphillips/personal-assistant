@@ -1,0 +1,24 @@
+{
+  "fixture": true,
+  "producer": "myos",
+  "date": "2026-09-21",
+  "generated_at": "2026-09-21T09:00:00-05:00",
+  "items": [
+    {
+      "id": "fixture-weekly-map",
+      "title": "Fixture weekly map",
+      "text": "Invented fixture content for the Ideas reader.",
+      "kind": "workflow",
+      "agents": ["assistant", "focus"],
+      "source": null
+    },
+    {
+      "id": "fixture-reading-tool",
+      "title": "Fixture reading tool",
+      "text": "Invented fixture content with an outside source.",
+      "kind": "tool",
+      "agents": ["myos"],
+      "source": "https://example.com/fixture-reading-tool"
+    }
+  ]
+}

@@ -251,7 +251,7 @@ export function fakeCmux(inventory = null) {
 // may adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), jobs, routines = null, scheduler = null, hub, adapters, store, bindings,
-  cmux = null, goals, feed, briefInstructions, notices = null, settings = fakeSettings(), reads = null, notifications = null, configure = (c) => c,
+  cmux = null, goals, feed, ideas = null, ideasInstructions = null, briefInstructions, notices = null, settings = fakeSettings(), reads = null, notifications = null, configure = (c) => c,
   delegation = null,
 } = {}) {
   const server = http.createServer();
@@ -293,7 +293,7 @@ export async function startApp(t, {
     : briefInstructions;
   const handler = createApp({
     config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader,
-    feedInstructions: instructionsReader, briefInstructions: briefInstructionsReader, notices, settings, registry, routines,
+    feedInstructions: instructionsReader, ideas, ideasInstructions, briefInstructions: briefInstructionsReader, notices, settings, registry, routines,
     scheduler: schedulerService, notifications, log,
   });
   server.on('request', handler);

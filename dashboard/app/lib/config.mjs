@@ -44,6 +44,9 @@ const DEFAULT_FOCUS_ORIGIN = 'http://127.0.0.1:4242';
 const DEFAULT_BRIEFS_DIR = '../../daily-brief/briefs';
 const DEFAULT_FEED_DIR = '../../feed/items';
 const DEFAULT_FEED_INSTRUCTIONS = '../../daily-brief/watch/relevance.md';
+const DEFAULT_IDEAS_DIR = '../../ideas/items';
+const DEFAULT_IDEAS_MARKS = '../../ideas/marks.json';
+const DEFAULT_IDEAS_INSTRUCTIONS = '../../ideas/criteria.md';
 const DEFAULT_BRIEF_INSTRUCTIONS = '../../daily-brief/curator.md';
 const DEFAULT_REGISTRY_PATH = '../../registry/agents.json';
 const DEFAULT_ROUTINES_DIR = '../../routines';
@@ -79,6 +82,9 @@ export const LIMITS = Object.freeze({
   goalsNotes: 50, // files read from the vault's notes/goals/
   feedFileBytes: 256 * 1024, // one feed run file read by the Feed view
   feedFiles: 30, // newest feed run files read
+  ideasFileBytes: 256 * 1024, // one ideas run, the marks, or the criteria file
+  ideaTitleChars: 200, // one producer idea's title
+  ideaBodyBytes: 16 * 1024, // one Ideas POST body
   feedInstructionsBytes: 64 * 1024, // the feed's criteria file read by the Feed view
   briefInstructionsBytes: 64 * 1024, // the brief's rules file read by the Brief tab
   settingsBodyBytes: 4 * 1024, // one PUT /api/settings body
@@ -143,6 +149,9 @@ export function loadConfig(env = process.env) {
   const briefsDir = parsePath(env.DASHBOARD_BRIEFS_DIR, DEFAULT_BRIEFS_DIR);
   const feedDir = parsePath(env.DASHBOARD_FEED_DIR, DEFAULT_FEED_DIR);
   const feedInstructionsPath = parsePath(env.DASHBOARD_FEED_INSTRUCTIONS, DEFAULT_FEED_INSTRUCTIONS);
+  const ideasDir = path.resolve(APP_ROOT, DEFAULT_IDEAS_DIR);
+  const ideasMarksPath = path.resolve(APP_ROOT, DEFAULT_IDEAS_MARKS);
+  const ideasInstructionsPath = path.resolve(APP_ROOT, DEFAULT_IDEAS_INSTRUCTIONS);
   const briefInstructionsPath = parsePath(env.DASHBOARD_BRIEF_INSTRUCTIONS, DEFAULT_BRIEF_INSTRUCTIONS);
   const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, DEFAULT_REGISTRY_PATH);
   const routinesDir = parsePath(env.DASHBOARD_ROUTINES_DIR, DEFAULT_ROUTINES_DIR);
@@ -185,6 +194,9 @@ export function loadConfig(env = process.env) {
     briefsDir,
     feedDir,
     feedInstructionsPath,
+    ideasDir,
+    ideasMarksPath,
+    ideasInstructionsPath,
     briefInstructionsPath,
     registryPath,
     builtinPath,

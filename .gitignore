@@ -31,6 +31,10 @@ daily-brief/watch/state.json
 # Feed store: what the producers found and judged, local only.
 feed/items/
 
+# Ideas store: suggestions and their dashboard marks, local only.
+ideas/items/
+ideas/marks.json
+
 # Routine runs: each routine's runs log, local only; the routine files
 # beside it are committed like the registry.
 routines/runs/

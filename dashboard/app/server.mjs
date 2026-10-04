@@ -3,7 +3,7 @@
 // adapters (Claude for personas, Codex for the shared app-server's threads),
 // the cmux client, the routine store (loaded before the hub, so its
 // snapshot lists them) and the scheduler that runs them, the notification
-// store (loaded before the hub too), state hub, the Goals, Feed, and feed instructions
+// store (loaded before the hub too), state hub, the Goals, Feed, Ideas, and instructions
 // readers, the settings store, the brief notices, and app, add any built-in
 // agent the registry lacks (builtins.mjs), start the
 // personas, seed the settings file on first start (and add quick chat to
@@ -43,6 +43,8 @@ import { createFeedInstructions } from './lib/feed-instructions.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
 import { createGoals } from './lib/goals.mjs';
+import { createIdeas } from './lib/ideas.mjs';
+import { createInstructions } from './lib/instructions.mjs';
 import { createHub } from './lib/hub.mjs';
 import { createNotices } from './lib/notices.mjs';
 import { NOTIFICATIONS_FILE, createNotifications } from './lib/notifications.mjs';
@@ -154,6 +156,14 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
   const goals = createGoals({ registry, limits: config.limits, log: logEntry });
   const feed = createFeed({ dir: config.feedDir, limits: config.limits, log: logEntry });
   const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log: logEntry });
+  const ideas = createIdeas({
+    dir: config.ideasDir, marksFile: config.ideasMarksPath, limits: config.limits,
+    zone: config.timeZone, log: logEntry,
+  });
+  const ideasInstructions = createInstructions({
+    file: config.ideasInstructionsPath, path: 'ideas/criteria.md', maxBytes: config.limits.ideasFileBytes,
+    label: 'Ideas', event: 'ideas_instructions_error', log: logEntry,
+  });
   const briefInstructions = createBriefInstructions({ file: config.briefInstructionsPath, limits: config.limits, log: logEntry });
   const notices = createNotices({
     briefsDir: config.briefsDir,
@@ -164,7 +174,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     log: logEntry,
   });
   const app = createApp({
-    config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, briefInstructions, notices, settings, registry, routines,
+    config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, ideas, ideasInstructions, briefInstructions, notices, settings, registry, routines,
     scheduler, notifications, log: logEntry,
   });
   const server = http.createServer(app);
