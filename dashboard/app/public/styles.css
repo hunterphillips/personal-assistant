@@ -1062,6 +1062,98 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   font-size: 13px;
 }
 
+/* Ideas: weekly groups in the Feed's centered reading column. */
+.ideas-page {
+  flex: 1;
+  min-height: 0;
+  padding: 24px 34px 40px;
+  overflow: auto;
+}
+
+.ideas-page > * {
+  width: 100%;
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.composer.ideas-instructions-composer,
+.composer.ideas-add-composer {
+  margin: 16px auto 32px;
+  padding: 0 0 24px;
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
+}
+.composer.ideas-instructions-composer { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+.ideas-add-composer .composer-input { display: block; width: 100%; }
+.ideas-add-actions { margin-top: 8px; }
+
+.ideas-week + .ideas-week { margin-top: 36px; }
+.ideas-week-title {
+  margin: 0 0 18px;
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 400;
+}
+.ideas-run:empty { display: none; }
+.ideas-run + .ideas-run:not(:empty) { margin-top: 24px; }
+.ideas-item + .ideas-item { margin-top: 28px; }
+.ideas-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.ideas-text {
+  margin-top: 6px;
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ideas-text > :first-child { margin-top: 0; }
+.ideas-text > :last-child { margin-bottom: 0; }
+.ideas-meta,
+.ideas-source {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.ideas-source a { color: inherit; }
+.ideas-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-top: 8px;
+}
+.ideas-action,
+.ideas-started {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.ideas-action { cursor: pointer; }
+.ideas-action:hover,
+.ideas-action:focus-visible,
+.ideas-started:hover,
+.ideas-started:focus-visible { color: var(--ink); }
+.ideas-action:disabled { cursor: default; opacity: 0.5; }
+.ideas-reason {
+  margin: 4px 0 0;
+  color: var(--red);
+  font-size: 13px;
+}
+
 /* Goals: the vault's priorities and goal notes, one row per goal under each
    section heading, the details only when a row is open. */
 
@@ -2230,7 +2322,8 @@ textarea.form-input {
   #view-goals,
   #view-health { padding: 20px 16px; }
 
-  .feed-page { padding: 16px 16px 24px; }
+  .feed-page,
+  .ideas-page { padding: 16px 16px 24px; }
   .feed-item { grid-template-columns: 24px minmax(0, 1fr); }
   .feed-badge { width: 24px; height: 24px; }
 

@@ -28,6 +28,10 @@
         <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4.5L17 13H5"/></svg>
         <span class="nav-label">Goals</span>
       </a>
+      <a href="/ideas" data-view="ideas" title="Ideas">
+        <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M8.4 14.5A6 6 0 1 1 15.6 14.5C14.6 15.2 14 16.1 14 17h-4c0-.9-.6-1.8-1.6-2.5Z"/></svg>
+        <span class="nav-label">Ideas</span>
+      </a>
       <a href="/health" data-view="health" title="Health" aria-label="Health">
         <svg class="nav-icon" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 12h4l2.5-6 5 12 2.5-6H21"/></svg>
         <span class="nav-label">Health</span>
@@ -57,6 +61,12 @@
             <div class="header-action-group" data-actions-for="focus" hidden></div>
             <div class="header-action-group" data-actions-for="goals" hidden>
               <button type="button" class="button" id="goals-add">Add goal</button>
+            </div>
+            <div class="header-action-group" data-actions-for="ideas" hidden>
+              <button type="button" class="instructions-toggle" id="ideas-instructions-toggle" aria-label="Instructions" title="Instructions" aria-expanded="false" aria-controls="ideas-instructions" hidden>
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4h12M2 8h12M2 12h12"/><circle cx="5" cy="4" r="1.5"/><circle cx="10.5" cy="8" r="1.5"/><circle cx="7" cy="12" r="1.5"/></svg>
+              </button>
+              <button type="button" class="button" id="ideas-add">Add idea</button>
             </div>
             <div class="header-action-group" data-actions-for="health" hidden>
               <button type="button" class="button" id="jobs-refresh">Refresh</button>
@@ -176,6 +186,36 @@
       <section class="view" id="view-goals" data-view="goals" aria-label="Goals" hidden>
         <p class="routines-message" id="goals-message" role="status" hidden></p>
         <div class="routines-cards" id="goals-cards"></div>
+      </section>
+
+      <section class="view" id="view-ideas" data-view="ideas" aria-label="Ideas" hidden>
+        <div class="ideas-page" id="ideas-page">
+          <section class="instructions" id="ideas-instructions" aria-labelledby="ideas-instructions-heading" hidden>
+            <h2 class="instructions-heading" id="ideas-instructions-heading">Ideas instructions</h2>
+            <p class="instructions-intro">Ideas follow these criteria. A change goes to the producer, which edits the file.</p>
+            <div id="ideas-instructions-body"></div>
+            <form class="composer ideas-instructions-composer" id="ideas-instructions-form">
+              <label class="composer-label" for="ideas-instructions-input">What should change?</label>
+              <textarea class="composer-input" id="ideas-instructions-input" rows="3"></textarea>
+              <div class="composer-row instructions-actions">
+                <button type="submit" class="button button-primary">Send</button>
+                <button type="button" class="button" id="ideas-instructions-cancel">Cancel</button>
+              </div>
+              <p class="composer-reason" id="ideas-instructions-reason" role="status" hidden></p>
+            </form>
+          </section>
+          <form class="composer ideas-add-composer" id="ideas-add-form" hidden>
+            <label class="composer-label" for="ideas-add-input">Idea</label>
+            <textarea class="composer-input" id="ideas-add-input" rows="4"></textarea>
+            <div class="composer-row ideas-add-actions">
+              <button type="submit" class="button button-primary">Send</button>
+              <button type="button" class="button" id="ideas-add-cancel">Cancel</button>
+            </div>
+            <p class="composer-reason" id="ideas-add-reason" role="status" hidden></p>
+          </form>
+          <p class="routines-message" id="ideas-message" role="status" hidden></p>
+          <div id="ideas-weeks"></div>
+        </div>
       </section>
 
       <section class="view" id="view-health" data-view="health" aria-label="Health" hidden>
@@ -320,6 +360,7 @@
   <script src="/assets/thread-view.js"></script>
   <script src="/assets/goals.js"></script>
   <script src="/assets/instructions.js"></script>
+  <script src="/assets/ideas.js"></script>
   <script src="/assets/feed.js"></script>
   <script src="/assets/notifications.js"></script>
   <script src="/assets/quick-chat.js"></script>

@@ -21,6 +21,7 @@ export const CONTEXT_VIEWS = Object.freeze({
   brief: 'Brief',
   focus: 'Focus',
   goals: 'Goals',
+  ideas: 'Ideas',
   health: 'Health',
 });
 export const LABEL_MAX = 200;

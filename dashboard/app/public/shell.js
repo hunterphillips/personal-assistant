@@ -1,5 +1,5 @@
 // Dashboard shell: switches between Agents (Home, agents.js), the Feed
-// (feed.js), Focus, Goals (goals.js), and Health (jobs.js, the launchd jobs)
+// (feed.js), Focus, Goals (goals.js), Ideas (ideas.js), and Health (jobs.js, the launchd jobs)
 // with the History API, creates the Focus frame the first time its view is
 // shown and keeps it afterwards, and keeps one copy of the server's state,
 // which it hands to the Health, Agents, and Goals views, the header's
@@ -33,9 +33,9 @@
 
   var ROUTES = {
     '/': 'agents', '/agents': 'agents', '/focus': 'focus',
-    '/brief': 'feed', '/feed': 'feed', '/goals': 'goals', '/health': 'health',
+    '/brief': 'feed', '/feed': 'feed', '/goals': 'goals', '/ideas': 'ideas', '/health': 'health',
   };
-  var TITLES = { agents: 'Agents', focus: 'Focus', goals: 'Goals', health: 'Health', feed: 'Feed' };
+  var TITLES = { agents: 'Agents', focus: 'Focus', goals: 'Goals', ideas: 'Ideas', health: 'Health', feed: 'Feed' };
   var FALLBACK_POLL_MS = 30000;
   var STATE_TIMEOUT_MS = 5000;
   var BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
@@ -82,6 +82,9 @@
     openBrief: function (date, from) {
       if (overlay) overlay.open(date, from);
     },
+    openQuickChat: function (from) {
+      if (quickChat) quickChat.open(from);
+    },
     // What Hunter is looking at, for quick chat's context line.
     context: function () { return viewContext(); },
   };
@@ -89,6 +92,7 @@
   var settings = window.DashboardSettings ? window.DashboardSettings.create(shellApi) : null;
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
+  var ideas = window.DashboardIdeas ? window.DashboardIdeas.create(shellApi) : null;
   var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
   var notifications = window.DashboardNotifications ? window.DashboardNotifications.create(shellApi) : null;
   // The pane over every view (quick-chat.js), with its own thread view.
@@ -124,6 +128,7 @@
     if (current === 'health') return jobs ? jobs.context() : { view: 'health' };
     if (current === 'agents') return agents ? agents.context() : { view: 'agents' };
     if (current === 'feed') return feed ? feed.context() : { view: 'feed' };
+    if (current === 'ideas') return ideas ? ideas.context() : { view: 'ideas' };
     return current ? { view: current } : null;
   }
 
@@ -264,6 +269,7 @@
     if (settings) settings.update(state, keys);
     if (agents) agents.update(state, keys);
     if (goals) goals.update(state, keys);
+    if (ideas) ideas.update(state, keys);
     if (notifications) notifications.update(state, keys);
     if (quickChat) quickChat.update(state, keys);
     if (overlay) overlay.update(state, keys);
@@ -441,6 +447,10 @@
       if (view === 'feed') feed.show();
       else feed.hide();
     }
+    if (ideas) {
+      if (view === 'ideas') ideas.show();
+      else ideas.hide();
+    }
     if (quickChat && changed) quickChat.viewChanged();
     render(false);
     fetchState();
@@ -491,6 +501,7 @@
       if (agents) agents.hide();
       if (goals) goals.hide();
       if (feed) feed.hide();
+      if (ideas) ideas.hide();
       if (quickChat) quickChat.visibility(true);
     } else {
       connect();
@@ -499,6 +510,7 @@
       if (agents && current === 'agents') agents.show();
       if (goals && current === 'goals') goals.show();
       if (feed && current === 'feed') feed.show();
+      if (ideas && current === 'ideas') ideas.show();
       if (quickChat) quickChat.visibility(false);
     }
   });

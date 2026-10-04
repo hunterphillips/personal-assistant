@@ -11,6 +11,7 @@ test('parseContext keeps a known view with a label and detail, trims them, and d
   });
   assert.deepEqual(parseContext({ view: 'focus' }), { view: 'focus' });
   assert.deepEqual(parseContext({ view: 'goals', label: '  ', detail: null }), { view: 'goals' });
+  assert.deepEqual(parseContext({ view: 'ideas', label: 'Fixture idea' }), { view: 'ideas', label: 'Fixture idea' });
   assert.deepEqual(parseContext({ view: 'feed', label: 'x'.repeat(LABEL_MAX), detail: 'y'.repeat(DETAIL_MAX) }).view, 'feed');
 });
 
@@ -26,6 +27,7 @@ test('parseContext refuses an unknown view, another key, a non-string, or text o
 test('the line names the view and the label; the prompt puts the context before the text', () => {
   assert.equal(contextLine({ view: 'health', label: 'Nightly sync' }), 'Sent from Health: Nightly sync');
   assert.equal(contextLine({ view: 'focus' }), 'Sent from Focus.');
+  assert.equal(contextLine({ view: 'ideas', label: 'Fixture idea' }), 'Sent from Ideas: Fixture idea');
   assert.equal(
     contextPrompt({ view: 'health', label: 'Nightly sync', detail: 'Outcome: Failed' }, 'Can you find a fix?'),
     'Hunter sent this from the Health view, looking at: Nightly sync\nOutcome: Failed\n\nCan you find a fix?',

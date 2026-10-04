@@ -59,6 +59,8 @@ import { createFeedInstructions } from '../../lib/feed-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
+import { createIdeas } from '../../lib/ideas.mjs';
+import { createInstructions } from '../../lib/instructions.mjs';
 import { RuntimeError } from '../../lib/runtime/adapter.mjs';
 import { createNotices } from '../../lib/notices.mjs';
 import { NOTIFICATIONS_FILE, createNotifications } from '../../lib/notifications.mjs';
@@ -106,6 +108,9 @@ export { focusSourceAvailable };
 //              copied into a temporary feed directory. It adds nothing to
 //              `agents`; a test that discusses an item adds the WATCH persona
 //              itself. `feedDir` is the copy's path.
+//   ideas      a directory of Ideas run files, marks, and criteria copied
+//              into the temporary directory. `ideasDir`, `ideasMarksFile`,
+//              and `ideasInstructionsFile` name the copy.
 //   instructions  a criteria file (such as
 //              test/fixtures/feed-instructions/relevance.md) copied into the
 //              temporary directory as DASHBOARD_FEED_INSTRUCTIONS.
@@ -139,7 +144,7 @@ export { focusSourceAvailable };
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, jobs: jobsSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
-  vault = null, feed = null, instructions = null, briefInstructions = null, settings: settingsSeed = null, delegationWaitMs = null,
+  vault = null, feed = null, ideas: ideasFixture = null, instructions = null, briefInstructions = null, settings: settingsSeed = null, delegationWaitMs = null,
   routines: routineSeed = null, notifications: notificationSeed = null,
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
@@ -166,6 +171,10 @@ export async function startHub({
     if (vaultDir) agents = [...agents, { ...SECOND_BRAIN, cwd: vaultDir }];
     const feedDir = path.join(root, feed ? 'feed' : 'feed-missing');
     if (feed) await cp(feed, feedDir, { recursive: true });
+    const ideasDir = path.join(root, ideasFixture ? 'ideas' : 'ideas-missing');
+    if (ideasFixture) await cp(ideasFixture, ideasDir, { recursive: true });
+    const ideasMarksFile = path.join(ideasDir, 'marks.json');
+    const ideasInstructionsFile = path.join(ideasDir, 'criteria.md');
     const instructionsFile = path.join(root, instructions ? 'relevance.md' : 'relevance-missing.md');
     if (instructions) await cp(instructions, instructionsFile);
     const briefInstructionsFile = path.join(root, briefInstructions ? 'curator.md' : 'curator-missing.md');
@@ -287,12 +296,20 @@ export async function startHub({
     const goals = createGoals({ registry, limits: config.limits });
     const feedReader = createFeed({ dir: feedDir, limits: config.limits });
     const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits });
+    const ideas = createIdeas({
+      dir: ideasDir, marksFile: ideasMarksFile, limits: config.limits, zone: config.timeZone, now: clock.now,
+    });
+    const ideasInstructions = createInstructions({
+      file: ideasInstructionsFile, path: 'ideas/criteria.md', maxBytes: config.limits.ideasFileBytes,
+      label: 'Ideas', event: 'ideas_instructions_error',
+    });
     const briefInstructionsReader = createBriefInstructions({ file: config.briefInstructionsPath, limits: config.limits });
     const notices = createNotices({
       briefsDir, threadsDir, hub, target: () => settings.current().settings.brief.agent, limits: config.limits,
     });
     const newHandler = () => createApp({
       config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, feedInstructions,
+      ideas, ideasInstructions,
       briefInstructions: briefInstructionsReader, notices, settings, registry, routines, scheduler, notifications, log: () => {},
     });
     let handler = newHandler();
@@ -314,6 +331,9 @@ export async function startHub({
       briefsDir,
       vaultDir,
       feedDir,
+      ideasDir,
+      ideasMarksFile,
+      ideasInstructionsFile,
       instructionsFile,
       briefInstructionsFile,
       focus,

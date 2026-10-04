@@ -7,7 +7,8 @@ append-only.
 ## Files
 
 `items/<date>-<producer>.json` is one producer run. The date is a calendar
-date and the producer is an agent id.
+date. The producer in the file name is an agent id, or `manual` for Hunter's
+own ideas.
 
 ```json
 { "producer": "myos", "date": "2026-10-04", "generated_at": "2026-10-04T09:00:00-05:00",

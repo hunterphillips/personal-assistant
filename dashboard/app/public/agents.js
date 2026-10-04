@@ -898,7 +898,7 @@
   }
 
   // The view names a context line uses, by the send route's `view`.
-  var CONTEXT_VIEWS = { agents: 'Agents', feed: 'Feed', brief: 'Brief', focus: 'Focus', goals: 'Goals', health: 'Health' };
+  var CONTEXT_VIEWS = { agents: 'Agents', feed: 'Feed', brief: 'Brief', focus: 'Focus', goals: 'Goals', ideas: 'Ideas', health: 'Health' };
 
   // "Sent from Health: Nightly sync", or "Sent from Focus." with no label.
   function contextSummary(entry) {

@@ -674,13 +674,13 @@ test('with no agents, Home says so, and Health refreshes once when opened', asyn
   await expect.poll(() => hub.jobs.calls).toBe(1);
 });
 
-test('the rail holds five links without scrolling, and /brief and /reading land on the Feed', async ({ page, hub }) => {
+test('the rail holds six links without scrolling, and /brief and /reading land on the Feed', async ({ page, hub }) => {
   await page.goto(`${hub.origin}/goals`);
   await expectView(page, 'goals', 'Goals');
   await expect(page.locator('#app-header-title')).toHaveText('Goals');
   const links = page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link');
-  await expect(links).toHaveCount(5);
-  for (const [i, name] of ['Home', 'Feed', 'Focus', 'Goals', 'Health'].entries()) {
+  await expect(links).toHaveCount(6);
+  for (const [i, name] of ['Home', 'Feed', 'Focus', 'Goals', 'Ideas', 'Health'].entries()) {
     await expect(links.nth(i)).toHaveAccessibleName(name);
   }
   const onPhone = test.info().project.name === 'mobile-webkit';
@@ -693,7 +693,7 @@ test('the rail holds five links without scrolling, and /brief and /reading land 
     expect(labelBox.width).toBeLessThanOrEqual(1);
     expect(labelBox.height).toBeLessThanOrEqual(1);
   }
-  // The phone rail is a fixed bar along the bottom; all five links fit without scrolling.
+  // The phone rail is a fixed bar along the bottom; all six links fit without scrolling.
   if (onPhone) {
     const navBox = await page.locator('.nav').boundingBox();
     const viewport = page.viewportSize();
