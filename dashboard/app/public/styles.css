@@ -311,10 +311,66 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   padding: 10px 12px 10px 16px;
   border-bottom: 1px solid var(--line);
 }
-.quick-chat-agent {
+/* The picker: a button naming the agent, which gives way to a search
+   field over the Claude agents; the list drops below it, its rows the @
+   picker's (.mention-option). */
+.quick-chat-picker {
+  position: relative;
   flex: 1;
   min-width: 0;
+}
+.quick-chat-agent,
+.quick-chat-search {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+.quick-chat-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.quick-chat-agent:hover { border-color: var(--rule); }
+.quick-chat-agent svg { flex: none; color: var(--muted); }
+.quick-chat-agent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quick-chat-agent[hidden],
+.quick-chat-search[hidden] { display: none; }
+.quick-chat-agent-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 3;
+  max-height: min(320px, 60vh);
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 8px 24px var(--shadow-pop);
+}
+.quick-chat-agent-list {
+  display: flex;
+  flex-direction: column;
+}
+.quick-chat-agent-none {
+  margin: 0;
+  padding: 10px;
+  color: var(--muted);
 }
 .quick-chat-empty {
   margin: 0;

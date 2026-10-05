@@ -52,6 +52,9 @@ function hubOptions(extra = {}) {
 
 const pane = (page) => page.locator('#quick-chat');
 const picker = (page) => page.locator('#quick-chat-agent');
+const search = (page) => page.locator('#quick-chat-agent-search');
+const options = (page) => page.locator('#quick-chat-agent-list [role="option"]');
+const optionNames = (page) => page.locator('#quick-chat-agent-list [role="option"] .mention-option-name');
 const paneMessages = (page) => page.locator('#quick-chat-messages .thread-message');
 const paneInput = (page) => page.locator('#quick-chat-input');
 const phone = (page) => page.viewportSize().width < 720;
@@ -81,8 +84,12 @@ test.describe('quick chat', () => {
       await page.goto(hub.origin + route);
       await expectView(page, view, title);
       await openPane(page);
-      await expect(picker(page)).toHaveValue('myos');
-      expect(await picker(page).locator('option').allTextContents()).toEqual(['Assistant', 'Myos', 'CFO']);
+      await expect(picker(page)).toHaveText('Myos');
+      await picker(page).click();
+      await expect(optionNames(page)).toHaveText(['Assistant', 'Myos', 'CFO']);
+      await page.keyboard.press('Escape');
+      await expect(search(page)).toBeHidden();
+      await expect(picker(page)).toBeFocused();
       await expect(paneMessages(page)).toHaveCount(2);
       await expect(page.locator(`#view-${view}`)).toBeVisible();
       if (view === 'goals') {
@@ -134,7 +141,10 @@ test.describe('quick chat', () => {
   test('the picker switches the thread, and the choice lasts for the page session', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/health`);
     await openPane(page);
-    await picker(page).selectOption('cfo');
+    await picker(page).click();
+    await options(page).filter({ hasText: 'CFO' }).click();
+    await expect(search(page)).toBeHidden();
+    await expect(picker(page)).toHaveText('CFO');
     await expect(page.locator('#quick-chat-messages .thread-line')).toHaveText('No messages yet.');
     await expect(page.locator('#quick-chat-input-label')).toHaveText('Message CFO');
     await send(page, 'Hello CFO.');
@@ -143,11 +153,71 @@ test.describe('quick chat', () => {
 
     await page.keyboard.press('Escape');
     await openPane(page);
-    await expect(picker(page)).toHaveValue('cfo');
+    await expect(picker(page)).toHaveText('CFO');
     await page.reload();
     await openPane(page);
-    await expect(picker(page)).toHaveValue('cfo');
+    await expect(picker(page)).toHaveText('CFO');
     await expect(page.locator('#quick-chat-input-label')).toHaveText('Message CFO');
+  });
+
+  test('the picker is a typeahead over name and role: Up, Down, and Enter choose, Escape closes, and an empty result says so', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/goals`);
+    await openPane(page);
+    await expect(picker(page)).toHaveText('Myos');
+    await expect(picker(page)).toHaveAttribute('aria-expanded', 'false');
+    await picker(page).click();
+    await expect(search(page)).toBeFocused();
+    await expect(search(page)).toHaveValue('');
+    await expect(search(page)).toHaveAttribute('aria-expanded', 'true');
+    // Each row is the name and the role; the current agent is active.
+    await expect(options(page)).toHaveText([/^Assistant$/, /^Myos\s*Helper$/, /^CFO\s*Money$/]);
+    await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+    await expect(search(page)).toHaveAttribute('aria-activedescendant', await options(page).nth(1).getAttribute('id'));
+
+    // A role matches as a name does, whatever the case.
+    await search(page).fill('mon');
+    await expect(optionNames(page)).toHaveText(['CFO']);
+    await search(page).fill('S');
+    await expect(optionNames(page)).toHaveText(['Assistant', 'Myos']);
+    await expect(options(page).first()).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowDown');
+    await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowDown');
+    await expect(options(page).first()).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowUp');
+    await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+
+    await search(page).fill('nobody');
+    await expect(options(page)).toHaveCount(0);
+    await expect(page.locator('#quick-chat-agent-none')).toHaveText('No agent matches.');
+    await page.keyboard.press('Enter');
+    await expect(search(page)).toBeVisible();
+
+    // Escape closes the search, not the pane, and the choice stands.
+    await page.keyboard.press('Escape');
+    await expect(search(page)).toBeHidden();
+    await expect(pane(page)).toBeVisible();
+    await expect(picker(page)).toBeFocused();
+    await expect(picker(page)).toHaveText('Myos');
+    await expect(paneMessages(page)).toHaveCount(2);
+
+    // Enter chooses the active row, loads its thread, and the composer takes the focus.
+    await page.keyboard.press('Enter');
+    await expect(search(page)).toBeFocused();
+    await page.keyboard.type('mone');
+    await page.keyboard.press('Enter');
+    await expect(search(page)).toBeHidden();
+    await expect(picker(page)).toHaveText('CFO');
+    await expect(page.locator('#quick-chat-input-label')).toHaveText('Message CFO');
+    await expect(paneInput(page)).toBeFocused();
+    expect(await page.evaluate(() => window.sessionStorage.getItem('dashboard.quickChatAgent'))).toBe('cfo');
+
+    // A second Escape, from the composer, closes the pane.
+    await page.keyboard.press('Escape');
+    await expect(pane(page)).toBeHidden();
+    await openPane(page);
+    await expect(picker(page)).toHaveText('CFO');
+    expect(hub.personas.sent).toEqual([]);
   });
 
   test('the first message after opening on Health carries the selected job; the next carries nothing; a new view sends its name', async ({ page, hub }) => {

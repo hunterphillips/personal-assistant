@@ -1,8 +1,10 @@
 // Quick chat: the header's Quick chat entry (and, on a phone, the menu's)
 // opens a pane on the right of the current view, over it on a desk and
 // across the width on a phone, without leaving the view. At its top a
-// picker lists every Claude agent (registry personas whose provider is
-// claude, the set Settings offers); below it is a thread view
+// button names the agent; activating it opens a typeahead over every Claude
+// agent (registry personas whose provider is claude, the set Settings
+// offers), filtered by name and role, with the keys and roles of the
+// composer's @ picker; below it is a thread view
 // (thread-view.js) bound to the chosen agent, the same column the Agents
 // view shows, so a message sent from either lands in the one thread. The
 // default is the agent Settings names under "Quick chat talks to"; a choice
@@ -69,12 +71,30 @@
     });
   }
 
+  // The agents whose name or role holds the query, ignoring case, in the
+  // order given; an empty query keeps them all.
+  function matchAgents(agents, query) {
+    var needle = String(query || '').trim().toLowerCase();
+    if (!needle) return agents.slice();
+    return agents.filter(function (agent) {
+      return [agent.name, agent.role].some(function (text) {
+        return typeof text === 'string' && text.toLowerCase().indexOf(needle) !== -1;
+      });
+    });
+  }
+
   function create(shellApi) {
     var toggle = document.getElementById('quick-chat-toggle');
     var menuEntry = document.getElementById('quick-chat-menu-entry');
     var menuToggle = document.getElementById('app-menu-toggle');
     var pane = document.getElementById('quick-chat');
+    var pickerBox = document.getElementById('quick-chat-picker');
     var picker = document.getElementById('quick-chat-agent');
+    var pickerName = document.getElementById('quick-chat-agent-name');
+    var search = document.getElementById('quick-chat-agent-search');
+    var searchMenu = document.getElementById('quick-chat-agent-menu');
+    var searchList = document.getElementById('quick-chat-agent-list');
+    var searchNone = document.getElementById('quick-chat-agent-none');
     var closeButton = document.getElementById('quick-chat-close');
     var empty = document.getElementById('quick-chat-empty');
     var mount = document.getElementById('quick-chat-thread');
@@ -85,7 +105,7 @@
     var state = null;
     var choice = readChoice(); // the picker's last choice, or null
     var shownId = null; // the agent the thread view is bound to
-    var pickerKey = null; // what the picker was last built from
+    var finding = null; // the open search: { matches, index }, or null
     var contextPending = false; // the next send carries the view's context
     var sentView = null; // the view the last context named
     var pendingView = null; // the view the context on the send in flight names
@@ -132,26 +152,99 @@
       return agents.length > 0 ? agents[0].id : null;
     }
 
-    function renderPicker(id) {
+    function agentName(id) {
       var agents = claudeAgents(state);
-      var key = JSON.stringify([id, agents.map(function (agent) { return [agent.id, agent.name]; })]);
-      if (key === pickerKey) return;
-      pickerKey = key;
-      picker.textContent = '';
-      agents.forEach(function (agent) {
-        var option = document.createElement('option');
-        option.value = agent.id;
-        option.textContent = agent.name;
-        picker.appendChild(option);
+      for (var i = 0; i < agents.length; i += 1) if (agents[i].id === id) return agents[i].name;
+      return '';
+    }
+
+    // The search lists the agents matching what is typed; the active row
+    // stays on the agent it was on while that agent still matches.
+    function filterSearch(keepId) {
+      var matches = matchAgents(claudeAgents(state), search.value);
+      var index = 0;
+      for (var i = 0; i < matches.length; i += 1) if (matches[i].id === keepId) index = i;
+      finding = { matches: matches, index: index };
+      renderSearch();
+    }
+
+    function renderSearch() {
+      var roleChip = window.DashboardAgents && window.DashboardAgents.roleChip;
+      searchList.textContent = '';
+      finding.matches.forEach(function (agent, i) {
+        var option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'mention-option';
+        option.id = 'quick-chat-agent-' + agent.id;
+        option.tabIndex = -1;
+        option.setAttribute('role', 'option');
+        option.setAttribute('data-agent', agent.id);
+        option.setAttribute('aria-selected', i === finding.index ? 'true' : 'false');
+        var name = document.createElement('span');
+        name.className = 'mention-option-name';
+        name.textContent = agent.name;
+        option.appendChild(name);
+        if (roleChip ? roleChip(agent) : !!agent.role) {
+          var role = document.createElement('span');
+          role.className = 'role-chip';
+          role.textContent = agent.role;
+          option.appendChild(role);
+        }
+        searchList.appendChild(option);
       });
-      picker.value = id || '';
+      var active = finding.matches[finding.index];
+      searchNone.hidden = !!active;
+      if (active) {
+        search.setAttribute('aria-activedescendant', 'quick-chat-agent-' + active.id);
+        var row = document.getElementById('quick-chat-agent-' + active.id);
+        if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+      } else {
+        search.removeAttribute('aria-activedescendant');
+      }
+    }
+
+    function openSearch() {
+      search.value = '';
+      picker.hidden = true;
+      search.hidden = false;
+      searchMenu.hidden = false;
+      picker.setAttribute('aria-expanded', 'true');
+      search.setAttribute('aria-expanded', 'true');
+      filterSearch(shownId);
+      search.focus();
+    }
+
+    // Closing hands the focus back to the button when the keyboard asked
+    // (Escape); a choice sends it to the composer instead.
+    function closeSearch(restore) {
+      if (!finding) return;
+      finding = null;
+      searchMenu.hidden = true;
+      searchList.textContent = '';
+      search.hidden = true;
+      search.setAttribute('aria-expanded', 'false');
+      search.removeAttribute('aria-activedescendant');
+      picker.hidden = false;
+      picker.setAttribute('aria-expanded', 'false');
+      if (restore) picker.focus();
+    }
+
+    function choose(agent) {
+      if (!agent) return;
+      closeSearch(false);
+      choice = agent.id;
+      writeChoice(choice);
+      render();
+      thread.focusInput();
     }
 
     function render() {
       if (!state) return;
       var id = agentId();
-      renderPicker(id);
-      picker.hidden = !id;
+      pickerName.textContent = agentName(id);
+      if (finding) filterSearch(finding.matches[finding.index] ? finding.matches[finding.index].id : id);
+      if (!id) closeSearch(false);
+      pickerBox.hidden = !id;
       empty.textContent = id ? '' : NO_AGENT;
       empty.hidden = !!id;
       mount.hidden = !id;
@@ -180,6 +273,7 @@
 
     function close(restore) {
       if (!isOpen()) return;
+      closeSearch(false);
       pane.hidden = true;
       toggle.setAttribute('aria-expanded', 'false');
       thread.hide();
@@ -208,14 +302,40 @@
     }
     window.addEventListener('resize', function () { if (isOpen()) place(); });
     closeButton.addEventListener('click', function () { close(true); });
-    picker.addEventListener('change', function () {
-      choice = picker.value;
-      writeChoice(choice);
-      render();
-      thread.focusInput();
+    picker.addEventListener('click', openSearch);
+    search.addEventListener('input', function () {
+      var active = finding && finding.matches[finding.index];
+      filterSearch(active ? active.id : null);
     });
-    // Escape closes the pane unless something inside it (the model or @
-    // picker) or another popover took the key first.
+    search.addEventListener('keydown', function (event) {
+      if (event.isComposing || !finding) return;
+      var count = finding.matches.length;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (count === 0) return;
+        finding.index = (finding.index + (event.key === 'ArrowDown' ? 1 : -1) + count) % count;
+        renderSearch();
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        choose(finding.matches[finding.index]);
+      } else if (event.key === 'Escape') {
+        // Taken here, so the pane stays open (the listener below).
+        event.preventDefault();
+        closeSearch(true);
+      }
+    });
+    // A press on a row keeps the focus in the field (mousedown below), so
+    // a blur means the keyboard or a tap went somewhere else.
+    search.addEventListener('blur', function () { closeSearch(false); });
+    searchMenu.addEventListener('mousedown', function (event) { event.preventDefault(); });
+    searchList.addEventListener('click', function (event) {
+      var option = event.target.closest('[role="option"]');
+      if (!option || !finding) return;
+      var id = option.getAttribute('data-agent');
+      choose(finding.matches.filter(function (agent) { return agent.id === id; })[0]);
+    });
+    // Escape closes the pane unless something inside it (the model, @, or
+    // agent picker) or another popover took the key first.
     document.addEventListener('keydown', function (event) {
       if (event.key !== 'Escape' || event.defaultPrevented || !isOpen()) return;
       event.preventDefault();
@@ -242,5 +362,5 @@
     };
   }
 
-  window.DashboardQuickChat = { create: create, claudeAgents: claudeAgents, fitContext: fitContext };
+  window.DashboardQuickChat = { create: create, claudeAgents: claudeAgents, matchAgents: matchAgents, fitContext: fitContext };
 }());
