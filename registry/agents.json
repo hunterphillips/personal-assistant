@@ -27,7 +27,7 @@
     },
     {
       "id": "focus",
-      "name": "Focus",
+      "name": "Focus Board",
       "role": "Attention",
       "description": "I curate the attention board: what deserves attention now, what aged out, and what he dismissed.",
       "group": "personal",
@@ -45,7 +45,7 @@
     },
     {
       "id": "second-brain",
-      "name": "Second brain",
+      "name": "Brainy",
       "role": "Memory",
       "description": "I hold what is true about Hunter and what he has decided: priorities, commitments, notes, and the log.",
       "group": "personal",
