@@ -213,3 +213,172 @@ test.describe('on a phone', () => {
     await expectShown(page);
   });
 });
+
+// The Now section, shown for a view with no panel of its own (Focus): the
+// agents waiting on Hunter, the open notifications, and today's brief, all
+// from the snapshot.
+test.describe('the Now panel', () => {
+  const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const now = (page) => page.locator('#panel [data-panel-for="now"]');
+  const group = (page, name) => now(page).locator(`[data-now-group="${name}"]`);
+  // Today as the browser's calendar day, and the date as the overlay titles it.
+  const today = (page) => page.evaluate(() => {
+    const day = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    return {
+      date: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`,
+      words: day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
+    };
+  });
+
+  async function openNow(page, hub) {
+    await page.goto(hub.origin + '/focus');
+    await expectView(page, 'focus', 'Focus');
+    if (phone(page)) await toggle(page).click();
+    await expect(now(page)).toBeVisible();
+  }
+
+  test.describe('with an agent waiting, an open notification, and today\'s brief', () => {
+    test.use({
+      hubOptions: {
+        agents: [ASSISTANT, CFO],
+        personas: {
+          cfo: {
+            state: 'waiting',
+            messages: [{ role: 'assistant', text: 'Which account should the transfer come from?', at: minutesAgo(5) }],
+          },
+        },
+        notifications: [
+          { id: 'n-agent', agent: 'cfo', text: 'The transfer needs an account.', link: 'agent:cfo', at: minutesAgo(30) },
+          { id: 'n-brief', agent: 'assistant', text: 'The brief landed.', link: 'brief:2026-10-03', at: minutesAgo(10) },
+          { id: 'n-done', agent: 'assistant', text: 'An acknowledged one.', at: minutesAgo(60), acknowledgedAt: minutesAgo(50) },
+        ],
+      },
+    });
+
+    test('Focus shows the three groups, each listing what is open, and other views their own panel', async ({ page, hub }) => {
+      await page.goto(hub.origin + '/');
+      await hub.writeBrief((await today(page)).date);
+      await openNow(page, hub);
+      const { words } = await today(page);
+      await expect(now(page).locator('.panel-heading')).toHaveText(['Waiting on you', 'Notifications', 'Brief']);
+
+      const waiting = group(page, 'agents').locator('.panel-row');
+      await expect(waiting).toHaveCount(1);
+      await expect(waiting.locator('.agent-row-dot-wait')).toHaveCount(1);
+      await expect(waiting.locator('.panel-row-name')).toHaveText('CFO');
+      await expect(waiting.locator('.now-row-detail')).toHaveText('Which account should the transfer come from?');
+
+      // Open ones only, newest first, each with when it came.
+      const notices = group(page, 'notifications').locator('.panel-row');
+      await expect(notices.locator('.panel-row-name')).toHaveText(['The brief landed.', 'The transfer needs an account.']);
+      await expect(notices.locator('.now-row-detail')).toHaveText(['10 minutes ago', '30 minutes ago']);
+
+      const brief = group(page, 'brief').locator('.panel-row');
+      await expect(brief.locator('.panel-row-name')).toHaveText(words);
+      await expect(now(page).locator('.now-empty')).toHaveCount(0);
+
+      // A view with its own panel shows that instead.
+      await nav(page, 'Home').click();
+      await expectView(page, 'agents', 'Agents');
+      if (phone(page)) await toggle(page).click();
+      await expect(page.locator('#agents-list')).toBeVisible();
+      await expect(now(page)).toBeHidden();
+    });
+
+    test('the waiting agent opens its thread, and leaves the list on the next state', async ({ page, hub }) => {
+      await openNow(page, hub);
+      await group(page, 'agents').locator('.panel-row').click();
+      await expect(page).toHaveURL(`${hub.origin}/?agent=cfo`);
+      await expectView(page, 'agents', 'Agents');
+      await expect(page.locator('#agent-name')).toHaveText('CFO');
+
+      await nav(page, 'Focus').click();
+      await expectView(page, 'focus', 'Focus');
+      if (phone(page)) await toggle(page).click();
+      await expect(group(page, 'agents').locator('.panel-row')).toHaveCount(1);
+      await hub.personas.adapter.interrupt(CFO);
+      await expect(group(page, 'agents').locator('.panel-row')).toHaveCount(0);
+      await expect(group(page, 'agents').locator('.now-empty')).toHaveText('No one is waiting on you.');
+    });
+
+    test('a notification opens its link, and acknowledging it removes its row', async ({ page, hub }) => {
+      await openNow(page, hub);
+      const row = (id) => now(page).locator(`[data-now-notification="${id}"]`);
+      await row('n-agent').click();
+      await expectView(page, 'agents', 'Agents');
+      await expect(page.locator('#agent-name')).toHaveText('CFO');
+
+      await page.goto(hub.origin + '/focus');
+      if (phone(page)) await toggle(page).click();
+      await hub.writeBrief('2026-10-03');
+      await row('n-brief').click();
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toBeHidden();
+
+      if (phone(page)) await toggle(page).click();
+      await expect(row('n-brief')).toBeVisible();
+      const answer = await page.evaluate(() => fetch('/api/notifications/n-brief/acknowledge', { method: 'POST' }).then((response) => response.status));
+      expect(answer).toBe(200);
+      await expect(row('n-brief')).toHaveCount(0);
+      await expect(row('n-agent')).toHaveCount(1);
+    });
+
+    test('today\'s brief opens in the overlay', async ({ page, hub }) => {
+      await page.goto(hub.origin + '/');
+      const { date } = await today(page);
+      await hub.writeBrief(date);
+      await openNow(page, hub);
+      await now(page).locator(`[data-now-brief="${date}"]`).click();
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+      await expect(page.locator('.brief-date')).toHaveText((await today(page)).words);
+      await expectView(page, 'focus', 'Focus');
+    });
+  });
+
+  test.describe('with nothing open and an older brief', () => {
+    test.use({
+      hubOptions: {
+        agents: [ASSISTANT],
+        notifications: [{ id: 'n-done', agent: 'assistant', text: 'An acknowledged one.', at: minutesAgo(60), acknowledgedAt: minutesAgo(50) }],
+      },
+    });
+
+    test('each empty group says so in a sentence', async ({ page, hub }) => {
+      await hub.writeBrief('2026-10-03');
+      await openNow(page, hub);
+      await expect(now(page).locator('.panel-heading')).toHaveText(['Waiting on you', 'Notifications', 'Brief']);
+      await expect(now(page).locator('.panel-row')).toHaveCount(0);
+      await expect(now(page).locator('.now-empty')).toHaveText([
+        'No one is waiting on you.', 'There are no notifications.', 'No brief today.',
+      ]);
+    });
+  });
+
+  test.describe('on a phone', () => {
+    test.use({
+      viewport: { width: 390, height: 844 },
+      hubOptions: {
+        agents: [ASSISTANT, CFO],
+        personas: { cfo: { state: 'waiting' } },
+        notifications: [{ id: 'n-agent', agent: 'cfo', text: 'The transfer needs an account.', link: 'agent:cfo', at: minutesAgo(30) }],
+      },
+    });
+
+    test('a choice closes the drawer', async ({ page, hub }) => {
+      await page.goto(hub.origin + '/');
+      const { date } = await today(page);
+      await hub.writeBrief(date);
+      for (const target of ['[data-now-agent="cfo"]', '[data-now-notification="n-agent"]', `[data-now-brief="${date}"]`]) {
+        await page.goto(hub.origin + '/focus');
+        await expectView(page, 'focus', 'Focus');
+        await toggle(page).click();
+        await expectShown(page);
+        await now(page).locator(target).click();
+        await expectCollapsed(page);
+      }
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+    });
+  });
+});

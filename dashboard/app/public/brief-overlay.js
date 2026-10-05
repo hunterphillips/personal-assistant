@@ -15,7 +15,8 @@
 // context() }. context() is what quick chat sends along while the overlay
 // is open: the brief's date and the item whose top edge is highest inside
 // the scrolling sheet, below its sticky bar (the section's label and the
-// item's text).
+// item's text). DashboardBriefOverlay.dayWords(date) is the date as the
+// overlay titles it, for the side panel's Now section.
 // open(null) shows the newest brief, open(date) that date's. The overlay
 // scrolls on its own, closes with its Close button or Escape, and returns
 // focus to what opened it; the page behind is inert while it is open. The
@@ -514,5 +515,5 @@
     };
   }
 
-  window.DashboardBriefOverlay = { create: create };
+  window.DashboardBriefOverlay = { create: create, dayWords: dayWords };
 }());

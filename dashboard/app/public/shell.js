@@ -12,8 +12,9 @@
 // brief's old page, shows the Feed with the brief's overlay open, and the
 // address becomes `/feed`. The overlay opens over any view from the header's
 // Brief entry and from links (shellApi.openBrief) and changes no address.
-// The side panel (panel.js) shows the open view's own section, and a view
-// change closes its drawer on a phone.
+// The side panel (panel.js) shows the open view's own section, or Now,
+// which it draws from every state; a view change closes its drawer on a
+// phone.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
 // `snapshot` replaces it, `delta` applies a patch when its revision is the
@@ -97,6 +98,7 @@
     panelChanged: function () { panelSection(); },
   };
   var panel = window.DashboardPanel || null;
+  if (panel) panel.attach(shellApi);
   var jobs = window.DashboardJobs ? window.DashboardJobs.create(shellApi) : null;
   var settings = window.DashboardSettings ? window.DashboardSettings.create(shellApi) : null;
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
@@ -282,6 +284,7 @@
     if (notifications) notifications.update(state, keys);
     if (quickChat) quickChat.update(state, keys);
     if (overlay) overlay.update(state, keys);
+    if (panel) panel.update(state);
   }
 
   function isSnapshot(body) {

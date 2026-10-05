@@ -506,8 +506,11 @@ brief's overlay open (the address becomes `/feed`), `/focus` Focus,
 rail of six icon links, Home, Feed, Focus, Goals, Ideas, and Health; a
 path the shell does not know lands on Agents. Between the rail and every
 view sits a side panel (`aside#panel`) holding one section per view: the
-Agents view's is the agents list, the others stay empty for now, and Focus
-shows the `now` section. Its toggle, "Hide side panel" or "Show side
+view's own list (agents with search, Feed sources, Goals areas, Health
+jobs, Ideas weeks) or Now (agents waiting, open notifications, today's
+brief), which a view without its own, Focus, shows. `public/panel.js`
+draws Now from every state and opens a row's target through the shell.
+Its toggle, "Hide side panel" or "Show side
 panel", comes first in the header, before the view's title, on every view.
 From 720px the toggle collapses the panel on every view and the choice is
 kept in `localStorage` under `dashboard.panelHidden` (an old
