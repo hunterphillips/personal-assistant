@@ -271,7 +271,9 @@
 // waits on an answer. When it fires the hub calls adapter.interrupt(agent)
 // and logs { event: 'persona_turn_timeout', agentId }; once the interrupt
 // resolves, lastError is 'turn_timeout' so the snapshot says why the turn
-// stopped. The timer is cleared when the persona goes idle or error.
+// stopped, unless the turn was a routine's run (the interrupt resolves its
+// { text, error, aborted }), whose end is the run's and not the thread's.
+// The timer is cleared when the persona goes idle or error.
 
 import os from 'node:os';
 
@@ -445,8 +447,9 @@ export function createHub({
     entry.timer = setTimeout(() => {
       entry.timer = null;
       log({ event: 'persona_turn_timeout', agentId: entry.agent.id });
-      entry.adapter.interrupt(entry.agent).then(() => {
+      entry.adapter.interrupt(entry.agent).then((ended) => {
         if (closed || personas.get(entry.agent.id) !== entry) return;
+        if (ended && typeof ended === 'object') return;
         entry.lastError = 'turn_timeout';
         commitAgents();
       }, (error) => {

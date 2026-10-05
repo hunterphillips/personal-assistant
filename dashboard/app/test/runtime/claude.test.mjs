@@ -989,6 +989,7 @@ test('the tools hook adds mcpServers and allowedTools by name and cannot change 
   assert.equal(context.from, 'assistant');
   assert.deepEqual(context.chain, ['assistant']);
   assert.deepEqual(context.mentions, ['brain']);
+  assert.equal(context.routine, null);
   assert.match(context.turnId, /^[0-9a-f-]{36}$/);
 
   const { options, prompt } = query.calls[0];
@@ -1083,31 +1084,40 @@ test('the hook result is committed once init is seen and rolled back when the tu
   assert.ok(noisy.logs.some((entry) => entry.event === 'persona_tools_error' && entry.method === 'commit'));
 });
 
-test('a routine send records the routine on the user message and never a sender, runs with the options of a plain send at the same level, and names the routine on init', async (t) => {
+test('a routine send runs detached: a fresh session, nothing in the thread, and its reply in the resolution', async (t) => {
   const { adapter, store, events, query, logs } = await setup(t);
   const routine = { id: 'daily-drift', name: 'Daily drift' };
-  await adapter.send(AGENT, 'Compute drift.', { permission: 'auto', model: 'opus', effort: 'high', routine, prompt: 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.' });
-  await adapter.send(AGENT, 'Compute drift.', { permission: 'auto', model: 'opus', effort: 'high' });
-  const [first, second] = events.filter((event) => event.type === 'message' && event.role === 'user');
-  assert.deepEqual(first.routine, routine);
-  assert.equal('from' in first, false);
-  assert.equal('routine' in second, false);
-  const cached = await store.read('cfo');
-  assert.deepEqual(cached[0].routine, routine);
-  assert.equal('routine' in cached[2], false);
-  assert.equal(query.calls[0].prompt, 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.');
-  // The same options, the routine's turn and the plain one, function by function (the second resumes the session the first began).
-  const shape = ({ resume, ...options }) => Object.fromEntries(Object.entries(options).map(([key, value]) => [key, typeof value === 'function' ? 'function' : value]));
+  const prompt = 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.';
+  const ended = await adapter.send(AGENT, 'Compute drift.', { permission: 'auto', model: 'opus', effort: 'high', routine, prompt });
+  assert.deepEqual(ended, { text: 'Hello from the persona.', error: null, aborted: false });
+  assert.equal('resume' in query.calls[0].options, false);
+  assert.equal(query.calls[0].options.cwd, AGENT.cwd);
+  assert.equal(query.calls[0].prompt, prompt);
+  assert.equal(await store.readPointer('cfo'), null);
+  assert.deepEqual(await store.read('cfo'), []);
+  assert.equal(events.some((event) => event.type === 'message'), false);
+
+  // The thread is still fresh: a plain send starts it and adopts its session.
+  assert.equal(await adapter.send(AGENT, 'Compute drift.', { permission: 'auto', model: 'opus', effort: 'high' }), undefined);
+  assert.equal('resume' in query.calls[1].options, false);
+  assert.equal(adapter.state('cfo').sessionId, 'session-1');
+
+  // A run after it still starts fresh and leaves the thread's pointer alone.
+  await adapter.send(AGENT, 'Compute drift.', { permission: 'auto', model: 'opus', effort: 'high', routine, prompt });
+  assert.equal('resume' in query.calls[2].options, false);
+  assert.equal((await store.readPointer('cfo')).sessionId, 'session-1');
+  // The same options otherwise, function by function.
+  const shape = ({ resume, cwd, ...options }) => Object.fromEntries(Object.entries(options).map(([key, value]) => [key, typeof value === 'function' ? 'function' : value]));
   assert.deepEqual(shape(query.calls[0].options), shape(query.calls[1].options));
-  assert.deepEqual([query.calls[0].options.resume, query.calls[1].options.resume], [undefined, 'session-1']);
   assert.equal(query.calls[0].options.permissionMode, 'auto');
-  assert.deepEqual(logs.filter((e) => e.event === 'persona_init').map((e) => e.routine), ['daily-drift', null]);
+  assert.deepEqual(logs.filter((e) => e.event === 'persona_init').map((e) => e.routine), ['daily-drift', null, 'daily-drift']);
 
   // A sender given beside a routine is dropped: the turn is the routine's.
-  await adapter.send(AGENT, 'Again.', { routine, from: 'assistant' });
-  const third = events.filter((event) => event.type === 'message' && event.role === 'user')[2];
-  assert.deepEqual(third.routine, routine);
-  assert.equal('from' in third, false);
+  const seen = [];
+  const hooked = await setup(t, { turnTools: (agent, context) => { seen.push(context); return null; } });
+  await hooked.adapter.send(AGENT, 'Again.', { routine, from: 'assistant' });
+  assert.equal(seen[0].from, null);
+  assert.deepEqual(seen[0].routine, routine);
   // A routine that is not { id, name } is refused before any turn starts.
   for (const bad of ['daily-drift', { id: 'x' }, { id: '', name: 'x' }, { id: 'x', name: 7 }, []]) {
     let rejected = null;
@@ -1118,6 +1128,56 @@ test('a routine send records the routine on the user message and never a sender,
     assert.equal(rejected?.code, 'invalid_routine', JSON.stringify(bad));
   }
   assert.equal(query.calls.length, 3);
+});
+
+test('a routine send ignores thread context', async (t) => {
+  const { adapter, query } = await setup(t);
+  await adapter.send(AGENT, 'Compute drift.', {
+    routine: { id: 'daily-drift', name: 'Daily drift' },
+    context: { view: 'focus', label: 'Focus', detail: 'Today' },
+  });
+  assert.equal(query.calls[0].prompt, 'Compute drift.');
+});
+
+test('a routine send runs in the registry folder of the moment, not the pinned cwd', async (t) => {
+  const { adapter, query } = await setup(t);
+  await adapter.start(AGENT);
+  const moved = { ...AGENT, cwd: '/invented/moved' };
+  await adapter.send(moved, 'Compute drift.', { routine: { id: 'daily-drift', name: 'Daily drift' } });
+  assert.equal(query.calls[0].options.cwd, '/invented/moved');
+  await adapter.send(moved, 'How is cash?');
+  assert.equal(query.calls[1].options.cwd, '/invented/cfo');
+});
+
+test('a routine send that fails before init resolves with the run\'s error and leaves the thread idle', async (t) => {
+  const query = fakeQuery(async function* () {
+    throw new Error('Claude Code process exited with code 127');
+  });
+  const { adapter, events, logs } = await setup(t, { query });
+  const ended = await adapter.send(AGENT, 'Compute drift.', { routine: { id: 'daily-drift', name: 'Daily drift' } });
+  assert.deepEqual(ended, { text: '', error: 'The run could not start.', aborted: false });
+  assert.equal(adapter.state('cfo').state, 'idle');
+  assert.equal(adapter.state('cfo').lastError, null);
+  assert.equal(events.some((event) => event.type === 'error'), false);
+  const logged = logs.find((entry) => entry.event === 'persona_turn_error');
+  assert.equal(logged.routine, 'daily-drift');
+  assert.equal(logged.error, 'The run could not start.');
+});
+
+test('interrupt during a routine send resolves aborted', async (t) => {
+  const query = fakeQuery(async function* ({ options }) {
+    yield init();
+    await untilAborted(options);
+  });
+  const { adapter, events } = await setup(t, { query });
+  const turn = adapter.send(AGENT, 'Compute drift.', { routine: { id: 'daily-drift', name: 'Daily drift' } });
+  await waitFor(events, (event) => event.type === 'thread.state' && event.state === 'busy');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const interrupted = await adapter.interrupt(AGENT);
+  const ended = await turn;
+  assert.equal(ended.aborted, true);
+  assert.deepEqual(interrupted, ended, 'interrupt resolves what the run resolves');
+  assert.equal(adapter.state('cfo').state, 'idle');
 });
 
 test('the preset carries the agent\'s identity from its registry entry, built on every turn', async (t) => {

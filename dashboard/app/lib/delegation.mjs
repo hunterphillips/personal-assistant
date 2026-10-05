@@ -19,7 +19,7 @@
 //                    randomUUID, importSdk })
 // returns:
 //
-//   toolsFor(agent, { text, prompt, from, chain, mentions, turnId })
+//   toolsFor(agent, { text, prompt, from, chain, mentions, routine, turnId })
 //     -> Promise<{ mcpServers, allowedTools, prompt?, commit(), rollback() }>
 //     The turnTools hook. `mcpServers.agents` is the per-turn server (its
 //     handler closes over the sender and the chain), `allowedTools` names
@@ -34,7 +34,7 @@
 //     started. The tool's description lists every other agent that takes
 //     messages from the sender: `accepts` absent or null means everyone.
 //
-//   ask({ from, chain, to, message }) -> Promise<result>
+//   ask({ from, chain, to, message, quiet }) -> Promise<result>
 //     result is { status: 'replied', delegationId, reply }, { status:
 //     'pending', delegationId }, { status: 'busy', delegationId }, or
 //     { status: 'refused', reason }, with the sentence the tool answers
@@ -82,6 +82,14 @@
 //     entries for another session are dropped when it is read.
 //   takePending(agentId, sessionId) -> the same list, removed
 //   restorePending(agentId, entries) puts a taken list back
+//
+// A routine's run (scheduler.mjs) is a session of its own that leaves
+// nothing in its agent's thread, so its ask is quiet: toolsFor sees
+// `routine` in the hook's context, takes no pending replies (they belong to
+// the thread's next own turn), and passes `quiet` to ask, which posts no
+// line to the sender's thread and queues no late reply; its pending
+// sentence and the tool's description say a late reply does not reach the
+// run. The receiver's thread and the card relay are as for any ask.
 //
 // Lines in the sender's thread are system messages with kind 'delegation',
 // `state` (sent, busy, waiting, finished, failed, refused), `to`, `text`,
@@ -189,7 +197,7 @@ export function createDelegation({
 
   // Posts one line to the sender's thread. Resolves false when the store
   // refused it; the caller turns that into a sentence for the tool.
-  async function post(from, line) {
+  async function postLine(from, line) {
     try {
       await hub.notify(from, { role: 'system', kind: 'delegation', ...line });
       return true;
@@ -199,7 +207,7 @@ export function createDelegation({
     }
   }
 
-  async function refuse(from, to, reason) {
+  async function refuseWith(post, from, to, reason) {
     log({ event: 'delegation_refused', agentId: from, to, reason });
     const text = sentence('refused', { to, from, reason });
     const line = { state: 'refused', reason, to, text, summary: text };
@@ -208,7 +216,10 @@ export function createDelegation({
     return { status: 'refused', reason, text };
   }
 
-  async function ask({ from, chain = [], to, message }) {
+  async function ask({ from, chain = [], to, message, quiet = false }) {
+    // A run's ask posts nothing to the sender's thread.
+    const post = quiet ? async () => true : postLine;
+    const refuse = (sender, target, reason) => refuseWith(post, sender, target, reason);
     const hops = Array.isArray(chain) ? chain.filter((id) => typeof id === 'string' && id !== '') : [];
     const target = typeof to === 'string' ? to : '';
     const receiverAgent = agentById(target);
@@ -281,7 +292,7 @@ export function createDelegation({
         : { state: 'finished', to: target, delegationId, text, summary: firstSentence(text) };
       const posted = await post(from, line);
       log({ event: 'delegation_finished', agentId: from, to: target, delegationId, status: failed ? 'failed' : 'finished', waitedMs, inline });
-      if (!inline) {
+      if (!inline && !quiet) {
         const list = pending.get(from) ?? [];
         list.push({ delegationId, from, to: target, sessionId, reply: text, at: now().toISOString() });
         pending.set(from, list.slice(-limits.delegationPendingReplies));
@@ -317,7 +328,8 @@ export function createDelegation({
     ended.then(() => finish(false)).catch((error) => {
       log({ event: 'delegation_error', agentId: from, to: target, delegationId, error: bound(error?.message ?? String(error)) });
     });
-    return { status: 'pending', delegationId, text: `${nameOf(target)} is still working. The reply will arrive in this thread.` };
+    const still = quiet ? `${nameOf(target)} is still working; its reply will not reach this run.` : `${nameOf(target)} is still working. The reply will arrive in this thread.`;
+    return { status: 'pending', delegationId, text: still };
   }
 
   function sessionOf(agentId) {
@@ -347,7 +359,7 @@ export function createDelegation({
   }
 
   // The tool's description: the agents the sender may ask, then the rules.
-  function describe(sender) {
+  function describe(sender, quiet) {
     const lines = agents()
       .filter((agent) => takesMessagesFrom(agent, sender))
       .map((agent) => {
@@ -360,7 +372,9 @@ export function createDelegation({
       'Ask another agent in this system and get its reply. The agents:',
       listed,
       'Agents the user mentions with @ in a message are the ones you may be meant to ask; pass their id as `to`. '
-        + 'A reply that is not back within a few seconds arrives in this thread later, so say what you asked and of whom, then stop.',
+        + (quiet
+          ? 'A reply that is not back within a few seconds does not reach this run, so say what you asked and of whom, then stop.'
+          : 'A reply that is not back within a few seconds arrives in this thread later, so say what you asked and of whom, then stop.'),
     ].join('\n');
   }
 
@@ -404,13 +418,14 @@ export function createDelegation({
     const { tool, createSdkMcpServer } = await ensureSdk();
     const sender = agent.id;
     const chain = Array.isArray(context.chain) ? context.chain : [];
-    const taken = context.from ? [] : takePending(sender, sessionOf(sender));
+    const quiet = Boolean(context.routine);
+    const taken = context.from || quiet ? [] : takePending(sender, sessionOf(sender));
     let settled = false;
     const schema = {
       to: z.string().min(1).max(64).describe('The agent\'s id, from the list above'),
       message: z.string().min(1).max(limits.delegationMessageChars).describe('What to ask; the agent sees it as a message from you'),
     };
-    const askTool = tool(TOOL_NAME, describe(sender), schema, async (args) => {
+    const askTool = tool(TOOL_NAME, describe(sender, quiet), schema, async (args) => {
       try {
         const message = typeof args?.message === 'string' ? args.message.trim() : '';
         if (message === '') return result('The message is empty.');
@@ -418,7 +433,7 @@ export function createDelegation({
           return result(`The message is too long: ${limits.delegationMessageChars} characters at most.`);
         }
         // The sender comes from this turn, never from the arguments.
-        const outcome = await ask({ from: sender, chain, to: args?.to, message });
+        const outcome = await ask({ from: sender, chain, to: args?.to, message, quiet });
         return result(outcome.text);
       } catch (error) {
         log({ event: 'delegation_error', agentId: sender, to: typeof args?.to === 'string' ? args.to : null, error: bound(error?.message ?? String(error)) });

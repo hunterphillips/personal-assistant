@@ -538,7 +538,7 @@ test('through the routes: A asks B, B raises, the card is answered from A, and t
   assert.equal(personas.sent.length, 2);
 });
 
-test('a routine run on A asks B, B raises, the card is forwarded to A and recorded on the run, an answer from A resolves it, the reply lands, and the run ends finished', async (t) => {
+test('a routine run on A asks B, B raises, the card is forwarded to A and recorded on the run, an answer from A resolves it, the reply lands on the run, and A\'s thread keeps only the waiting line', async (t) => {
   const routines = createRoutines({ dir: path.join(await tempDir(t), 'routines'), limits: LIMITS, now: () => new Date('2026-10-03T12:00:00.000Z') });
   await routines.load();
   const { app, personas, thread, lines, hub, scheduler, logs } = await setup(t, {
@@ -552,12 +552,11 @@ test('a routine run on A asks B, B raises, the card is forwarded to A and record
   assert.deepEqual([view('assistant').state, view('cfo').state], ['busy', 'waiting']);
   const [card] = view('assistant').forwarded;
   assert.deepEqual([card.agent, card.kind, card.toolName], ['cfo', 'approval', 'Bash']);
-  assert.deepEqual((await lines('assistant')).map((line) => line.state), ['sent', 'waiting']);
-  assert.deepEqual((await thread('assistant')).filter((line) => line.kind === 'routine'), [{
+  const waitingLine = {
     role: 'system', kind: 'routine', state: 'waiting', routine: { id: 'ledger-check', name: 'Ledger check' }, agent: 'cfo', toolName: 'Bash',
     summary: 'CFO is waiting for you during Ledger check.', text: '{"command":"ls"}',
-  }]);
-  assert.equal((await thread('assistant'))[0].text, 'Ask CFO to check the ledger.');
+  };
+  assert.deepEqual(await thread('assistant'), [waitingLine]);
   assert.equal(personas.sent[0].context.routine.id, 'ledger-check');
   assert.equal('endedAt' in routines.runs('ledger-check')[0], false);
   assert.equal(view('assistant').needsYou, false, 'the card is still open; the run has not ended');
@@ -573,12 +572,52 @@ test('a routine run on A asks B, B raises, the card is forwarded to A and record
     { role: 'user', text: 'Check the ledger.', from: 'assistant' },
     { role: 'assistant', text: 'Reply: answered' },
   ]);
-  assert.deepEqual((await thread('assistant')).at(-1), { role: 'assistant', text: 'Reply: answered' });
-  assert.deepEqual((await lines('assistant')).map((line) => line.state), ['sent', 'waiting', 'finished']);
+  assert.deepEqual(await lines('assistant'), []);
+  assert.deepEqual(await thread('assistant'), [waitingLine]);
   assert.deepEqual(routines.runs('ledger-check'), [{
     run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-03T12:00:00.000Z', endedAt: '2026-10-03T12:00:00.000Z', outcome: 'finished',
+    reply: 'Reply: answered',
     cards: [{ agent: 'cfo', kind: 'approval', toolName: 'Bash', summary: '{"command":"ls"}', resolved: 'answered' }],
   }]);
   assert.equal(view('assistant').needsYou, false);
+  assert.equal(view('assistant').lastMessage, null);
+  assert.equal(view('assistant').unread, false);
   assert.deepEqual(logs.filter((entry) => entry.event === 'routine_run').map(({ routineId, agentId, trigger, outcome }) => [routineId, agentId, trigger, outcome]), [['ledger-check', 'assistant', 'test', 'finished']]);
+});
+
+test('a run takes no pending replies and its description says a late reply does not reach it', async (t) => {
+  const { delegation, personas } = await setup(t, { waitMs: 40 });
+  personas.hold('cfo');
+  assert.equal((await delegation.ask({ from: 'assistant', chain: [], to: 'cfo', message: 'Take your time' })).status, 'pending');
+  await personas.reply('cfo', 'Here it is.');
+  await settle();
+  assert.equal(delegation.pendingFor('assistant', null).length, 1);
+
+  const run = await delegation.toolsFor({ id: 'assistant' }, { text: 'Compute drift.', prompt: 'Compute drift.', from: null, chain: [], mentions: [], routine: { id: 'daily-drift', name: 'Daily drift' } });
+  assert.equal('prompt' in run, false);
+  run.commit();
+  assert.equal(delegation.pendingFor('assistant', null).length, 1);
+  const [askTool] = run.mcpServers.agents.instance.tools;
+  assert.match(askTool.description, /does not reach this run/);
+
+  const own = await delegation.toolsFor({ id: 'assistant' }, { text: 'What now?', prompt: 'What now?', from: null, chain: [], mentions: [], routine: null });
+  assert.match(own.prompt, /^Replies that arrived since your last turn:\nFrom CFO \(d-1\): Here it is\./);
+  assert.doesNotMatch(own.mcpServers.agents.instance.tools[0].description, /this run/);
+});
+
+test('a quiet ask whose reply is late posts nothing and queues nothing', async (t) => {
+  const { delegation, personas, lines, thread, logs } = await setup(t, { waitMs: 40 });
+  personas.hold('cfo');
+  const outcome = await delegation.ask({ from: 'assistant', chain: [], to: 'cfo', message: 'Take your time', quiet: true });
+  assert.deepEqual(outcome, { status: 'pending', delegationId: 'd-1', text: 'CFO is still working; its reply will not reach this run.' });
+  await personas.reply('cfo', 'Here it is.');
+  await settle();
+  assert.deepEqual(delegation.pendingFor('assistant', null), []);
+  assert.deepEqual(await lines('assistant'), []);
+  assert.deepEqual(await thread('cfo'), [
+    { role: 'user', text: 'Take your time', from: 'assistant' },
+    { role: 'assistant', text: 'Here it is.' },
+  ]);
+  const finished = logs.find((entry) => entry.event === 'delegation_finished');
+  assert.equal(finished.inline, false);
 });

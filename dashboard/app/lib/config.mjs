@@ -98,6 +98,7 @@ export const LIMITS = Object.freeze({
   routineInstructionChars: 4000, // a routine's instruction
   routineRunLines: 200, // lines kept in one routine's runs log
   routineRunsShown: 10, // runs GET /api/routines/:id/runs answers
+  routineReplyChars: 2000, // characters of a run's reply kept on its end line
   routineMissedMax: 100, // missed occurrences counted before the count is capped
   routineCatchupDays: 7, // how far back a routine's marker may reach on start
   routinesMax: 100, // routine files

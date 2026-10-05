@@ -1,14 +1,17 @@
 // The scheduler: runs routines (routines.mjs) on their schedules
 // (schedule.mjs), catches up what was missed while the daemon was down,
 // and writes each run's outcome to the routine's runs log. A run is a send
-// like the composer's: the agent's instruction, at the agent's own
-// permission level, on the model and effort the hub resolves for it, with
-// nothing held back and nothing added beyond the attribution. The prompt
-// the model gets is
+// with `routine`, which the adapter runs detached (runtime/adapter.mjs): a
+// session of its own, at the agent's own permission level, on the model and
+// effort the hub resolves for it, that leaves nothing in the agent's
+// thread. The prompt the model gets is
 //   Routine "<name>" (a scheduled run, not the user): <instruction>
-// followed by one sentence that it may ask other agents and that its reply
-// is what the run leaves behind; the thread shows the instruction as the
-// user message, with `routine: { id, name }` on it.
+//
+//   You may ask other agents. Your reply is recorded in this routine's log,
+//   not shown as a message; if something in it needs Hunter's attention,
+//   use notify.
+// The reply lands on the run's end line. The one thing a run may append to
+// the thread is the waiting line below, where its card gets answered.
 //
 // createScheduler({ routines, hub, schedule, zone, timeouts, limits, log,
 //                   now, setTimeout, clearTimeout, randomUUID })
@@ -51,10 +54,15 @@
 //     { role: 'system', kind: 'routine', state: 'waiting', routine,
 //       agent: <whose card>, toolName, summary: '<Agent> is waiting for
 //       you during <name>.', text: <the input's first 120 characters> }.
-//     When the turn ends, the end line { run, endedAt, outcome, cards? }:
-//     'waiting' when any card was raised and not answered (resolved
-//     expired or interrupted, or not resolved), else 'failed' when the
-//     agent's adapter emitted an error, else 'finished'; cards as
+//     When the turn ends, the end line { run, endedAt, outcome, reply?,
+//     truncated?, detail?, cards? }: outcome is 'waiting' when any card was
+//     raised and not answered (resolved expired or interrupted, or not
+//     resolved), else 'interrupted' when the send resolved `aborted`, else
+//     'failed' when it rejected, resolved an `error`, or the agent's
+//     adapter emitted an error, else 'finished'. `reply` is the resolved
+//     text cut to limits.routineReplyChars (with `truncated: true` when
+//     cut), omitted when empty; `detail` is the error on 'failed' and
+//     'interrupted' on 'interrupted'; cards as
 //     [{ agent, kind, toolName, summary, resolved }]. Each run is logged
 //     routine_run { routineId, agentId, trigger, outcome, ms }, and
 //     hub.runEnded(id) follows every line.
@@ -192,16 +200,22 @@ export function createScheduler({
     }).catch((error) => log({ event: 'routine_line_error', routineId: routine.id, error: error?.message ?? String(error) }));
   }
 
-  async function settle(context, rejected) {
+  async function settle(context, rejected, ended = null) {
     if (context.detached) return;
     detach(context);
-    if (rejected) context.errorSeen = true;
     const waiting = context.cards.some((card) => UNANSWERED.has(card.resolved));
-    const outcome = waiting ? 'waiting' : context.errorSeen ? 'failed' : 'finished';
+    const failed = rejected || Boolean(ended?.error) || context.errorSeen;
+    const outcome = waiting ? 'waiting' : ended?.aborted ? 'interrupted' : failed ? 'failed' : 'finished';
+    const text = typeof ended?.text === 'string' ? ended.text : '';
+    const reply = Array.from(text).slice(0, limits.routineReplyChars).join('');
+    const detail = outcome === 'failed' && typeof ended?.error === 'string' ? ended.error : outcome === 'interrupted' ? 'interrupted' : null;
     const endedAt = now();
     await context.started;
     await append(context.routine.id, {
       run: context.run, endedAt: endedAt.toISOString(), outcome,
+      ...(reply !== '' ? { reply } : {}),
+      ...(reply.length < text.length ? { truncated: true } : {}),
+      ...(detail ? { detail } : {}),
       ...(context.cards.length > 0 ? { cards: context.cards.map(({ requestId, ...card }) => card) } : {}),
     });
     log({ event: 'routine_run', routineId: context.routine.id, agentId: context.routine.agent, trigger: context.trigger, outcome, ms: endedAt.getTime() - context.startedAt.getTime() });
@@ -243,7 +257,7 @@ export function createScheduler({
       return refuse(routine, base, test, error?.code === 'busy' ? 'busy' : (error?.code ?? 'send_failed'));
     }
     context.started = append(id, { run: context.run, ...base, startedAt: context.startedAt.toISOString() });
-    turn.then(() => settle(context, false), () => settle(context, true));
+    turn.then((ended) => settle(context, false, ended), () => settle(context, true));
     return { ok: true };
   }
 
@@ -274,7 +288,8 @@ export function createScheduler({
 }
 
 function promptFor(routine) {
-  return `Routine "${routine.name}" (a scheduled run, not the user): ${routine.instruction}\n\nYou may ask other agents, and your reply is what this run leaves behind.`;
+  return `Routine "${routine.name}" (a scheduled run, not the user): ${routine.instruction}\n\n`
+    + 'You may ask other agents. Your reply is recorded in this routine\'s log, not shown as a message; if something in it needs Hunter\'s attention, use notify.';
 }
 
 // A card's input in at most SUMMARY_CHARS characters: a question's first

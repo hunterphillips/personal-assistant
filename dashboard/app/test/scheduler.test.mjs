@@ -24,25 +24,35 @@ const AGENTS = [
 ];
 
 const FIELDS = Object.freeze({ name: 'Daily drift', agent: 'cfo', instruction: 'Compute drift.', schedule: { cron: '30 6 * * 1-5' }, active: true });
-const PROMPT = 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.\n\nYou may ask other agents, and your reply is what this run leaves behind.';
+const PROMPT = 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.\n\n'
+  + 'You may ask other agents. Your reply is recorded in this routine\'s log, not shown as a message; if something in it needs Hunter\'s attention, use notify.';
 
 // A runtime stand-in: send() opens a turn the test ends with finish(),
 // fail(), or abort(); raise() and resolve() play a card on the open turn,
 // stamped with the turn's sender and chain as the real adapter stamps it;
-// say() plays a message in the thread.
+// say() plays a message in the thread. A routine's send runs detached, as
+// the real adapter's does: no messages, no error event, and it resolves
+// { text, error, aborted }.
 function fakeRuntime(now, failing = new Set()) {
   const listeners = new Set();
   const entries = new Map();
   let nextRequest = 1;
   const entry = (id) => {
-    if (!entries.has(id)) entries.set(id, { state: 'idle', pending: null, lastError: null, turn: null, from: null, chain: [] });
+    if (!entries.has(id)) entries.set(id, { state: 'idle', pending: null, lastError: null, turn: null, from: null, chain: [], routine: null });
     return entries.get(id);
   };
   const emit = (type, agentId, fields = {}) => {
     for (const fn of [...listeners]) fn({ type, agentId, at: now().toISOString(), ...fields });
   };
   const setState = (id, state) => { entry(id).state = state; emit('thread.state', id, { state }); };
-  const end = (id) => { const current = entry(id); const done = current.turn; current.turn = null; done?.(); };
+  const end = (id, ended) => {
+    const current = entry(id);
+    const done = current.turn;
+    const result = current.routine ? { text: '', error: null, aborted: false, ...ended } : undefined;
+    current.turn = null;
+    current.routine = null;
+    done?.(result);
+  };
   const runtime = {
     kind: 'claude',
     sent: [],
@@ -63,12 +73,19 @@ function fakeRuntime(now, failing = new Set()) {
       const done = new Promise((resolve) => { current.turn = resolve; });
       current.from = context.from ?? null;
       current.chain = Array.isArray(context.chain) ? [...context.chain] : [];
+      current.routine = context.routine ?? null;
       current.lastError = null;
       setState(target.id, 'busy');
-      emit('message', target.id, { role: 'user', text, ...(context.routine ? { routine: context.routine } : {}), ...(context.from ? { from: context.from } : {}) });
+      if (!current.routine) emit('message', target.id, { role: 'user', text, ...(context.from ? { from: context.from } : {}) });
       return done;
     },
-    async interrupt() {},
+    async interrupt(target) {
+      const current = entry(target.id);
+      if (!current.turn) return undefined;
+      const routine = current.routine;
+      runtime.abort(target.id);
+      return routine ? { text: '', error: null, aborted: true } : undefined;
+    },
     async close() {},
     raise(id, { kind = 'approval', toolName = 'Bash', input = { command: 'ls' } } = {}) {
       const current = entry(id);
@@ -84,9 +101,23 @@ function fakeRuntime(now, failing = new Set()) {
       emit('resolved', id, { requestId, outcome, from: current.from, chain: [...current.chain] });
       setState(id, 'busy');
     },
-    finish(id, text = 'Done.') { emit('message', id, { role: 'assistant', text }); setState(id, 'idle'); end(id); },
-    fail(id, message = 'Invented failure') { entry(id).lastError = message; emit('error', id, { message }); setState(id, 'error'); end(id); },
-    abort(id) { setState(id, 'idle'); end(id); },
+    finish(id, text = 'Done.') {
+      if (!entry(id).routine) emit('message', id, { role: 'assistant', text });
+      setState(id, 'idle');
+      end(id, { text });
+    },
+    fail(id, message = 'Invented failure') {
+      if (entry(id).routine) {
+        setState(id, 'idle');
+        end(id, { error: message });
+        return;
+      }
+      entry(id).lastError = message;
+      emit('error', id, { message });
+      setState(id, 'error');
+      end(id);
+    },
+    abort(id) { setState(id, 'idle'); end(id, { aborted: true }); },
     say(id, fields) { emit('message', id, fields); },
   };
   return runtime;
@@ -109,6 +140,7 @@ async function setup(t, { agents = AGENTS, limits = {}, timeouts = {}, clock = S
     registry: fakeRegistry(agents), jobs: fakeJobs(), routines, timeZone: ZONE,
     focus: { checkHealth: async () => ({ available: true }) }, brief: { latestMetadata: async () => ({ state: 'unknown' }) },
     timeouts: allTimeouts, limits: allLimits, adapters: { claude: runtime }, store, log, now,
+    reads: { readAt: () => START, mark: async () => {} },
   });
   await hub.start();
   t.after(() => hub.close());
@@ -146,8 +178,8 @@ async function settle(condition = null) {
   }
 }
 
-test('a due occurrence fires once as a send at the agent\'s level with the routine and the prompt, and not again on the next tick', async (t) => {
-  const { routines, runtime, scheduler, set, advance, runs, hub, view, runLogs } = await setup(t);
+test('a due occurrence fires once as a send at the agent\'s level with the routine and the prompt, in a session of its own, and leaves the thread alone', async (t) => {
+  const { routines, runtime, scheduler, set, advance, runs, hub, view, runLogs, threads } = await setup(t);
   await routines.create(FIELDS);
   await scheduler.tick();
   assert.equal(runtime.sent.length, 0, 'nothing is due at creation');
@@ -166,9 +198,15 @@ test('a due occurrence fires once as a send at the agent\'s level with the routi
   assert.equal(runtime.sent.length, 1, 'the marker moved with the start line');
   runtime.finish('cfo', 'Drift is fine.');
   await settle(() => runs()[0]?.endedAt);
-  assert.deepEqual(runs(), [{ run: 'run-1', occurrence: MONDAY, trigger: 'schedule', startedAt: '2026-10-05T11:30:10.000Z', endedAt: '2026-10-05T11:30:40.000Z', outcome: 'finished' }]);
+  assert.deepEqual(runs(), [{
+    run: 'run-1', occurrence: MONDAY, trigger: 'schedule', startedAt: '2026-10-05T11:30:10.000Z', endedAt: '2026-10-05T11:30:40.000Z', outcome: 'finished',
+    reply: 'Drift is fine.',
+  }]);
   assert.deepEqual(runLogs(), [{ event: 'routine_run', routineId: 'daily-drift', agentId: 'cfo', trigger: 'schedule', outcome: 'finished' }]);
   assert.equal(view('cfo').needsYou, false);
+  assert.deepEqual(threads, []);
+  assert.equal(view('cfo').lastMessage, null);
+  assert.equal(view('cfo').unread, false);
   assert.equal(hub.snapshot().routines.items[0].lastRun.outcome, 'finished');
 });
 
@@ -236,7 +274,7 @@ test('a card on the run posts one line; left unanswered the run ends waiting and
   runtime.finish('cfo');
   await settle(() => runs()[0]?.endedAt);
   assert.deepEqual(runs()[0], {
-    run: 'run-1', occurrence: MONDAY, trigger: 'schedule', startedAt: '2026-10-05T11:30:10.000Z', endedAt: '2026-10-05T11:31:10.000Z', outcome: 'waiting',
+    run: 'run-1', occurrence: MONDAY, trigger: 'schedule', startedAt: '2026-10-05T11:30:10.000Z', endedAt: '2026-10-05T11:31:10.000Z', outcome: 'waiting', reply: 'Done.',
     cards: [
       { agent: 'cfo', kind: 'approval', toolName: 'Bash', summary: '{"command":"ls"}', resolved: 'expired' },
       { agent: 'cfo', kind: 'question', toolName: 'AskUserQuestion', summary: 'Sell the bond fund?', resolved: 'interrupted' },
@@ -290,16 +328,55 @@ test('a card on a hop, whose chain starts with the agent, is the run\'s card too
   assert.equal(view('cfo').needsYou, true);
 });
 
-test('an error on the agent\'s turn ends the run failed', async (t) => {
-  const { routines, runtime, scheduler, set, runs, runLogs } = await setup(t);
+test('a failed run ends failed with the run\'s error as detail, and the thread stays idle with no error', async (t) => {
+  const { routines, runtime, scheduler, set, runs, runLogs, view } = await setup(t);
   await routines.create(FIELDS);
   set('2026-10-05T11:30:10.000Z');
   await scheduler.tick();
-  runtime.fail('cfo');
+  runtime.fail('cfo', 'Invented failure');
   await settle(() => runs()[0]?.endedAt);
   assert.equal(runs()[0].outcome, 'failed');
+  assert.equal(runs()[0].detail, 'Invented failure');
   assert.equal('cards' in runs()[0], false);
+  assert.equal('reply' in runs()[0], false);
   assert.deepEqual(runLogs().map((entry) => entry.outcome), ['failed']);
+  assert.equal(view('cfo').state, 'idle');
+  assert.equal(view('cfo').lastError, null);
+});
+
+test('a long reply is cut and marked', async (t) => {
+  const { routines, runtime, scheduler, set, runs } = await setup(t, { limits: { routineReplyChars: 10 } });
+  await routines.create(FIELDS);
+  set('2026-10-05T11:30:10.000Z');
+  await scheduler.tick();
+  runtime.finish('cfo', 'Twenty characters ok');
+  await settle(() => runs()[0]?.endedAt);
+  assert.equal(runs()[0].reply, 'Twenty cha');
+  assert.equal(runs()[0].truncated, true);
+});
+
+test('an aborted run ends interrupted', async (t) => {
+  const { routines, runtime, scheduler, set, runs } = await setup(t);
+  await routines.create(FIELDS);
+  set('2026-10-05T11:30:10.000Z');
+  await scheduler.tick();
+  runtime.abort('cfo');
+  await settle(() => runs()[0]?.endedAt);
+  assert.equal(runs()[0].outcome, 'interrupted');
+  assert.equal(runs()[0].detail, 'interrupted');
+});
+
+test('a run over the wall clock ends interrupted and leaves no turn_timeout on the thread', async (t) => {
+  const { routines, scheduler, set, runs, view, logs } = await setup(t, { timeouts: { turnMaxMs: 20 } });
+  await routines.create(FIELDS);
+  set('2026-10-05T11:30:10.000Z');
+  await scheduler.tick();
+  await settle(() => runs()[0]?.endedAt);
+  assert.equal(runs()[0].outcome, 'interrupted');
+  assert.ok(logs.some((entry) => entry.event === 'persona_turn_timeout'));
+  await settle();
+  assert.equal(view('cfo').state, 'idle');
+  assert.equal(view('cfo').lastError, null);
 });
 
 test('stop() leaves an aborted turn\'s start line open, and the next start closes it as interrupted and arms the tick', async (t) => {
@@ -366,7 +443,7 @@ test('a test run leaves the marker alone, is refused busy with no line while the
   assert.equal(runtime.sent.length, 1);
   runtime.finish('cfo');
   await settle(() => runs()[0]?.endedAt);
-  assert.deepEqual(hub.snapshot().routines.items[0].lastRun, { run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-05T11:10:00.000Z', endedAt: '2026-10-05T11:10:00.000Z', outcome: 'finished' });
+  assert.deepEqual(hub.snapshot().routines.items[0].lastRun, { run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-05T11:10:00.000Z', endedAt: '2026-10-05T11:10:00.000Z', outcome: 'finished', reply: 'Done.' });
   set('2026-10-05T11:30:10.000Z');
   await scheduler.tick();
   await settle(() => runs().length === 2);
