@@ -64,7 +64,9 @@ from here.
   daemon runs and lists: role, description, group, cwd, provider, model
   and effort, `accepts` (who may message it), launchd labels, `pinned`,
   `builtin` (seeded from `registry/builtin.json`, no Delete); plus the
-  `groups` list that sets group order and labels. Absolute paths;
+  `groups` list that sets group order and labels. Local data the
+  dashboard writes, never committed; back it up when moving machines.
+  Absolute paths;
   the daemon keeps the last good copy on a bad edit. Since 2026-10-02 the
   dashboard writes it (an agent's settings, New agent) as 2-space JSON in
   the schema's key order; hand edits still load.
@@ -128,10 +130,12 @@ picks one up and ends by updating it.
   SDK, `ws`, and `zod`); run `npm ci` after pulling. `var/` is local state.
 - `dashboard/prototype/`: a static design study with illustrative data; its
   own repository, ignored here.
-- `registry/agents.json`: the agent registry; `registry/builtin.json` the
-  built-in agents.
-- `routines/`: one file per routine, written by the dashboard and committed
-  like the registry; `runs/` beside them holds the runs logs, gitignored.
+- `registry/agents.json`: the agent registry, local data gitignored like
+  `routines/`; `registry/builtin.json`, the committed built-in agents it is
+  seeded from.
+- `routines/`: one file per routine, written by the dashboard; local data,
+  gitignored, never committed; `runs/` beside them holds the runs logs,
+  gitignored too.
 - `notifications/`: the notifications store, gitignored.
 - `daily-brief/`: contract, schema, curator rules, `bin/run-brief` and its
   prompts, `launchd/`, `watch/`. `contributions/` and `briefs/` are outputs,
