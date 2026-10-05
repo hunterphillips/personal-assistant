@@ -9,6 +9,12 @@
 // is instructions.js's. The shell calls create(shellApi) once, then show()
 // and hide() as the Feed view comes on and off screen.
 //
+// The side panel's Feed section, drawn on the same render as the posts and
+// cleared on hide, lists All and then each source with its count. Choosing
+// a source hides the other sources' posts and any run left empty, with a
+// line above the posts and a Show all button; the choice is not stored and
+// clears on hide.
+//
 // While shown, the view fetches /api/feed on show() and every 60 seconds. An
 // answer identical to the last one rendered changes nothing; the panel is
 // outside what it renders, so it keeps its text. A body that is
@@ -150,6 +156,9 @@
   function create(shellApi) {
     var message = document.getElementById('feed-message');
     var runs = document.getElementById('feed-runs');
+    var side = document.querySelector('[data-panel-for="feed"]');
+    var filterLine = document.getElementById('feed-filter');
+    var filterText = document.getElementById('feed-filter-text');
 
     var data = null; // the last /api/feed answer
     var visible = false;
@@ -158,6 +167,7 @@
     var rendered = null; // the JSON text of the answer on screen
     var pending = null; // the id being discussed, while the request is out
     var target = null; // { run, index } to scroll to once it is drawn
+    var source = null; // the source the posts are filtered to, or null for all
 
     function discussButton(item) {
       var button = element('button', 'feed-discuss');
@@ -176,6 +186,7 @@
     function renderItem(item) {
       var node = element('article', 'feed-item');
       node.setAttribute('data-feed-item', item.id);
+      node.setAttribute('data-feed-source', String(item.source));
       var badge = element('span', 'feed-badge feed-badge-' + colourIndex(item.source), initials(item.source));
       badge.setAttribute('role', 'img');
       badge.setAttribute('aria-label', item.source);
@@ -218,6 +229,72 @@
       return group;
     }
 
+    // Each source with its count across the runs drawn, most posts first,
+    // then by name.
+    function sourceCounts(shown) {
+      var counts = {};
+      shown.forEach(function (run) {
+        objectsIn(run.items).forEach(function (item) {
+          var key = String(item.source);
+          counts[key] = (counts[key] || 0) + 1;
+        });
+      });
+      return Object.keys(counts).map(function (name) { return { name: name, count: counts[name] }; })
+        .sort(function (a, b) { return b.count - a.count || a.name.localeCompare(b.name); });
+    }
+
+    function panelRow(name, label, count) {
+      var row = element('button', 'panel-row');
+      row.type = 'button';
+      row.setAttribute('data-feed-source', name);
+      if (name) {
+        var badge = element('span', 'feed-badge feed-badge-' + colourIndex(name), initials(name));
+        badge.setAttribute('aria-hidden', 'true');
+        row.appendChild(badge);
+      }
+      row.appendChild(element('span', 'panel-row-name', label));
+      row.appendChild(element('span', 'panel-row-count', String(count)));
+      return row;
+    }
+
+    function renderPanel(sources) {
+      if (!side) return;
+      side.textContent = '';
+      var total = sources.reduce(function (sum, entry) { return sum + entry.count; }, 0);
+      side.appendChild(panelRow('', 'All', total));
+      side.appendChild(element('h2', 'panel-heading', 'Sources'));
+      sources.forEach(function (entry) { side.appendChild(panelRow(entry.name, entry.name, entry.count)); });
+    }
+
+    // Hides the posts from other sources and the runs left empty, marks the
+    // chosen row, and says what is shown.
+    function applyFilter() {
+      var items = runs.querySelectorAll('.feed-item');
+      for (var i = 0; i < items.length; i += 1) {
+        items[i].hidden = source !== null && items[i].getAttribute('data-feed-source') !== source;
+      }
+      var groups = runs.querySelectorAll('.feed-run');
+      for (var g = 0; g < groups.length; g += 1) {
+        groups[g].hidden = !groups[g].querySelector('.feed-item:not([hidden])');
+      }
+      if (side) {
+        var rows = side.querySelectorAll('.panel-row');
+        for (var r = 0; r < rows.length; r += 1) {
+          if (rows[r].getAttribute('data-feed-source') === (source === null ? '' : source)) rows[r].setAttribute('aria-current', 'true');
+          else rows[r].removeAttribute('aria-current');
+        }
+      }
+      filterText.textContent = source === null ? '' : 'Showing ' + source + ' only.';
+      filterLine.hidden = source === null;
+    }
+
+    function choose(name) {
+      source = name ? name : null;
+      applyFilter();
+      document.getElementById('feed-page').scrollTop = 0;
+      shellApi.closePanel();
+    }
+
     function setMessage(lines) {
       message.textContent = '';
       lines.forEach(function (text, i) {
@@ -237,9 +314,13 @@
     function render() {
       if (!data) return;
       var built = [];
+      var shown = [];
       try {
         objectsIn(data.runs).forEach(function (run) {
-          if (objectsIn(run.items).length > 0) built.push(renderRun(run));
+          if (objectsIn(run.items).length > 0) {
+            built.push(renderRun(run));
+            shown.push(run);
+          }
         });
       } catch (_error) {
         setNoAnswer();
@@ -249,6 +330,13 @@
       setMessage(built.length === 0 ? [EMPTY].concat(problems) : problems);
       runs.textContent = '';
       built.forEach(function (group) { runs.appendChild(group); });
+      var sources = sourceCounts(shown);
+      // A source gone from the store takes its filter with it.
+      if (source !== null && !sources.some(function (entry) { return entry.name === source; })) source = null;
+      if (built.length > 0) renderPanel(sources);
+      else if (side) side.textContent = '';
+      applyFilter();
+      shellApi.panelChanged();
       rendered = JSON.stringify(data);
     }
 
@@ -352,6 +440,16 @@
       return found;
     }
 
+    if (side) {
+      side.addEventListener('click', function (event) {
+        var row = event.target.closest && event.target.closest('button[data-feed-source]');
+        if (row) choose(row.getAttribute('data-feed-source'));
+      });
+    }
+    filterLine.addEventListener('click', function (event) {
+      if (event.target.closest && event.target.closest('button[data-feed-action="show-all"]')) choose('');
+    });
+
     runs.addEventListener('click', function (event) {
       var button = event.target.closest && event.target.closest('button[data-feed-action="discuss"]');
       if (!button) return;
@@ -371,6 +469,10 @@
       // notification's link); show() has already run.
       reveal: function (run, index) {
         target = { run: run, index: index };
+        if (source !== null) {
+          source = null;
+          applyFilter();
+        }
         revealTarget(false);
       },
       // What quick chat sends along from the Feed: the topmost item whose
@@ -386,6 +488,9 @@
       },
       hide: function () {
         visible = false;
+        source = null;
+        if (side) side.textContent = '';
+        filterLine.hidden = true;
         if (panel) panel.hide();
         if (poll !== null) clearInterval(poll);
         poll = null;

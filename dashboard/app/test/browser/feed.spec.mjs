@@ -215,6 +215,127 @@ test.describe('with the fixture store', () => {
   });
 });
 
+test.describe('the side panel', () => {
+  test.use({ hubOptions: { feed: FEED, agents: [WATCH] } });
+
+  const side = (page) => page.locator('#panel [data-panel-for="feed"]');
+  const sourceRow = (page, name) => side(page).locator(`.panel-row[data-feed-source="${name}"]`);
+  const shownItems = (page) => page.locator('#feed-runs .feed-item:visible');
+
+  // On a phone the panel is a drawer, opened by the header's toggle first.
+  async function openSide(page) {
+    if (page.viewportSize().width >= 720) return;
+    await page.locator('#panel-toggle').click();
+    await expect(page.locator('#panel')).toBeVisible();
+  }
+
+  async function pick(page, name) {
+    await openSide(page);
+    await sourceRow(page, name).click();
+  }
+
+  test('lists All and each source with its count, matching the posts', async ({ page, hub }) => {
+    await openFeed(page, hub);
+    await openSide(page);
+    await expect(side(page)).toBeVisible();
+    await expect(page.locator('#panel [data-panel-for="now"]')).toBeHidden();
+    await expect(side(page).locator('.panel-row-name')).toHaveText([
+      'All', 'Invented Gazette', 'Invented Letters', 'Invented Weekly', 'Invented Gazette, Invented Weekly',
+    ]);
+    await expect(side(page).locator('.panel-row-count')).toHaveText(['10', '4', '3', '2', '1']);
+    await expect(side(page).locator('h2.panel-heading')).toHaveText(['Sources']);
+    await expect(side(page).locator('.panel-heading')).toHaveCSS('text-transform', 'uppercase');
+    await expect(sourceRow(page, '')).toHaveAttribute('aria-current', 'true');
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(1);
+    await expect(sourceRow(page, 'Invented Gazette')).toHaveCSS('height', '40px');
+
+    // The rows' counts are the posts' own.
+    const posts = await page.locator('#feed-runs .feed-item .feed-badge').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')));
+    expect(posts).toHaveLength(10);
+    for (const name of ['Invented Gazette', 'Invented Letters', 'Invented Weekly', 'Invented Gazette, Invented Weekly']) {
+      await expect(sourceRow(page, name).locator('.panel-row-count')).toHaveText(String(posts.filter((source) => source === name).length));
+    }
+
+    // The same initials and colour as the posts' badges.
+    const badge = sourceRow(page, 'Invented Gazette').locator('.feed-badge');
+    await expect(badge).toHaveText('IG');
+    const colour = (locator) => locator.evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(await colour(badge)).toBe(await colour(item(page, 'watch/2026-09-28/1').locator('.feed-badge')));
+    await expect(sourceRow(page, '').locator('.feed-badge')).toHaveCount(0);
+  });
+
+  test('choosing a source shows only its posts; Show all and All restore them', async ({ page, hub }) => {
+    await openFeed(page, hub);
+    const line = page.locator('#feed-filter');
+    await expect(line).toBeHidden();
+
+    await pick(page, 'Invented Weekly');
+    await expect(sourceRow(page, 'Invented Weekly')).toHaveAttribute('aria-current', 'true');
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(1);
+    await expect(shownItems(page)).toHaveCount(2);
+    await expect(item(page, 'watch/2026-09-28/2')).toBeVisible();
+    await expect(item(page, 'watch/2026-09-28/6')).toBeVisible();
+    await expect(item(page, 'watch/2026-09-28/1')).toBeHidden();
+    await expect(item(page, 'watch/2026-09-28/5')).toBeHidden();
+    // The run with no Weekly post is hidden whole.
+    await expect(page.locator('[data-feed-run="2026-09-21-watch"]')).toBeHidden();
+    await expect(line).toBeVisible();
+    await expect(page.locator('#feed-filter-text')).toHaveText('Showing Invented Weekly only.');
+    const showAll = line.getByRole('button', { name: 'Show all' });
+    await expect(showAll).toBeVisible();
+
+    await showAll.click();
+    await expect(shownItems(page)).toHaveCount(10);
+    await expect(runs(page)).toHaveCount(2);
+    await expect(page.locator('#feed-runs .feed-run:visible')).toHaveCount(2);
+    await expect(line).toBeHidden();
+    await expect(sourceRow(page, '')).toHaveAttribute('aria-current', 'true');
+
+    await pick(page, 'Invented Letters');
+    await expect(shownItems(page)).toHaveCount(3);
+    await expect(page.locator('#feed-runs .feed-run:visible')).toHaveCount(2);
+    await pick(page, '');
+    await expect(shownItems(page)).toHaveCount(10);
+    await expect(line).toBeHidden();
+  });
+
+  test('the choice survives the refetch and clears once the Feed is left', async ({ page, hub }) => {
+    await page.clock.install();
+    await openFeed(page, hub);
+    await pick(page, 'Invented Weekly');
+    await expect(shownItems(page)).toHaveCount(2);
+    const before = hub.requests('/api/feed').length;
+    await page.clock.runFor(60_000);
+    await expect.poll(() => hub.requests('/api/feed').length).toBeGreaterThan(before);
+    await expect(shownItems(page)).toHaveCount(2);
+
+    await nav(page, 'Home').click();
+    await expectView(page, 'agents', 'Agents');
+    await expect(side(page)).toBeHidden();
+    await expect(side(page).locator('.panel-row')).toHaveCount(0);
+    await nav(page, 'Feed').click();
+    await expectView(page, 'feed', 'Feed');
+    await expect(sourceRow(page, '')).toHaveAttribute('aria-current', 'true');
+    await expect(shownItems(page)).toHaveCount(10);
+    await expect(page.locator('#feed-filter')).toBeHidden();
+  });
+
+  test('on a phone a choice closes the drawer', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openFeed(page, hub);
+    await expect(side(page).locator('.panel-row')).toHaveCount(5);
+    await page.locator('#panel-toggle').click();
+    await expect(page.locator('#panel')).toBeVisible();
+    await expect(page.locator('#panel-scrim')).toBeVisible();
+    await sourceRow(page, 'Invented Gazette').click();
+    await expect(page.locator('#panel-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#panel')).toBeHidden();
+    await expect(page.locator('#panel-scrim')).toBeHidden();
+    await expect(shownItems(page)).toHaveCount(4);
+    await expect(page.locator('#feed-filter-text')).toHaveText('Showing Invented Gazette only.');
+  });
+});
+
 test.describe('with an empty store', () => {
   test.use({ hubOptions: { agents: [WATCH] } });
 
