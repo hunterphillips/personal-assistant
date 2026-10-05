@@ -499,3 +499,19 @@ test('start seeds the built-in agents into a registry without them, lists them w
   assert.equal(logs.filter((e) => e.event === 'builtins_seeded').length, 1);
   assert.deepEqual(JSON.parse(await readFile(env.DASHBOARD_REGISTRY_PATH, 'utf8')), file);
 });
+
+test('start seeds the built-in agents when the registry file does not exist, and routines start empty', async (t) => {
+  const env = {
+    ...await testEnv(t),
+    DASHBOARD_BUILTIN_PATH: fileURLToPath(new URL('../../../registry/builtin.json', import.meta.url)),
+    DASHBOARD_ROUTINES_DIR: path.join(await tempDir(t), 'routines'),
+  };
+  // No registry file on disk, as in a fresh checkout.
+  const dashboard = await startDashboard({ env, log: () => {}, createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => dashboard.close());
+  const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
+  assert.ok(state.agents.find((entry) => entry.id === 'myos'), 'the built-in agent is listed');
+  assert.deepEqual(state.routines.items, []);
+  const file = JSON.parse(await readFile(env.DASHBOARD_REGISTRY_PATH, 'utf8'));
+  assert.deepEqual(file.agents.map((entry) => entry.id), ['myos']);
+});

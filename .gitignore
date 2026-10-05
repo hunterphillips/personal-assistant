@@ -38,8 +38,15 @@ feed/items/
 ideas/items/
 ideas/marks.json
 
-# Routine runs: each routine's runs log, local only; the routine files
-# beside it are committed like the registry.
+# Registry: local data the dashboard writes from the interface (an agent's
+# settings, New agent, Delete), never committed. registry/builtin.json
+# (committed) seeds the built-in agents into a registry that is missing
+# or lacks them. Back this file up when moving machines.
+registry/agents.json
+
+# Routines: local data the dashboard writes from the routine form, never
+# committed; a fresh checkout starts with none. Runs logs are local too.
+routines/*.json
 routines/runs/
 
 # Notifications agents raise: a sentence may carry a figure, local only.

@@ -47,15 +47,24 @@ test('a group the registry does not list falls back to the first group; no group
   assert.equal(bare.current().agents.find((entry) => entry.id === 'myos').group, 'personal');
 });
 
-test('an invalid or missing registry is skipped silently; a missing file is no built-ins; a bad file is logged', async (t) => {
+test('a missing registry is seeded with the built-ins alone', async () => {
+  const missing = fakeRegistry([], { ok: false, error: 'registry_missing' });
+  const logs = [];
+  assert.deepEqual(await seedBuiltins({ registry: missing, file: BUILTIN_FILE, root: '/invented/repo', log: (entry) => logs.push(entry) }), ['myos']);
+  assert.equal(missing.writes.length, 1);
+  assert.deepEqual(missing.writes[0].agents.map((entry) => entry.id), ['myos']);
+  assert.deepEqual(logs, [{ event: 'builtins_seeded', agents: ['myos'] }]);
+});
+
+test('an invalid registry is skipped silently; a missing built-ins file is none; a bad file is logged', async (t) => {
   const dir = await tempDir(t);
   const logs = [];
   const log = (entry) => logs.push(entry);
-  const invalid = fakeRegistry([agent('cfo')], { ok: false, error: 'registry_invalid_json' });
-  assert.deepEqual(await seedBuiltins({ registry: invalid, file: BUILTIN_FILE, root: dir, log }), []);
-  const missing = fakeRegistry([], { ok: false, error: 'registry_missing' });
-  assert.deepEqual(await seedBuiltins({ registry: missing, file: BUILTIN_FILE, root: dir, log }), []);
-  assert.equal(invalid.writes.length + missing.writes.length, 0);
+  for (const error of ['registry_invalid_json', 'registry_unreadable: EACCES', 'agents[0].cwd must be an absolute path']) {
+    const invalid = fakeRegistry([agent('cfo')], { ok: false, error });
+    assert.deepEqual(await seedBuiltins({ registry: invalid, file: BUILTIN_FILE, root: dir, log }), [], error);
+    assert.equal(invalid.writes.length, 0, error);
+  }
   assert.deepEqual(logs, []);
 
   const registry = fakeRegistry([agent('cfo')]);
