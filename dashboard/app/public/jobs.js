@@ -12,6 +12,12 @@
 // refreshes jobs after either succeeds, and the card follows the state.
 // A failed Pause or Resume is reported there until the next attempt or
 // until the state shows Focus paused or resumed.
+//
+// The side panel's Health section, drawn on the same render as the cards and
+// cleared on hide, lists Settings and then each agent's jobs in the cards'
+// order, each with a dot colored like its badge. Choosing a row brings the
+// settings card or the job's row into view and marks the panel row current
+// until another is chosen or the view hides.
 (function () {
   'use strict';
 
@@ -143,6 +149,7 @@
     var message = document.getElementById('jobs-message');
     var cards = document.getElementById('jobs-cards');
     var availability = document.getElementById('health-availability');
+    var side = document.querySelector('[data-panel-for="health"]');
 
     var state = null;
     var visible = false;
@@ -152,6 +159,7 @@
     var pauseError = ''; // why the last Pause or Resume failed, or ''
     var tick = null;
     var selectedLabel = null; // one job row, remembered for this page
+    var chosen = null; // the panel row chosen while shown: 'settings', a job's label, or null
 
     function row(item) {
       var li = element('li', 'routine-row job-row');
@@ -228,6 +236,53 @@
       }
     }
 
+    function panelRow(key, label, badge) {
+      var button = element('button', 'panel-row');
+      button.type = 'button';
+      button.setAttribute('data-health-target', key);
+      if (key === chosen) button.setAttribute('aria-current', 'true');
+      if (badge) {
+        var dot = element('span', 'panel-dot panel-dot-' + badge.tone);
+        dot.setAttribute('role', 'img');
+        dot.setAttribute('aria-label', badge.text);
+        button.appendChild(dot);
+      }
+      button.appendChild(element('span', 'panel-row-name', label));
+      return button;
+    }
+
+    // Replaces the panel's rows, keeping keyboard focus on the row it was on.
+    function renderPanel(list) {
+      if (!side) return;
+      var active = document.activeElement;
+      var focused = active && side.contains(active) ? active.getAttribute('data-health-target') : null;
+      side.textContent = '';
+      side.appendChild(panelRow('settings', 'Settings', null));
+      list.forEach(function (group) {
+        side.appendChild(element('h2', 'panel-heading', group.name));
+        group.items.forEach(function (item) { side.appendChild(panelRow(item.label, item.name, badgeFor(item))); });
+      });
+      if (focused !== null) {
+        var again = side.querySelector('[data-health-target="' + CSS.escape(focused) + '"]');
+        if (again) again.focus();
+      }
+      shell.panelChanged();
+    }
+
+    function choose(key) {
+      chosen = key;
+      var rows = side.querySelectorAll('.panel-row');
+      for (var r = 0; r < rows.length; r += 1) {
+        if (rows[r].getAttribute('data-health-target') === key) rows[r].setAttribute('aria-current', 'true');
+        else rows[r].removeAttribute('aria-current');
+      }
+      shell.closePanel();
+      var target = key === 'settings'
+        ? document.getElementById('settings-card')
+        : cards.querySelector('[data-job-label="' + CSS.escape(key) + '"]');
+      if (target) target.scrollIntoView({ block: key === 'settings' ? 'start' : 'center' });
+    }
+
     // What is off, above the heading; nothing while both answer. The
     // sentences are the Agents view's, which says the same per row.
     function renderAvailability() {
@@ -252,6 +307,7 @@
       if (!state || !visible) return;
       var jobs = state.jobs;
       if (selectedLabel && !(jobs.items || []).some(function (item) { return item.label === selectedLabel; })) selectedLabel = null;
+      if (chosen && chosen !== 'settings' && !(jobs.items || []).some(function (item) { return item.label === chosen; })) chosen = null;
       var busy = refreshing || jobs.refreshing === true;
       refreshButton.textContent = busy ? 'Refreshing…' : 'Refresh';
       refreshButton.disabled = busy;
@@ -266,6 +322,7 @@
 
       renderAvailability();
       rebuildCards();
+      renderPanel(groups(state));
     }
 
     function stale() {
@@ -316,6 +373,12 @@
     }
 
     refreshButton.addEventListener('click', refresh);
+    if (side) {
+      side.addEventListener('click', function (event) {
+        var button = event.target.closest && event.target.closest('button[data-health-target]');
+        if (button) choose(button.getAttribute('data-health-target'));
+      });
+    }
     // Pause and Resume exist only in what this module renders.
     document.addEventListener('click', function (event) {
       var button = event.target.closest && event.target.closest('button[data-jobs-action]');
@@ -365,6 +428,8 @@
       },
       hide: function () {
         visible = false;
+        chosen = null;
+        if (side) side.textContent = '';
         if (tick !== null) clearInterval(tick);
         tick = null;
       },

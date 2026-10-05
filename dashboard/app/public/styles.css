@@ -933,6 +933,17 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   white-space: nowrap;
 }
 
+/* A job's state before its name in Health's panel, colored like its badge. */
+.panel-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.panel-dot-good { background: var(--green); }
+.panel-dot-wait { background: var(--amber); }
+.panel-dot-bad { background: var(--red); }
+
 .panel-row-count {
   flex: none;
   color: var(--muted);

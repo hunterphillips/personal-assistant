@@ -453,6 +453,127 @@ test.describe('with seeded jobs', () => {
   });
 });
 
+test.describe('the side panel', () => {
+  // The seeded jobs and one whose agent the registry no longer lists.
+  test.use({
+    hubOptions: {
+      build: () => ({
+        agents: AGENTS,
+        jobs: {
+          items: [...items(), job({ id: 'gone', name: 'Gone' }, 'com.hunter.gone.nightly', { outcome: 'failed' })],
+          focusAvailable: true,
+          refreshedAt: ago(5_000),
+        },
+      }),
+    },
+  });
+
+  const side = (page) => page.locator('#panel [data-panel-for="health"]');
+  const sideRow = (page, label) => side(page).locator(`.panel-row[data-health-target="${label}"]`);
+  const phone = (page) => page.viewportSize().width < 720;
+
+  // On a phone the panel is a drawer, opened by the header's toggle first.
+  async function openSide(page) {
+    if (!phone(page)) return;
+    await page.locator('#panel-toggle').click();
+    await expect(page.locator('#panel')).toBeVisible();
+  }
+
+  async function pick(page, label) {
+    await openSide(page);
+    await sideRow(page, label).click();
+  }
+
+  test('lists Settings and each agent\'s jobs with dots matching the cards\' badges', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    await openSide(page);
+    await expect(side(page)).toBeVisible();
+    await expect(page.locator('#panel [data-panel-for="now"]')).toBeHidden();
+
+    const cardNames = await page.locator('.routine-card .card-name').allTextContents();
+    expect(cardNames).toEqual(['Focus', 'Second brain', 'CFO', 'Gone']);
+    await expect(side(page).locator('h2.panel-heading')).toHaveText(cardNames);
+
+    const jobNames = await page.locator('#jobs-cards .routine-name').allTextContents();
+    await expect(side(page).locator('.panel-row-name')).toHaveText(['Settings', ...jobNames]);
+
+    const tones = { good: 'badge-good', wait: 'badge-wait', bad: 'badge-bad' };
+    for (const label of await page.locator('#jobs-cards [data-job-label]').evaluateAll((rows) => rows.map((r) => r.dataset.jobLabel))) {
+      const badge = page.locator(`#jobs-cards [data-job-label="${label}"] .badge`);
+      const dot = sideRow(page, label).locator('.panel-dot');
+      const badgeClass = await badge.getAttribute('class');
+      const expected = Object.keys(tones).find((key) => badgeClass.includes(tones[key]));
+      await expect(dot).toHaveClass(new RegExp(`panel-dot-${expected}`));
+      await expect(dot).toHaveAttribute('aria-label', await badge.textContent());
+    }
+    // The dot takes the theme's own green, not the badge's tint.
+    const green = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--green)';
+      document.body.appendChild(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+    await expect(sideRow(page, 'com.focus.scan-gmail').locator('.panel-dot')).toHaveCSS('background-color', green);
+    await expect(sideRow(page, 'com.hunter.brain-audit').locator('.panel-dot')).toHaveClass(/panel-dot-bad/);
+    await expect(sideRow(page, 'com.focus.scan-notes').locator('.panel-dot')).toHaveClass(/panel-dot-wait/);
+  });
+
+  test('choosing a job brings its row into view and marks the panel row current until another is chosen or the view hides', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    const target = page.locator('#jobs-cards [data-job-label="com.hunter.gone.nightly"]');
+    await expect(target).not.toBeInViewport();
+
+    await pick(page, 'com.hunter.gone.nightly');
+    await expect(target).toBeInViewport();
+    await expect(sideRow(page, 'com.hunter.gone.nightly')).toHaveAttribute('aria-current', 'true');
+    await expect(side(page).locator('.panel-row[aria-current="true"]')).toHaveCount(1);
+
+    await expect(page.locator('#settings-card')).not.toBeInViewport({ ratio: 0.9 });
+    await pick(page, 'settings');
+    await expect(page.locator('#settings-card')).toBeInViewport({ ratio: 0.99 });
+    await expect(sideRow(page, 'settings')).toHaveAttribute('aria-current', 'true');
+    await expect(sideRow(page, 'com.hunter.gone.nightly')).not.toHaveAttribute('aria-current', 'true');
+
+    await pick(page, 'com.hunter.cfo.daily');
+    await hub.state.refreshJobs();
+    await expect(sideRow(page, 'com.hunter.cfo.daily')).toHaveAttribute('aria-current', 'true');
+
+    await nav(page, 'Goals').click();
+    await expectView(page, 'goals', 'Goals');
+    await expect(side(page).locator('.panel-row')).toHaveCount(0);
+    await nav(page, 'Health').click();
+    await expectView(page, 'health', 'Health');
+    await openSide(page);
+    await expect(sideRow(page, 'settings')).toBeVisible();
+    await expect(side(page).locator('.panel-row[aria-current="true"]')).toHaveCount(0);
+  });
+
+  test('a job that fails recolors its dot', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    await openSide(page);
+    const dot = sideRow(page, 'com.hunter.brain-drain').locator('.panel-dot');
+    await expect(dot).toHaveClass(/panel-dot-good/);
+    hub.jobs.items = hub.jobs.items.map((item) => item.label === 'com.hunter.brain-drain' ? { ...item, outcome: 'failed', exitStatus: 1 } : item);
+    await hub.state.refreshJobs();
+    await expect(dot).toHaveClass(/panel-dot-bad/);
+    await expect(dot).toHaveAttribute('aria-label', 'Failed (exit 1)');
+  });
+
+  test('on a phone a choice closes the drawer; on a desk the panel stays', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    await pick(page, 'com.hunter.brain-audit');
+    await expect(page.locator('#jobs-cards [data-job-label="com.hunter.brain-audit"]')).toBeInViewport();
+    if (phone(page)) {
+      await expect(page.locator('#panel')).toBeHidden();
+      await expect(page.locator('#panel-scrim')).toBeHidden();
+    } else {
+      await expect(page.locator('#panel')).toBeVisible();
+    }
+  });
+});
+
 test.describe('with stale jobs', () => {
   test.use({ hubOptions: seeded({ refreshedAt: ago(5 * MINUTE) }) });
 
