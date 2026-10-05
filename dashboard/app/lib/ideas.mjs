@@ -13,7 +13,7 @@ import { defaultAgentId } from './builtins.mjs';
 const FILE_NAME = /^\d{4}-\d{2}-\d{2}-[a-z][a-z0-9-]*\.json$/;
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const URL = /^https?:\/\//i;
-const KINDS = new Set(['workflow', 'view', 'app', 'tool', 'skill', 'plugin', 'task']);
+const KINDS = new Set(['workflow', 'view', 'app', 'tool', 'skill', 'plugin', 'agent']);
 
 export class IdeasError extends Error {
   constructor(code) {

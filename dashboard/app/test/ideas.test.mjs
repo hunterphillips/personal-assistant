@@ -22,7 +22,7 @@ function store(paths, extra = {}) {
 }
 
 function item(id, extra = {}) {
-  return { id, title: `Fixture ${id}`, text: 'Invented fixture content.', kind: 'task', agents: ['assistant'], source: null, ...extra };
+  return { id, title: `Fixture ${id}`, text: 'Invented fixture content.', kind: 'agent', agents: ['assistant'], source: null, ...extra };
 }
 
 test('runs read newest first and the result is frozen', async (t) => {

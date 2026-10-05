@@ -24,7 +24,7 @@ own ideas.
   `^[a-z0-9][a-z0-9-]{0,79}$` and is unique across the store.
 - `title` is required and non-empty.
 - `text` is a string. Only a manual idea may leave it empty.
-- `kind` is `workflow`, `view`, `app`, `tool`, `skill`, `plugin`, `task`, or
+- `kind` is `workflow`, `view`, `app`, `tool`, `skill`, `plugin`, `agent`, or
   null.
 - `agents` is a list of registry ids.
 - `source` is an `http` or `https` URL, or null.

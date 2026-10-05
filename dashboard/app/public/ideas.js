@@ -16,7 +16,7 @@
   var TOO_LONG = 'That is too long for one message.';
   var ALREADY_STARTED = 'That idea has already been started.';
   var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  var KINDS = new Set(['workflow', 'view', 'app', 'tool', 'skill', 'plugin', 'task']);
+  var KINDS = new Set(['workflow', 'view', 'app', 'tool', 'skill', 'plugin', 'agent']);
   var ICONS = {
     workflow: '<path d="M6 5.5h7a3 3 0 0 1 3 3v7"/><path d="m13 13 3 3 3-3"/><circle cx="6" cy="5.5" r="2"/>',
     view: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 9h17"/><path d="M9 9v10"/>',
@@ -24,7 +24,7 @@
     tool: '<path d="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-3Z"/>',
     skill: '<path d="M12 3.5 14.2 8l4.8.7-3.5 3.4.8 4.9-4.3-2.3L7.7 17l.8-4.9L5 8.7 9.8 8Z"/>',
     plugin: '<path d="M8.5 4v4.5H4v7h4.5V20h7v-4.5H20v-7h-4.5V4Z"/><path d="M10 4a2 2 0 1 1 4 0"/><path d="M20 10a2 2 0 1 1 0 4"/>',
-    task: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 2.5 2.5L16 9"/>',
+    agent: '<circle cx="12" cy="8.5" r="3.25"/><path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/>',
     idea: '<path d="M9 18h6"/><path d="M10 21h4"/><path d="M8.4 14.5A6 6 0 1 1 15.6 14.5C14.6 15.2 14 16.1 14 17h-4c0-.9-.6-1.8-1.6-2.5Z"/>',
   };
 

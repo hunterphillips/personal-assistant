@@ -13,16 +13,21 @@ Paths below are from the repo root, two folders up from this folder.
 - `ideas/marks.json` and every id in every file in `ideas/items/`. Emit
   none of those ids. A dismissed idea is never rephrased under a new id.
 - `systems/second-brain/notes/longterm-priorities.md` (the vault) and
-  the goals it lists.
+  the goals it lists, as context for judging, not the test an idea
+  must pass.
 - `registry/agents.json`.
 - `thoughts/shared/lanes/*/handoff.md`.
 - This week's `feed/items/`.
 
 ## Judge
 
-Weigh each candidate against `ideas/criteria.md`. Write at most five.
-Draw across the seven kinds; no kind needs an entry. Something already
-built, already running, or already in a plan is not an idea.
+Weigh each candidate against `ideas/criteria.md`. An idea is about the
+system: what it, one of its agents, or a new agent or tool could do.
+Never an action for Hunter to take. `ideas/criteria.md` is Hunter's own
+note; when it names a theme for the week, that takes precedence. Write
+at most five. Draw across the seven kinds; no kind needs an entry.
+Something already built, already running, or already in a plan is not
+an idea.
 
 ## Write
 
