@@ -6,7 +6,7 @@ import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { expect, expectView, test } from '../support/browser-test.mjs';
+import { expect, expectView, nav, test } from '../support/browser-test.mjs';
 
 const VAULT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'vault');
 const BUSY = 'Second brain is in the middle of a turn. Try again when it is idle.';
@@ -19,7 +19,7 @@ const composer = (page) => page.locator('#goals-cards form.goal-composer');
 const messages = (page) => page.locator('#agent-messages .thread-message');
 
 async function openRow(page, section, id) {
-  await page.getByRole('button', { name: new RegExp(`^${section} \\d+$`) }).click();
+  await page.locator('#goals-cards').getByRole('button', { name: new RegExp(`^${section} \\d+$`) }).click();
   await row(page, id).click();
 }
 
@@ -100,7 +100,7 @@ test.describe('with the fixture vault', () => {
 
   test('rows and headers are one column and at least 44 px tall', async ({ page, hub }) => {
     await openGoals(page, hub);
-    await page.getByRole('button', { name: /^Goal notes/ }).click();
+    await page.locator('#goals-cards').getByRole('button', { name: /^Goal notes/ }).click();
     const heights = await page.locator('#goals-cards .goal-row:visible, #goals-cards .goal-section-toggle')
       .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
     expect(heights.length).toBeGreaterThan(5);
@@ -125,14 +125,14 @@ test.describe('with the fixture vault', () => {
     await expect(page.locator('[data-goal-section="later"] .card-note')).toHaveText('Updated 2026-03-04');
     await expect(row(page, 'later:kayak-trip')).toBeHidden();
 
-    await page.getByRole('button', { name: /^Later/ }).click();
+    await page.locator('#goals-cards').getByRole('button', { name: /^Later/ }).click();
     await expect(row(page, 'later:kayak-trip')).toBeVisible();
     await expect(row(page, 'later:kayak-trip').locator('.goal-status')).toHaveText('pick a river in May.');
     await expect(row(page, 'later:reorganise-the-garage-shelves-one-weekend').locator('.goal-title'))
       .toHaveText('Reorganise the garage shelves one weekend soon.');
     await expect(row(page, 'later:reorganise-the-garage-shelves-one-weekend').locator('.goal-status')).toHaveCount(0);
 
-    await page.getByRole('button', { name: /^Long term/ }).click();
+    await page.locator('#goals-cards').getByRole('button', { name: /^Long term/ }).click();
     const longTerm = page.locator('[data-goal-section="long-term"]');
     await expect(longTerm.locator('.goal-principle')).toHaveText('Make things by hand and share them with friends.');
     await expect(longTerm.locator('.goal-row .goal-title')).toHaveText([
@@ -141,7 +141,7 @@ test.describe('with the fixture vault', () => {
     await expect(longTerm.locator('.goal-status')).toHaveCount(0);
     await expect(longTerm.locator('.goal-horizons dt')).toHaveText(['1 yr', '5 yrs']);
 
-    await page.getByRole('button', { name: /^Goal notes/ }).click();
+    await page.locator('#goals-cards').getByRole('button', { name: /^Goal notes/ }).click();
     await expect(row(page, 'goal:boat').locator('.goal-status')).toHaveText('a small wooden rowing boat.');
     await expect(row(page, 'goal:zine').locator('.goal-status')).toHaveText('A photocopied zine about the neighbourhood.');
     await row(page, 'goal:boat').click();
@@ -150,7 +150,7 @@ test.describe('with the fixture vault', () => {
     await expect(item(page, 'goal:zine').locator('.role-chip')).toHaveCount(0);
     await expect(item(page, 'goal:zine').locator('.goal-prose p')).toHaveText(['Walks and maps.', 'Recipes.']);
 
-    await page.getByRole('button', { name: /^Later/ }).click();
+    await page.locator('#goals-cards').getByRole('button', { name: /^Later/ }).click();
     await expect(row(page, 'later:kayak-trip')).toBeHidden();
     await expect(page.locator('#view-goals [data-action]')).toHaveCount(0);
   });
@@ -323,6 +323,81 @@ test.describe('with the fixture vault', () => {
   });
 });
 
+test.describe('the side panel', () => {
+  test.use({ hubOptions: { vault: VAULT } });
+
+  const side = (page) => page.locator('#panel [data-panel-for="goals"]');
+  const area = (page, id) => side(page).locator(`.panel-row[data-goal-area="${id}"]`);
+  const heading = (page, id) => page.locator(`#goals-section-${id}`);
+
+  // On a phone the panel is a drawer, opened by the header's toggle first.
+  async function openSide(page) {
+    if (page.viewportSize().width >= 720) return;
+    await page.locator('#panel-toggle').click();
+    await expect(page.locator('#panel')).toBeVisible();
+  }
+
+  test('lists Areas, one row per section with its count', async ({ page, hub }) => {
+    await openGoals(page, hub);
+    await openSide(page);
+    await expect(side(page)).toBeVisible();
+    await expect(page.locator('#panel [data-panel-for="now"]')).toBeHidden();
+    await expect(side(page).locator('h2.panel-heading')).toHaveText(['Areas']);
+    await expect(side(page).locator('.panel-row-name')).toHaveText(['Now', 'Later', 'Not now', 'Long term', 'Goal notes']);
+    await expect(side(page).locator('.panel-row-count')).toHaveText(['2', '4', '2', '3', '4']);
+    const counts = await page.locator('#goals-cards .goal-count').allTextContents();
+    expect(await side(page).locator('.panel-row-count').allTextContents()).toEqual(counts);
+    expect(await side(page).locator('.panel-row').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-goal-area'))))
+      .toEqual(await sections(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-goal-section'))));
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(0);
+  });
+
+  test('choosing an area opens a folded section, scrolls to it, and marks the row', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1280, height: 420 });
+    await openGoals(page, hub);
+    const toggle = page.locator('[data-goal-section="goals"] .goal-section-toggle');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(heading(page, 'goals')).not.toBeInViewport();
+
+    await area(page, 'goals').click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('[data-goal-section="goals"] .goal-row').first()).toBeVisible();
+    await expect(heading(page, 'goals')).toBeInViewport();
+    await expect(area(page, 'goals')).toHaveAttribute('aria-current', 'true');
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(1);
+
+    // An open section stays open, and the mark moves to the new row.
+    await area(page, 'now').click();
+    await expect(page.locator('[data-goal-section="now"] .goal-section-toggle')).toHaveAttribute('aria-expanded', 'true');
+    await expect(heading(page, 'now')).toBeInViewport();
+    await expect(area(page, 'now')).toHaveAttribute('aria-current', 'true');
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(1);
+    await area(page, 'goals').click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    await nav(page, 'Home').click();
+    await expectView(page, 'agents', 'Agents');
+    await expect(side(page).locator('.panel-row')).toHaveCount(0);
+    await nav(page, 'Goals').click();
+    await expectView(page, 'goals', 'Goals');
+    await expect(side(page).locator('.panel-row')).toHaveCount(5);
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(0);
+  });
+
+  test('on a phone a choice closes the drawer', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openGoals(page, hub);
+    await openSide(page);
+    await expect(page.locator('#panel-scrim')).toBeVisible();
+    await area(page, 'goals').click();
+    await expect(page.locator('#panel-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#panel')).toBeHidden();
+    await expect(page.locator('#panel-scrim')).toBeHidden();
+    await expect(page.locator('[data-goal-section="goals"] .goal-section-toggle')).toHaveAttribute('aria-expanded', 'true');
+    await expect(heading(page, 'goals')).toBeInViewport();
+  });
+});
+
 test.describe('with the second-brain persona not started', () => {
   test.use({ hubOptions: { vault: VAULT, personas: { 'second-brain': { startFails: true } } } });
 
@@ -374,5 +449,7 @@ test.describe('with an empty vault', () => {
     expect(lines[0]).toBe('Nothing in the vault yet.');
     expect(lines.slice(1)).toContain('notes/current-priorities.md is missing.');
     await expect(sections(page)).toHaveCount(0);
+    await expect(page.locator('#panel [data-panel-for="goals"] .panel-row')).toHaveCount(0);
+    await expect(page.locator('#panel [data-panel-for="goals"]')).toBeHidden();
   });
 });

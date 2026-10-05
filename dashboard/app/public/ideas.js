@@ -5,6 +5,11 @@
 // criteria panel is instructions.js's. Each row expands its description and
 // owns one overflow menu whose buttons use data-ideas-action so the shell's
 // data-action handler never owns them.
+//
+// The side panel's Ideas section, drawn on the same render as the weeks and
+// cleared on hide, lists Weeks: each week with its count of ideas. Choosing
+// one scrolls that week's heading into view and marks the row current until
+// another is chosen or the view hides.
 (function () {
   'use strict';
 
@@ -79,6 +84,7 @@
   function create(shellApi) {
     var message = document.getElementById('ideas-message');
     var weeks = document.getElementById('ideas-weeks');
+    var side = document.querySelector('[data-panel-for="ideas"]');
     var addToggle = document.getElementById('ideas-add');
     var addForm = document.getElementById('ideas-add-form');
     var addInput = document.getElementById('ideas-add-input');
@@ -94,6 +100,7 @@
     var pending = null;
     var discussed = null;
     var openMenu = null;
+    var chosen = null; // the week key of the panel's current row, or null
 
     function agents() { return state && Array.isArray(state.agents) ? state.agents : []; }
     function agent(id) { return agents().find(function (entry) { return entry.id === id; }) || null; }
@@ -228,6 +235,38 @@
       return node;
     }
 
+    // The panel's Weeks group: one row per week drawn, with its count of ideas.
+    function renderPanel(groups) {
+      if (!side) return;
+      side.textContent = '';
+      if (groups.length === 0) return;
+      side.appendChild(element('h2', 'panel-heading', 'Weeks'));
+      groups.forEach(function (group) {
+        var count = group.runs.reduce(function (sum, run) { return sum + objectsIn(run.items).length; }, 0);
+        var row = element('button', 'panel-row');
+        row.type = 'button';
+        row.setAttribute('data-ideas-week', group.key);
+        if (group.key === chosen) row.setAttribute('aria-current', 'true');
+        row.appendChild(element('span', 'panel-row-name', group.title));
+        row.appendChild(element('span', 'panel-row-count', String(count)));
+        side.appendChild(row);
+      });
+    }
+
+    // Scrolls the week's heading into view and marks its row current.
+    function choose(key) {
+      var week = weeks.querySelector('[data-ideas-week="' + CSS.escape(key) + '"]');
+      if (!week) return;
+      chosen = key;
+      var rows = side.querySelectorAll('.panel-row');
+      for (var r = 0; r < rows.length; r += 1) {
+        if (rows[r].getAttribute('data-ideas-week') === key) rows[r].setAttribute('aria-current', 'true');
+        else rows[r].removeAttribute('aria-current');
+      }
+      week.querySelector('.ideas-week-title').scrollIntoView({ block: 'start' });
+      shellApi.closePanel();
+    }
+
     function setMessage(lines) {
       message.textContent = '';
       lines.forEach(function (text, index) {
@@ -263,6 +302,10 @@
       setMessage(built.length === 0 ? [EMPTY].concat(problems) : problems);
       weeks.textContent = '';
       built.forEach(function (node) { weeks.appendChild(node); });
+      // A week gone from the store takes its mark with it.
+      if (!groups.some(function (group) { return group.key === chosen; })) chosen = null;
+      renderPanel(groups);
+      shellApi.panelChanged();
       rendered = JSON.stringify(data);
     }
 
@@ -373,6 +416,12 @@
       })
       : null;
 
+    if (side) {
+      side.addEventListener('click', function (event) {
+        var row = event.target.closest && event.target.closest('button[data-ideas-week]');
+        if (row) choose(row.getAttribute('data-ideas-week'));
+      });
+    }
     weeks.addEventListener('click', function (event) {
       var toggle = event.target.closest && event.target.closest('.ideas-menu-toggle');
       if (toggle) {
@@ -447,6 +496,8 @@
       hide: function () {
         visible = false;
         discussed = null;
+        chosen = null;
+        if (side) side.textContent = '';
         closeMenu(false);
         addToggle.hidden = true;
         closeAdd(false, false);
