@@ -520,8 +520,11 @@ function controlledJobs({ items = [], focusAvailable = null, refreshedAt = null 
 // request and continues the turn the same way. The open turn's `from` and
 // `chain` are kept on the entry and stamped on every request and resolved
 // event, as the real adapter does, so the real hub relays the card. A send
-// with `routine` (the scheduler's) records the user message with it and
-// never with `from`, as the real adapter does.
+// with `routine` (the scheduler's) runs detached, as the real adapter does:
+// no user message, no assistant message, never a `from`; its seeded ask is
+// quiet; and it resolves { text, error, aborted }: the reply on finish,
+// { text: '', error } on fail() with no error event and the state idle,
+// and aborted on interrupt().
 // Controls on the returned object:
 //   hold(id)                       later turns stay busy until reply()
 //   reply(id, text)                ends the open turn with that reply
@@ -559,6 +562,7 @@ export function fakePersonas(seed, store) {
         from: null,
         chain: [],
         routine: null,
+        text: [],
       });
     }
     return entries.get(id);
@@ -590,16 +594,23 @@ export function fakePersonas(seed, store) {
     return effort === null ? `Now on ${name}.` : `Now on ${name}, ${effortText}.`;
   }
 
-  function endTurn(id) {
+  // A routine's turn resolves what it ended with; any other turn, nothing.
+  function endTurn(id, { error = null, aborted = false } = {}) {
     const current = entry(id);
     const done = current.turn;
     current.turn = null;
-    done?.();
+    done?.(current.routine ? { text: error ? '' : current.text.join('\n\n'), error, aborted } : undefined);
+  }
+
+  // Assistant text: the thread's message, or a run's collected reply.
+  async function speak(id, text) {
+    if (entry(id).routine) entry(id).text.push(text);
+    else await say(id, 'assistant', text);
   }
 
   async function finish(id, text) {
     const current = entry(id);
-    await say(id, 'assistant', text);
+    await speak(id, text);
     current.costUsd = (current.costUsd ?? 0) + 0.01;
     emit('usage', id, { usage: {}, costUsd: current.costUsd, denials: [] });
     setState(id, 'idle');
@@ -619,7 +630,7 @@ export function fakePersonas(seed, store) {
   // The seeded ask, made as the tool handler would, then the reply.
   async function delegateTurn(id, delegate, context) {
     if (!delegation) throw new Error('fakePersonas: a delegate seed needs setDelegation()');
-    const outcome = await delegation.ask({ from: id, chain: context.chain ?? [], to: delegate.to, message: delegate.text });
+    const outcome = await delegation.ask({ from: id, chain: context.chain ?? [], to: delegate.to, message: delegate.text, quiet: Boolean(entry(id).routine) });
     if (entry(id).state === 'busy' && !held.has(id)) await finish(id, outcome.text);
   }
 
@@ -668,10 +679,10 @@ export function fakePersonas(seed, store) {
       current.routine = context.routine && typeof context.routine === 'object' ? { id: context.routine.id, name: context.routine.name } : null;
       current.from = !current.routine && typeof context.from === 'string' && context.from !== '' ? context.from : null;
       current.chain = Array.isArray(context.chain) ? [...context.chain] : [];
+      current.text = [];
       setState(agent.id, 'busy');
       const fields = {
         ...(current.from ? { from: current.from } : {}),
-        ...(current.routine ? { routine: current.routine } : {}),
         ...(Array.isArray(context.mentions) && context.mentions.length > 0 ? { mentions: [...context.mentions] } : {}),
       };
       const delegate = seed[agent.id]?.delegate;
@@ -681,7 +692,8 @@ export function fakePersonas(seed, store) {
       // As the real adapter: the context line, then the message as typed.
       const sendContext = context.context ? parseContext(context.context) : null;
       const before = sendContext ? say(agent.id, 'system', contextLine(sendContext), { kind: 'context', ...sendContext }) : Promise.resolve();
-      before.then(() => say(agent.id, 'user', text, fields)).then(() => {
+      const shown = current.routine ? Promise.resolve() : before.then(() => say(agent.id, 'user', text, fields));
+      shown.then(() => {
         if (delegate && !current.from) return delegateTurn(agent.id, delegate, context);
         const notify = seed[agent.id]?.notify;
         if (notify && !current.from) return notifyTurn(agent.id, notify);
@@ -711,7 +723,7 @@ export function fakePersonas(seed, store) {
         emit('resolved', agent.id, { requestId, outcome: 'interrupted', from: current.from, chain: [...current.chain] });
       }
       setState(agent.id, 'idle');
-      endTurn(agent.id);
+      endTurn(agent.id, { aborted: true });
     },
     // As the real adapter: the same refusals, the pointer's pair kept in
     // the entry, and the line written through the real store.
@@ -749,7 +761,7 @@ export function fakePersonas(seed, store) {
     sent,
     hold: (id) => held.add(id),
     reply: (id, text) => finish(id, text),
-    say: (id, text) => say(id, 'assistant', text),
+    say: (id, text) => speak(id, text),
     raise,
     expire(id) {
       const current = entry(id);
@@ -762,6 +774,11 @@ export function fakePersonas(seed, store) {
     },
     fail(id, message) {
       const current = entry(id);
+      if (current.routine) {
+        setState(id, 'idle');
+        endTurn(id, { error: message });
+        return;
+      }
       current.lastError = message;
       emit('error', id, { message });
       setState(id, 'error');
