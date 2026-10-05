@@ -33,7 +33,8 @@ from here.
   turn's prompt also names the agent, its registry name, role, and
   description; each agent runs at a permission level, Ask, Auto, or Full
   access, set in its gear panel; its routines, scheduled prompts the
-  daemon runs itself as a turn in its thread at its level, are listed
+  daemon runs itself in a session of its own at its level, each run's
+  reply kept under Last runs in its settings, are listed
   under its settings with a picker form and under the groups in the
   list; Myos is the built-in guide agent, seeded by the daemon, and any
   other agent can be deleted from its gear panel), Feed holds what the

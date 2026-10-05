@@ -48,8 +48,9 @@ function routines() {
       id: 'morning-drift', name: 'Morning drift', agent: 'cfo', instruction: DRIFT, cron: '30 6 * * 1-5',
       runs: [
         { outcome: 'missed', count: 1, from: ago(3 * DAY), to: ago(2 * DAY) },
+        { run: 'run-failed', occurrence: ago(2 * DAY), trigger: 'schedule', startedAt: ago(2 * DAY), endedAt: ago(2 * DAY - 10_000), outcome: 'failed', reply: 'Partial answer.', detail: 'Invented failure' },
         { run: 'run-1', occurrence: yesterday, trigger: 'schedule', startedAt: yesterday },
-        { run: 'run-1', endedAt: new Date(Date.parse(yesterday) + 48_000).toISOString(), outcome: 'finished' },
+        { run: 'run-1', endedAt: new Date(Date.parse(yesterday) + 48_000).toISOString(), outcome: 'finished', reply: 'Every bucket is within its band.\n\nBonds sit 1.2 points under.' },
       ],
     },
     { id: 'pending-decisions', name: 'Pending decisions', agent: 'cfo', instruction: 'List every open decision.', cron: '0 9 * * 1,4' },
@@ -232,26 +233,38 @@ test.describe('with seeded routines', () => {
     await expect(sectionRows(page).nth(0).locator('.routine-item-when')).toHaveText('Weekdays at 6:30');
   });
 
-  test('Test run shows the run in Last runs and leaves the thread alone', async ({ page, hub }) => {
+  test('Test run shows the run and its reply in Last runs and leaves the thread alone', async ({ page, hub }) => {
     await openRoutine(page, hub, 'cfo', 'Morning drift');
     const runs = page.locator('#routine-runs .routine-run-row');
-    await expect(runs).toHaveCount(2);
-    await expect(runs.nth(0).locator('.routine-chip')).toHaveText('Finished');
-    await expect(runs.nth(0).locator('.routine-run-note')).toHaveText('Replied in 48 seconds.');
-    await expect(runs.nth(1).locator('.routine-chip')).toHaveText('Missed');
-    await expect(runs.nth(1).locator('.routine-run-note')).toHaveText('One fire was missed.');
-
-    await form(page).locator('[data-agent-action="test-routine"]').click();
     await expect(runs).toHaveCount(3);
     await expect(runs.nth(0).locator('.routine-chip')).toHaveText('Finished');
+    await expect(runs.nth(0).locator('.routine-run-note')).toHaveText('Replied in 48 seconds.');
+    const seededReply = runs.nth(0).locator('details.routine-run-reply');
+    await expect(seededReply.locator('summary')).toHaveText('Every bucket is within its band.');
+    await seededReply.locator('summary').click();
+    await expect(seededReply).toHaveAttribute('open', '');
+    await expect(seededReply.locator('.routine-run-reply-body')).toBeVisible();
+    await expect(seededReply).toContainText('Every bucket is within its band.');
+    await expect(seededReply).toContainText('Bonds sit 1.2 points under.');
+    await expect(runs.nth(1).locator('.routine-chip')).toHaveText('Failed');
+    await expect(runs.nth(1).locator('.routine-run-note')).toHaveText('The turn failed.');
+    await expect(runs.nth(1).locator('.routine-run-reply')).toHaveText('Invented failure');
+    await expect(runs.nth(2).locator('.routine-chip')).toHaveText('Missed');
+    await expect(runs.nth(2).locator('.routine-run-note')).toHaveText('One fire was missed.');
+
+    await form(page).locator('[data-agent-action="test-routine"]').click();
+    await expect(runs).toHaveCount(4);
+    await expect(runs.nth(0).locator('.routine-chip')).toHaveText('Finished');
     await expect(runs.nth(0).locator('.routine-run-note')).toHaveText(/^Test run\. Replied in \d+ seconds?\.$/);
+    await expect(runs.nth(0).locator('.routine-run-reply')).toHaveText(`Reply: ${DRIFT}`);
     await expect(panelRows(page)).toHaveCount(0);
     expect(hub.personas.sent.at(-1)).toMatchObject({ id: 'cfo', text: DRIFT, context: { routine: { id: 'morning-drift', name: 'Morning drift' } } });
 
     // A run is a session of its own: neither its instruction nor its reply is a message.
     if (page.viewportSize().width < 720) await page.locator('[data-agent-action="close-details"]').click();
     await expect(page.locator('#agent-messages .thread-message-routine')).toHaveCount(0);
-    await expect(page.locator('#agent-messages')).not.toContainText(`Reply: ${DRIFT}`);
+    await expect(page.locator('#agent-messages .thread-message').last()).toContainText('Cash is fine.');
+    await expect(row(page, 'CFO').locator('.agent-row-dot')).toHaveCount(0);
   });
 
   test('a run whose card is raised shows the card and the line; unanswered, the row says Needs you until Hunter writes', async ({ page, hub }) => {
@@ -284,6 +297,7 @@ test.describe('with seeded routines', () => {
     const runs = page.locator('#routine-runs .routine-run-row');
     await expect(runs.nth(0).locator('.routine-chip')).toHaveText('Waiting for you');
     await expect(runs.nth(0).locator('.routine-run-note')).toHaveText('Test run. CFO wanted to run Bash.');
+    await expect(runs.nth(0).locator('.routine-run-reply')).toHaveText('Done without it.');
     await expect(panelRows(page)).toHaveCount(0);
 
     // Hunter's own message clears the chip.

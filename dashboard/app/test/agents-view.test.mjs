@@ -253,6 +253,14 @@ test('formatInput pretty-prints whole JSON and leaves cut input as it came', () 
   assert.equal(view.formatInput({ input: 'not json', truncated: false }), 'not json');
 });
 
+test('runNote distinguishes stopped runs and keeps failure detail out of the note', () => {
+  const names = (id) => id;
+  assert.equal(view.runNote({ outcome: 'interrupted', detail: 'interrupted' }, names), 'The turn was stopped.');
+  assert.equal(view.runNote({ outcome: 'interrupted' }, names), 'The dashboard stopped during the run.');
+  assert.equal(view.runNote({ outcome: 'failed', detail: 'invented failure' }, names), 'The turn failed.');
+  assert.equal(view.runNote({ outcome: 'failed', detail: 'agent_unavailable' }, names), 'The agent was not started.');
+});
+
 test('modelButtonText names the effective pair, the model alone, or the Claude Code default', () => {
   const models = [{ id: 'sonnet', name: 'Sonnet' }, { id: 'opus', name: 'Opus' }];
   assert.equal(view.modelButtonText({ id: 'sonnet', effort: 'high' }, models), 'Sonnet · High');

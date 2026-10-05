@@ -25,7 +25,7 @@
 // sheet over it on a phone), with one line counting the agent's jobs and
 // linking to Health. The panel's open state lasts for the page's life: it
 // stays open as other agents are chosen, and a reload starts closed. For a
-// persona the panel is a form (name, role, group or a new group, description,
+// agent the panel is a form (name, role, group or a new group, description,
 // folder, model and effort, who may message it, pinned) that PUTs
 // /api/agents/<id>/settings; Save is off until a field changed, and a refusal
 // lists the validator's problems under the form. A project or system entry
@@ -39,12 +39,13 @@
 // and where the brief or quick chat moves when Settings names this agent,
 // then sends DELETE /api/agents/<id>; a refusal is one sentence under it.
 //
-// Under a persona's settings the panel lists its routines (the snapshot's
+// Under an agent's settings the panel lists its routines (the snapshot's
 // `routines`): each row's name, schedule in words, and last run. A row or
 // "Add routine" swaps the panel to the routine form (Name, Instruction,
 // When as a picker of cadence and time, Active), which POSTs or PUTs
 // /api/routines; a saved routine's form also offers Test run, Delete with
-// an inline confirm, and its last runs from /api/routines/<id>/runs. A
+// an inline confirm, and its last runs and replies from
+// /api/routines/<id>/runs. A
 // collapsed Routines section at the foot of the list shows every routine
 // under its agent, each row opening that agent's panel on it. A persona
 // whose routine last ended waiting shows "Needs you" on its row until
@@ -282,7 +283,7 @@
         parts.push('The agent was already working.');
         break;
       case 'interrupted':
-        parts.push('The dashboard stopped during the run.');
+        parts.push(run.detail === 'interrupted' ? 'The turn was stopped.' : 'The dashboard stopped during the run.');
         break;
       case 'missed':
         parts.push(run.count === 1 ? 'One fire was missed.' : (run.count || 0) + ' fires were missed.');
@@ -2332,6 +2333,22 @@
         item.appendChild(line);
         var note = runNote(run, names);
         if (note) item.appendChild(element('span', 'routine-run-note', note));
+        var reply = run.outcome === 'failed' && run.detail && run.detail !== 'agent_unavailable'
+          ? String(run.detail)
+          : typeof run.reply === 'string' && run.reply ? run.reply : '';
+        if (reply) {
+          var firstLine = reply.split(/\r?\n/, 1)[0];
+          var isLong = /[\r\n]/.test(reply) || reply.length > 160;
+          if (isLong) {
+            var details = element('details', 'routine-run-reply');
+            var summary = firstLine.length > 160 ? firstLine.slice(0, 160) + '…' : firstLine;
+            details.appendChild(element('summary', null, window.DashboardMarkdown.plain(summary) || summary));
+            details.appendChild(window.DashboardMarkdown.renderInto(element('div', 'routine-run-reply-body markdown'), reply));
+            item.appendChild(details);
+          } else {
+            item.appendChild(element('span', 'routine-run-reply', window.DashboardMarkdown.plain(reply)));
+          }
+        }
         list.appendChild(item);
       }
       node.appendChild(list);
