@@ -66,8 +66,7 @@ from here.
   `builtin` (seeded from `registry/builtin.json`, no Delete); plus the
   `groups` list that sets group order and labels. Local data the
   dashboard writes, never committed; back it up when moving machines.
-  Absolute paths;
-  the daemon keeps the last good copy on a bad edit. Since 2026-10-02 the
+  Absolute paths; the daemon keeps the last good copy on a bad edit. Since 2026-10-02 the
   dashboard writes it (an agent's settings, New agent) as 2-space JSON in
   the schema's key order; hand edits still load.
 - **Use cases**: `daily-brief/`, running every morning since 2026-09-27

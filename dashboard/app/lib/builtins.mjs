@@ -16,7 +16,7 @@
 //   missing registry is seeded: the built-ins alone, written fresh. An
 //   invalid one (unreadable, malformed JSON, or failing validation: it
 //   keeps its last good copy and is fixed by hand) is skipped silently, as
-//   is a missing file.
+//   is a missing built-ins file.
 //   An unreadable or malformed file, or a write the validator refuses, is
 //   logged (builtins_error, builtins_seed_error) and never fatal. A
 //   deleted built-in is therefore back on the next start: the dashboard

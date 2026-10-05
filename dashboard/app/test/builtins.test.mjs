@@ -47,7 +47,7 @@ test('a group the registry does not list falls back to the first group; no group
   assert.equal(bare.current().agents.find((entry) => entry.id === 'myos').group, 'personal');
 });
 
-test('a missing registry is seeded with the built-ins alone', async (t) => {
+test('a missing registry is seeded with the built-ins alone', async () => {
   const missing = fakeRegistry([], { ok: false, error: 'registry_missing' });
   const logs = [];
   assert.deepEqual(await seedBuiltins({ registry: missing, file: BUILTIN_FILE, root: '/invented/repo', log: (entry) => logs.push(entry) }), ['myos']);
@@ -56,7 +56,7 @@ test('a missing registry is seeded with the built-ins alone', async (t) => {
   assert.deepEqual(logs, [{ event: 'builtins_seeded', agents: ['myos'] }]);
 });
 
-test('an invalid registry is skipped silently; a missing file is no built-ins; a bad file is logged', async (t) => {
+test('an invalid registry is skipped silently; a missing built-ins file is none; a bad file is logged', async (t) => {
   const dir = await tempDir(t);
   const logs = [];
   const log = (entry) => logs.push(entry);
