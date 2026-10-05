@@ -1,10 +1,11 @@
 // Agents view, the page at `/`: the registry's agents as a list grouped
-// Work and Personal in the shell's side panel, and in the view either one persona's thread or, with no
-// agent open, a sentence asking for one. The shell calls create({ requestState,
-// isStreaming }) once, then update(state, keys) on every change
-// (keys is null for a whole snapshot), show() when the view opens, and
-// hide() when it closes or the tab is hidden. The list is rebuilt only
-// while the view is shown; show() renders the latest state.
+// Work and Personal in the shell's side panel, and in the view either one
+// persona's thread or, with no agent open, a sentence asking for one. The
+// shell calls create({ requestState, isStreaming }) once, then
+// update(state, keys) on every change (keys is null for a whole snapshot),
+// show() when the view opens, and hide() when it closes or the tab is
+// hidden. The list is rebuilt only while the view is shown; show() renders
+// the latest state.
 //
 // The open agent is `?agent=<id>` in the URL, so a reload lands on the same
 // thread and Back and Forward move between threads. Choosing a row pushes

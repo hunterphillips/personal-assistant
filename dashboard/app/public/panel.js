@@ -89,7 +89,10 @@
 
   scrim.addEventListener('click', closePanel);
 
-  document.addEventListener('keydown', function (event) {
+  // On window, so every layer's own Escape on the document (quick chat,
+  // notifications, the menu) runs first and the drawer closes only when
+  // none of them took the key.
+  window.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape' || event.defaultPrevented || !isPhone() || !shown()) return;
     closePanel();
     toggle.focus();

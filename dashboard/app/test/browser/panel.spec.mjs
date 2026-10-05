@@ -167,6 +167,24 @@ test.describe('on a phone', () => {
     await expectCollapsed(page);
   });
 
+  test('Escape closes a layer opened over the drawer first, and the drawer only on the next press', async ({ page, hub }) => {
+    await page.goto(hub.origin + '/goals');
+    await expectView(page, 'goals', 'Goals');
+    await toggle(page).click();
+    await expectShown(page);
+
+    await page.getByRole('button', { name: 'Menu', exact: true }).click();
+    await page.locator('#notifications-menu-entry').click();
+    const notifications = page.locator('#notifications-panel');
+    await expect(notifications).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(notifications).toBeHidden();
+    await expectShown(page);
+
+    await page.keyboard.press('Escape');
+    await expectCollapsed(page);
+  });
+
   test('Agents with no agent open opens the drawer, a row closes it, and Back opens it', async ({ page, hub }) => {
     await page.goto(hub.origin + '/?agent=cfo');
     await expectView(page, 'agents', 'Agents');
