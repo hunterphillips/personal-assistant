@@ -12,7 +12,7 @@
 //     'sdk_unavailable' when the rejection is a RuntimeError with that code
 //     (the provider's package could not be loaded) and 'start_failed'
 //     otherwise.
-//   send(agent, text, { model, effort, permission, from, mentions, prompt, chain, routine, context } = {}) -> Promise<void>
+//   send(agent, text, { model, effort, permission, from, mentions, prompt, chain, routine, context } = {}) -> Promise<void | { text, error, aborted }>
 //     Starts one turn on the given model id and effort level, each optional
 //     and passed to the provider only when set, at the given permission
 //     level (permissions.mjs; null and absent mean ask). `from` is the registry id
@@ -26,7 +26,11 @@
 //     line before the user message and gives the model the prompt with it
 //     in front, and one that does not ignores it. See the refusal rule below. Once accepted, the promise
 //     resolves when the turn ends and never rejects; failures arrive as
-//     `error` events and in state().
+//     `error` events and in state(). A send with `routine` ({ id, name },
+//     scheduler.mjs) runs detached, in a session of its own that leaves
+//     nothing in the thread: no resume, no message events, no error event
+//     or lastError, and it resolves { text, error, aborted }, the run's
+//     reply, failure, and whether it was interrupted.
 //   answer(agent, requestId, answer) -> Promise<void>
 //     Settles an open request. Rejects 'no_such_request' for an unknown or
 //     already settled id and 'invalid_answer' for a malformed answer.
@@ -59,7 +63,7 @@
 //
 // A provider that runs turns on a model may take a `turnTools` hook at
 // creation (claude.mjs): turnTools(agent, { text, prompt, from, chain,
-// mentions, turnId }) -> { mcpServers?, allowedTools?, prompt?, commit?,
+// mentions, routine, turnId }) -> { mcpServers?, allowedTools?, prompt?, commit?,
 // rollback? }, called before each turn, its fields copied by name. It is
 // how the daemon gives every agent the ask tool (delegation.mjs) and, later,
 // a read-only tool list for unattended chains.

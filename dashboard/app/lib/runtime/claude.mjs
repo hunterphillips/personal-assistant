@@ -14,7 +14,7 @@
 //     runs a query. Rejects with a RuntimeError 'sdk_unavailable' (its cause
 //     is the import error) if the SDK cannot be loaded, and with the fs
 //     error if the pointer file cannot be read.
-//   send(agent, text, { model, effort, permission, from, mentions, prompt, chain }) -> Promise<void>
+//   send(agent, text, { model, effort, permission, from, mentions, prompt, chain, routine }) -> Promise<void | { text, error, aborted }>
 //     Starts one turn. Refusals reject with a RuntimeError whose code is
 //     'busy' (a turn or New thread is in flight; decided synchronously, before
 //     any await, so two sends can never both reach query() and fork the
@@ -23,7 +23,8 @@
 //     one of permissions.mjs PERMISSION_LEVELS, null, or absent), or
 //     'invalid_routine' (a `routine` that is not { id, name }). Once
 //     accepted, the promise resolves when the turn ends and never rejects;
-//     failures arrive as `error` events.
+//     failures arrive as `error` events, except on a routine's detached
+//     run, which resolves { text, error, aborted } (see Turn rules).
 //   answer(agent, requestId, answer) -> Promise<void>
 //     question: { answers: { [question text]: 'Label' | ['A', 'B'] } } (arrays
 //               are joined with ", "); { decision: 'deny' } declines it.
@@ -99,7 +100,7 @@
 // A listener that throws is logged as { event: 'runtime_listener_error' }
 // and the rest still run.
 //
-// Turn rules. Every query() passes the thread's cwd, the stored session id
+// Turn rules. Every thread query() passes the thread's cwd, the stored session id
 // as resume, the permissionMode the caller's `permission` level maps to
 // (permissions.mjs sdkModeFor: ask -> 'default', auto -> 'auto', full ->
 // 'bypassPermissions' with allowDangerouslySkipPermissions; null and absent
@@ -122,10 +123,21 @@
 // registry id of the agent that sent the text (absent for the user) and
 // `mentions` the ids it named with @; both are recorded on the user message
 // and carried by its event. `routine` is { id, name } when the text is a
-// routine's instruction (scheduler.mjs), recorded on the user message as
-// `routine` and never beside `from`, kept on the turn, and logged on
-// persona_init as `routine: <id>`; the options, the mode, canUseTool, and
-// the tools hook are those of any other turn at the same level. `prompt`, when given, is what the SDK receives
+// routine's instruction (scheduler.mjs), and the send then runs detached:
+// a fresh session in agent.cwd (the registry's folder of the moment, not
+// the pinned one) with no resume, no pointer read or write, no cache write,
+// no context line, and no `message` events; assistant text is collected
+// instead, and the send resolves { text, error, aborted } (text joined,
+// trimmed, bounded to limits.messageTextBytes; error the failure, "The run
+// could not start." before init; aborted on an interrupt). A run's failure
+// is the run's: no `error` event, no lastError, and the state ends idle.
+// Busy stays mutual with the thread's turns, cards raised during a run are
+// the agent's pending requests as on any turn, `from` is never kept beside
+// a routine, the tools hook gets `routine` in its context (null on a thread
+// turn), and persona_init, persona_usage (with the run's own cost), and
+// persona_turn_error carry `routine: <id>`. Otherwise the options, the
+// mode, canUseTool, and the hook are those of any other turn at the same
+// level. `prompt`, when given, is what the SDK receives
 // in place of `text`, so the thread shows what was written while the model
 // gets the daemon's prefixed form (delegation.mjs). `context` is what quick
 // chat sent along (send-context.mjs); a valid one is recorded as a system
@@ -165,7 +177,7 @@
 // canUseTool, so they run without a card.
 //
 // Per-turn tools. With `turnTools` set, every turn calls
-// turnTools(agent, { text, prompt, from, chain, mentions, turnId }) before
+// turnTools(agent, { text, prompt, from, chain, mentions, routine, turnId }) before
 // query() and copies exactly these fields from its result by name, never
 // spreading it: `mcpServers` and `allowedTools` into the options (a later
 // phase adds `tools` here for a read-only chain), and `prompt` in place of
@@ -196,6 +208,7 @@ const DENIED = 'Denied from the dashboard';
 const INTERRUPTED = 'Interrupted from the dashboard';
 const RESUME_FAILED = 'The stored session could not be resumed. Start a new thread.';
 const START_FAILED = 'The turn could not start. Retry; if it keeps failing, start a new thread.';
+const RUN_START_FAILED = 'The run could not start.';
 // What the CLI prints when a resume points at a session it cannot find.
 const SESSION_MISSING = /(session|conversation)[\s\S]{0,80}(not found|does not exist)|no conversation/i;
 // The SDK's ApiKeySource values that do not bill an API key: 'none' is
@@ -331,6 +344,7 @@ export function createClaudeAdapter({
         from: turn.from,
         chain: [...turn.chain],
         mentions: [...turn.mentions],
+        routine: turn.routine,
         turnId: turn.id,
       });
       return isRecord(result) ? result : null;
@@ -379,7 +393,7 @@ export function createClaudeAdapter({
         abortTurn(turn);
         return null;
       }
-      await adoptSession(entry, message.session_id);
+      if (!turn.detached) await adoptSession(entry, message.session_id);
     } else if (message?.type === 'assistant') {
       if (message.parent_tool_use_id) return null;
       const content = Array.isArray(message.message?.content) ? message.message.content : [];
@@ -387,11 +401,14 @@ export function createClaudeAdapter({
         .filter((block) => block?.type === 'text' && typeof block.text === 'string')
         .map((block) => block.text)
         .join('\n\n');
-      if (text.trim()) await record(entry, 'assistant', text);
+      if (!text.trim()) return null;
+      if (turn.detached) turn.text.push(text);
+      else await record(entry, 'assistant', text);
     } else if (message?.type === 'result') {
       // A result before init (a startup failure) must not replace a good pointer.
-      if (turn.initSeen) await adoptSession(entry, message.session_id);
-      if (typeof message.total_cost_usd === 'number') entry.costUsd = message.total_cost_usd;
+      // A run's session is its own: neither its id nor its cost is the thread's.
+      if (turn.initSeen && !turn.detached) await adoptSession(entry, message.session_id);
+      if (typeof message.total_cost_usd === 'number' && !turn.detached) entry.costUsd = message.total_cost_usd;
       const denials = Array.isArray(message.permission_denials) ? message.permission_denials : [];
       emit('usage', entry.agentId, { usage: message.usage ?? null, costUsd: entry.costUsd, denials });
       log({
@@ -399,8 +416,9 @@ export function createClaudeAdapter({
         agentId: entry.agentId,
         subtype: message.subtype ?? null,
         numTurns: message.num_turns ?? null,
-        costUsd: entry.costUsd,
+        costUsd: turn.detached ? message.total_cost_usd ?? null : entry.costUsd,
         denials: denials.length,
+        ...(turn.routine ? { routine: turn.routine.id } : {}),
       });
       if (message.is_error || message.subtype !== 'success') {
         const errors = Array.isArray(message.errors) ? message.errors.filter((item) => typeof item === 'string') : [];
@@ -453,29 +471,32 @@ export function createClaudeAdapter({
     };
   }
 
-  // Never rejects: every failure becomes an error event and state.
+  // Never rejects: every failure becomes an error event and state, or, on a
+  // detached turn, the resolution's `error`.
   async function runTurn(entry, agent, text, turn) {
-    entry.lastError = null;
+    if (!turn.detached) entry.lastError = null;
     setState(entry, 'busy');
     let failure = null;
     let detail = null;
     let resumed = false;
     try {
-      if (turn.context) await record(entry, 'system', contextLine(turn.context), { kind: 'context', ...turn.context });
-      await record(entry, 'user', text, {
-        ...(turn.routine ? { routine: turn.routine } : {}),
-        ...(turn.from ? { from: turn.from } : {}),
-        ...(turn.mentions.length > 0 ? { mentions: [...turn.mentions] } : {}),
-      });
+      if (!turn.detached) {
+        if (turn.context) await record(entry, 'system', contextLine(turn.context), { kind: 'context', ...turn.context });
+        await record(entry, 'user', text, {
+          ...(turn.from ? { from: turn.from } : {}),
+          ...(turn.mentions.length > 0 ? { mentions: [...turn.mentions] } : {}),
+        });
+      }
       const run = await ensureQuery();
-      if (!entry.loaded) await loadPointer(entry);
-      if (turn.aborted) return;
+      if (!turn.detached && !entry.loaded) await loadPointer(entry);
+      if (turn.aborted) return ended(turn, null);
       turn.tools = await toolsForTurn(entry, agent, text, turn);
-      if (turn.aborted) return;
-      resumed = Boolean(entry.sessionId);
+      if (turn.aborted) return ended(turn, null);
+      const resume = turn.detached ? null : entry.sessionId;
+      resumed = Boolean(resume);
       const options = {
-        cwd: entry.cwd,
-        ...(entry.sessionId ? { resume: entry.sessionId } : {}),
+        cwd: turn.detached ? agent.cwd : entry.cwd,
+        ...(resume ? { resume } : {}),
         ...sdkModeFor(turn.permission),
         systemPrompt: systemPromptFor(agent),
         maxTurns: limits.turnMaxTurns,
@@ -507,7 +528,7 @@ export function createClaudeAdapter({
             failure = RESUME_FAILED;
             log({ event: 'thread_resume_failed', agentId: entry.agentId });
           } else {
-            failure = START_FAILED;
+            failure = turn.detached ? RUN_START_FAILED : START_FAILED;
           }
         }
       }
@@ -521,12 +542,23 @@ export function createClaudeAdapter({
       }
       entry.turn = null;
       if (failure) {
+        log({ event: 'persona_turn_error', agentId: entry.agentId, error: failure, ...detail, ...(turn.routine ? { routine: turn.routine.id } : {}) });
+      }
+      // A run's failure is the run's: the thread never shows it.
+      if (failure && !turn.detached) {
         entry.lastError = failure;
-        log({ event: 'persona_turn_error', agentId: entry.agentId, error: failure, ...detail });
         emit('error', entry.agentId, { message: failure });
       }
-      setState(entry, failure ? 'error' : 'idle');
+      setState(entry, failure && !turn.detached ? 'error' : 'idle');
     }
+    return ended(turn, failure);
+  }
+
+  // What a detached turn resolves with; nothing for a thread turn.
+  function ended(turn, failure) {
+    if (!turn.detached) return undefined;
+    const text = truncateUtf8(turn.text.join('\n\n').trim(), limits.messageTextBytes).text;
+    return { text, error: failure, aborted: turn.aborted && !turn.refusal };
   }
 
   function abortTurn(turn) {
@@ -575,6 +607,9 @@ export function createClaudeAdapter({
         effort: typeof effort === 'string' && effort !== '' ? effort : null,
         permission: permission ?? 'ask',
         routine: routine ? { id: routine.id, name: routine.name } : null,
+        // A routine's run is a session of its own, outside the thread.
+        detached: Boolean(routine),
+        text: [],
         // A routine's turn is the routine's, never another agent's.
         from: !routine && typeof from === 'string' && from !== '' ? from : null,
         mentions: Array.isArray(mentions) ? mentions.filter((id) => typeof id === 'string' && id !== '') : [],
