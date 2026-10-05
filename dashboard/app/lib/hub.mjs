@@ -216,6 +216,10 @@
 //     `forwarded`; the requests stay answerable in their owners' threads.
 //     The new-thread route calls it after a successful reset.
 //
+//   avatar(id) -> Promise<{ type, body } | null>
+//     The registry agent's picture, read now (avatars.mjs readAvatar), or
+//     null when it has none or the registry does not list it.
+//
 //   persona(id) -> { agent, adapter } | null
 //     The registry agent (with cwd) and its adapter, for a started persona.
 //
@@ -280,7 +284,7 @@
 
 import os from 'node:os';
 
-import { findAvatar } from './avatars.mjs';
+import { findAvatar, readAvatar } from './avatars.mjs';
 import { LIMITS, TIMEOUTS, TIME_ZONE } from './config.mjs';
 import { MODELS } from './models.mjs';
 import * as defaultSchedule from './schedule.mjs';
@@ -722,6 +726,12 @@ export function createHub({
       if (!reads) return;
       await reads.mark(id);
       if (!closed) commitAgents();
+    },
+
+    // The listed agent's picture, { type, body }, or null (avatars.mjs).
+    async avatar(id) {
+      const agent = (registry.current()?.agents ?? []).find((item) => item.id === id);
+      return agent ? readAvatar(agent) : null;
     },
 
     persona(id) {
