@@ -693,7 +693,7 @@ export function fakePersonas(seed, store) {
       // arrival; the receiver then waits for the answer before replying.
       const raised = current.from ? seed[current.from]?.delegate : null;
       // As the real adapter: the context line, then the message as typed.
-      const sendContext = context.context ? parseContext(context.context) : null;
+      const sendContext = !current.routine && context.context ? parseContext(context.context) : null;
       const before = sendContext ? say(agent.id, 'system', contextLine(sendContext), { kind: 'context', ...sendContext }) : Promise.resolve();
       const shown = current.routine ? Promise.resolve() : before.then(() => say(agent.id, 'user', text, fields));
       shown.then(() => {
