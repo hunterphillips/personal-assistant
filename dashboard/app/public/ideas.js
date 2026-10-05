@@ -127,6 +127,7 @@
       var label = name === 'idea' ? 'Idea' : name.charAt(0).toUpperCase() + name.slice(1);
       var icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       icon.setAttribute('class', 'ideas-kind-icon');
+      icon.setAttribute('data-ideas-kind', name);
       icon.setAttribute('width', '24');
       icon.setAttribute('height', '24');
       icon.setAttribute('viewBox', '0 0 24 24');

@@ -1172,6 +1172,13 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .ideas-item:focus-within { background: var(--hover-tint); }
 .ideas-item:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .ideas-kind-icon { margin-top: 1px; color: var(--ink-soft); }
+.ideas-kind-icon[data-ideas-kind="workflow"] { color: var(--badge-0); }
+.ideas-kind-icon[data-ideas-kind="view"],
+.ideas-kind-icon[data-ideas-kind="app"] { color: var(--badge-1); }
+.ideas-kind-icon[data-ideas-kind="tool"] { color: var(--badge-2); }
+.ideas-kind-icon[data-ideas-kind="skill"] { color: var(--badge-3); }
+.ideas-kind-icon[data-ideas-kind="plugin"] { color: var(--badge-4); }
+.ideas-kind-icon[data-ideas-kind="agent"] { color: var(--badge-5); }
 .ideas-content { min-width: 0; }
 .ideas-title {
   margin: 0;
