@@ -34,9 +34,11 @@
 //   answer(agent, requestId, answer) -> Promise<void>
 //     Settles an open request. Rejects 'no_such_request' for an unknown or
 //     already settled id and 'invalid_answer' for a malformed answer.
-//   interrupt(agent) -> Promise<void>
-//     Aborts the turn in flight and resolves once it has ended; a no-op when
-//     no turn is running.
+//   interrupt(agent) -> Promise<void | { text, error, aborted }>
+//     Aborts the turn in flight and resolves once it has ended, with what
+//     its send resolves (a routine's run resolves { text, error, aborted },
+//     which tells the hub the thread's turn was not the one stopped); a
+//     no-op when no turn is running.
 //   setModel(agent, { model?, effort? }) -> Promise<void>   (optional)
 //     Records the thread's own model and effort for its next turns: a key
 //     present replaces that field (a string, or null to inherit again), a

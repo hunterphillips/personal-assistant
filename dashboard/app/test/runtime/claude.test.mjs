@@ -1164,9 +1164,10 @@ test('interrupt during a routine send resolves aborted', async (t) => {
   const turn = adapter.send(AGENT, 'Compute drift.', { routine: { id: 'daily-drift', name: 'Daily drift' } });
   await waitFor(events, (event) => event.type === 'thread.state' && event.state === 'busy');
   await new Promise((resolve) => setTimeout(resolve, 5));
-  await adapter.interrupt(AGENT);
+  const interrupted = await adapter.interrupt(AGENT);
   const ended = await turn;
   assert.equal(ended.aborted, true);
+  assert.deepEqual(interrupted, ended, 'interrupt resolves what the run resolves');
   assert.equal(adapter.state('cfo').state, 'idle');
 });
 

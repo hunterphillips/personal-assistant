@@ -31,8 +31,9 @@
 //     approval: { decision: 'allow' | 'deny' }.
 //     Rejects 'no_such_request' for an unknown or already resolved id and
 //     'invalid_answer' for anything else.
-//   interrupt(agent) -> Promise<void>
-//     Aborts the turn in flight and waits for it to end; a no-op when idle.
+//   interrupt(agent) -> Promise<void | { text, error, aborted }>
+//     Aborts the turn in flight and waits for it to end, resolving what the
+//     send resolves (a run's { text, error, aborted }); a no-op when idle.
 //   setModel(agent, { model?, effort? }) -> Promise<void>
 //     The thread's own choice for its next turns. A key that is present
 //     replaces that field (a string, or null to drop the thread's choice
@@ -591,7 +592,8 @@ export function createClaudeAdapter({
       if (routine !== null && routine !== undefined && !isRoutineRef(routine)) return Promise.reject(new RuntimeError('invalid_routine'));
       const entry = entryFor(agent.id);
       if (entry.turn || entry.resetting) return Promise.reject(new RuntimeError('busy'));
-      entry.cwd ??= agent.cwd;
+      // A run never reads the pin, so it never sets it.
+      if (!routine) entry.cwd ??= agent.cwd;
       const turn = {
         id: randomUUID(),
         controller: new AbortController(),
@@ -635,7 +637,7 @@ export function createClaudeAdapter({
       if (!turn) return;
       log({ event: 'persona_interrupt', agentId: agentIdOf(agent) });
       abortTurn(turn);
-      await turn.done;
+      return turn.done;
     },
 
     setModel(agent, choice = {}) {

@@ -48,8 +48,10 @@ function fakeRuntime(now, failing = new Set()) {
   const end = (id, ended) => {
     const current = entry(id);
     const done = current.turn;
+    const result = current.routine ? { text: '', error: null, aborted: false, ...ended } : undefined;
     current.turn = null;
-    done?.(current.routine ? { text: '', error: null, aborted: false, ...ended } : undefined);
+    current.routine = null;
+    done?.(result);
   };
   const runtime = {
     kind: 'claude',
@@ -77,7 +79,13 @@ function fakeRuntime(now, failing = new Set()) {
       if (!current.routine) emit('message', target.id, { role: 'user', text, ...(context.from ? { from: context.from } : {}) });
       return done;
     },
-    async interrupt() {},
+    async interrupt(target) {
+      const current = entry(target.id);
+      if (!current.turn) return undefined;
+      const routine = current.routine;
+      runtime.abort(target.id);
+      return routine ? { text: '', error: null, aborted: true } : undefined;
+    },
     async close() {},
     raise(id, { kind = 'approval', toolName = 'Bash', input = { command: 'ls' } } = {}) {
       const current = entry(id);
@@ -356,6 +364,19 @@ test('an aborted run ends interrupted', async (t) => {
   await settle(() => runs()[0]?.endedAt);
   assert.equal(runs()[0].outcome, 'interrupted');
   assert.equal(runs()[0].detail, 'interrupted');
+});
+
+test('a run over the wall clock ends interrupted and leaves no turn_timeout on the thread', async (t) => {
+  const { routines, scheduler, set, runs, view, logs } = await setup(t, { timeouts: { turnMaxMs: 20 } });
+  await routines.create(FIELDS);
+  set('2026-10-05T11:30:10.000Z');
+  await scheduler.tick();
+  await settle(() => runs()[0]?.endedAt);
+  assert.equal(runs()[0].outcome, 'interrupted');
+  assert.ok(logs.some((entry) => entry.event === 'persona_turn_timeout'));
+  await settle();
+  assert.equal(view('cfo').state, 'idle');
+  assert.equal(view('cfo').lastError, null);
 });
 
 test('stop() leaves an aborted turn\'s start line open, and the next start closes it as interrupted and arms the tick', async (t) => {

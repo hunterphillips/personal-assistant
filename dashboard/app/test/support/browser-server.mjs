@@ -598,8 +598,11 @@ export function fakePersonas(seed, store) {
   function endTurn(id, { error = null, aborted = false } = {}) {
     const current = entry(id);
     const done = current.turn;
+    const ended = current.routine ? { text: error ? '' : current.text.join('\n\n'), error, aborted } : undefined;
     current.turn = null;
-    done?.(current.routine ? { text: error ? '' : current.text.join('\n\n'), error, aborted } : undefined);
+    current.routine = null;
+    done?.(ended);
+    return ended;
   }
 
   // Assistant text: the thread's message, or a run's collected reply.
@@ -723,7 +726,7 @@ export function fakePersonas(seed, store) {
         emit('resolved', agent.id, { requestId, outcome: 'interrupted', from: current.from, chain: [...current.chain] });
       }
       setState(agent.id, 'idle');
-      endTurn(agent.id, { aborted: true });
+      return endTurn(agent.id, { aborted: true });
     },
     // As the real adapter: the same refusals, the pointer's pair kept in
     // the entry, and the line written through the real store.
