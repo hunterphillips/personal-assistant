@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import { createHub } from '../lib/hub.mjs';
 import { RuntimeError } from '../lib/runtime/adapter.mjs';
@@ -103,7 +106,7 @@ test('the initial snapshot is frozen, carries agent cwd and job count, and omits
   assert.deepEqual(snapshot.registry, { ok: true, error: null, loadedAt: '2026-09-25T12:00:00.000Z' });
   assert.deepEqual(snapshot.agents, [
     {
-      id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
+      id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1, avatar: null,
       provider: 'claude', state: 'unavailable', pending: null, forwarded: [], needsYou: false, lastMessage: null, lastError: null, costUsd: null, lastLineAt: null,
       unread: false,
       model: { id: null, effort: null, source: 'default', default: { id: null, effort: null }, agent: { id: null, effort: null } },
@@ -443,7 +446,7 @@ test('start seeds a persona from its adapter and the last cached message', async
   await hub.start();
   assert.deepEqual(adapter.calls, [['start', 'cfo']]);
   assert.deepEqual(persona(hub), {
-    id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1,
+    id: 'cfo', name: 'CFO', role: 'Role', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented', jobs: 1, avatar: null,
     provider: 'claude', state: 'error', pending: null, forwarded: [], needsYou: false, lastMessage: { role: 'assistant', text: 'Invented r', at: 'b' },
     lastError: 'Invented failure', costUsd: 0.5, lastLineAt: null,
     unread: false,
@@ -1182,4 +1185,35 @@ test('the routine line a run posts sets lastLineAt and leaves the preview alone'
   assert.deepEqual(persona(hub).lastMessage, { role: 'assistant', text: 'Earlier re', at: 'a' });
   assert.equal(hub.snapshot().revision, before + 1);
   assert.deepEqual(Object.keys(deltas.at(-1).patch), ['agents']);
+});
+
+test('an agent\'s avatar is the picture file\'s mtime, read at load, on a registry change, and on a status refresh', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dashboard-test-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const own = path.join(dir, 'cfo');
+  const other = path.join(dir, 'brain');
+  await mkdir(own);
+  await mkdir(path.join(other, 'images'), { recursive: true });
+  await writeFile(path.join(own, 'avatar.jpg'), 'invented');
+  await utimes(path.join(own, 'avatar.jpg'), 1_700_000_000, 1_700_000_000);
+  await writeFile(path.join(other, 'images', 'me.webp'), 'invented');
+  await utimes(path.join(other, 'images', 'me.webp'), 1_700_000_100, 1_700_000_100);
+  const registry = fakeRegistry(registryState([
+    agent('cfo', { cwd: own }),
+    agent('brain', { cwd: other, avatar: 'images/me.webp' }),
+    agent('ops', { kind: 'system', provider: undefined, cwd: dir }),
+  ]));
+  const { hub, deltas } = makeHub({ registry });
+  assert.deepEqual(hub.snapshot().agents.map((a) => [a.id, a.avatar]), [['cfo', '1700000000000'], ['brain', '1700000100000'], ['ops', null]]);
+
+  // A picture added later shows on the next status refresh.
+  await writeFile(path.join(dir, 'avatar.png'), 'invented');
+  await utimes(path.join(dir, 'avatar.png'), 1_700_000_200, 1_700_000_200);
+  await hub.refreshStatus();
+  assert.equal(hub.snapshot().agents.find((a) => a.id === 'ops').avatar, '1700000200000');
+  assert.ok(deltas.some((d) => 'agents' in d.patch));
+
+  // A registry change reads again: an override that does not resolve is null.
+  registry.emit(registryState([agent('cfo', { cwd: own, avatar: 'missing.png' })]));
+  assert.equal(hub.snapshot().agents[0].avatar, null);
 });
