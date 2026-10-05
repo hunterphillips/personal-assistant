@@ -260,6 +260,30 @@ test('pinned is kept on a persona, dropped when false, and rejected on other kin
   }
 });
 
+test('avatar is kept as a path string on any kind and rejected when it is not a non-empty string', async (t) => {
+  const dir = await tempDir(t);
+  const result = validateDocument({
+    version: 1,
+    agents: [
+      baseAgent(dir, { id: 'cfo', avatar: 'images/me.png' }),
+      baseAgent(dir, { id: 'brain', avatar: '/elsewhere/me.webp' }),
+      baseAgent(dir, { id: 'plain' }),
+      { ...baseAgent(dir, { id: 'board', kind: 'system', avatar: 'me.jpg' }), provider: undefined },
+    ],
+  });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.agents[0].avatar, 'images/me.png');
+  assert.equal(result.agents[1].avatar, '/elsewhere/me.webp');
+  assert.equal('avatar' in result.agents[2], false);
+  assert.equal(result.agents[3].avatar, 'me.jpg');
+
+  for (const value of ['', 7, null, 'x'.repeat(1025)]) {
+    const bad = validateDocument({ version: 1, agents: [baseAgent(dir, { avatar: value })] });
+    assert.equal(bad.ok, false, JSON.stringify(value));
+    assert.match(bad.error, /avatar must be a non-empty string of at most 1024 characters/);
+  }
+});
+
 test('an unknown key on an agent is rejected', async (t) => {
   const dir = await tempDir(t);
   const file = await write(dir, {

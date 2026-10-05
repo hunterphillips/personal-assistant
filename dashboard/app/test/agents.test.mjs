@@ -437,6 +437,14 @@ test('settings PUT rewrites the entry in schema order, keeps jobs, omits accepts
   assert.deepEqual(noOne.json.agent.accepts, []);
 });
 
+test('settings PUT keeps an avatar path, written after pinned and before builtin', async (t) => {
+  const app = await startEditable(t, [agent('cfo', { pinned: true, avatar: 'me.png', builtin: true }), agent('assistant')]);
+  const response = await put(app, '/api/agents/cfo/settings', settingsBody({ name: 'Money desk', pinned: true }));
+  assert.equal(response.status, 200);
+  assert.equal(response.json.agent.avatar, 'me.png');
+  assert.deepEqual(Object.keys(app.registry.writes[0].agents[0]), ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'pinned', 'avatar', 'builtin']);
+});
+
 test('settings PUT writes permission after effort when set, none for null or absent, refuses a bad level, and POST creates with none', async (t) => {
   const app = await startEditable(t);
   const full = await put(app, '/api/agents/cfo/settings', settingsBody({ model: 'sonnet', effort: 'low', accepts: ['assistant'], permission: 'full' }));

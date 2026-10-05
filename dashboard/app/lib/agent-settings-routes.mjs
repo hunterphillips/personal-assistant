@@ -233,8 +233,8 @@ function fieldsOf(body) {
 
 // One agent entry in the schema's key order. `accepts` is written whenever
 // the body gives an array (including empty, for "no one"), and omitted
-// when it's null; `model`, `effort`, `permission`, and `pinned` only when
-// set.
+// when it's null; `model`, `effort`, `permission`, `pinned`, and `avatar`
+// only when set.
 function entryFor(fields) {
   const entry = {
     id: fields.id,
@@ -252,6 +252,8 @@ function entryFor(fields) {
   if (Array.isArray(fields.accepts)) entry.accepts = [...fields.accepts];
   if (Array.isArray(fields.jobs) && fields.jobs.length > 0) entry.jobs = [...fields.jobs];
   if (fields.pinned === true) entry.pinned = true;
+  // Never in a body, like builtin; an edit keeps the existing path.
+  if (typeof fields.avatar === 'string') entry.avatar = fields.avatar;
   // Never in a body; an edit keeps the existing entry's flag.
   if (fields.builtin === true) entry.builtin = true;
   return entry;
