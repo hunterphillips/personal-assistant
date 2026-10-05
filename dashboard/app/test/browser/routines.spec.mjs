@@ -232,7 +232,7 @@ test.describe('with seeded routines', () => {
     await expect(sectionRows(page).nth(0).locator('.routine-item-when')).toHaveText('Weekdays at 6:30');
   });
 
-  test('Test run shows the run in Last runs and the routine\'s label in the thread', async ({ page, hub }) => {
+  test('Test run shows the run in Last runs and leaves the thread alone', async ({ page, hub }) => {
     await openRoutine(page, hub, 'cfo', 'Morning drift');
     const runs = page.locator('#routine-runs .routine-run-row');
     await expect(runs).toHaveCount(2);
@@ -248,11 +248,10 @@ test.describe('with seeded routines', () => {
     await expect(panelRows(page)).toHaveCount(0);
     expect(hub.personas.sent.at(-1)).toMatchObject({ id: 'cfo', text: DRIFT, context: { routine: { id: 'morning-drift', name: 'Morning drift' } } });
 
+    // A run is a session of its own: neither its instruction nor its reply is a message.
     if (page.viewportSize().width < 720) await page.locator('[data-agent-action="close-details"]').click();
-    const message = page.locator('#agent-messages .thread-message-routine');
-    await expect(message.locator('.thread-message-label')).toHaveText('Routine · Morning drift');
-    await expect(message.locator('.thread-message-text')).toHaveText(DRIFT);
-    await expect(page.locator('#agent-messages .thread-message').last().locator('.thread-message-text')).toHaveText(`Reply: ${DRIFT}`);
+    await expect(page.locator('#agent-messages .thread-message-routine')).toHaveCount(0);
+    await expect(page.locator('#agent-messages')).not.toContainText(`Reply: ${DRIFT}`);
   });
 
   test('a run whose card is raised shows the card and the line; unanswered, the row says Needs you until Hunter writes', async ({ page, hub }) => {
