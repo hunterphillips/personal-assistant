@@ -42,6 +42,8 @@ An agent named with `@` in a message; a reference, not a delivery.
 **Routine**:
 A scheduled prompt to one agent, with a name, an instruction, a schedule in
 words, and an active switch. Owned by the agent, stored here.
+Its runs and their replies are listed under the agent's settings, never in
+the thread.
 _Avoid_: job, cron, scheduled task, launchd
 
 **Job**:

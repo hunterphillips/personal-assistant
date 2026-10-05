@@ -2845,6 +2845,12 @@ textarea.form-input {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+.routine-run-reply {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.routine-run-reply summary { cursor: pointer; }
+.routine-run-reply-body { margin-top: 4px; }
 
 /* The collapsed section under the groups. */
 .agents-routines { margin: 4px 0 16px; }

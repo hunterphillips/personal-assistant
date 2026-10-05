@@ -162,7 +162,7 @@ snapshot; concurrent requests share one check. It stays for one release.
   "routines": { "items": [{ "id": "daily-drift", "name": "Daily drift", "agent": "cfo", "instruction": "...",
                             "schedule": { "cron": "30 6 * * 1-5", "text": "Weekdays at 6:30" }, "active": true,
                             "created": "<ISO>", "updated": "<ISO>", "nextAt": "<ISO>",
-                            "lastRun": { "run": "<uuid>", "occurrence": "<ISO>", "trigger": "schedule", "startedAt": "<ISO>", "endedAt": "<ISO>", "outcome": "finished" } }] },
+                            "lastRun": { "run": "<uuid>", "occurrence": "<ISO>", "trigger": "schedule", "startedAt": "<ISO>", "endedAt": "<ISO>", "outcome": "finished", "reply": "...", "truncated": false, "detail": null } }] },
   "settings": { "ok": true, "error": null, "model": { "default": null, "effort": null }, "brief": { "agent": "assistant" }, "permission": { "default": "ask" }, "quickChat": { "agent": "myos" } },
   "notifications": { "open": 1, "items": [{ "id": "<uuid>", "agent": "cfo", "text": "...", "link": "job:com.example.drift", "at": "<ISO>", "acknowledgedAt": null }] },
   "models": [{ "id": "fable", "name": "Fable" }, { "id": "opus", "name": "Opus" }, { "id": "sonnet", "name": "Sonnet" }, { "id": "haiku", "name": "Haiku" }] }
@@ -240,10 +240,12 @@ agent order, then by name. Each item carries:
   `lib/config.mjs`), or null while the routine is inactive or its agent is
   not a Claude persona.
 - `lastRun`: the newest run from the routine's log, or null. A run is
-  `{ run, occurrence, trigger, startedAt, endedAt?, outcome?, cards? }`:
+  `{ run, occurrence, trigger, startedAt, endedAt?, outcome?, reply?, truncated?, detail?, cards? }`:
   `trigger` is `schedule`, `catchup`, or `test`, `outcome` is `finished`,
   `waiting`, `failed`, `busy`, or `interrupted`; a `busy` line has no
   `run`, and a missed line is `{ outcome: "missed", count, from, to }`.
+  `reply` is the resolved text, capped at `LIMITS.routineReplyChars`, with
+  `truncated: true` when cut; `detail` carries the failure or `interrupted`.
   The scheduler writes these lines (Routines under Personas).
 
 The items change on a write through the routes, on a registry change (an
@@ -732,7 +734,9 @@ dashboard was down." first when it applies, then "Replied in 48 seconds.",
 waiting on a card, "The turn failed.", "The agent was not started.", "The
 agent was already working.", "The dashboard stopped during the run.",
 "One fire was missed." or "<n> fires were missed.", or "Running now.". A
-refused test run says "CFO is still working. Wait for the reply." or "CFO
+non-empty reply appears beneath that sentence, on one line when short and
+collapsed under its first line when long. A refused test run says "CFO is
+still working. Wait for the reply." or "CFO
 is unavailable." The form stays as it is while snapshots arrive, and
 closes when another agent is chosen.
 
@@ -1224,9 +1228,8 @@ read-only fake) both routes are 404.
 - One turn per persona at a time. A second message while a turn is running
   is refused as `busy` before the SDK is called, because two resumes of one
   session both succeed and split its history.
-- A routine's run is sent as the composer's message is: the same options,
-  mode, and tools, at the agent's own level, with `routine: { id, name }`
-  on the user message as its only mark (Routines, below).
+- A routine's run runs in a session of its own in the agent's folder, with
+  the same options and tools, at the agent's level (Routines, below).
 - Each turn resumes the stored session in the thread's pinned folder with
   `maxTurns` 25 and the SDK permission mode the agent's level maps to
   (`permission` in the snapshot, the registry's level over the settings
@@ -1348,6 +1351,9 @@ any thread. Both tools are in `allowedTools`, so neither raises a card.
   with "Asked while answering you." beneath the title; the agent in the
   middle of a two-hop exchange keeps only its waiting line. Allowing or
   answering it from either thread settles it for both.
+- A routine run's `ask` is quiet: it posts no lines to the sender's thread,
+  queues no late reply, and takes no pending replies into the run. The
+  receiver's thread and a card it raises still behave as above.
 - The tool waits `delegationWaitMs` for the receiver's turn to end and
   answers with the reply text alone. Past that it answers "<name> is
   still working. The reply will arrive in this thread." (what the tool
@@ -1370,19 +1376,23 @@ any thread. Both tools are in `allowedTools`, so neither raises a card.
 
 ### Routines
 
-A routine (Routines under State, above) runs as a send to its agent, the
-instruction as the message, through `lib/scheduler.mjs`. The model gets
-`Routine "<name>" (a scheduled run, not the user): <instruction>` and one
-sentence that it may ask other agents and that its reply is what the run
-leaves behind; the thread shows the instruction as a user message with
-`routine: { id, name }` on it, never `from`; the thread renders it on the
-right like Hunter's with "Routine · <name>" above it, and a row's preview
-of it starts with the routine's name. Nothing else differs from a
-message Hunter sends: the turn runs on the model and effort the hub
-resolves for the agent, at the agent's permission level, with the ask
-tool, and a card it raises is the agent's own `pending`, answered as any
-other; a hop's card is forwarded to the agent's thread as any delegation's
-is. The `persona_init` log line carries `routine: <id>`.
+A routine (Routines under State, above) runs through `lib/scheduler.mjs`
+in a fresh session of its own in the agent's current folder. The model gets
+`Routine "<name>" (a scheduled run, not the user): <instruction>` followed
+by `You may ask other agents. Your reply is recorded in this routine's log,
+not shown as a message; if something in it needs Hunter's attention, use
+notify.` The turn resolves `{ text, error, aborted }`; it does not resume or
+write a session pointer or thread cache, and it emits no message event. It
+uses the model, effort, tools, and permission level the hub resolves for the
+agent. A card it raises is the agent's own `pending`, answered as any other;
+a hop's card is forwarded to the agent's thread as any delegation's is. The
+`persona_init` log line carries `routine: <id>`.
+
+A run failure belongs to the run: the end line carries its `detail`, no
+thread error event or `lastError` is set, and the agent returns to idle. A
+run's quiet `ask` leaves no sender lines or queued late reply and does not
+take pending replies from earlier turns. The waiting line described below
+is the only routine message a new run can append to the thread.
 
 The scheduler ticks every 30 seconds (`TIMEOUTS.routineTickMs`). For each
 active routine whose agent is a Claude persona, the marker is the newest
@@ -1401,12 +1411,15 @@ with `occurrence` null, so it never moves the marker; it answers 409
 `busy` while the agent has a turn open and 409 `agent_unavailable` when
 it is not started, writing nothing.
 
-Each run's outcome: `finished` when the turn ended with every card
+Each run's end line may carry `reply`, cut at `LIMITS.routineReplyChars`
+with `truncated: true`, and `detail`. Its outcome is `finished` when the turn ended with every card
 answered, `waiting` when a card was raised and not answered (it expired,
 the turn was interrupted, or it was still open when the turn ended),
 `failed` when the turn errored or the agent was not started
 (`detail: agent_unavailable`), `busy` when the agent had a turn open at
-the occurrence, and `interrupted` when the daemon stopped mid-run. The
+the occurrence, and `interrupted` with `detail: interrupted` when the
+detached turn was aborted. A run the daemon left open is also closed as
+`interrupted` without that detail. The
 end line lists the cards as `{ agent, kind, toolName, summary, resolved }`.
 On the first card of a run the scheduler posts one line to the agent's
 thread, `{ role: "system", kind: "routine", state: "waiting", routine,

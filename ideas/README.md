@@ -46,8 +46,9 @@ A run reads the vault's `notes/longterm-priorities.md`, the agent registry,
 reads `marks.json` and every existing idea id, then emits none of those ids.
 
 A producer writes one new run file and never edits an old one. It never calls
-`notify`. Its reply in its thread is exactly one sentence with no idea
-content, for example: "Wrote 4 ideas for the week of October 5."
+`notify`. Its reply, recorded in the routine's runs log, is exactly one
+sentence with no idea content, for example: "Wrote 4 ideas for the week of
+October 5."
 
 The dashboard returns the newest 30 runs. The reader and its limits are
 in `dashboard/app/lib/ideas.mjs`.
