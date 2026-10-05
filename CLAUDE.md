@@ -18,7 +18,10 @@ from here.
   phone); the rail's chat icon carries a dot when an agent is waiting or
   has an unread reply, Health a mark when a job's last run failed; Quick
   chat opens any Claude agent's thread in a pane over any view, defaulting
-  to Myos, and sends what Hunter is looking at as a context line. A rail
+  to Myos, and sends what Hunter is looking at as a context line. Every
+  view has a side panel from a header toggle, with the view's own list
+  (agents with search, Feed sources, Goals areas, Health jobs, Ideas
+  weeks) or Now (agents waiting, open notifications, today's brief). A rail
   of six views: Home is the Agents view (the Assistant pinned above the
   groups the registry lists, agents on the Claude Agent SDK, Codex
   threads on a shared app-server, Claude Code terminals in cmux; a gear

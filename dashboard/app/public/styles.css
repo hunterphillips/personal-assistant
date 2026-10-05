@@ -951,6 +951,41 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   font-variant-numeric: tabular-nums;
 }
 
+/* The Now section (panel.js): a row of two lines, the second muted, and a
+   sentence under a group's heading when it is empty. */
+[data-panel-for="now"] > .now-group:first-child > .panel-heading { margin-top: 0; }
+
+.panel-row.now-row {
+  height: auto;
+  min-height: 40px;
+  padding: 7px 12px;
+}
+div.panel-row.now-row { cursor: default; }
+div.panel-row.now-row:hover { background: none; }
+
+.now-row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.now-row-detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-empty {
+  margin: 0;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 /* The header's first control, on every view. Its inner bar fades while the
    panel is collapsed. */
 .panel-toggle {
