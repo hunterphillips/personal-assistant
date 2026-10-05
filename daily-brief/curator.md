@@ -9,9 +9,9 @@ The curator is one session, started by `bin/run-brief` every morning with
 
 One packet per domain in `contributions/<date>/`, written against
 `contribution-contract.md`: `cfo.yaml`, `focus.yaml`, `second-brain.yaml`,
-`calendar.yaml`, `watch.yaml` (most days absent), `run.yaml` (the coordinator's own
-caveats about missing or stale inputs), and `work.md` (the work brief,
-weekdays). Plus the previous two memos.
+`calendar.yaml`, `watch.yaml` (most days absent), and `run.yaml` (the
+coordinator's own caveats about missing or stale inputs). Plus the previous
+two memos.
 
 ## The memo
 
@@ -37,15 +37,12 @@ the builder refuses more than 550 words. Empty sections are omitted.
    doing. State the fact; he decides. Nothing he already knows about his
    own life (his mortgage rate, a rollover he did, a note he rewrote). An
    item with `origin: self` is his own action; it is not news to him.
-5. **Work is one short block.** Its own brief reaches him at work; here it
-   is the picture in a few lines, and a single item only when it spills
-   into his personal life.
-6. **Figures from `computed` or `recorded` items only.** A `summarized`
+5. **Figures from `computed` or `recorded` items only.** A `summarized`
    claim names its source. Doubts about the inputs (a failed feed, a
    stale scan, a figure that could not be verified) go in a short block
    at the end headed **Things to note**, so he knows what to trust. Never
    "Caveats"; Hunter retired that label on 09-29.
-7. **Headlines print; `why` never does.**
+6. **Headlines print; `why` never does.**
 
 ## After
 

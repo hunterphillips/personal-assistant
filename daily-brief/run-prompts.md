@@ -18,8 +18,6 @@ it. Write your packet to
 where <domain> is cfo, focus, or second-brain.
 ```
 
-Work needs no prompt; the curator reads that day's `catchup` brief directly.
-
 Calendar: the scheduled run writes `calendar.yaml` from `bin/prompts/calendar.md`;
 in a hand run the curator reads the calendars directly.
 

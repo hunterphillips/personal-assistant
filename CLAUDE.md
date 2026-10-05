@@ -86,8 +86,7 @@ from here.
     project registry that routes `/brain` captures to repos.
   - `systems/personal-context` (`~/workspace/personal-context`): who Hunter
     is. Read it through the `ask-profile` skill.
-  - Work: `~/workspace/work/nowgentic`, whose `catchup` brief the Daily Brief
-    reads. The harness (skills, output style, agents) is `~/workspace/Claude`.
+  - The harness (skills, output style, agents) is `~/workspace/Claude`.
 - Access: Hunter's own sessions and agents reach any of his local context
   from here, CFO included. Access boundaries apply to external callers, not
   to his own work.
@@ -111,7 +110,7 @@ contribution per domain) are code words until they are renamed.
 2. `thoughts/shared/lanes/daily-brief/handoff.md`: the brief. Scheduled since
    09-27 (`thoughts/shared/plans/2026-09-27-daily-brief-scheduled-run.md`),
    watch daily since 2026-10-01 (`2026-09-28-watch-domain.md`). On 2026-09-29 the writing
-   rules collapsed to seven content rules after Hunter preferred a one-shot
+   rules collapsed to a few content rules after Hunter preferred a one-shot
    prompt's brief; do not add sentence-level prose rules back.
 3. `thoughts/shared/research/2026-09-10-daily-brief-landscape.md`: read
    before changing the brief contract; most obvious improvements were

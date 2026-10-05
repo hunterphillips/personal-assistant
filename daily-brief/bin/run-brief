@@ -31,7 +31,6 @@ gather_seconds=${DAILY_BRIEF_GATHER_SECONDS:-900}
 curate_seconds=${DAILY_BRIEF_CURATE_SECONDS:-1200}
 
 # Upstream artifacts the run waits for. Checked, never triggered.
-catchup_dir=/Users/hunterphillips/workspace/work/nowgentic/.claude/catchup
 cfo_logs=/Users/hunterphillips/workspace/work/investing/cfo/logs
 focus_logs=/Users/hunterphillips/workspace/projects/AI/focus/logs
 
@@ -213,7 +212,7 @@ if [ "$dry_run" = 1 ]; then
     say "  cursor=$cursor"
     say "  calendar window $window_start .. $window_end"
     say "  previous memos: ${previous_memos:-none}"
-    say "  would wait up to ${wait_seconds}s for: $catchup_dir/$date-catchup.md (Mon-Fri), $cfo_logs/snapshot-$date.log, $focus_logs/last-notes.json and last-work.json newer than $date 00:00"
+    say "  would wait up to ${wait_seconds}s for: $cfo_logs/snapshot-$date.log, $focus_logs/last-notes.json newer than $date 00:00"
     while IFS='|' read -r domain cwd model kind; do
         [ -n "$domain" ] || continue
         model=$(model_for "$domain" "$model")
@@ -224,7 +223,6 @@ if [ "$dry_run" = 1 ]; then
     done <<ROSTER
 $roster
 ROSTER
-    say "  gather work: cp $catchup_dir/$date-catchup.md $contributions/$date/work.md (Mon-Fri)"
     pending=$(ls "$brief_dir"/watch/packets/*.yaml 2>/dev/null | /usr/bin/xargs -n1 /usr/bin/basename 2>/dev/null | /usr/bin/sed 's/\.yaml$//' | /usr/bin/tr '\n' ' ')
     say "  watch: copy the newest unreported packet in watch/packets/ (${pending:-none}) as watch.yaml; mark reported after verify"
     say "  write $contributions/$date/run.yaml"
@@ -272,13 +270,11 @@ fi
 # --- freshness wait -----------------------------------------------------------
 waited=0
 if [ "$stage" = all ] || [ "$stage" = gather ]; then
-    is_weekday=1; [ "$(weekday "$date")" -ge 6 ] && is_weekday=0
     if [ "$force" = 0 ]; then
         while :; do
             missing=
-            [ "$is_weekday" = 1 ] && [ ! -f "$catchup_dir/$date-catchup.md" ] && missing="$missing catchup"
             [ -f "$cfo_logs/snapshot-$date.log" ] || missing="$missing cfo-snapshot"
-            for src in notes work; do
+            for src in notes; do
                 f=$focus_logs/last-$src.json
                 if [ ! -f "$f" ] || [ -z "$(/usr/bin/find "$f" -newermt "$date 00:00:00" 2>/dev/null)" ]; then
                     missing="$missing focus-$src"
@@ -290,10 +286,8 @@ if [ "$stage" = all ] || [ "$stage" = gather ]; then
         done
         for m in $missing; do
             case $m in
-                catchup) add_run_caveat catchup "Today's work brief had not been written when the run started, so the work section rests on nothing newer than the previous catchup." ;;
                 cfo-snapshot) add_run_caveat cfo-snapshot "cfo's daily snapshot had not run when the run started; its figures are from the previous snapshot." ;;
                 focus-notes) add_run_caveat focus-notes "Focus had not scanned the vault today when the run started." ;;
-                focus-work) add_run_caveat focus-work "Focus had not read today's work brief when the run started." ;;
             esac
         done
     fi
@@ -350,12 +344,6 @@ ROSTER
 $roster
 ROSTER
     for f in "$transcripts/$date"-*.log; do [ -f "$f" ] && /bin/chmod 600 "$f"; done
-
-    if [ "$is_weekday" = 1 ] && [ -f "$catchup_dir/$date-catchup.md" ]; then
-        /bin/cp "$catchup_dir/$date-catchup.md" "$contributions/$date/work.md" && /bin/chmod 600 "$contributions/$date/work.md"
-    elif [ "$is_weekday" = 0 ]; then
-        : # weekend: no work brief is expected, and the curator knows
-    fi
 
     # Watch: the daily contributor leaves packets in watch/packets/; the newest
     # one not yet reported rides into this brief and is marked after verify.

@@ -9,15 +9,14 @@ The plan and its decisions:
 
 | Time | Job | Repo |
 |---|---|---|
-| 05:15 Mon-Fri | `com.hunter.catchup.daily`, the work brief | `~/workspace/work/nowgentic/.claude/bin/` |
 | 05:30 | `com.hunter.cfo.daily`, cfo's snapshot | `~/workspace/work/investing/cfo/launchd/` |
-| 05:50 | `com.focus.scan-notes`, `com.focus.scan-work` | `~/workspace/projects/AI/focus/launchd/` |
+| 05:50 | `com.focus.scan-notes` | `~/workspace/projects/AI/focus/launchd/` |
 | 05:40 | `com.personal-assistant.watch`, the newsletter packet | `launchd/` here |
 | 06:05 | `com.personal-assistant.daily-brief` | `launchd/` here |
 
 A normal morning finishes around 06:45. The runner does not trust the
-clock: it waits up to 30 minutes for today's catchup file, cfo's snapshot
-log, and Focus's `last-notes.json` and `last-work.json`, then proceeds and
+clock: it waits up to 30 minutes for cfo's snapshot log and Focus's
+`last-notes.json`, then proceeds and
 lists whatever is still missing in `contributions/<date>/run.yaml`, which
 the memo reports under "Things to note".
 
@@ -87,7 +86,8 @@ models. Log lines start with `watch`.
 ## Where things land
 
 - `contributions/<date>/` — `cfo.yaml`, `focus.yaml`, `second-brain.yaml`,
-  `calendar.yaml`, `run.yaml`, and `work.md` on weekdays. Gitignored.
+  `calendar.yaml`, `run.yaml`, and `watch.yaml` when a packet is pending.
+  Gitignored.
 - `briefs/memo-<date>.md` — the curator's memo; `<date>.md`,
   `viewer-<date>.html`, `brief-<date>.json`, and `notice-<date>.json` built
   from it. The structured brief has one item per paragraph or list block.

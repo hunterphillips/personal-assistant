@@ -165,13 +165,6 @@ gaps:
     since: 2026-09-24          # a date, or the word standing
 ```
 
-## Work
-
-Not a packet. The assembler reads that day's `catchup` brief and condenses it
-to at most three sentences, placed in What changed or Needs you. If the
-catchup skill later grows a structured output, it can adopt this schema;
-nothing here depends on it.
-
 ## Calendar
 
 Not a packet. The assembler reads Hunter's personal Google calendars

@@ -322,14 +322,7 @@ directly instead. No other domain reports calendar events.
 
 **run** — the coordinator's own packet, written by `bin/run-brief`, not by a
 model. `caveat` items only: an upstream input that had not run when the
-brief started (the work brief, cfo's snapshot, Focus's morning scans), or a
+brief started (cfo's snapshot, Focus's morning scan), or a
 domain packet that failed its header check. `status: ok` with no items when
 every input was present. Never a `change`.
 
-## Work
-
-No work contribution is written here. The `catchup` skill already produces a
-dated brief in `~/workspace/work/nowgentic/.claude/catchup/`, and the curator
-reads it directly and condenses it to at most three sentences. Individual work
-items do not appear in this brief unless one spills into Hunter's personal
-life for a specific reason.
