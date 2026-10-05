@@ -12,6 +12,10 @@
 // that URL; the shell's popstate handler calls show(), which reads it back.
 // On a phone the list is the side panel's drawer: Agents with no agent open
 // opens it, choosing a row closes it, and the thread's Back opens it again.
+// The search field above the list hides the rows whose name, role, and
+// preview (and, for a session, its project's name) do not hold the query,
+// and a group with none left; it is applied again after every rebuild,
+// never stored, and cleared when the view is left.
 // The launchd jobs, the registry error, and what is off (the Codex server,
 // cmux) are on the Health view (jobs.js); this view says only what
 // each row needs.
@@ -1132,6 +1136,8 @@
     var list = document.getElementById('agents-list');
     var message = document.getElementById('agents-message');
     var groupsNode = document.getElementById('agents-groups');
+    var search = document.getElementById('agents-search');
+    var searchEmpty = document.getElementById('agents-search-empty');
     var empty = document.getElementById('agent-empty');
     var panel = document.getElementById('agent-panel');
     var detailsToggle = document.getElementById('agent-details-toggle');
@@ -1234,11 +1240,20 @@
 
       var preview = previewText(agent, state.agents);
       if (preview) node.appendChild(element('span', 'agent-row-preview', preview));
+      node.setAttribute('data-search', searchText([agent.name, agent.role, preview]));
       if (line && line.tone !== 'wait') node.appendChild(element('span', 'agent-row-state agent-row-state-' + line.tone, line.text));
       return node;
     }
 
-    function sessionRow(session) {
+    // What the search field matches a row against, one field per line so a
+    // query never spans two of them.
+    function searchText(fields) {
+      return fields.filter(Boolean).join('\n').toLowerCase();
+    }
+
+    // A session row also matches its project's name, so a project's
+    // sessions show with it.
+    function sessionRow(session, project) {
       var node = element('a', 'agent-row agent-row-session');
       node.href = agentUrl(session.id);
       node.setAttribute('data-agent', session.id);
@@ -1254,6 +1269,7 @@
 
       var folder = shortPath(session.cwd, state.home);
       if (folder) node.appendChild(element('span', 'agent-row-preview', folder));
+      node.setAttribute('data-search', searchText([displayName(session), folder, project && project.name]));
       if (line && line.tone !== 'wait') node.appendChild(element('span', 'agent-row-state agent-row-state-' + line.tone, line.text));
       return node;
     }
@@ -1268,6 +1284,27 @@
       message.textContent = text;
       message.hidden = !text;
     }
+
+    // Hides the rows the search field's query is not in, and a group with
+    // no row left; the sentence under the field says when none is.
+    function filterList() {
+      var query = search.value.trim().toLowerCase();
+      var shown = 0;
+      var sections = groupsNode.querySelectorAll('.agent-group');
+      for (var i = 0; i < sections.length; i += 1) {
+        var rows = sections[i].querySelectorAll('[data-search]');
+        var left = 0;
+        for (var j = 0; j < rows.length; j += 1) {
+          var match = !query || rows[j].getAttribute('data-search').indexOf(query) !== -1;
+          rows[j].hidden = !match;
+          if (match) left += 1;
+        }
+        sections[i].hidden = left === 0 && !!query;
+        shown += left;
+      }
+      searchEmpty.hidden = !query || shown > 0;
+    }
+    search.addEventListener('input', filterList);
 
     function renderList() {
       if (!state) return;
@@ -1292,7 +1329,7 @@
         for (var j = 0; j < list[i].entries.length; j += 1) {
           var entry = list[i].entries[j];
           if (entry.agent) section.appendChild(row(entry.agent));
-          for (var k = 0; k < entry.sessions.length; k += 1) section.appendChild(sessionRow(entry.sessions[k]));
+          for (var k = 0; k < entry.sessions.length; k += 1) section.appendChild(sessionRow(entry.sessions[k], entry.agent));
         }
         groupsNode.appendChild(section);
       }
@@ -1303,6 +1340,7 @@
       groupsNode.appendChild(routinesSection);
       newAgent.hidden = !!(state.registry && state.registry.ok === false);
       renderRoutinesSection();
+      filterList();
       if (focusedId) {
         var again = groupsNode.querySelector('[data-agent="' + CSS.escape(focusedId) + '"]');
         if (again) again.focus();
@@ -2659,6 +2697,11 @@
       },
       hide: function () {
         visible = false;
+        // Leaving the view clears the search; a hidden tab keeps it.
+        if (!document.hidden && search.value) {
+          search.value = '';
+          filterList();
+        }
         thread.hide();
         if (tick !== null) clearInterval(tick);
         tick = null;

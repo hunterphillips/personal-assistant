@@ -134,8 +134,9 @@ test.describe('with seeded agents', () => {
     await expectView(page, 'agents', 'Agents');
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#agent-panel')).toBeHidden();
-    // Nothing sits above the groups; New agent sits under them.
-    await expect(page.locator('#agents-list > :visible')).toHaveText([/^Work/, 'New agent']);
+    // Only the search field sits above the groups; New agent sits under them.
+    await expect(page.locator('#agents-list > :visible')).toHaveText(['', /^Work/, 'New agent']);
+    await expect(page.locator('#agents-list > :visible').first()).toHaveClass('search');
     await expect(page.locator('#agents-list .agent-row').first()).toHaveAttribute('data-agent', 'cfo');
     await expect(page.locator('#view-agents .routine-card')).toHaveCount(0);
     if (phone(page)) {
@@ -671,12 +672,12 @@ test.describe('with seeded agents', () => {
     await expect(page.locator('#agents-list')).toBeVisible();
     await expect(page.locator('#agent-thread')).toBeHidden();
 
-    // No Jobs row: the first thing under the page header is a group.
+    // No Jobs row: under the page header are the search field and the groups.
     await expect(page.locator('#view-agents').getByText('Jobs')).toHaveCount(0);
     const heading = await page.locator('#app-header-title').boundingBox();
     const firstGroup = await page.locator('.agent-group-heading').first().boundingBox();
     const between = await page.locator('#agents-list > :visible').evaluateAll((nodes) => nodes.map((n) => n.className));
-    expect(between).toEqual(['', 'agents-list-foot']);
+    expect(between).toEqual(['search', '', 'agents-list-foot']);
     expect(firstGroup.y).toBeGreaterThan(heading.y);
 
     await row(page, 'CFO').click();
@@ -1893,5 +1894,110 @@ test.describe('with the @ picker in the composer', () => {
     await expect(messages(page)).toHaveCount(3);
     expect(lastSent(hub).context.mentions).toEqual(['dev']);
     await expect(messages(page).nth(2).locator('.mention')).toHaveText('@Dev');
+  });
+});
+
+test.describe('with the search field over the list', () => {
+  // A Codex thread in Catchup's folder, so it lists under that project row.
+  const SESSION = {
+    id: 'codex:t1', threadId: 't1', cwd: '/invented/catchup', title: 'Fix the flaky test', state: 'idle', pending: null,
+    lastMessage: null, lastError: null, updatedAt: ago(30 * MINUTE),
+  };
+  test.use({
+    hubOptions: {
+      build: () => ({ ...seeded().build(), codex: { sessions: [SESSION], status: { available: true }, threads: {} } }),
+    },
+  });
+
+  const search = (page) => page.locator('#agents-search');
+  const empty = (page) => page.locator('#agents-search-empty');
+  const shownNames = (page) => page.locator('#agents-groups .agent-row:visible .agent-row-name');
+  const shownHeadings = (page) => page.locator('#agents-groups .agent-group-heading:visible');
+  const ALL = ['CFO', 'Catchup', 'Fix the flaky test', 'Second brain', 'Dev', 'Focus'];
+
+  async function openList(page, hub) {
+    await page.goto(hub.origin + '/');
+    await expectView(page, 'agents', 'Agents');
+    await expect(page.locator('#agents-list')).toBeVisible();
+    await expect(shownNames(page)).toHaveText(ALL);
+  }
+
+  test('typing filters the rows by name, role, or preview and hides a group with none left', async ({ page, hub }) => {
+    await openList(page, hub);
+    await expect(search(page)).toHaveAttribute('placeholder', 'Search');
+    await expect(search(page)).toHaveAttribute('aria-label', 'Search agents and threads');
+    await expect(page.locator('#agents-list > label.search + #agents-search-empty + #agents-message')).toHaveCount(1);
+    await expect(empty(page)).toBeHidden();
+
+    // A role, in any case.
+    await search(page).fill('MONEY');
+    await expect(shownNames(page)).toHaveText(['CFO']);
+    await expect(shownHeadings(page)).toHaveText(['Work']);
+    await expect(empty(page)).toBeHidden();
+
+    // A preview: CFO's last reply and the task board's description.
+    await search(page).fill('fine');
+    await expect(shownNames(page)).toHaveText(['CFO']);
+    await search(page).fill('task board');
+    await expect(shownNames(page)).toHaveText(['Focus']);
+    await expect(shownHeadings(page)).toHaveText(['Personal']);
+
+    // The routines and New agent stay below whatever the query leaves.
+    await expect(page.locator('#agents-new')).toBeVisible();
+    await expect(page.locator('#agents-routines')).toBeVisible();
+
+    await search(page).fill('');
+    await expect(shownNames(page)).toHaveText(ALL);
+    await expect(shownHeadings(page)).toHaveText(['Work', 'Personal']);
+  });
+
+  test('a session row shows when its project matches, and alone when only it does', async ({ page, hub }) => {
+    await openList(page, hub);
+    await search(page).fill('catchup');
+    await expect(shownNames(page)).toHaveText(['Catchup', 'Fix the flaky test']);
+    await search(page).fill('flaky');
+    await expect(shownNames(page)).toHaveText(['Fix the flaky test']);
+  });
+
+  test('a state change rebuilds the list with the filter still applied', async ({ page, hub }) => {
+    await openList(page, hub);
+    await search(page).fill('money');
+    await expect(shownNames(page)).toHaveText(['CFO']);
+
+    await hub.personas.say('brain', 'Money moved to savings.');
+    await expect(shownNames(page)).toHaveText(['CFO', 'Second brain']);
+    await expect(shownHeadings(page)).toHaveText(['Work', 'Personal']);
+    await expect(row(page, 'Dev')).toBeHidden();
+    await expect(search(page)).toHaveValue('money');
+  });
+
+  test('no match says so in one sentence and hides every group', async ({ page, hub }) => {
+    await openList(page, hub);
+    await search(page).fill('nothing like this');
+    await expect(empty(page)).toBeVisible();
+    await expect(empty(page)).toHaveText('Nothing matches.');
+    await expect(shownNames(page)).toHaveCount(0);
+    await expect(page.locator('#agents-groups .agent-group:visible')).toHaveCount(0);
+    await expect(page.locator('#agents-new')).toBeVisible();
+
+    await search(page).fill('');
+    await expect(empty(page)).toBeHidden();
+    await expect(shownNames(page)).toHaveText(ALL);
+  });
+
+  test('leaving the view clears the field and shows every row again', async ({ page, hub }) => {
+    await openList(page, hub);
+    await search(page).fill('money');
+    await expect(shownNames(page)).toHaveText(['CFO']);
+
+    await nav(page, 'Goals').click();
+    await expectView(page, 'goals', 'Goals');
+    await nav(page, 'Home').click();
+    await expectView(page, 'agents', 'Agents');
+    // A phone opens the drawer again, with no agent open.
+    await expect(page.locator('#agents-list')).toBeVisible();
+    await expect(search(page)).toHaveValue('');
+    await expect(shownNames(page)).toHaveText(ALL);
+    await expect(empty(page)).toBeHidden();
   });
 });
