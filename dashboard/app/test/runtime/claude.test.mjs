@@ -1130,6 +1130,15 @@ test('a routine send runs detached: a fresh session, nothing in the thread, and 
   assert.equal(query.calls.length, 3);
 });
 
+test('a routine send ignores thread context', async (t) => {
+  const { adapter, query } = await setup(t);
+  await adapter.send(AGENT, 'Compute drift.', {
+    routine: { id: 'daily-drift', name: 'Daily drift' },
+    context: { view: 'focus', label: 'Focus', detail: 'Today' },
+  });
+  assert.equal(query.calls[0].prompt, 'Compute drift.');
+});
+
 test('a routine send runs in the registry folder of the moment, not the pinned cwd', async (t) => {
   const { adapter, query } = await setup(t);
   await adapter.start(AGENT);

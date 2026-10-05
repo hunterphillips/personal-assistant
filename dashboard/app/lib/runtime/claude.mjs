@@ -619,7 +619,7 @@ export function createClaudeAdapter({
         chain: Array.isArray(chain) ? chain.filter((id) => typeof id === 'string' && id !== '') : [],
         context: context ? parseContext(context) : null,
       };
-      if (turn.context) turn.prompt = contextPrompt(turn.context, turn.prompt ?? text);
+      if (!turn.detached && turn.context) turn.prompt = contextPrompt(turn.context, turn.prompt ?? text);
       entry.turn = turn;
       turn.done = runTurn(entry, agent, text, turn);
       return turn.done;
