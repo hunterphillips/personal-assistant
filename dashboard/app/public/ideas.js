@@ -2,8 +2,9 @@
 // into Monday-start weeks. The view fetches /api/ideas on show and every 60
 // seconds. Discuss opens quick chat without sending a turn; Start sends the
 // idea to the pinned agent; Dismiss removes it from the returned list. The
-// criteria panel is instructions.js's. Buttons use data-ideas-action so the
-// shell's data-action handler never owns them.
+// criteria panel is instructions.js's. Each row expands its description and
+// owns one overflow menu whose buttons use data-ideas-action so the shell's
+// data-action handler never owns them.
 (function () {
   'use strict';
 
@@ -16,6 +17,16 @@
   var ALREADY_STARTED = 'That idea has already been started.';
   var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   var KINDS = new Set(['workflow', 'view', 'app', 'tool', 'skill', 'plugin', 'task']);
+  var ICONS = {
+    workflow: '<path d="M6 5.5h7a3 3 0 0 1 3 3v7"/><path d="m13 13 3 3 3-3"/><circle cx="6" cy="5.5" r="2"/>',
+    view: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 9h17"/><path d="M9 9v10"/>',
+    app: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
+    tool: '<path d="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-3Z"/>',
+    skill: '<path d="M12 3.5 14.2 8l4.8.7-3.5 3.4.8 4.9-4.3-2.3L7.7 17l.8-4.9L5 8.7 9.8 8Z"/>',
+    plugin: '<path d="M8.5 4v4.5H4v7h4.5V20h7v-4.5H20v-7h-4.5V4Z"/><path d="M10 4a2 2 0 1 1 4 0"/><path d="M20 10a2 2 0 1 1 0 4"/>',
+    task: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 2.5 2.5L16 9"/>',
+    idea: '<path d="M9 18h6"/><path d="M10 21h4"/><path d="M8.4 14.5A6 6 0 1 1 15.6 14.5C14.6 15.2 14 16.1 14 17h-4c0-.9-.6-1.8-1.6-2.5Z"/>',
+  };
 
   function element(tag, className, text) {
     var node = document.createElement(tag);
@@ -82,6 +93,7 @@
     var rendered = null;
     var pending = null;
     var discussed = null;
+    var openMenu = null;
 
     function agents() { return state && Array.isArray(state.agents) ? state.agents : []; }
     function agent(id) { return agents().find(function (entry) { return entry.id === id; }) || null; }
@@ -102,7 +114,7 @@
     }
 
     function action(name, id) {
-      var button = element('button', 'ideas-action', name);
+      var button = element('button', 'menu-entry ideas-action', name);
       button.type = 'button';
       button.setAttribute('data-ideas-action', name.toLowerCase());
       button.setAttribute('data-ideas-id', id);
@@ -110,32 +122,86 @@
       return button;
     }
 
+    function kindIcon(kind) {
+      var name = KINDS.has(kind) ? kind : 'idea';
+      var label = name === 'idea' ? 'Idea' : name.charAt(0).toUpperCase() + name.slice(1);
+      var icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      icon.setAttribute('class', 'ideas-kind-icon');
+      icon.setAttribute('width', '24');
+      icon.setAttribute('height', '24');
+      icon.setAttribute('viewBox', '0 0 24 24');
+      icon.setAttribute('stroke', 'currentColor');
+      icon.setAttribute('fill', 'none');
+      icon.setAttribute('stroke-width', '1.75');
+      icon.setAttribute('stroke-linecap', 'round');
+      icon.setAttribute('stroke-linejoin', 'round');
+      icon.setAttribute('role', 'img');
+      icon.setAttribute('aria-label', label);
+      icon.innerHTML = '<title>' + label + '</title>' + ICONS[name];
+      return icon;
+    }
+
+    function closeMenu(restore) {
+      if (!openMenu) return;
+      var menu = openMenu.querySelector('.ideas-menu');
+      var toggle = openMenu.querySelector('.ideas-menu-toggle');
+      menu.hidden = true;
+      toggle.setAttribute('aria-expanded', 'false');
+      openMenu = null;
+      if (restore) toggle.focus();
+    }
+
+    function openItemMenu(node) {
+      if (openMenu && openMenu !== node) closeMenu(false);
+      var menu = node.querySelector('.ideas-menu');
+      var toggle = node.querySelector('.ideas-menu-toggle');
+      menu.hidden = false;
+      toggle.setAttribute('aria-expanded', 'true');
+      openMenu = node;
+    }
+
     function renderItem(item) {
       var node = element('article', 'ideas-item');
       node.setAttribute('data-ideas-item', item.id);
-      node.appendChild(element('h3', 'ideas-title', item.title));
+      node.setAttribute('role', 'button');
+      node.setAttribute('tabindex', '0');
+      node.setAttribute('aria-expanded', 'false');
+      node.appendChild(kindIcon(item.kind));
+      var content = element('div', 'ideas-content');
+      content.appendChild(element('h3', 'ideas-title', item.title));
       if (item.text) {
         var body = element('div', 'ideas-text markdown');
         window.DashboardMarkdown.renderInto(body, item.text);
-        node.appendChild(body);
+        content.appendChild(body);
       }
       var meta = [];
-      if (KINDS.has(item.kind)) meta.push(item.kind);
       arrayOf(item.agents).forEach(function (id) { meta.push(agentName(id)); });
-      if (meta.length) node.appendChild(element('p', 'ideas-meta', meta.join(' · ')));
+      var metaNode = element('p', 'ideas-meta');
+      if (meta.length) metaNode.appendChild(document.createTextNode(meta.join(' · ')));
       if (typeof item.source === 'string' && /^https?:\/\//i.test(item.source)) {
-        var source = element('p', 'ideas-source');
         var link = element('a', null, 'Source');
         link.href = item.source;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
-        source.appendChild(link);
-        node.appendChild(source);
+        if (meta.length) metaNode.appendChild(document.createTextNode(' · '));
+        metaNode.appendChild(link);
       }
-      var actions = element('div', 'ideas-actions');
+      if (metaNode.childNodes.length) content.appendChild(metaNode);
+      node.appendChild(content);
+      var toggle = element('button', 'ideas-menu-toggle');
+      toggle.type = 'button';
+      toggle.setAttribute('aria-label', 'More');
+      toggle.setAttribute('title', 'More');
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.setAttribute('aria-haspopup', 'menu');
+      toggle.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
+      node.appendChild(toggle);
+      var actions = element('div', 'app-menu ideas-menu');
+      actions.setAttribute('role', 'menu');
+      actions.hidden = true;
       actions.appendChild(action('Discuss', item.id));
       if (item.status === 'taken' && typeof item.agent === 'string') {
-        var started = element('a', 'ideas-started', 'Started with ' + agentName(item.agent));
+        var started = element('a', 'menu-entry ideas-started', 'Started with ' + agentName(item.agent));
         started.href = '/?agent=' + encodeURIComponent(item.agent);
         actions.appendChild(started);
       } else actions.appendChild(action('Start', item.id));
@@ -307,14 +373,42 @@
       : null;
 
     weeks.addEventListener('click', function (event) {
+      var toggle = event.target.closest && event.target.closest('.ideas-menu-toggle');
+      if (toggle) {
+        var menuItem = toggle.closest('.ideas-item');
+        if (openMenu === menuItem) closeMenu(true);
+        else openItemMenu(menuItem);
+        return;
+      }
       var button = event.target.closest && event.target.closest('button[data-ideas-action]');
-      if (!button) return;
-      var id = button.getAttribute('data-ideas-id');
-      if (button.getAttribute('data-ideas-action') === 'discuss') {
-        discussed = itemById(id);
-        shellApi.openQuickChat(button);
-      } else if (button.getAttribute('data-ideas-action') === 'start') mutate('/api/ideas/start', id, button);
-      else mutate('/api/ideas/dismiss', id, button);
+      if (button) {
+        var id = button.getAttribute('data-ideas-id');
+        closeMenu(false);
+        if (button.getAttribute('data-ideas-action') === 'discuss') {
+          discussed = itemById(id);
+          shellApi.openQuickChat(button);
+        } else if (button.getAttribute('data-ideas-action') === 'start') mutate('/api/ideas/start', id, button);
+        else mutate('/api/ideas/dismiss', id, button);
+        return;
+      }
+      if (event.target.closest && event.target.closest('.ideas-started')) { closeMenu(false); return; }
+      if (event.target.closest && event.target.closest('a')) return;
+      var row = event.target.closest && event.target.closest('.ideas-item');
+      if (row) {
+        var expanded = row.getAttribute('aria-expanded') === 'true';
+        row.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+        row.classList.toggle('ideas-item-expanded', !expanded);
+      }
+    });
+    weeks.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && openMenu) { event.preventDefault(); closeMenu(true); return; }
+      if ((event.key === 'Enter' || event.key === ' ') && event.target.classList.contains('ideas-item')) {
+        event.preventDefault();
+        event.target.click();
+      }
+    });
+    document.addEventListener('click', function (event) {
+      if (openMenu && !openMenu.contains(event.target)) closeMenu(false);
     });
     addToggle.setAttribute('aria-controls', 'ideas-add-form');
     addToggle.setAttribute('aria-expanded', 'false');
@@ -352,6 +446,7 @@
       hide: function () {
         visible = false;
         discussed = null;
+        closeMenu(false);
         addToggle.hidden = true;
         closeAdd(false, false);
         if (panel) panel.hide();

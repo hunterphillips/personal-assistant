@@ -24,6 +24,12 @@ const pane = (page) => page.locator('#quick-chat');
 const paneInput = (page) => page.locator('#quick-chat-input');
 const messages = (page) => page.locator('#agent-messages .thread-message');
 
+async function openIdeaMenu(page, id) {
+  const row = item(page, id);
+  await row.getByRole('button', { name: 'More' }).click();
+  return row.locator('.ideas-menu');
+}
+
 async function openIdeas(page, hub) {
   await page.goto(`${hub.origin}/ideas`);
   await expectView(page, 'ideas', 'Ideas');
@@ -56,15 +62,17 @@ test.describe('Ideas', () => {
     expect(overflow).toBe(0);
   });
 
-  test('groups runs into newest-first weeks with kinds and agent names', async ({ page, hub }) => {
+  test('groups runs into newest-first weeks with kind icons and agent names', async ({ page, hub }) => {
     await openIdeas(page, hub);
     await expect(weeks(page).locator('.ideas-week-title')).toHaveText(['Week of September 28', 'Week of September 21']);
     await expect(weeks(page).first().locator('.ideas-item')).toHaveCount(1);
     await expect(weeks(page).nth(1).locator('.ideas-item')).toHaveCount(2);
     await expect(item(page, 'fixture-agent-card').locator('.ideas-title')).toHaveText('Fixture agent card');
     await expect(item(page, 'fixture-agent-card').locator('.ideas-text')).toHaveText('Invented fixture content for a newer run.');
-    await expect(item(page, 'fixture-agent-card').locator('.ideas-meta')).toHaveText('view · Assistant');
-    await expect(item(page, 'fixture-weekly-map').locator('.ideas-meta')).toHaveText('workflow · Assistant · Focus');
+    await expect(item(page, 'fixture-agent-card').getByRole('img', { name: 'View' })).toBeVisible();
+    await expect(item(page, 'fixture-weekly-map').getByRole('img', { name: 'Workflow' })).toBeVisible();
+    await expect(item(page, 'fixture-agent-card').locator('.ideas-meta')).toHaveText('Assistant');
+    await expect(item(page, 'fixture-weekly-map').locator('.ideas-meta')).toHaveText('Assistant · Focus');
     const source = item(page, 'fixture-reading-tool').getByRole('link', { name: 'Source' });
     await expect(source).toHaveAttribute('href', 'https://example.com/fixture-reading-tool');
     await expect(source).toHaveAttribute('target', '_blank');
@@ -74,7 +82,8 @@ test.describe('Ideas', () => {
 
   test('Dismiss removes the idea and a later run cannot bring its id back', async ({ page, hub }) => {
     await openIdeas(page, hub);
-    await item(page, 'fixture-weekly-map').getByRole('button', { name: 'Dismiss' }).click();
+    const menu = await openIdeaMenu(page, 'fixture-weekly-map');
+    await menu.getByRole('button', { name: 'Dismiss' }).click();
     await expect(item(page, 'fixture-weekly-map')).toHaveCount(0);
     await writeFile(path.join(hub.ideasDir, '2026-10-05-myos.json'), JSON.stringify({
       producer: 'myos', date: '2026-10-05', generated_at: '2026-10-05T09:00:00-05:00', items: [{
@@ -92,7 +101,8 @@ test.describe('Ideas', () => {
   test('Start opens the pinned agent with context, marks the idea, and busy leaves another new', async ({ page, hub }) => {
     hub.personas.hold('assistant');
     await openIdeas(page, hub);
-    await item(page, 'fixture-agent-card').getByRole('button', { name: 'Start' }).click();
+    let menu = await openIdeaMenu(page, 'fixture-agent-card');
+    await menu.getByRole('button', { name: 'Start' }).click();
     await expectView(page, 'agents', 'Agents');
     await expect(page).toHaveURL(`${hub.origin}/?agent=assistant`);
     await expect(page.locator('#agent-messages .thread-message-context summary'))
@@ -103,10 +113,13 @@ test.describe('Ideas', () => {
 
     await nav(page, 'Ideas').click();
     await expectView(page, 'ideas', 'Ideas');
+    menu = await openIdeaMenu(page, 'fixture-agent-card');
     await expect(item(page, 'fixture-agent-card').getByRole('link', { name: 'Started with Assistant' })).toBeVisible();
     const next = item(page, 'fixture-reading-tool');
+    await openIdeaMenu(page, 'fixture-reading-tool');
     await next.getByRole('button', { name: 'Start' }).click();
     await expect(next.locator('.ideas-reason')).toHaveText('Assistant is in the middle of a turn. Try again when it is idle.');
+    await openIdeaMenu(page, 'fixture-reading-tool');
     await expect(next.getByRole('button', { name: 'Start' })).toBeVisible();
     await expect(page).toHaveURL(`${hub.origin}/ideas`);
     expect(hub.requests('/api/ideas/start').map((entry) => entry.status)).toEqual([202, 409]);
@@ -135,7 +148,8 @@ test.describe('Ideas', () => {
 
   test('Discuss opens quick chat without a turn and sends context only with the first message', async ({ page, hub }) => {
     await openIdeas(page, hub);
-    await item(page, 'fixture-reading-tool').getByRole('button', { name: 'Discuss' }).click();
+    const menu = await openIdeaMenu(page, 'fixture-reading-tool');
+    await menu.getByRole('button', { name: 'Discuss' }).click();
     await expect(pane(page)).toBeVisible();
     expect(hub.personas.sent).toEqual([]);
 
@@ -153,6 +167,28 @@ test.describe('Ideas', () => {
     await pane(page).getByRole('button', { name: 'Send', exact: true }).click();
     await expect(contexts).toHaveCount(1);
     expect(hub.personas.sent[1].context.context).toBeUndefined();
+  });
+
+  test('the row menu lists its actions and closes on Escape', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    const row = item(page, 'fixture-agent-card');
+    const menu = await openIdeaMenu(page, 'fixture-agent-card');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Start', 'Dismiss']);
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(row.getByRole('button', { name: 'More' })).toBeFocused();
+  });
+
+  test('clicking a row expands and collapses its text', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    const row = item(page, 'fixture-agent-card');
+    await expect(row).toHaveAttribute('aria-expanded', 'false');
+    await row.locator('.ideas-title').click();
+    await expect(row).toHaveAttribute('aria-expanded', 'true');
+    await expect(row).toHaveClass(/ideas-item-expanded/);
+    await row.locator('.ideas-title').click();
+    await expect(row).toHaveAttribute('aria-expanded', 'false');
   });
 
   test('Instructions shows the criteria and a change opens the producing agent', async ({ page, hub }) => {

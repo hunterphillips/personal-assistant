@@ -26,6 +26,9 @@ built, already running, or already in a plan is not an idea.
 
 ## Write
 
+`text` is one or two sentences under 200 characters that say what the idea
+would do; the why belongs in Discuss.
+
 One new file, `ideas/items/<today>-myos.json`, in the shape
 `ideas/README.md` describes. One item, for example:
 
