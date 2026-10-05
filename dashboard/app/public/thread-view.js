@@ -95,6 +95,7 @@
 
     var back = part('back');
     var nameNode = part('name');
+    var avatarSlot = part('avatar');
     var chips = part('chips');
     var cost = part('cost');
     var newThread = part('new-thread');
@@ -433,7 +434,18 @@
 
     // The column with a title and nothing else (New agent with no thread
     // open, in the Agents view).
+    // The agent's avatar before its name (avatar.js); a coding session is
+    // not a registry agent and has none.
+    function renderAvatar(agent) {
+      var shown = !!agent && !isSession(agent);
+      avatarSlot.hidden = !shown;
+      if (!shown) return;
+      if (avatarSlot.firstChild) window.DashboardAvatar.update(avatarSlot.firstChild, agent);
+      else avatarSlot.appendChild(window.DashboardAvatar.node(agent, 'large'));
+    }
+
     function blank(title) {
+      renderAvatar(null);
       nameNode.textContent = title;
       chips.textContent = '';
       cost.textContent = '';
@@ -467,6 +479,7 @@
       var session = isSession(agent);
       var name = displayName(agent);
 
+      renderAvatar(agent);
       nameNode.textContent = name;
       chips.textContent = '';
       if (roleChip(agent)) chips.appendChild(chip('role-chip', agent.role));
