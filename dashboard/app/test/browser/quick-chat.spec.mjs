@@ -217,6 +217,16 @@ test.describe('quick chat', () => {
     await expect(pane(page)).toBeHidden();
     await openPane(page);
     await expect(picker(page)).toHaveText('CFO');
+
+    // Closing the pane with the search open leaves the button on reopening.
+    await picker(page).click();
+    await search(page).fill('as');
+    await pane(page).getByRole('button', { name: 'Close quick chat' }).click();
+    await expect(pane(page)).toBeHidden();
+    await openPane(page);
+    await expect(search(page)).toBeHidden();
+    await expect(picker(page)).toHaveText('CFO');
+    await expect(picker(page)).toHaveAttribute('aria-expanded', 'false');
     expect(hub.personas.sent).toEqual([]);
   });
 

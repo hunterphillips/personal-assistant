@@ -106,6 +106,7 @@
     var choice = readChoice(); // the picker's last choice, or null
     var shownId = null; // the agent the thread view is bound to
     var finding = null; // the open search: { matches, index }, or null
+    var searchKey = null; // the agents the open search was built from
     var contextPending = false; // the next send carries the view's context
     var sentView = null; // the view the last context named
     var pendingView = null; // the view the context on the send in flight names
@@ -158,10 +159,16 @@
       return '';
     }
 
+    function listKey(agents) {
+      return JSON.stringify(agents.map(function (agent) { return [agent.id, agent.name, agent.role]; }));
+    }
+
     // The search lists the agents matching what is typed; the active row
     // stays on the agent it was on while that agent still matches.
     function filterSearch(keepId) {
-      var matches = matchAgents(claudeAgents(state), search.value);
+      var agents = claudeAgents(state);
+      searchKey = listKey(agents);
+      var matches = matchAgents(agents, search.value);
       var index = 0;
       for (var i = 0; i < matches.length; i += 1) if (matches[i].id === keepId) index = i;
       finding = { matches: matches, index: index };
@@ -175,7 +182,7 @@
         var option = document.createElement('button');
         option.type = 'button';
         option.className = 'mention-option';
-        option.id = 'quick-chat-agent-' + agent.id;
+        option.id = 'quick-chat-option-' + agent.id;
         option.tabIndex = -1;
         option.setAttribute('role', 'option');
         option.setAttribute('data-agent', agent.id);
@@ -195,8 +202,8 @@
       var active = finding.matches[finding.index];
       searchNone.hidden = !!active;
       if (active) {
-        search.setAttribute('aria-activedescendant', 'quick-chat-agent-' + active.id);
-        var row = document.getElementById('quick-chat-agent-' + active.id);
+        search.setAttribute('aria-activedescendant', 'quick-chat-option-' + active.id);
+        var row = document.getElementById('quick-chat-option-' + active.id);
         if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
       } else {
         search.removeAttribute('aria-activedescendant');
@@ -219,6 +226,7 @@
     function closeSearch(restore) {
       if (!finding) return;
       finding = null;
+      searchKey = null;
       searchMenu.hidden = true;
       searchList.textContent = '';
       search.hidden = true;
@@ -242,8 +250,14 @@
       if (!state) return;
       var id = agentId();
       pickerName.textContent = agentName(id);
-      if (finding) filterSearch(finding.matches[finding.index] ? finding.matches[finding.index].id : id);
-      if (!id) closeSearch(false);
+      // An open search is rebuilt only when the agents it lists change, so
+      // a status snapshot leaves its rows and scroll alone.
+      if (finding && id && listKey(claudeAgents(state)) !== searchKey) filterSearch(finding.matches[finding.index] ? finding.matches[finding.index].id : id);
+      if (!id && finding) {
+        var focused = document.activeElement === search;
+        closeSearch(false);
+        if (focused) closeButton.focus();
+      }
       pickerBox.hidden = !id;
       empty.textContent = id ? '' : NO_AGENT;
       empty.hidden = !!id;

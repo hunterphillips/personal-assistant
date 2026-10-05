@@ -329,6 +329,8 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   background: var(--paper);
   color: var(--ink);
   font: inherit;
+  /* 16px, as every text field here, so iOS does not zoom on focus. */
+  font-size: 16px;
 }
 .quick-chat-agent {
   display: flex;
