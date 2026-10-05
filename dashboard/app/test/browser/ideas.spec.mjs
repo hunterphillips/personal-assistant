@@ -36,6 +36,15 @@ async function openIdeas(page, hub) {
   await expect(weeks(page)).toHaveCount(2);
 }
 
+// The Monday-start week that holds today, as the view heads it ("Week of
+// October 5"); a manual idea always lands in this week.
+function thisMonday() {
+  const day = new Date();
+  day.setHours(12, 0, 0, 0);
+  day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
+  return day.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+}
+
 test.describe('Ideas', () => {
   test.use({ withFocus: false, hubOptions: { ideas: IDEAS, agents: AGENTS } });
 
@@ -136,7 +145,7 @@ test.describe('Ideas', () => {
     await expect(form).toBeHidden();
     const added = item(page, 'fixture-manual-idea');
     await expect(added).toBeVisible();
-    await expect(weeks(page).first().locator('.ideas-week-title')).toHaveText('Week of September 28');
+    await expect(weeks(page).first().locator('.ideas-week-title')).toHaveText(`Week of ${thisMonday()}`);
     await expect(added.locator('.ideas-title')).toHaveText('Fixture manual idea');
     await expect(added.locator('.ideas-text')).toContainText('Keep this line exactly.');
     await expect(added.locator('.ideas-text')).toContainText('And this one.');
