@@ -921,7 +921,6 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   font-weight: 400;
   line-height: 1.2;
 }
-.agents-list-head .agents-heading { margin-bottom: 0; }
 
 .agents-message { margin: 0 0 12px; }
 .agents-list-foot { margin: 4px 0 0; }
@@ -2453,18 +2452,27 @@ textarea.form-input {
     box-shadow: 8px 0 24px var(--shadow-sheet);
     transform: translateX(-100%);
     visibility: hidden;
-    transition: transform 200ms ease, visibility 0s linear 200ms;
   }
 
   .shell.panel-open .panel {
     transform: none;
     visibility: visible;
+  }
+
+  /* It slides only once a phone has opened it (panel.js), so a desk that
+     narrows to a phone hides it at once instead of sliding it over the
+     view. */
+  .shell.panel-slides .panel {
+    transition: transform 200ms ease, visibility 0s linear 200ms;
+  }
+
+  .shell.panel-slides.panel-open .panel {
     transition: transform 200ms ease;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .panel,
-    .shell.panel-open .panel { transition: none; }
+    .shell.panel-slides .panel,
+    .shell.panel-slides.panel-open .panel { transition: none; }
   }
 
   .scrim {

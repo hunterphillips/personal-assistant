@@ -58,7 +58,7 @@
   // The drawer, on a phone; a desk's panel answers only to the toggle.
   function openPanel() {
     if (!isPhone()) return;
-    shell.classList.add('panel-open');
+    shell.classList.add('panel-slides', 'panel-open');
     render();
   }
 
@@ -101,7 +101,7 @@
   // A phone's drawer does not outlive the phone; the desk's stored choice
   // is kept apart from it throughout.
   phone.addEventListener('change', function () {
-    if (!isPhone()) shell.classList.remove('panel-open');
+    if (!isPhone()) shell.classList.remove('panel-open', 'panel-slides');
     render();
   });
 

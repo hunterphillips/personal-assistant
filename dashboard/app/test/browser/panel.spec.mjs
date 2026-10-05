@@ -78,8 +78,10 @@ test('the agents list sits in the panel and the Agents view keeps only the threa
   }
 });
 
+// Each width sets its own viewport, so both projects run every test: the
+// desk in WebKit and the phone in Chromium too.
 test.describe('on a desk', () => {
-  test.beforeEach(({ page }) => test.skip(phone(page), 'the panel is a drawer on a phone'));
+  test.use({ viewport: { width: 1280, height: 800 } });
 
   test('collapsing on one view collapses it on all, a reload keeps the choice, and the view takes the width', async ({ page, hub }) => {
     await page.goto(hub.origin + '/goals');
@@ -121,7 +123,7 @@ test.describe('on a desk', () => {
 });
 
 test.describe('on a phone', () => {
-  test.beforeEach(({ page }) => test.skip(!phone(page), 'the drawer is phone only'));
+  test.use({ viewport: { width: 390, height: 844 } });
 
   test('the toggle opens the drawer; the scrim, Escape, and another view close it; nothing is stored', async ({ page, hub }) => {
     await page.goto(hub.origin + '/goals');
