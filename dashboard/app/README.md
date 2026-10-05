@@ -835,9 +835,14 @@ sits over the input the same way, so what is typed stays in view.
 
 Quick chat in the header (in the menu on a phone) opens a pane on the
 right of any view: over the view on a desk, across the width on a phone.
-At its top a picker lists every Claude agent; it starts on the agent
-Settings names under "Quick chat talks to", and a choice made in it holds
-for the browser session. Below the picker is the same thread column the
+At its top a button names the agent; it starts on the agent Settings
+names under "Quick chat talks to", and a choice made in it holds for the
+browser session. The button opens a search over every Claude agent, one
+row each with its name and role, filtered as you type by either
+(ignoring case); Up and Down move, Enter or a click chooses and loads
+that agent's thread, and Escape closes the search and leaves the pane
+open. With nothing matching it says "No agent matches." Below the picker
+is the same thread column the
 Agents view renders, bound to the same thread, so a message sent from
 either shows in both. A draft typed in the pane is in the Agents view's
 composer when that agent opens there. Escape or Close closes the pane.

@@ -262,7 +262,14 @@
        also opens over the overlay. -->
   <aside class="quick-chat" id="quick-chat" aria-label="Quick chat" hidden>
     <div class="quick-chat-head">
-      <select class="settings-select quick-chat-agent" id="quick-chat-agent" aria-label="Agent"></select>
+      <div class="quick-chat-picker" id="quick-chat-picker">
+        <button type="button" class="quick-chat-agent" id="quick-chat-agent" aria-haspopup="listbox" aria-expanded="false"><span class="quick-chat-agent-name" id="quick-chat-agent-name"></span><svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4"/></svg></button>
+        <input type="text" class="quick-chat-search" id="quick-chat-agent-search" role="combobox" aria-label="Agent" aria-autocomplete="list" aria-controls="quick-chat-agent-list" aria-expanded="false" autocomplete="off" autocapitalize="off" spellcheck="false" hidden>
+        <div class="quick-chat-agent-menu" id="quick-chat-agent-menu" hidden>
+          <div class="quick-chat-agent-list" id="quick-chat-agent-list" role="listbox" aria-label="Agents"></div>
+          <p class="quick-chat-agent-none" id="quick-chat-agent-none" hidden>No agent matches.</p>
+        </div>
+      </div>
       <button type="button" class="button icon-button" id="quick-chat-close" aria-label="Close quick chat" title="Close quick chat">
         <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>

@@ -24,6 +24,23 @@ test('fitContext cuts a long label or detail to the route caps and drops empty o
   assert.equal(quick.fitContext(null), null);
 });
 
+test('matchAgents keeps the agents whose name or role holds the query, in list order, ignoring case', () => {
+  const list = [
+    { id: 'assistant', name: 'Assistant', role: 'Assistant' },
+    { id: 'myos', name: 'Myos', role: 'Helper' },
+    { id: 'cfo', name: 'CFO', role: 'Money' },
+    { id: 'bare', name: 'Bare' },
+  ];
+  const ids = (query) => plain(quick.matchAgents(list, query)).map((agent) => agent.id);
+  assert.deepEqual(ids(''), ['assistant', 'myos', 'cfo', 'bare']);
+  assert.deepEqual(ids('  '), ['assistant', 'myos', 'cfo', 'bare']);
+  assert.deepEqual(ids('cf'), ['cfo']);
+  assert.deepEqual(ids('MONEY'), ['cfo']);
+  assert.deepEqual(ids('elp'), ['myos']);
+  assert.deepEqual(ids('s'), ['assistant', 'myos']);
+  assert.deepEqual(ids('zzz'), []);
+});
+
 test('jobDetail lists what the snapshot has for the job, with the agent by its listed name', () => {
   const job = {
     label: 'com.hunter.cfo.daily', agentId: 'cfo', agentName: 'Old name', schedule: { text: 'Daily at 06:00' },
