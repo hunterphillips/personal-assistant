@@ -220,6 +220,89 @@ test.describe('Ideas', () => {
   });
 });
 
+test.describe('Ideas side panel', () => {
+  test.use({ withFocus: false, hubOptions: { ideas: IDEAS, agents: AGENTS } });
+
+  const side = (page) => page.locator('#panel [data-panel-for="ideas"]');
+  const week = (page, key) => side(page).locator(`.panel-row[data-ideas-week="${key}"]`);
+  const heading = (page, key) => page.locator(`#ideas-weeks [data-ideas-week="${key}"] .ideas-week-title`);
+
+  // On a phone the panel is a drawer, opened by the header's toggle first.
+  async function openSide(page) {
+    if (page.viewportSize().width >= 720) return;
+    await page.locator('#panel-toggle').click();
+    await expect(page.locator('#panel')).toBeVisible();
+  }
+
+  // Pads the newer week with copies of its idea, so the older week starts
+  // below the fold.
+  async function padNewerWeek(page) {
+    await page.route('**/api/ideas', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const response = await route.fetch();
+      const body = await response.json();
+      const run = body.runs.find((entry) => entry.date === '2026-09-28');
+      const first = run.items[0];
+      for (let i = 1; i <= 11; i += 1) run.items.push({ ...first, id: `${first.id}-${i}` });
+      await route.fulfill({ response, json: body });
+    });
+  }
+
+  test('lists Weeks, one row per week with its count of ideas', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    await openSide(page);
+    await expect(side(page)).toBeVisible();
+    await expect(page.locator('#panel [data-panel-for="now"]')).toBeHidden();
+    await expect(side(page).locator('h2.panel-heading')).toHaveText(['Weeks']);
+    await expect(side(page).locator('.panel-row-name')).toHaveText(['Week of September 28', 'Week of September 21']);
+    await expect(side(page).locator('.panel-row-count')).toHaveText(['1', '2']);
+    expect(await side(page).locator('.panel-row').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-ideas-week'))))
+      .toEqual(await weeks(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-ideas-week'))));
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(0);
+  });
+
+  test('choosing a week scrolls to it and marks the row', async ({ page, hub }) => {
+    await padNewerWeek(page);
+    await openIdeas(page, hub);
+    await expect(week(page, '2026-09-28').locator('.panel-row-count')).toHaveText('12');
+    await expect(heading(page, '2026-09-21')).not.toBeInViewport();
+
+    await openSide(page);
+    await week(page, '2026-09-21').click();
+    await expect(heading(page, '2026-09-21')).toBeInViewport();
+    await expect(week(page, '2026-09-21')).toHaveAttribute('aria-current', 'true');
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(1);
+
+    await openSide(page);
+    await week(page, '2026-09-28').click();
+    await expect(heading(page, '2026-09-28')).toBeInViewport();
+    await expect(week(page, '2026-09-28')).toHaveAttribute('aria-current', 'true');
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(1);
+
+    await nav(page, 'Home').click();
+    await expectView(page, 'agents', 'Agents');
+    await expect(side(page).locator('.panel-row')).toHaveCount(0);
+    await nav(page, 'Ideas').click();
+    await expectView(page, 'ideas', 'Ideas');
+    await expect(side(page).locator('.panel-row')).toHaveCount(2);
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(0);
+  });
+
+  test('on a phone a choice closes the drawer', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await padNewerWeek(page);
+    await openIdeas(page, hub);
+    await page.locator('#panel-toggle').click();
+    await expect(page.locator('#panel')).toBeVisible();
+    await expect(page.locator('#panel-scrim')).toBeVisible();
+    await week(page, '2026-09-21').click();
+    await expect(page.locator('#panel-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#panel')).toBeHidden();
+    await expect(page.locator('#panel-scrim')).toBeHidden();
+    await expect(heading(page, '2026-09-21')).toBeInViewport();
+  });
+});
+
 test.describe('Ideas with an empty store', () => {
   test.use({ withFocus: false, hubOptions: { agents: AGENTS } });
 
@@ -228,5 +311,7 @@ test.describe('Ideas with an empty store', () => {
     await expectView(page, 'ideas', 'Ideas');
     await expect(page.locator('#ideas-message')).toHaveText(/^No ideas yet\./);
     await expect(weeks(page)).toHaveCount(0);
+    await expect(page.locator('#panel [data-panel-for="ideas"] .panel-row')).toHaveCount(0);
+    await expect(page.locator('#panel [data-panel-for="ideas"]')).toBeHidden();
   });
 });

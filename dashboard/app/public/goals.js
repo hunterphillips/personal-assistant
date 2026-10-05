@@ -12,6 +12,10 @@
 // focus, keeps open rows and sections open (by item and section id) and focus
 // on the row, heading, or Edit button that had it, and an answer identical to
 // the last one rendered changes nothing.
+// The side panel's Goals section, drawn on the same render as the sections
+// and cleared on hide, lists Areas: each section with its count. Choosing
+// one opens that section if it is folded, scrolls its heading into view, and
+// marks the row current until another is chosen or the view hides.
 // A body that is not the expected shape shows the no-answer sentence.
 // Buttons carry data-goal-action, never data-action, which the shell's own
 // click handler owns. Every text node is set with textContent.
@@ -145,6 +149,7 @@
   function create(shellApi) {
     var message = document.getElementById('goals-message');
     var cards = document.getElementById('goals-cards');
+    var side = document.querySelector('[data-panel-for="goals"]');
 
     var data = null; // the last /api/goals answer
     var visible = false;
@@ -158,6 +163,7 @@
     var rendered = null; // the JSON text of the answer on screen
     var openRows = {}; // item id -> true for each open row
     var openSections = { now: true }; // section id -> true for each open section
+    var chosen = null; // the section id of the panel's current row, or null
 
     function editButton(item) {
       var button = element('button', 'button button-small', 'Edit');
@@ -256,6 +262,39 @@
       return node;
     }
 
+    // The panel's Areas group: one row per section drawn, with its count.
+    function renderPanel(drawn) {
+      if (!side) return;
+      side.textContent = '';
+      if (drawn.length === 0) return;
+      side.appendChild(element('h2', 'panel-heading', 'Areas'));
+      drawn.forEach(function (section) {
+        var row = element('button', 'panel-row');
+        row.type = 'button';
+        row.setAttribute('data-goal-area', section.id);
+        if (section.id === chosen) row.setAttribute('aria-current', 'true');
+        row.appendChild(element('span', 'panel-row-name', section.title));
+        row.appendChild(element('span', 'panel-row-count', String(objectsIn(section.items).length)));
+        side.appendChild(row);
+      });
+    }
+
+    // Opens the section if it is folded, scrolls its heading into view, and
+    // marks its row current.
+    function choose(id) {
+      var button = controlFor('section', id);
+      if (!button) return;
+      if (button.getAttribute('aria-expanded') !== 'true') toggle(button, openSections);
+      chosen = id;
+      var rows = side.querySelectorAll('.panel-row');
+      for (var r = 0; r < rows.length; r += 1) {
+        if (rows[r].getAttribute('data-goal-area') === id) rows[r].setAttribute('aria-current', 'true');
+        else rows[r].removeAttribute('aria-current');
+      }
+      document.getElementById('goals-section-' + id).scrollIntoView({ block: 'start' });
+      shellApi.closePanel();
+    }
+
     function setMessage(lines) {
       message.textContent = '';
       lines.forEach(function (text, i) {
@@ -321,12 +360,15 @@
       if (!data) return;
       var sections = objectsIn(data.sections);
       var built = [];
+      var drawn = [];
       var found = {};
       var previous = items;
       try {
         items = found;
         sections.forEach(function (section) {
-          if (!sectionEmpty(section)) built.push(renderSection(section));
+          if (sectionEmpty(section)) return;
+          built.push(renderSection(section));
+          drawn.push(section);
         });
       } catch (_error) {
         items = previous;
@@ -350,6 +392,10 @@
       restoreFocus(saved);
       var again = control ? controlFor(control.action, control.id) : null;
       if (again) again.focus();
+      // A section gone from the vault takes its mark with it.
+      if (!drawn.some(function (section) { return section.id === chosen; })) chosen = null;
+      renderPanel(drawn);
+      shellApi.panelChanged();
       rendered = JSON.stringify(data);
     }
 
@@ -503,6 +549,12 @@
       else delete state[id];
     }
 
+    if (side) {
+      side.addEventListener('click', function (event) {
+        var row = event.target.closest && event.target.closest('button[data-goal-area]');
+        if (row) choose(row.getAttribute('data-goal-area'));
+      });
+    }
     document.getElementById('goals-add').addEventListener('click', function () {
       openComposer('add', null);
     });
@@ -539,6 +591,8 @@
       },
       hide: function () {
         visible = false;
+        chosen = null;
+        if (side) side.textContent = '';
         if (poll !== null) clearInterval(poll);
         poll = null;
       },
