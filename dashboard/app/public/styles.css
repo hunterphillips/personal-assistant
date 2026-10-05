@@ -891,6 +891,55 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   }
 }
 
+/* A panel's rows and the headings over its groups, shared by every view's
+   section. */
+.panel-heading {
+  margin: 20px 0 6px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.panel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.panel-row:hover { background: var(--hover-tint); }
+.panel-row[aria-current="true"] {
+  background: var(--paper);
+  box-shadow: 0 1px 3px var(--shadow-tint);
+}
+
+.panel-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-row-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The header's first control, on every view. Its inner bar fades while the
    panel is collapsed. */
 .panel-toggle {
@@ -1061,7 +1110,8 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 
 .instructions-actions { margin-top: 8px; }
 
-.feed-run + .feed-run { margin-top: 32px; }
+/* Spacing counts only what is shown, so a source filter leaves no gap. */
+.feed-run:not([hidden]) ~ .feed-run { margin-top: 32px; }
 
 .feed-run-header {
   display: flex;
@@ -1089,7 +1139,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   column-gap: 12px;
   align-items: start;
 }
-.feed-item + .feed-item { margin-top: 24px; }
+.feed-item:not([hidden]) ~ .feed-item { margin-top: 24px; }
 /* The item a notification's link opened. */
 .feed-item[data-feed-target] {
   border-radius: 4px;
@@ -1116,6 +1166,23 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .feed-badge-3 { background: var(--badge-3); }
 .feed-badge-4 { background: var(--badge-4); }
 .feed-badge-5 { background: var(--badge-5); }
+
+/* The line above the posts while one source is chosen. */
+.feed-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.panel-row .feed-badge {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
 
 /* An agent's round picture, or its initials on a badge color (avatar.js). */
 .avatar {
