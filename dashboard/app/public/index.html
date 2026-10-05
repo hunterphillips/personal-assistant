@@ -113,6 +113,11 @@
           <section data-panel-for="now" hidden></section>
           <section data-panel-for="agents">
             <div class="agents-list" id="agents-list">
+              <label class="search">
+                <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg>
+                <input type="search" id="agents-search" placeholder="Search" aria-label="Search agents and threads" autocomplete="off" autocapitalize="off" spellcheck="false">
+              </label>
+              <p class="agents-message agents-search-empty" id="agents-search-empty" hidden>Nothing matches.</p>
               <p class="agents-message" id="agents-message" hidden></p>
               <div id="agents-groups">
                 <details class="agents-routines" id="agents-routines" hidden>
