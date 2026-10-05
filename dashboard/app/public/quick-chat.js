@@ -1,10 +1,11 @@
 // Quick chat: the header's Quick chat entry (and, on a phone, the menu's)
 // opens a pane on the right of the current view, over it on a desk and
 // across the width on a phone, without leaving the view. At its top a
-// button names the agent; activating it opens a typeahead over every Claude
-// agent (registry personas whose provider is claude, the set Settings
-// offers), filtered by name and role, with the keys and roles of the
-// composer's @ picker; below it is a thread view
+// button shows the agent's avatar (avatar.js) and name; activating it opens
+// a typeahead over every Claude agent (registry personas whose provider is
+// claude, the set Settings offers), each row its avatar, name, and role,
+// filtered by name and role, with the keys and roles of the composer's @
+// picker; below it is a thread view
 // (thread-view.js) bound to the chosen agent, the same column the Agents
 // view shows, so a message sent from either lands in the one thread. The
 // default is the agent Settings names under "Quick chat talks to"; a choice
@@ -91,6 +92,7 @@
     var pickerBox = document.getElementById('quick-chat-picker');
     var picker = document.getElementById('quick-chat-agent');
     var pickerName = document.getElementById('quick-chat-agent-name');
+    var pickerAvatar = document.getElementById('quick-chat-agent-avatar');
     var search = document.getElementById('quick-chat-agent-search');
     var searchMenu = document.getElementById('quick-chat-agent-menu');
     var searchList = document.getElementById('quick-chat-agent-list');
@@ -153,14 +155,24 @@
       return agents.length > 0 ? agents[0].id : null;
     }
 
-    function agentName(id) {
+    function agentOf(id) {
       var agents = claudeAgents(state);
-      for (var i = 0; i < agents.length; i += 1) if (agents[i].id === id) return agents[i].name;
-      return '';
+      for (var i = 0; i < agents.length; i += 1) if (agents[i].id === id) return agents[i];
+      return null;
+    }
+
+    // The chosen agent's avatar (avatar.js) before its name on the button.
+    function renderButton(id) {
+      var agent = agentOf(id);
+      pickerName.textContent = agent ? agent.name : '';
+      pickerAvatar.hidden = !agent;
+      if (!agent) return;
+      if (pickerAvatar.firstChild) window.DashboardAvatar.update(pickerAvatar.firstChild, agent);
+      else pickerAvatar.appendChild(window.DashboardAvatar.node(agent, 'large'));
     }
 
     function listKey(agents) {
-      return JSON.stringify(agents.map(function (agent) { return [agent.id, agent.name, agent.role]; }));
+      return JSON.stringify(agents.map(function (agent) { return [agent.id, agent.name, agent.role, agent.avatar]; }));
     }
 
     // The search lists the agents matching what is typed; the active row
@@ -187,6 +199,7 @@
         option.setAttribute('role', 'option');
         option.setAttribute('data-agent', agent.id);
         option.setAttribute('aria-selected', i === finding.index ? 'true' : 'false');
+        option.appendChild(window.DashboardAvatar.node(agent, 'small'));
         var name = document.createElement('span');
         name.className = 'mention-option-name';
         name.textContent = agent.name;
@@ -249,7 +262,7 @@
     function render() {
       if (!state) return;
       var id = agentId();
-      pickerName.textContent = agentName(id);
+      renderButton(id);
       // An open search is rebuilt only when the agents it lists change, so
       // a status snapshot leaves its rows and scroll alone.
       if (finding && id && listKey(claudeAgents(state)) !== searchKey) filterSearch(finding.matches[finding.index] ? finding.matches[finding.index].id : id);

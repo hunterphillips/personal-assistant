@@ -47,6 +47,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/agents/<id>/new-thread` | Starts the persona on a new session. |
 | `POST /api/agents/<id>/model` | Sets the model and effort the persona's thread runs on: `{"model": "sonnet"}`, `{"effort": "low"}`, or both; null for a key returns it to the agent's default (below). |
 | `GET /api/agents/<id>/thread` | The persona's cached messages. |
+| `GET /api/agents/<id>/avatar` | The agent's picture with its content type and `Cache-Control: no-cache`, for an agent of any kind; 404 `no_avatar` when it has none, 404 `no_such_agent` for an id the registry does not list (Avatars, below). |
 | `PUT /api/agents/<id>/settings` | Rewrites a persona's registry entry (name, role, group, description, folder, model, effort, permission level, who may message it, pinned) and answers the stored entry (below). |
 | `POST /api/agents` | Adds a Claude persona to the registry from the same fields plus `id`; 201 with the stored entry (below). |
 | `DELETE /api/agents/<id>` | Removes a persona from the registry with its routines and their runs logs; its thread stays on disk (below). |
@@ -100,6 +101,7 @@ what `lib/app.mjs` expects from it.
 - `lib/brief-adapter.mjs` serves the brief routes over `lib/briefs.mjs` and `lib/feedback.mjs`.
 - `lib/hub.mjs` keeps the state snapshot and its subscribers.
 - `lib/builtins.mjs` seeds the built-in agents from `registry/builtin.json` at start and picks the agent a setting falls to.
+- `lib/avatars.mjs` finds an agent's picture in its folder or at its registry `avatar` path; `public/avatar.js` draws it, or the agent's initials, wherever an agent is named.
 - `lib/registry.mjs` and `lib/jobs.mjs` read the agent registry and its launchd jobs; `lib/launchd.mjs` renders the plist for `bin/dashboard-install`.
 - `lib/threads.mjs` and `lib/runtime/` hold the persona thread files, the two runtime adapters (`claude.mjs` runs personas, `codex.mjs` follows the shared Codex app-server's threads), and the cmux client (`cmux.mjs`).
 - `lib/bindings.mjs` reads the terminal bindings `bin/codex-new` records.
@@ -137,12 +139,12 @@ snapshot; concurrent requests share one check. It stays for one release.
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
   "groups": [{ "id": "work", "name": "Work" }, { "id": "personal", "name": "Personal" }],
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
-               "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "provider": "claude",
+               "cwd": "/Users/hunter/workspace/work/investing/cfo", "jobs": 1, "avatar": "1759622400000", "provider": "claude",
                "state": "idle", "pending": null, "forwarded": [], "needsYou": false, "lastMessage": { "role": "assistant", "text": "...", "at": "<ISO>" },
                "lastError": null, "costUsd": 0.42, "lastLineAt": null, "model": { "id": "opus", "effort": null, "source": "agent", "default": { "id": "opus", "effort": null }, "agent": { "id": "opus", "effort": null } },
                "permission": { "level": "full", "source": "agent", "agent": "full", "default": "ask" }, "accepts": null },
              { "id": "assistant", "name": "Assistant", "role": "Assistant", "description": "...", "group": "personal", "kind": "persona",
-               "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "provider": "claude", "pinned": true,
+               "cwd": "/Users/hunter/workspace/personal-assistant", "jobs": 1, "avatar": null, "provider": "claude", "pinned": true,
                "state": "idle", "pending": null, "forwarded": [], "needsYou": false, "lastMessage": null, "lastError": null, "costUsd": null, "lastLineAt": null,
                "model": { "id": null, "effort": null, "source": "default", "default": { "id": null, "effort": null }, "agent": { "id": null, "effort": null } },
                "permission": { "level": "ask", "source": "system", "agent": null, "default": "ask" }, "accepts": null }],
@@ -555,8 +557,8 @@ The Agents view is the page at `/`. It lists every registry agent under
 the registry's groups (`groups` in the file, in that order, with those
 names; a group an agent names that the file leaves out follows them under
 its id with the first letter raised), in registry order within a group:
-name, role (left out when it only repeats the name), provider (Claude or
-Codex), and for a persona its last message
+its avatar (Avatars, below) and name, role (left out when it only repeats
+the name), provider (Claude or Codex), and for a persona its last message
 with a relative time. A row wanting Hunter shows an amber dot beside its
 name, titled and labelled "Waiting for you" (a question or approval open)
 or "Needs you" (a routine's run left a card unanswered and nothing has
@@ -939,6 +941,34 @@ the root's. `.claude/settings.json` and `.mcp.json` are read from the
 folder only and are not inherited from the root. A built-in agent names
 its folder in `registry/builtin.json` as `folder`, relative to the repo.
 
+### Avatars
+
+Each agent has a round picture beside its name in the agents list (the
+pinned agent included), the thread header, quick chat's picker (its
+button and each row), the notifications list, the lines of a delegation,
+and a message another agent sends. The picture is the first of
+`avatar.png`, `avatar.jpg`, and `avatar.webp` found in the agent's folder
+(its registry `cwd`), or, when the registry entry has an `avatar` key, that path,
+relative to the `cwd` or absolute, for an agent whose folder is its own
+repository. A path that does not resolve does not fall back to the
+lookup. PNG, JPEG, and WebP only, judged by extension (no SVG), at most
+512 KiB. Anything else, a missing file, or a bad path shows the agent's
+initials instead, and a file that was found or named but cannot be used
+is logged once as `avatar_skipped` with the agent's id and a reason
+(`missing`, `wrong_type`, `not_a_file`, or `too_large`). The initials
+are the first letters of the first two words of the agent's name, or the
+first two letters of a one-word name, on one of the `--badge-0` to
+`--badge-5` colors the Feed's source circles use, chosen from the
+agent's id so it never changes.
+
+The snapshot's agent entry carries `avatar`: null, or the picture's
+modification time in milliseconds as a string. The client loads
+`/api/agents/<id>/avatar?v=<avatar>`, so a replaced file is a new URL.
+The daemon reads the file when the registry loads or changes and on each
+status refresh (every `/api/state` and `/api/dashboard/status`); nothing
+watches it, so a picture added to a folder shows the next time the page
+loads its state.
+
 ### State in the snapshot
 
 At startup the hub starts each persona in the registry and follows its
@@ -1165,7 +1195,7 @@ the three is 400 `invalid_permission`; `newGroup: { id, name }` adds a group who
 listed group has (one that does joins it) and `group` must equal its id.
 A created agent is kind `persona` on `claude`; project and system entries
 are still hand edits. The entry is written in the schema's key order with
-its `jobs` and a `builtin` flag kept (no body sets the flag), and the whole file as 2-space JSON with a trailing
+its `jobs`, an `avatar` path, and a `builtin` flag kept (no body sets either), and the whole file as 2-space JSON with a trailing
 newline, so a dashboard write reads as a small diff; unrelated top-level
 keys are kept. The write is atomic (a temp file beside the registry,
 renamed over it, with the file's mode kept), the registry reloads at

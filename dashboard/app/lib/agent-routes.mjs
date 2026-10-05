@@ -19,6 +19,10 @@
 //   POST new-thread  bodyless -> 200 once both thread files are cleared
 //   POST read        bodyless -> 200 once the shared read time is recorded
 //   GET  thread      { messages } from store.read(id)
+//   GET  avatar      the agent's picture (avatars.mjs) with its content
+//                    type and Cache-Control: no-cache, for an agent of any
+//                    kind; 404 no_avatar when it has none (the client
+//                    draws initials). HEAD too.
 //   PUT  settings    the agent's registry entry (agent-settings-routes.mjs);
 //                    POST /api/agents (serveCreate) adds one, and DELETE
 //                    /api/agents/:id (no action, bodyless) removes one with
@@ -81,7 +85,7 @@
 
 import { AGENT_ID } from './registry.mjs';
 import { createAgentSettingsRoutes } from './agent-settings-routes.mjs';
-import { HttpError, readJsonBody, sendJson } from './http.mjs';
+import { HttpError, readJsonBody, sendBody, sendJson } from './http.mjs';
 import { parseContext } from './send-context.mjs';
 import { isEffort } from './models.mjs';
 
@@ -101,9 +105,10 @@ const ACTIONS = new Map([
   ['thread', { methods: ['GET'] }],
   ['settings', { methods: ['PUT'] }],
   ['open-terminal', { methods: ['POST'], bodyless: true }],
+  ['avatar', { methods: ['GET', 'HEAD'] }],
 ]);
 const SESSION_ACTIONS = new Set(['answer', 'interrupt', 'thread', 'open-terminal']);
-const PERSONA_ACTIONS = new Set(['send', 'model', 'answer', 'interrupt', 'new-thread', 'read', 'thread', 'settings']);
+const PERSONA_ACTIONS = new Set(['send', 'model', 'answer', 'interrupt', 'new-thread', 'read', 'thread', 'settings', 'avatar']);
 
 // Adapter refusal code -> HTTP status.
 const RUNTIME_STATUS = new Map([
@@ -270,6 +275,15 @@ export function createAgentRoutes({
     sendJson(res, 200, { ok: true });
   }
 
+  // Any listed agent, not only a persona. The query (?v=<mtime>) is the
+  // client's cache key and is ignored here.
+  async function serveAvatar(req, res, id) {
+    if (!hub.snapshot().agents.some((agent) => agent.id === id)) throw new HttpError(404, 'no_such_agent');
+    const picture = await hub.avatar(id);
+    if (!picture) throw new HttpError(404, 'no_avatar');
+    sendBody(res, 200, picture.type, picture.body, { head: req.method === 'HEAD', headers: { 'Cache-Control': 'no-cache' } });
+  }
+
   async function serveSessionThread(res, id) {
     const { agent, adapter } = sessionFor(id);
     let thread;
@@ -326,6 +340,8 @@ export function createAgentRoutes({
         return settingsRoutes.serveDelete(req, res, id);
       case 'open-terminal':
         return serveOpenTerminal(res, id);
+      case 'avatar':
+        return serveAvatar(req, res, id);
       default:
         throw new HttpError(404, 'not_found');
     }

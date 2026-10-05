@@ -21,7 +21,7 @@
 //                                 // { state: 'unknown' } before the first check
 //       registry: { ok, error, loadedAt },
 //       groups: [{ id, name }],    // the registry's group list, in order
-//       agents: [{ id, name, role, description, group, kind, cwd, jobs,
+//       agents: [{ id, name, role, description, group, kind, cwd, jobs, avatar,
 //                  provider?, pinned?, builtin?, state, pending?, lastMessage?,
 //                  lastError?, costUsd?, lastLineAt?, model?, permission?,
 //                  accepts?, unread }],
@@ -42,7 +42,10 @@
 //       models: [{ id, name }] }
 //     An agent's cwd is the registry's, or null, and jobs is how many
 //     launchd labels its registry jobs name; agents never carry the
-//     jobs themselves. Each object in it is frozen.
+//     jobs themselves. avatar is null or the agent's picture file's mtime
+//     in ms as a string (avatars.mjs), for /api/agents/<id>/avatar?v=<it>;
+//     read when the registry loads or changes and on refreshStatus, never
+//     watched. Each object in it is frozen.
 //     `home` is the `home` option, os.homedir() by default.
 //     A non-persona agent has state null and no other runtime fields. A
 //     persona (kind 'persona') has:
@@ -213,6 +216,10 @@
 //     `forwarded`; the requests stay answerable in their owners' threads.
 //     The new-thread route calls it after a successful reset.
 //
+//   avatar(id) -> Promise<{ type, body } | null>
+//     The registry agent's picture, read now (avatars.mjs readAvatar), or
+//     null when it has none or the registry does not list it.
+//
 //   persona(id) -> { agent, adapter } | null
 //     The registry agent (with cwd) and its adapter, for a started persona.
 //
@@ -277,6 +284,7 @@
 
 import os from 'node:os';
 
+import { inspectAvatar, readAvatar } from './avatars.mjs';
 import { LIMITS, TIMEOUTS, TIME_ZONE } from './config.mjs';
 import { MODELS } from './models.mjs';
 import * as defaultSchedule from './schedule.mjs';
@@ -294,7 +302,25 @@ export function createHub({
 }) {
   const listeners = new Set();
   const settingsCurrent = () => settingsView(settings ? settings.current() : null);
-  const views = (current = registry.current()) => agentViews(current, personas, settingsCurrent(), routines, reads);
+  // agentId -> the reason last logged for a picture that cannot be used.
+  const avatarSkips = new Map();
+  // agentId -> String(mtime ms) of the agent's picture, or null
+  // (avatars.mjs). A picture that cannot be used is logged once per
+  // reason as avatar_skipped, so a file too large to show says why.
+  function avatarVersions(current) {
+    const versions = {};
+    for (const agent of current?.agents ?? []) {
+      const found = inspectAvatar(agent);
+      versions[agent.id] = found?.picture ? String(Math.trunc(found.picture.mtimeMs)) : null;
+      const reason = found?.reason ?? null;
+      if (reason && avatarSkips.get(agent.id) !== reason) log({ event: 'avatar_skipped', agentId: agent.id, reason });
+      if (reason) avatarSkips.set(agent.id, reason);
+      else avatarSkips.delete(agent.id);
+    }
+    return versions;
+  }
+  let avatars = avatarVersions(registry.current());
+  const views = (current = registry.current()) => agentViews(current, personas, settingsCurrent(), routines, reads, avatars);
   const routinesCurrent = () => routinesView(registry.current(), routines, schedule, timeZone, now());
   const notificationsCurrent = () => (notifications ? notifications.view() : { open: 0, items: [] });
   const turnMaxMs = timeouts.turnMaxMs ?? TIMEOUTS.turnMaxMs;
@@ -562,6 +588,7 @@ export function createHub({
         log({ event: 'thread_reads_error', error: error?.message ?? String(error) });
       });
     }
+    avatars = avatarVersions(current);
     commit({ ...registryFields(current, views), routines: routinesCurrent() });
     if (started && !closed) commitSessions();
   });
@@ -599,6 +626,10 @@ export function createHub({
     const patch = {};
     if (!sameJson(focusStatus, state.focus)) patch.focus = focusStatus;
     if (!sameJson(briefStatus, state.brief)) patch.brief = briefStatus;
+    // A picture added, replaced, or removed since the registry loaded.
+    avatars = avatarVersions(registry.current());
+    const agents = views();
+    if (!sameJson(agents, state.agents)) patch.agents = agents;
     if (Object.keys(patch).length > 0) commit(patch);
   }
 
@@ -711,6 +742,12 @@ export function createHub({
       if (!reads) return;
       await reads.mark(id);
       if (!closed) commitAgents();
+    },
+
+    // The listed agent's picture, { type, body }, or null (avatars.mjs).
+    async avatar(id) {
+      const agent = (registry.current()?.agents ?? []).find((item) => item.id === id);
+      return agent ? readAvatar(agent) : null;
     },
 
     persona(id) {
@@ -928,7 +965,7 @@ function resolvePermission(agent, settingsState) {
   return { level: settingsState.permission.default, source: 'system' };
 }
 
-function agentViews(current, personas, settingsState, routines = null, reads = null) {
+function agentViews(current, personas, settingsState, routines = null, reads = null, avatars = {}) {
   return (current?.agents ?? []).map((agent) => {
     const view = {
       id: agent.id,
@@ -939,6 +976,7 @@ function agentViews(current, personas, settingsState, routines = null, reads = n
       kind: agent.kind,
       cwd: typeof agent.cwd === 'string' ? agent.cwd : null,
       jobs: Array.isArray(agent.jobs) ? agent.jobs.length : 0,
+      avatar: avatars[agent.id] ?? null,
     };
     if (agent.provider !== undefined) view.provider = agent.provider;
     if (agent.pinned === true) view.pinned = true;

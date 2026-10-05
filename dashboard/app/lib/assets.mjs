@@ -3,6 +3,7 @@
 
 export const ASSETS = Object.freeze({
   'albert-sans-latin.woff2': { file: 'albert-sans-latin.woff2', type: 'font/woff2' },
+  'avatar.js': { file: 'avatar.js', type: 'text/javascript; charset=utf-8' },
   'agents.js': { file: 'agents.js', type: 'text/javascript; charset=utf-8' },
   'panel.js': { file: 'panel.js', type: 'text/javascript; charset=utf-8' },
   'brief-overlay.js': { file: 'brief-overlay.js', type: 'text/javascript; charset=utf-8' },

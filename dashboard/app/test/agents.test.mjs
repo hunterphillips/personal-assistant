@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
 import { RuntimeError } from '../lib/runtime/adapter.mjs';
-import { fakeRegistry, request, startApp } from './support/harness.mjs';
+import { fakeRegistry, request, startApp, tempDir } from './support/harness.mjs';
 
 const status = {
   focus: { checkHealth: async () => ({ available: true }) },
@@ -437,6 +439,14 @@ test('settings PUT rewrites the entry in schema order, keeps jobs, omits accepts
   assert.deepEqual(noOne.json.agent.accepts, []);
 });
 
+test('settings PUT keeps an avatar path, written after pinned and before builtin', async (t) => {
+  const app = await startEditable(t, [agent('cfo', { pinned: true, avatar: 'me.png', builtin: true }), agent('assistant')]);
+  const response = await put(app, '/api/agents/cfo/settings', settingsBody({ name: 'Money desk', pinned: true }));
+  assert.equal(response.status, 200);
+  assert.equal(response.json.agent.avatar, 'me.png');
+  assert.deepEqual(Object.keys(app.registry.writes[0].agents[0]), ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'pinned', 'avatar', 'builtin']);
+});
+
 test('settings PUT writes permission after effort when set, none for null or absent, refuses a bad level, and POST creates with none', async (t) => {
   const app = await startEditable(t);
   const full = await put(app, '/api/agents/cfo/settings', settingsBody({ model: 'sonnet', effort: 'low', accepts: ['assistant'], permission: 'full' }));
@@ -599,4 +609,57 @@ test('send passes the mentioned agents through, drops ids the registry lacks, an
     assert.deepEqual([refused.status, refused.json], [400, { error: 'invalid_mentions' }], JSON.stringify(mentions));
   }
   assert.deepEqual(app.adapter.sendOptions, []);
+});
+
+// --- avatars ------------------------------------------------------------------
+
+test('avatar serves the picture from the agent\'s folder or its registry path, and 404s otherwise', async (t) => {
+  const dir = await tempDir(t);
+  const folders = {};
+  for (const id of ['cfo', 'brain', 'big', 'vector', 'gif', 'none', 'bad', 'ops']) {
+    folders[id] = path.join(dir, id);
+    await mkdir(folders[id]);
+  }
+  await writeFile(path.join(folders.cfo, 'avatar.jpg'), 'invented jpeg');
+  await writeFile(path.join(folders.cfo, 'avatar.webp'), 'not this one');
+  await mkdir(path.join(folders.brain, 'images'));
+  await writeFile(path.join(folders.brain, 'images', 'me.webp'), 'invented webp');
+  await writeFile(path.join(folders.brain, 'avatar.png'), 'not this one');
+  await writeFile(path.join(folders.big, 'avatar.png'), Buffer.alloc(512 * 1024 + 1));
+  await writeFile(path.join(folders.vector, 'me.svg'), '<svg/>');
+  await writeFile(path.join(folders.gif, 'avatar.gif'), 'GIF89a');
+  await writeFile(path.join(folders.ops, 'avatar.png'), 'invented png');
+  const registry = fakeRegistry([
+    agent('cfo', { cwd: folders.cfo }),
+    agent('brain', { cwd: folders.brain, avatar: 'images/me.webp' }),
+    agent('big', { cwd: folders.big }),
+    agent('vector', { cwd: folders.vector, avatar: 'me.svg' }),
+    agent('gif', { cwd: folders.gif }),
+    agent('none', { cwd: folders.none }),
+    agent('bad', { cwd: folders.bad, avatar: '../nowhere/me.png' }),
+    agent('ops', { kind: 'system', provider: undefined, cwd: folders.ops }),
+  ]);
+  const app = await startApp(t, { ...status, registry });
+
+  const found = await request(app, 'GET', '/api/agents/cfo/avatar?v=1');
+  assert.deepEqual([found.status, found.headers['content-type'], found.headers['cache-control'], found.text], [200, 'image/jpeg', 'no-cache', 'invented jpeg']);
+  const override = await request(app, 'GET', '/api/agents/brain/avatar');
+  assert.deepEqual([override.status, override.headers['content-type'], override.text], [200, 'image/webp', 'invented webp']);
+  const system = await request(app, 'GET', '/api/agents/ops/avatar');
+  assert.deepEqual([system.status, system.headers['content-type']], [200, 'image/png']);
+
+  for (const id of ['big', 'vector', 'gif', 'none', 'bad']) {
+    const response = await request(app, 'GET', `/api/agents/${id}/avatar`);
+    assert.deepEqual([response.status, response.json], [404, { error: 'no_avatar' }], id);
+  }
+  const unknown = await request(app, 'GET', '/api/agents/nobody/avatar');
+  assert.deepEqual([unknown.status, unknown.json], [404, { error: 'no_such_agent' }]);
+  assert.equal((await request(app, 'POST', '/api/agents/cfo/avatar', { headers: { origin: app.origin } })).status, 405);
+
+  // The snapshot says which agents have one.
+  const { agents } = (await request(app, 'GET', '/api/state')).json;
+  assert.deepEqual(agents.map((a) => [a.id, typeof a.avatar]), [
+    ['cfo', 'string'], ['brain', 'string'], ['big', 'object'], ['vector', 'object'], ['gif', 'object'], ['none', 'object'], ['bad', 'object'], ['ops', 'string'],
+  ]);
+  assert.equal(agents.find((a) => a.id === 'none').avatar, null);
 });

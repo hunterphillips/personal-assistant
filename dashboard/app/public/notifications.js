@@ -103,10 +103,15 @@
       };
     }
 
-    function agentName(id) {
+    // The snapshot's agent, or { id, name: id } for one no longer listed.
+    function agentOf(id) {
       var agents = state && Array.isArray(state.agents) ? state.agents : [];
-      for (var i = 0; i < agents.length; i += 1) if (agents[i].id === id) return agents[i].name || id;
-      return id;
+      for (var i = 0; i < agents.length; i += 1) if (agents[i].id === id) return agents[i];
+      return { id: id, name: id };
+    }
+
+    function agentName(id) {
+      return agentOf(id).name || id;
     }
 
     function jobName(label) {
@@ -142,7 +147,10 @@
       var li = element('li', 'notification');
       li.setAttribute('data-notification-id', item.id);
       var meta = element('div', 'notification-meta');
-      meta.appendChild(element('span', 'notification-agent', agentName(item.agent)));
+      var who = element('span', 'notification-who');
+      who.appendChild(window.DashboardAvatar.node(agentOf(item.agent), 'small'));
+      who.appendChild(element('span', 'notification-agent', agentName(item.agent)));
+      meta.appendChild(who);
       var time = element('time', 'notification-time', formatTime(item.at));
       time.setAttribute('datetime', item.at);
       meta.appendChild(time);

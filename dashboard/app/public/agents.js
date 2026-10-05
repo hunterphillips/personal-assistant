@@ -936,7 +936,10 @@
     // reply, with the sender's name above it linking to the sender's thread.
     function agentMessageNode(entry) {
       var node = element('div', 'thread-message thread-message-assistant thread-message-agent');
-      node.appendChild(agentLink(entry.from, 'thread-message-from'));
+      var sender = element('span', 'thread-message-sender');
+      sender.appendChild(avatarOf(entry.from));
+      sender.appendChild(agentLink(entry.from, 'thread-message-from'));
+      node.appendChild(sender);
       node.appendChild(markdownNode('thread-message-text', entry.text, entry.mentions));
       node.appendChild(messageMeta(entry));
       return node;
@@ -1002,12 +1005,15 @@
         var node = element('div', 'thread-message thread-message-system thread-message-brief thread-message-delegation');
         var details = element('details', 'thread-brief thread-delegation');
         var replied = typeof entry.summary === 'string' && entry.summary ? entry.summary : (entry.text || '');
-        var who = typeof entry.to === 'string' && entry.to ? names(entry.to) : (typeof entry.from === 'string' && entry.from ? names(entry.from) : 'The agent');
-        details.appendChild(element('summary', 'thread-brief-summary', who + ' replied: ' + window.DashboardMarkdown.plain(replied)));
+        var target = typeof entry.to === 'string' && entry.to ? entry.to : (typeof entry.from === 'string' && entry.from ? entry.from : null);
+        var who = target ? names(target) : 'The agent';
+        var summary = element('summary', 'thread-brief-summary');
+        if (target) summary.appendChild(avatarOf(target));
+        summary.appendChild(document.createTextNode(who + ' replied: ' + window.DashboardMarkdown.plain(replied)));
+        details.appendChild(summary);
         details.appendChild(markdownNode('thread-brief-body', entry.text || ''));
         node.appendChild(details);
         var meta = messageMeta(entry);
-        var target = typeof entry.to === 'string' && entry.to ? entry.to : (typeof entry.from === 'string' ? entry.from : null);
         if (target) {
           meta.appendChild(document.createTextNode(' '));
           meta.appendChild(agentLink(target, 'thread-delegation-link', 'Open ' + names(target)));
@@ -1020,12 +1026,25 @@
       var parts = delegationParts(entry, names);
       for (var i = 0; i < parts.length; i += 1) {
         var part = parts[i];
-        if (typeof part === 'string') text.appendChild(document.createTextNode(part));
-        else text.appendChild(agentLink(part.agent, null, part.text));
+        if (typeof part === 'string') {
+          text.appendChild(document.createTextNode(part));
+        } else {
+          text.appendChild(avatarOf(part.agent));
+          text.appendChild(agentLink(part.agent, null, part.text));
+        }
       }
       line.appendChild(text);
       line.appendChild(messageMeta(entry));
       return line;
+    }
+
+    // The avatar (avatar.js) of the agent with registry id `id`, set
+    // inline beside its name in a line of text.
+    function avatarOf(id) {
+      var list = agentsOf() || [];
+      var agent = null;
+      for (var i = 0; i < list.length; i += 1) if (list[i] && list[i].id === id) agent = list[i];
+      return window.DashboardAvatar.node(agent || { id: id, name: id }, 'inline');
     }
 
     // A link to an agent's thread by registry id, labeled with its name.
@@ -1205,6 +1224,7 @@
 
       var line = stateLine(agent);
       var head = element('span', 'agent-row-head');
+      head.appendChild(window.DashboardAvatar.node(agent, 'small'));
       head.appendChild(element('span', 'agent-row-name', agent.name));
       if (line && line.tone === 'wait') head.appendChild(stateDot(line));
       if (roleChip(agent)) head.appendChild(chip('role-chip', agent.role));

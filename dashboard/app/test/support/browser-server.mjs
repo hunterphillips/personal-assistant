@@ -77,6 +77,7 @@ import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } 
 import { focusSourceAvailable, startIsolatedFocus } from './isolated-focus.mjs';
 
 const FORBIDDEN_PORTS = new Set([4242, 4243]);
+const AVATAR_FIXTURE = new URL('../fixtures/avatar/avatar.png', import.meta.url);
 
 export { focusSourceAvailable };
 
@@ -136,6 +137,9 @@ export { focusSourceAvailable };
 //              `routinesDir` the directory, `scheduler` { tick, testRun },
 //              and `clock` { now, advance(ms) } the scheduler's and hub's
 //              clock, the real time moved ahead by what `advance` adds.
+//   avatars    [agentId]: each of these agents gets a folder in the
+//              temporary directory holding test/fixtures/avatar/avatar.png
+//              as its cwd, so the snapshot names its picture.
 //   notifications  [{ id?, agent, text, link?, at?, acknowledgedAt? }]
 //              written as the store's lines, oldest first, before it loads
 //              (`at` defaults to now, `link` and `acknowledgedAt` to null).
@@ -145,7 +149,7 @@ export async function startHub({
   withFocus = true, agents = [], registry: registryState, jobs: jobsSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
   vault = null, feed = null, ideas: ideasFixture = null, instructions = null, briefInstructions = null, settings: settingsSeed = null, delegationWaitMs = null,
-  routines: routineSeed = null, notifications: notificationSeed = null,
+  routines: routineSeed = null, notifications: notificationSeed = null, avatars = [],
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
     throw new Error('startHub: the vault option adds second-brain; remove it from agents.');
@@ -169,6 +173,12 @@ export async function startHub({
     if (typeof vault === 'string') await cp(vault, vaultDir, { recursive: true });
     else if (vault) await mkdir(vaultDir);
     if (vaultDir) agents = [...agents, { ...SECOND_BRAIN, cwd: vaultDir }];
+    for (const id of avatars) {
+      const folder = path.join(root, 'avatars', id);
+      await mkdir(folder, { recursive: true });
+      await cp(AVATAR_FIXTURE, path.join(folder, 'avatar.png'));
+      agents = agents.map((agent) => (agent.id === id ? { ...agent, cwd: folder } : agent));
+    }
     const feedDir = path.join(root, feed ? 'feed' : 'feed-missing');
     if (feed) await cp(feed, feedDir, { recursive: true });
     const ideasDir = path.join(root, ideasFixture ? 'ideas' : 'ideas-missing');
