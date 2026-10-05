@@ -6,10 +6,19 @@
 // path is no picture, and the client draws initials instead. An `avatar`
 // path that does not resolve does not fall through to the lookup.
 //
-// findAvatar(agent) -> { file, type, mtimeMs, size } | null
+// The `avatar` path is registry input, which only a hand edit sets (no
+// route body carries it), so it may name any file the daemon can read;
+// only the extension and the size limit what is served.
+//
+// inspectAvatar(agent) -> { picture } | { reason } | null
 //   Synchronous; stats the file each call, so the hub reads it when the
 //   registry loads and on a status refresh, and the route reads it again
-//   on each request. No watcher.
+//   on each request. No watcher. `picture` is { file, type, mtimeMs, size };
+//   `reason` says why a file that was named or found cannot be used:
+//   'missing' (an `avatar` path with nothing there), 'wrong_type',
+//   'not_a_file', or 'too_large'. null when there is simply no picture.
+//
+// findAvatar(agent) -> picture | null
 //
 // readAvatar(agent) -> Promise<{ type, body } | null>
 //   The picture's bytes, re-checked against the cap after the read.
@@ -27,7 +36,7 @@ const TYPES = new Map([
   ['.webp', 'image/webp'],
 ]);
 
-export function findAvatar(agent) {
+export function inspectAvatar(agent) {
   if (!agent || typeof agent.cwd !== 'string') return null;
   if (typeof agent.avatar === 'string') return picture(path.resolve(agent.cwd, agent.avatar));
   for (const name of LOOKUP) {
@@ -35,6 +44,10 @@ export function findAvatar(agent) {
     if (exists(file)) return picture(file);
   }
   return null;
+}
+
+export function findAvatar(agent) {
+  return inspectAvatar(agent)?.picture ?? null;
 }
 
 export async function readAvatar(agent) {
@@ -52,15 +65,16 @@ export async function readAvatar(agent) {
 
 function picture(file) {
   const type = TYPES.get(path.extname(file).toLowerCase());
-  if (!type) return null;
+  if (!type) return { reason: 'wrong_type' };
   let stats;
   try {
     stats = statSync(file);
   } catch {
-    return null;
+    return { reason: 'missing' };
   }
-  if (!stats.isFile() || stats.size > AVATAR_MAX_BYTES) return null;
-  return { file, type, mtimeMs: stats.mtimeMs, size: stats.size };
+  if (!stats.isFile()) return { reason: 'not_a_file' };
+  if (stats.size > AVATAR_MAX_BYTES) return { reason: 'too_large' };
+  return { picture: { file, type, mtimeMs: stats.mtimeMs, size: stats.size } };
 }
 
 function exists(file) {

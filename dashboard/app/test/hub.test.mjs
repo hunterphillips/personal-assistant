@@ -1217,3 +1217,23 @@ test('an agent\'s avatar is the picture file\'s mtime, read at load, on a regist
   registry.emit(registryState([agent('cfo', { cwd: own, avatar: 'missing.png' })]));
   assert.equal(hub.snapshot().agents[0].avatar, null);
 });
+
+test('a picture that cannot be used is logged once with its reason, and the agent shows initials', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dashboard-test-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(path.join(dir, 'avatar.png'), Buffer.alloc(512 * 1024 + 1));
+  const registry = fakeRegistry(registryState([
+    agent('cfo', { cwd: dir }),
+    agent('brain', { cwd: dir, avatar: 'me.svg' }),
+    agent('board', { cwd: dir, avatar: 'missing.png' }),
+  ]));
+  const { hub, logs } = makeHub({ registry });
+  assert.deepEqual(hub.snapshot().agents.map((a) => a.avatar), [null, null, null]);
+  await hub.refreshStatus();
+  await hub.refreshStatus();
+  assert.deepEqual(logs.filter((entry) => entry.event === 'avatar_skipped'), [
+    { event: 'avatar_skipped', agentId: 'cfo', reason: 'too_large' },
+    { event: 'avatar_skipped', agentId: 'brain', reason: 'wrong_type' },
+    { event: 'avatar_skipped', agentId: 'board', reason: 'missing' },
+  ]);
+});

@@ -945,17 +945,20 @@ its folder in `registry/builtin.json` as `folder`, relative to the repo.
 
 Each agent has a round picture beside its name in the agents list (the
 pinned agent included), the thread header, quick chat (beside the picker,
-since an option cannot carry an image), the notifications list, and the
-lines of a delegation. The picture is the first of `avatar.png`,
+since an option cannot carry an image), the notifications list, the
+lines of a delegation, and a message another agent sends. The picture is the first of `avatar.png`,
 `avatar.jpg`, and `avatar.webp` found in the agent's folder (its registry
 `cwd`), or, when the registry entry has an `avatar` key, that path,
 relative to the `cwd` or absolute, for an agent whose folder is its own
 repository. A path that does not resolve does not fall back to the
 lookup. PNG, JPEG, and WebP only, judged by extension (no SVG), at most
 512 KiB. Anything else, a missing file, or a bad path shows the agent's
-initials instead: the first letters of the first two words of its name,
-or the first two letters of a one-word name, on one of the `--badge-0`
-to `--badge-5` colours the Feed's source circles use, chosen from the
+initials instead, and a file that was found or named but cannot be used
+is logged once as `avatar_skipped` with the agent's id and a reason
+(`missing`, `wrong_type`, `not_a_file`, or `too_large`). The initials
+are the first letters of the first two words of the agent's name, or the
+first two letters of a one-word name, on one of the `--badge-0` to
+`--badge-5` colours the Feed's source circles use, chosen from the
 agent's id so it never changes.
 
 The snapshot's agent entry carries `avatar`: null, or the picture's

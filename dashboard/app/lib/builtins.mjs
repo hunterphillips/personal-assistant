@@ -106,7 +106,7 @@ async function readEntries(file) {
 
 // The registry's key order (agent-settings-routes.mjs entryFor), so the
 // seeded entry reads like a dashboard write.
-const KEY_ORDER = ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'permission', 'accepts', 'jobs', 'pinned', 'builtin'];
+const KEY_ORDER = ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'model', 'effort', 'permission', 'accepts', 'jobs', 'pinned', 'avatar', 'builtin'];
 
 function inKeyOrder(entry) {
   const ordered = {};

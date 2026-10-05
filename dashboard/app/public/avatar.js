@@ -3,8 +3,8 @@
 // lines. An agent whose snapshot entry carries `avatar` (its picture's
 // mtime, hub.mjs) shows /api/agents/<id>/avatar?v=<avatar>; one without,
 // or whose picture fails to load, shows its initials (data-initials, drawn
-// by CSS) on one of the
-// --badge-0 to --badge-5 colours, chosen from its id so it never changes.
+// by CSS) on one of the --badge-0 to --badge-5 colours, chosen from its id
+// so it never changes.
 // The name always sits beside it, so the circle is hidden from assistive
 // technology.
 //
@@ -21,7 +21,12 @@
   'use strict';
 
   var BADGE_COLOURS = 6;
-
+  // src -> { state: 'loading' | 'ready' | 'failed', image, waiting }: each picture
+  // is fetched once by a probe image, and every node showing it waits on
+  // that one load, so a list that redraws on every snapshot change neither
+  // refetches a picture nor retries one that failed. A new version is a
+  // new src.
+  var loads = {};
   function initials(name) {
     var words = String(name || '').split(/\s+/).filter(Boolean);
     if (words.length === 0) return '';
@@ -53,24 +58,61 @@
     node.className = base(node) + ' avatar-badge-' + colourIndex(agent.id);
   }
 
-  function fill(node, agent) {
-    node.textContent = '';
-    node.removeAttribute('data-initials');
-    node.setAttribute('data-avatar', agent.id);
-    node.setAttribute('data-avatar-key', keyOf(agent));
-    if (typeof agent.avatar !== 'string' || !agent.avatar) {
-      showInitials(node, agent);
-      return;
-    }
+  function showImage(node, src) {
     node.className = base(node) + ' avatar-image';
     var image = document.createElement('img');
     image.alt = '';
-    image.decoding = 'async';
-    image.addEventListener('error', function () {
-      if (image.parentNode === node) showInitials(node, agent);
-    });
-    image.src = '/api/agents/' + encodeURIComponent(agent.id) + '/avatar?v=' + encodeURIComponent(agent.avatar);
+    image.src = src;
     node.appendChild(image);
+  }
+
+  // The probe's outcome, applied to every node still waiting on `src`
+  // (one refilled since for another agent or version is skipped).
+  function settle(src, state) {
+    var entry = loads[src];
+    entry.state = state;
+    var waiting = entry.waiting;
+    entry.waiting = [];
+    for (var i = 0; i < waiting.length; i += 1) {
+      var node = waiting[i].node;
+      if (node.getAttribute('data-avatar-src') !== src) continue;
+      if (state === 'ready') showImage(node, src);
+      else showInitials(node, waiting[i].agent);
+    }
+  }
+
+  function load(src) {
+    if (loads[src]) return loads[src];
+    var image = new Image();
+    loads[src] = { state: 'loading', image: image, waiting: [] };
+    image.addEventListener('load', function () { settle(src, 'ready'); });
+    image.addEventListener('error', function () { settle(src, 'failed'); });
+    image.src = src;
+    return loads[src];
+  }
+
+  function fill(node, agent) {
+    node.textContent = '';
+    node.removeAttribute('data-initials');
+    node.removeAttribute('data-avatar-src');
+    node.setAttribute('data-avatar', agent.id);
+    node.setAttribute('data-avatar-key', keyOf(agent));
+    var src = typeof agent.avatar === 'string' && agent.avatar
+      ? '/api/agents/' + encodeURIComponent(agent.id) + '/avatar?v=' + encodeURIComponent(agent.avatar)
+      : null;
+    var entry = src ? load(src) : null;
+    if (!entry || entry.state === 'failed') {
+      showInitials(node, agent);
+      return;
+    }
+    node.setAttribute('data-avatar-src', src);
+    if (entry.state === 'ready') {
+      showImage(node, src);
+      return;
+    }
+    // An empty circle until the probe answers.
+    node.className = base(node) + ' avatar-image';
+    entry.waiting.push({ node: node, agent: agent });
   }
 
   function node(agent, size) {

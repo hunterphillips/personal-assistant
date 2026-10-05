@@ -284,7 +284,7 @@
 
 import os from 'node:os';
 
-import { findAvatar, readAvatar } from './avatars.mjs';
+import { inspectAvatar, readAvatar } from './avatars.mjs';
 import { LIMITS, TIMEOUTS, TIME_ZONE } from './config.mjs';
 import { MODELS } from './models.mjs';
 import * as defaultSchedule from './schedule.mjs';
@@ -302,7 +302,23 @@ export function createHub({
 }) {
   const listeners = new Set();
   const settingsCurrent = () => settingsView(settings ? settings.current() : null);
-  // agentId -> the picture's mtime as a string, or null (avatars.mjs).
+  // agentId -> the reason last logged for a picture that cannot be used.
+  const avatarSkips = new Map();
+  // agentId -> String(mtime ms) of the agent's picture, or null
+  // (avatars.mjs). A picture that cannot be used is logged once per
+  // reason as avatar_skipped, so a file too large to show says why.
+  function avatarVersions(current) {
+    const versions = {};
+    for (const agent of current?.agents ?? []) {
+      const found = inspectAvatar(agent);
+      versions[agent.id] = found?.picture ? String(Math.trunc(found.picture.mtimeMs)) : null;
+      const reason = found?.reason ?? null;
+      if (reason && avatarSkips.get(agent.id) !== reason) log({ event: 'avatar_skipped', agentId: agent.id, reason });
+      if (reason) avatarSkips.set(agent.id, reason);
+      else avatarSkips.delete(agent.id);
+    }
+    return versions;
+  }
   let avatars = avatarVersions(registry.current());
   const views = (current = registry.current()) => agentViews(current, personas, settingsCurrent(), routines, reads, avatars);
   const routinesCurrent = () => routinesView(registry.current(), routines, schedule, timeZone, now());
@@ -947,16 +963,6 @@ function resolveModel(agent, thread, settingsState) {
 function resolvePermission(agent, settingsState) {
   if (typeof agent.permission === 'string' && agent.permission !== '') return { level: agent.permission, source: 'agent' };
   return { level: settingsState.permission.default, source: 'system' };
-}
-
-// agentId -> String(mtime ms) of the agent's picture, or null.
-function avatarVersions(current) {
-  const versions = {};
-  for (const agent of current?.agents ?? []) {
-    const found = findAvatar(agent);
-    versions[agent.id] = found ? String(Math.trunc(found.mtimeMs)) : null;
-  }
-  return versions;
 }
 
 function agentViews(current, personas, settingsState, routines = null, reads = null, avatars = {}) {

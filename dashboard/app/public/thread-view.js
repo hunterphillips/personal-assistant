@@ -432,8 +432,6 @@
       return answers;
     }
 
-    // The column with a title and nothing else (New agent with no thread
-    // open, in the Agents view).
     // The agent's avatar before its name (avatar.js); a coding session is
     // not a registry agent and has none.
     function renderAvatar(agent) {
@@ -444,6 +442,8 @@
       else avatarSlot.appendChild(window.DashboardAvatar.node(agent, 'large'));
     }
 
+    // The column with a title and nothing else (New agent with no thread
+    // open, in the Agents view).
     function blank(title) {
       renderAvatar(null);
       nameNode.textContent = title;
