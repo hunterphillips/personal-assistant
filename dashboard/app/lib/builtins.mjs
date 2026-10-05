@@ -13,8 +13,10 @@
 //   lives in), or to `root` without one, and `folder` dropped; when its
 //   group is not in the registry's `groups`, the first listed group's id.
 //   Resolves with the ids it added (logged once as builtins_seeded). A
-//   registry that is not loaded (missing or invalid: it keeps its last good
-//   copy and is fixed by hand) is skipped silently, as is a missing file.
+//   missing registry is seeded: the built-ins alone, written fresh. An
+//   invalid one (unreadable, malformed JSON, or failing validation: it
+//   keeps its last good copy and is fixed by hand) is skipped silently, as
+//   is a missing file.
 //   An unreadable or malformed file, or a write the validator refuses, is
 //   logged (builtins_error, builtins_seed_error) and never fatal. A
 //   deleted built-in is therefore back on the next start: the dashboard
@@ -33,7 +35,7 @@ const MAX_BYTES = 64 * 1024;
 
 export async function seedBuiltins({ registry, file, root, log = () => {} }) {
   const current = registry.current();
-  if (!current?.ok) return [];
+  if (!current?.ok && current?.error !== 'registry_missing') return [];
   let entries;
   try {
     entries = await readEntries(file);
