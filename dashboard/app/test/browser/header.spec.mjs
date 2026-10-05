@@ -24,7 +24,7 @@ test.describe('header shell', () => {
 
   test('every view keeps one header and only its left-side actions', async ({ page, hub }) => {
     const cases = [
-      ['/?agent=assistant', 'agents', 'Agents', ['agents-toggle', 'agent-open-terminal', 'agent-details-toggle']],
+      ['/?agent=assistant', 'agents', 'Agents', ['agent-open-terminal', 'agent-details-toggle']],
       ['/feed', 'feed', 'Feed', ['feed-instructions-toggle']],
       ['/focus', 'focus', 'Focus', []],
       ['/goals', 'goals', 'Goals', ['goals-add']],
@@ -39,6 +39,9 @@ test.describe('header shell', () => {
       const header = page.locator('.app-header');
       await expect(header).toHaveCount(1);
       await expect(header.locator('#app-header-title')).toHaveText(title);
+      // The side panel's toggle is the header's own, outside every view's actions.
+      await expect(header.locator('#panel-toggle')).toHaveCount(1);
+      await expect(header.locator('[data-actions-for] #panel-toggle')).toHaveCount(0);
       await expect(header.locator(`[data-actions-for="${view}"]`)).not.toHaveAttribute('hidden', '');
       for (const id of ids) await expect(header.locator(`#${id}`)).toHaveCount(1);
       for (const id of moved) await expect(page.locator(`section.view #${id}`)).toHaveCount(0);

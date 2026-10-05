@@ -1,5 +1,5 @@
 // Agents view, the page at `/`: the registry's agents as a list grouped
-// Work and Personal, and beside it either one persona's thread or, with no
+// Work and Personal in the shell's side panel, and in the view either one persona's thread or, with no
 // agent open, a sentence asking for one. The shell calls create({ requestState,
 // isStreaming }) once, then update(state, keys) on every change
 // (keys is null for a whole snapshot), show() when the view opens, and
@@ -9,7 +9,8 @@
 // The open agent is `?agent=<id>` in the URL, so a reload lands on the same
 // thread and Back and Forward move between threads. Choosing a row pushes
 // that URL; the shell's popstate handler calls show(), which reads it back.
-// On a phone the list comes first and fills the width until a row is chosen.
+// On a phone the list is the side panel's drawer: Agents with no agent open
+// opens it, choosing a row closes it, and the thread's Back opens it again.
 // The launchd jobs, the registry error, and what is off (the Codex server,
 // cmux) are on the Health view (jobs.js); this view says only what
 // each row needs.
@@ -1107,6 +1108,8 @@
 
   function create(shell) {
     var view = document.getElementById('view-agents');
+    // The list sits in the shell's side panel, outside the view.
+    var list = document.getElementById('agents-list');
     var message = document.getElementById('agents-message');
     var groupsNode = document.getElementById('agents-groups');
     var empty = document.getElementById('agent-empty');
@@ -1758,6 +1761,7 @@
 
     function startCreate() {
       creating = true;
+      shell.closePanel();
       idTouched = false;
       formKey = null;
       formNotice = [];
@@ -1773,6 +1777,8 @@
       formNotice = [];
       formNoticeIsNote = false;
       renderThread();
+      // With no thread under the form, a phone goes back to the list.
+      if (!selectedId) shell.openPanel();
       newAgent.focus();
     }
 
@@ -1800,7 +1806,6 @@
     // header's gear and Open terminal follow the open entry.
     function renderThread() {
       var agent = selectedAgent();
-      view.classList.toggle('agents-open', !!selectedId || creating);
       renderMessage();
       if (!selectedId && !creating) {
         empty.textContent = CHOOSE;
@@ -1866,6 +1871,10 @@
     // so choosing the open row from `/agents` or `/?agent=` adds nothing.
     function select(id, push) {
       if (push && agentFromUrl() !== id) history.pushState(null, '', agentUrl(id));
+      // On a phone the list is the side panel's drawer: an entry closes it
+      // and none opens it again.
+      if (id) shell.closePanel();
+      else shell.openPanel();
       if (creating) {
         creating = false;
         formKey = null;
@@ -2462,7 +2471,7 @@
       var link = target.closest && target.closest('a[data-agent]');
       if (link) {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        if (!view.contains(link)) return;
+        if (!view.contains(link) && !list.contains(link)) return;
         event.preventDefault();
         if (link.hasAttribute('data-routine')) {
           openRoutine(link.getAttribute('data-agent'), link.getAttribute('data-routine'));
@@ -2585,15 +2594,21 @@
 
     // Turning a phone into a desk with nothing chosen opens the pinned
     // thread, the same as arriving on a desk; turning a desk into a phone
-    // with only that default open goes back to the list.
-    wide.addEventListener('change', function () {
-      if (!visible || agentFromUrl()) return;
+    // with only that default open goes back to the list, which the side
+    // panel's drawer then shows.
+    function followWidth() {
+      if (agentFromUrl()) return;
       var id = defaultId();
       if (id === selectedId) return;
-      if (selectedId && !wide.matches && !agentFromUrl()) setSelected(null);
+      if (selectedId && !wide.matches) setSelected(null);
       else if (id && !selectedId) setSelected(id);
       else return;
       render();
+    }
+    wide.addEventListener('change', function () {
+      if (!visible) return;
+      followWidth();
+      if (!wide.matches && !selectedId && !creating) shell.openPanel();
     });
 
     return {
@@ -2613,7 +2628,11 @@
         visible = true;
         var id = agentFromUrl() || defaultId();
         if (id !== selectedId) setSelected(id);
-        if (tick === null) tick = setInterval(function () { refreshTimes(view); }, TICK_MS);
+        if (!selectedId && !creating) shell.openPanel();
+        if (tick === null) tick = setInterval(function () {
+          refreshTimes(view);
+          refreshTimes(list);
+        }, TICK_MS);
         thread.show();
         render();
       },

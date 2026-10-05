@@ -486,7 +486,8 @@ here. The snapshot's `jobs` key, `public/jobs.js`, and
 
 ### Shell
 
-`public/index.html`, `public/shell.js`, `public/agents.js`,
+`public/index.html`, `public/shell.js`, `public/panel.js` (the side
+panel), `public/agents.js`,
 `public/thread-view.js` (one thread's column, mounted by the Agents view
 and quick chat), `public/quick-chat.js`, `public/markdown.js`, `public/jobs.js`, `public/goals.js`,
 `public/feed.js`, `public/instructions.js` (the instructions panel the
@@ -499,7 +500,17 @@ brief's overlay open (the address becomes `/feed`), `/focus` Focus,
 `/goals` Goals, and `/health` Health. The server redirects the old
 `/routines` to `/health` and `/reading` to `/feed`. The navigation is a
 rail of six icon links, Home, Feed, Focus, Goals, Ideas, and Health; a
-path the shell does not know lands on Agents. The script switches views
+path the shell does not know lands on Agents. Between the rail and every
+view sits a side panel (`aside#panel`) holding one section per view: the
+Agents view's is the agents list, the others stay empty for now, and Focus
+shows the `now` section. Its toggle, "Hide side panel" or "Show side
+panel", comes first in the header, before the view's title, on every view.
+From 720px the toggle collapses the panel on every view and the choice is
+kept in `localStorage` under `dashboard.panelHidden` (an old
+`dashboard.agentsListHidden` is read once and removed). Below 720px the
+panel is a drawer from the left over a scrim, between the header and the
+bottom bar: the toggle opens it, and the scrim, Escape, or another view
+closes it; nothing stores it. The script switches views
 with the History API and handles
 Back and Forward, and a reload or bookmark opens the same view. The Focus
 frame is created the first time its view opens and stays in the page
@@ -560,9 +571,10 @@ Back and Forward move between threads. From 720px the list and the pane
 beside it sit side by side; with no agent in the URL the pane holds the
 first pinned persona's thread (the URL stays `/`, so Back leaves the page
 and a row click still adds its entry), or reads "Choose an agent to open
-its thread." when nothing is pinned. On a phone the list fills the width,
-nothing opens by itself, and a thread takes the whole width with an "All
-agents" link back. The launchd jobs, the registry error, and the lines for
+its thread." when nothing is pinned. On a phone nothing opens by itself:
+Agents with no agent open opens the side panel's drawer on the list,
+choosing a row closes it, and a thread takes the whole width with an "All
+agents" link that opens the drawer again. The launchd jobs, the registry error, and the lines for
 the Codex server and cmux are on the Health view; the Agents view says only
 what each row needs.
 
@@ -575,14 +587,6 @@ nothing while it is off. A row opens the agent's thread with the panel on
 that routine's form. "No agent has a routine yet." when there is none; the
 heading is hidden while the registry cannot be read. Whether it is open
 lasts until the page reloads.
-
-From 720px, a bare icon button (`public/agents-sidebar.js`)
-hides and shows the list so an open thread can take the full width: it sits
-at the top right of the list, beside the Agents heading, while the list
-shows, and moves to the left end of the thread header, before the agent
-name, once the list is hidden. The choice is kept in `localStorage` under
-`dashboard.agentsListHidden` and applied before the view paints. The button
-is hidden on a phone, which keeps its own list/thread switch.
 
 #### Sessions
 

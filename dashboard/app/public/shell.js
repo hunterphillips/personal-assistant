@@ -12,6 +12,8 @@
 // brief's old page, shows the Feed with the brief's overlay open, and the
 // address becomes `/feed`. The overlay opens over any view from the header's
 // Brief entry and from links (shellApi.openBrief) and changes no address.
+// The side panel (panel.js) shows the open view's own section, and a view
+// change closes its drawer on a phone.
 //
 // State comes from the event stream (/api/events) while the tab is visible:
 // `snapshot` replaces it, `delta` applies a patch when its revision is the
@@ -87,7 +89,12 @@
     },
     // What Hunter is looking at, for quick chat's context line.
     context: function () { return viewContext(); },
+    // The side panel's drawer on a phone (panel.js); a desk's panel answers
+    // only to its toggle.
+    openPanel: function () { if (panel) panel.openPanel(); },
+    closePanel: function () { if (panel) panel.closePanel(); },
   };
+  var panel = window.DashboardPanel || null;
   var jobs = window.DashboardJobs ? window.DashboardJobs.create(shellApi) : null;
   var settings = window.DashboardSettings ? window.DashboardSettings.create(shellApi) : null;
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
@@ -424,6 +431,14 @@
     $('app-header-title').textContent = TITLES[view];
     var actions = document.querySelectorAll('[data-actions-for]');
     for (var a = 0; a < actions.length; a += 1) actions[a].hidden = actions[a].getAttribute('data-actions-for') !== view;
+    // The side panel shows the view's own section, or `now` for a view
+    // whose section is missing or empty (Focus). A phone's drawer closes
+    // before the views below are shown, so Agents can open it again.
+    var own = document.querySelector('[data-panel-for="' + view + '"]');
+    var shown = own && own.childElementCount > 0 ? view : 'now';
+    var sections = document.querySelectorAll('[data-panel-for]');
+    for (var p = 0; p < sections.length; p += 1) sections[p].hidden = sections[p].getAttribute('data-panel-for') !== shown;
+    shellApi.closePanel();
     document.title = TITLES[view] + ' · Dashboard';
     // Goals fetches the vault while shown, the Feed its store, and Health
     // refreshes stale jobs when it opens.
