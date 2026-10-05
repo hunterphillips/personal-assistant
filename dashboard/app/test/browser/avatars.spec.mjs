@@ -1,6 +1,6 @@
 // Agent avatars (public/avatar.js): the round picture beside an agent's
 // name, from the agent's folder when it has one, its initials on a badge
-// colour chosen from its id otherwise. On desk and phone.
+// color chosen from its id otherwise. On desk and phone.
 
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -13,8 +13,8 @@ const AGENTS = [
   { id: 'focus', name: 'Focus', role: 'Tasks', description: 'Invented task board.', group: 'personal', kind: 'system', cwd: '/invented/focus' },
 ];
 
-// The same hash avatar.js uses, so the test names the colour it expects.
-function colourIndex(id) {
+// The same hash avatar.js uses, so the test names the color it expects.
+function colorIndex(id) {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
   return hash % 6;
@@ -27,7 +27,7 @@ const phone = (page) => page.viewportSize().width < 720;
 test.describe('initials', () => {
   test.use({ hubOptions: { agents: AGENTS } });
 
-  test('an agent without a picture shows its initials on a colour that stays with its id', async ({ page, hub }) => {
+  test('an agent without a picture shows its initials on a color that stays with its id', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     const expected = { cfo: 'CF', brain: 'SB', focus: 'FO' };
     const seen = {};
@@ -35,29 +35,29 @@ test.describe('initials', () => {
       const avatar = rowAvatar(page, id);
       await expect(avatar).toHaveAttribute('data-initials', text);
       await expect(avatar).toHaveText('');
-      await expect(avatar).toHaveClass(new RegExp(`avatar-badge-${colourIndex(id)}\\b`));
+      await expect(avatar).toHaveClass(new RegExp(`avatar-badge-${colorIndex(id)}\\b`));
       await expect(avatar.locator('img')).toHaveCount(0);
       seen[id] = await avatar.evaluate((node) => getComputedStyle(node).backgroundColor);
       const badge = await avatar.evaluate((node, index) => {
         const probe = document.createElement('span');
         probe.style.backgroundColor = `var(--badge-${index})`;
         node.parentNode.appendChild(probe);
-        const colour = getComputedStyle(probe).backgroundColor;
+        const color = getComputedStyle(probe).backgroundColor;
         probe.remove();
-        return colour;
-      }, colourIndex(id));
+        return color;
+      }, colorIndex(id));
       expect(seen[id]).toBe(badge);
     }
 
-    // The same colours after a reload, and in the thread header.
+    // The same colors after a reload, and in the thread header.
     await page.reload();
     for (const id of Object.keys(expected)) {
-      await expect(rowAvatar(page, id)).toHaveClass(new RegExp(`avatar-badge-${colourIndex(id)}\\b`));
+      await expect(rowAvatar(page, id)).toHaveClass(new RegExp(`avatar-badge-${colorIndex(id)}\\b`));
       expect(await rowAvatar(page, id).evaluate((node) => getComputedStyle(node).backgroundColor)).toBe(seen[id]);
     }
     await page.goto(`${hub.origin}/?agent=brain`);
     await expect(headerAvatar(page)).toHaveAttribute('data-initials', 'SB');
-    await expect(headerAvatar(page)).toHaveClass(new RegExp(`avatar-badge-${colourIndex('brain')}\\b`));
+    await expect(headerAvatar(page)).toHaveClass(new RegExp(`avatar-badge-${colorIndex('brain')}\\b`));
   });
 });
 
@@ -108,5 +108,34 @@ test.describe('a picture that does not load', () => {
     await expect(rowAvatar(page, 'cfo')).toHaveAttribute('data-initials', 'CF');
     await page.waitForTimeout(500);
     expect(hub.requests('/api/agents/cfo/avatar').length).toBe(fetched);
+  });
+});
+
+test.describe('quick chat', () => {
+  test.use({ withFocus: false, hubOptions: { agents: AGENTS, avatars: ['cfo'], settings: { quickChat: { agent: 'cfo' } } } });
+
+  test('the picker shows the chosen agent\'s avatar on its button and each agent\'s on its row', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    if (phone(page)) {
+      await page.getByRole('button', { name: 'Menu', exact: true }).click();
+      await page.locator('#app-menu').getByRole('button', { name: 'Quick chat', exact: true }).click();
+    } else {
+      await page.locator('.header-right').getByRole('button', { name: 'Quick chat', exact: true }).click();
+    }
+    const button = page.locator('#quick-chat-agent');
+    await expect(button).toBeVisible();
+    await expect(button.locator('.avatar img')).toHaveAttribute('src', /^\/api\/agents\/cfo\/avatar\?v=\d+$/);
+    await expect(button).toHaveAccessibleName('CFO');
+
+    await button.click();
+    const row = (id) => page.locator(`#quick-chat-agent-list [role="option"][data-agent="${id}"] .avatar`);
+    await expect(row('cfo').locator('img')).toHaveAttribute('src', /^\/api\/agents\/cfo\/avatar\?v=\d+$/);
+    await expect(row('brain')).toHaveAttribute('data-initials', 'SB');
+    await expect(row('brain')).toHaveClass(new RegExp(`avatar-badge-${colorIndex('brain')}\\b`));
+
+    // Choosing another agent puts its initials on the button.
+    await page.locator('#quick-chat-agent-list [role="option"][data-agent="brain"]').click();
+    await expect(button.locator('.avatar')).toHaveAttribute('data-initials', 'SB');
+    await expect(button.locator('.avatar img')).toHaveCount(0);
   });
 });
