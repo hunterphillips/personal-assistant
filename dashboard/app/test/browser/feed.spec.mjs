@@ -215,6 +215,100 @@ test.describe('with the fixture store', () => {
   });
 });
 
+// The Feed's section of the side panel: All, then one row per source, and a
+// choice filters the posts in place.
+test.describe('the sources in the side panel', () => {
+  test.use({ hubOptions: { feed: FEED, agents: [WATCH] } });
+
+  const section = (page) => page.locator('#panel [data-panel-for="feed"]');
+  const sourceRow = (page, source) => section(page).locator(`button.panel-row[data-feed-source="${source}"]`);
+  const shownItems = (page) => page.locator('#feed-runs .feed-item:visible');
+  const filterLine = (page) => page.locator('#feed-filter');
+
+  test.describe('on a desk', () => {
+    test.use({ viewport: { width: 1280, height: 800 } });
+
+    test('lists All and each source with its count, sorted by count then name', async ({ page, hub }) => {
+      await openFeed(page, hub);
+      await expect(section(page)).toBeVisible();
+      await expect(section(page).locator('h2.panel-heading')).toHaveText(['Sources']);
+      await expect(section(page).locator('.panel-row-name')).toHaveText([
+        'All', 'Invented Gazette', 'Invented Letters', 'Invented Weekly', 'Invented Gazette, Invented Weekly',
+      ]);
+      await expect(section(page).locator('.panel-row-count')).toHaveText(['10', '4', '3', '2', '1']);
+      await expect(sourceRow(page, '')).toHaveAttribute('aria-current', 'true');
+      await expect(section(page).locator('[aria-current]')).toHaveCount(1);
+      await expect(sourceRow(page, 'Invented Gazette').locator('.feed-badge')).toHaveText('IG');
+      const colour = (node) => node.evaluate((el) => getComputedStyle(el).backgroundColor);
+      expect(await colour(sourceRow(page, 'Invented Gazette').locator('.feed-badge')))
+        .toBe(await colour(item(page, 'watch/2026-09-28/1').locator('.feed-badge')));
+      await expect(sourceRow(page, 'Invented Letters')).toHaveCSS('height', '40px');
+      await expect(sourceRow(page, 'Invented Letters')).toHaveCSS('border-top-left-radius', '9px');
+      await expect(filterLine(page)).toBeHidden();
+    });
+
+    test('a source shows its posts only; Show all and All bring the rest back', async ({ page, hub }) => {
+      await openFeed(page, hub);
+      await expect(shownItems(page)).toHaveCount(10);
+
+      await sourceRow(page, 'Invented Letters').click();
+      await expect(shownItems(page)).toHaveCount(3);
+      await expect(runs(page).filter({ visible: true })).toHaveCount(2);
+      await expect(filterLine(page)).toBeVisible();
+      await expect(filterLine(page)).toHaveText('Showing Invented Letters only. Show all');
+      await expect(sourceRow(page, 'Invented Letters')).toHaveAttribute('aria-current', 'true');
+      await expect(section(page).locator('[aria-current]')).toHaveCount(1);
+
+      // A run with nothing from the source is hidden.
+      await sourceRow(page, 'Invented Weekly').click();
+      await expect(shownItems(page)).toHaveCount(2);
+      await expect(runs(page).filter({ visible: true })).toHaveCount(1);
+      await expect(filterLine(page)).toHaveText('Showing Invented Weekly only. Show all');
+
+      await filterLine(page).getByRole('button', { name: 'Show all' }).click();
+      await expect(shownItems(page)).toHaveCount(10);
+      await expect(runs(page).filter({ visible: true })).toHaveCount(2);
+      await expect(filterLine(page)).toBeHidden();
+      await expect(sourceRow(page, '')).toHaveAttribute('aria-current', 'true');
+
+      await sourceRow(page, 'Invented Gazette').click();
+      await expect(shownItems(page)).toHaveCount(4);
+      await sourceRow(page, '').click();
+      await expect(shownItems(page)).toHaveCount(10);
+      await expect(filterLine(page)).toBeHidden();
+    });
+
+    test('the filter clears when the view is left, and the section empties', async ({ page, hub }) => {
+      await openFeed(page, hub);
+      await sourceRow(page, 'Invented Letters').click();
+      await expect(shownItems(page)).toHaveCount(3);
+      await nav(page, 'Goals').click();
+      await expectView(page, 'goals', 'Goals');
+      await expect(section(page).locator('.panel-row')).toHaveCount(0);
+      await nav(page, 'Feed').click();
+      await expectView(page, 'feed', 'Feed');
+      await expect(shownItems(page)).toHaveCount(10);
+      await expect(filterLine(page)).toBeHidden();
+      await expect(sourceRow(page, '')).toHaveAttribute('aria-current', 'true');
+    });
+  });
+
+  test.describe('on a phone', () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    test('a choice filters the posts and closes the drawer', async ({ page, hub }) => {
+      await openFeed(page, hub);
+      await page.locator('#panel-toggle').click();
+      await expect(section(page)).toBeVisible();
+      await sourceRow(page, 'Invented Letters').click();
+      await expect(page.locator('#panel-toggle')).toHaveAttribute('aria-expanded', 'false');
+      await expect(page.locator('#panel')).toBeHidden();
+      await expect(shownItems(page)).toHaveCount(3);
+      await expect(filterLine(page)).toBeVisible();
+    });
+  });
+});
+
 test.describe('with an empty store', () => {
   test.use({ hubOptions: { agents: [WATCH] } });
 

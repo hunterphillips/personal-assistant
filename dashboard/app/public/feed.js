@@ -9,6 +9,13 @@
 // is instructions.js's. The shell calls create(shellApi) once, then show()
 // and hide() as the Feed view comes on and off screen.
 //
+// The Feed's section of the side panel is drawn on the same render as the
+// posts and cleared on hide: All with the total, then Sources, one row per
+// source with its count, by count then name. Choosing a source hides the
+// other posts and any run left empty, with a line above the posts saying so
+// and Show all; All or Show all brings everything back. The choice is held
+// only while the view is shown, and on a phone it closes the drawer.
+//
 // While shown, the view fetches /api/feed on show() and every 60 seconds. An
 // answer identical to the last one rendered changes nothing; the panel is
 // outside what it renders, so it keeps its text. A body that is
@@ -150,6 +157,8 @@
   function create(shellApi) {
     var message = document.getElementById('feed-message');
     var runs = document.getElementById('feed-runs');
+    var filterLine = document.getElementById('feed-filter');
+    var sources = document.querySelector('[data-panel-for="feed"]');
 
     var data = null; // the last /api/feed answer
     var visible = false;
@@ -158,6 +167,7 @@
     var rendered = null; // the JSON text of the answer on screen
     var pending = null; // the id being discussed, while the request is out
     var target = null; // { run, index } to scroll to once it is drawn
+    var filter = null; // the source whose posts alone are shown
 
     function discussButton(item) {
       var button = element('button', 'feed-discuss');
@@ -176,6 +186,7 @@
     function renderItem(item) {
       var node = element('article', 'feed-item');
       node.setAttribute('data-feed-item', item.id);
+      node.setAttribute('data-feed-source', item.source);
       var badge = element('span', 'feed-badge feed-badge-' + colourIndex(item.source), initials(item.source));
       badge.setAttribute('role', 'img');
       badge.setAttribute('aria-label', item.source);
@@ -232,14 +243,89 @@
       rendered = null;
     }
 
+    // A row in the panel; `source` is null for All.
+    function sourceRow(source, name, count) {
+      var row = element('button', 'panel-row');
+      row.type = 'button';
+      row.setAttribute('data-feed-source', source === null ? '' : source);
+      if (source !== null) {
+        var badge = element('span', 'feed-badge feed-badge-' + colourIndex(source), initials(source));
+        badge.setAttribute('aria-hidden', 'true');
+        row.appendChild(badge);
+      }
+      row.appendChild(element('span', 'panel-row-name', name));
+      row.appendChild(element('span', 'panel-row-count', String(count)));
+      return row;
+    }
+
+    // All and one row per source across the runs shown, by count then name.
+    function renderSources(shown) {
+      var counts = new Map();
+      var total = 0;
+      shown.forEach(function (run) {
+        objectsIn(run.items).forEach(function (item) {
+          var source = String(item.source);
+          counts.set(source, (counts.get(source) || 0) + 1);
+          total += 1;
+        });
+      });
+      if (filter !== null && !counts.has(filter)) filter = null;
+      var names = Array.from(counts.keys()).sort(function (a, b) {
+        return counts.get(b) - counts.get(a) || (a < b ? -1 : a > b ? 1 : 0);
+      });
+      sources.textContent = '';
+      sources.appendChild(sourceRow(null, 'All', total));
+      sources.appendChild(element('h2', 'panel-heading', 'Sources'));
+      names.forEach(function (name) { sources.appendChild(sourceRow(name, name, counts.get(name))); });
+      shellApi.refreshPanel();
+    }
+
+    // Hides the posts from other sources and any run left empty, and says
+    // which source is shown.
+    function applyFilter() {
+      var groups = runs.querySelectorAll('.feed-run');
+      for (var i = 0; i < groups.length; i += 1) {
+        var items = groups[i].querySelectorAll('.feed-item');
+        var any = false;
+        for (var j = 0; j < items.length; j += 1) {
+          var match = filter === null || items[j].getAttribute('data-feed-source') === filter;
+          items[j].hidden = !match;
+          if (match) any = true;
+        }
+        groups[i].hidden = !any;
+      }
+      var rows = sources.querySelectorAll('.panel-row');
+      for (var r = 0; r < rows.length; r += 1) {
+        var current = rows[r].getAttribute('data-feed-source') === (filter === null ? '' : filter);
+        if (current) rows[r].setAttribute('aria-current', 'true');
+        else rows[r].removeAttribute('aria-current');
+      }
+      filterLine.textContent = '';
+      filterLine.hidden = filter === null;
+      if (filter === null) return;
+      filterLine.appendChild(document.createTextNode('Showing ' + filter + ' only. '));
+      var all = element('button', 'link-button', 'Show all');
+      all.type = 'button';
+      all.setAttribute('data-feed-action', 'show-all');
+      filterLine.appendChild(all);
+    }
+
+    function choose(source) {
+      filter = source;
+      applyFilter();
+    }
+
     // Builds every group before touching the page, so a body that is not the
     // expected shape leaves the last render in place and says so.
     function render() {
       if (!data) return;
       var built = [];
+      var shown = [];
       try {
         objectsIn(data.runs).forEach(function (run) {
-          if (objectsIn(run.items).length > 0) built.push(renderRun(run));
+          if (objectsIn(run.items).length === 0) return;
+          built.push(renderRun(run));
+          shown.push(run);
         });
       } catch (_error) {
         setNoAnswer();
@@ -249,6 +335,8 @@
       setMessage(built.length === 0 ? [EMPTY].concat(problems) : problems);
       runs.textContent = '';
       built.forEach(function (group) { runs.appendChild(group); });
+      renderSources(shown);
+      applyFilter();
       rendered = JSON.stringify(data);
     }
 
@@ -358,6 +446,18 @@
       discuss(button.getAttribute('data-feed-id'), button);
     });
 
+    filterLine.addEventListener('click', function (event) {
+      if (event.target.closest && event.target.closest('button[data-feed-action="show-all"]')) choose(null);
+    });
+
+    sources.addEventListener('click', function (event) {
+      var row = event.target.closest && event.target.closest('button.panel-row[data-feed-source]');
+      if (!row) return;
+      var source = row.getAttribute('data-feed-source');
+      choose(source === '' ? null : source);
+      shellApi.closePanel();
+    });
+
     return {
       show: function () {
         if (visible) return;
@@ -371,6 +471,7 @@
       // notification's link); show() has already run.
       reveal: function (run, index) {
         target = { run: run, index: index };
+        if (filter !== null) choose(null);
         revealTarget(false);
       },
       // What quick chat sends along from the Feed: the topmost item whose
@@ -386,6 +487,10 @@
       },
       hide: function () {
         visible = false;
+        filter = null;
+        sources.textContent = '';
+        filterLine.textContent = '';
+        filterLine.hidden = true;
         if (panel) panel.hide();
         if (poll !== null) clearInterval(poll);
         poll = null;

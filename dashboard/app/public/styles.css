@@ -914,6 +914,57 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .panel-toggle .bar { transition: opacity 150ms ease; }
 .panel-toggle[aria-expanded="false"] .bar { opacity: 0.35; }
 
+/* A view's rows in the side panel (the Feed's sources first), under small
+   headings. The current row takes the rail's current look. */
+.panel-heading {
+  margin: 16px 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.panel-row:hover { background: var(--hover-tint); }
+.panel-row[aria-current="true"] {
+  background: var(--paper);
+  box-shadow: 0 1px 3px var(--shadow-tint);
+}
+.panel-row .feed-badge {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+.panel-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-row-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Agents: the view is the thread alone; the list is in the side panel. */
 
 .agents {
@@ -1026,7 +1077,14 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 
 .instructions-actions { margin-top: 8px; }
 
-.feed-run + .feed-run { margin-top: 32px; }
+/* Which source the posts are filtered to, above them. */
+.feed-filter {
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: var(--muted);
+}
+
+.feed-run:not([hidden]) ~ .feed-run:not([hidden]) { margin-top: 32px; }
 
 .feed-run-header {
   display: flex;
@@ -1054,7 +1112,8 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   column-gap: 12px;
   align-items: start;
 }
-.feed-item + .feed-item { margin-top: 24px; }
+/* Measured between the posts shown, so a source's filter keeps the spacing. */
+.feed-item:not([hidden]) ~ .feed-item:not([hidden]) { margin-top: 24px; }
 /* The item a notification's link opened. */
 .feed-item[data-feed-target] {
   border-radius: 4px;

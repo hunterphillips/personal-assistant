@@ -93,6 +93,8 @@
     // only to its toggle.
     openPanel: function () { if (panel) panel.openPanel(); },
     closePanel: function () { if (panel) panel.closePanel(); },
+    // A view whose section of the panel has just been filled or emptied.
+    refreshPanel: function () { showPanelSection(); },
   };
   var panel = window.DashboardPanel || null;
   var jobs = window.DashboardJobs ? window.DashboardJobs.create(shellApi) : null;
@@ -418,6 +420,16 @@
     closeSource();
   }
 
+  // The side panel shows the open view's own section, or `now` for a view
+  // whose section is missing or empty (Focus, or the Feed before its first
+  // answer).
+  function showPanelSection() {
+    var own = document.querySelector('[data-panel-for="' + current + '"]');
+    var shown = own && own.childElementCount > 0 ? current : 'now';
+    var sections = document.querySelectorAll('[data-panel-for]');
+    for (var p = 0; p < sections.length; p += 1) sections[p].hidden = sections[p].getAttribute('data-panel-for') !== shown;
+  }
+
   function show(view) {
     var changed = view !== current;
     current = view;
@@ -431,13 +443,9 @@
     $('app-header-title').textContent = TITLES[view];
     var actions = document.querySelectorAll('[data-actions-for]');
     for (var a = 0; a < actions.length; a += 1) actions[a].hidden = actions[a].getAttribute('data-actions-for') !== view;
-    // The side panel shows the view's own section, or `now` for a view
-    // whose section is missing or empty (Focus). A phone's drawer closes
-    // before the views below are shown, so Agents can open it again.
-    var own = document.querySelector('[data-panel-for="' + view + '"]');
-    var shown = own && own.childElementCount > 0 ? view : 'now';
-    var sections = document.querySelectorAll('[data-panel-for]');
-    for (var p = 0; p < sections.length; p += 1) sections[p].hidden = sections[p].getAttribute('data-panel-for') !== shown;
+    // A phone's drawer closes before the views below are shown, so Agents
+    // can open it again.
+    showPanelSection();
     shellApi.closePanel();
     document.title = TITLES[view] + ' · Dashboard';
     // Goals fetches the vault while shown, the Feed its store, and Health
