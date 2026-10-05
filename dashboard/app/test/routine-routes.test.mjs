@@ -156,7 +156,8 @@ test('a test run answers 202 and sends at the agent\'s level with the routine; 4
   const dir = path.join(await tempDir(t), 'routines');
   const routines = createRoutines({ dir, limits: LIMITS, now: () => new Date('2026-10-03T12:00:00.000Z') });
   await routines.load();
-  const store = { read: async () => [], append: async () => {} };
+  const appended = [];
+  const store = { read: async () => [], append: async (id, message) => { appended.push([id, message]); } };
   const personas = fakePersonas({ assistant: { startFails: true } }, store);
   t.after(() => personas.adapter.close());
   const agents = AGENTS.map((agent) => (agent.id === 'cfo' ? { ...agent, model: 'sonnet', permission: 'auto' } : agent));
@@ -172,7 +173,8 @@ test('a test run answers 202 and sends at the agent\'s level with the routine; 4
   assert.deepEqual([run.status, run.json], [202, { ok: true }]);
   assert.deepEqual(personas.sent, [{ id: 'cfo', text: 'Compute drift.', context: {
     model: 'sonnet', effort: null, permission: 'auto', routine: { id: 'daily-drift', name: 'Daily drift' },
-    prompt: 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.\n\nYou may ask other agents, and your reply is what this run leaves behind.',
+    prompt: 'Routine "Daily drift" (a scheduled run, not the user): Compute drift.\n\n'
+      + 'You may ask other agents. Your reply is recorded in this routine\'s log, not shown as a message; if something in it needs Hunter\'s attention, use notify.',
   } }]);
   await settle();
   assert.deepEqual(routines.runs('daily-drift'), [{ run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-03T12:00:00.000Z' }]);
@@ -190,5 +192,9 @@ test('a test run answers 202 and sends at the agent\'s level with the routine; 4
   personas.reply('cfo', 'Drift is fine.');
   await settle();
   assert.equal(routines.runs('daily-drift')[0].outcome, 'finished');
-  assert.equal((await send(app, 'GET', '/api/routines/daily-drift/runs')).json.runs[0].outcome, 'finished');
+  assert.equal(routines.runs('daily-drift')[0].reply, 'Drift is fine.');
+  const runs = (await send(app, 'GET', '/api/routines/daily-drift/runs')).json.runs;
+  assert.equal(runs[0].outcome, 'finished');
+  assert.equal(runs[0].reply, 'Drift is fine.');
+  assert.deepEqual(appended, []);
 });

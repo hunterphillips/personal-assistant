@@ -16,7 +16,9 @@
 //   <dir>/runs/<id>.jsonl
 //     One JSON line per event, oldest first. A run is a start line
 //     { run, occurrence, trigger, startedAt } and an end line { run,
-//     endedAt, outcome, cards?, detail? } sharing `run`; a skipped or
+//     endedAt, outcome, reply?, truncated?, detail?, cards? } sharing `run`
+//     (reply is the run's text, cut and marked truncated when long; detail
+//     the failure or 'interrupted', scheduler.mjs); a skipped or
 //     missed occurrence is one line of its own ({ occurrence, trigger,
 //     outcome: 'busy' | 'failed', detail? } or { outcome: 'missed', count,
 //     from, to, capped? }). `occurrence` is the scheduled instant (null on
