@@ -845,46 +845,46 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   cursor: pointer;
 }
 
-/* Agents */
-
-.agents {
+/* The side panel: a column between the rail and every view, holding the
+   view's own section (the agents list on Agents). On a desk the header's
+   toggle collapses it on every view (panel.js); on a phone it is a drawer
+   (see the phone rules below). The stage keeps each view's full-height
+   chain, the Focus frame's included. */
+.body {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: var(--panel-w, 288px) minmax(0, 1fr);
+  flex: 1;
   min-height: 0;
-  overflow: hidden;
 }
 
-.agents-list {
+.panel {
   min-height: 0;
   padding: 24px;
   overflow: auto;
   border-right: 1px solid var(--line);
 }
 
-/* The Agents heading and, while the list shows, the toggle beside it. */
-.agents-list-head {
+.stage {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
-/* The toggle that hides and shows .agents-list, so an open thread can take
-   the full width. public/agents-sidebar.js moves it between this row and
-   the thread header. Desk only: the phone layout below 720px keeps its own
-   list/thread switch untouched. */
 @media (min-width: 720px) {
-  .agents.agents-collapsed {
+  .shell.panel-collapsed .body {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .agents.agents-collapsed .agents-list {
+  .shell.panel-collapsed .panel {
     display: none;
   }
 }
 
-.agents-toggle {
+/* The header's first control, on every view. Its inner bar fades while the
+   panel is collapsed. */
+.panel-toggle {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -898,9 +898,20 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   color: var(--muted);
   cursor: pointer;
 }
-.agents-toggle:hover,
-.agents-toggle:focus-visible {
+.panel-toggle:hover,
+.panel-toggle:focus-visible {
   color: var(--ink);
+}
+.panel-toggle .bar { transition: opacity 150ms ease; }
+.panel-toggle[aria-expanded="false"] .bar { opacity: 0.35; }
+
+/* Agents: the view is the thread alone; the list is in the side panel. */
+
+.agents {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .agents-heading, .goals-heading, .health-heading {
@@ -910,7 +921,6 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   font-weight: 400;
   line-height: 1.2;
 }
-.agents-list-head .agents-heading { margin-bottom: 0; }
 
 .agents-message { margin: 0 0 12px; }
 .agents-list-foot { margin: 4px 0 0; }
@@ -2367,7 +2377,7 @@ textarea.form-input {
   .app-header {
     min-height: 56px;
     gap: 8px;
-    padding: 6px 12px;
+    padding: 5px 12px;
   }
   .header-left { gap: 2px; overflow: hidden; }
   .header-title { margin-right: 2px; font-size: 19px; }
@@ -2422,22 +2432,64 @@ textarea.form-input {
   .feed-item { grid-template-columns: 24px minmax(0, 1fr); }
   .feed-badge { width: 24px; height: 24px; }
 
-  .agents { grid-template-columns: minmax(0, 1fr); }
-
-  .agents-list {
-    padding: 20px 16px;
-    border-right: 0;
+  /* The side panel is a drawer from the left over a scrim, between the
+     header and the bottom nav bar, so both stay in reach while it is open.
+     panel.js opens and closes it; nothing stores it. */
+  .body {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .agents.agents-open .agents-list { display: none; }
-  .agents:not(.agents-open) .agent-thread { display: none; }
+  .panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 4;
+    width: min(320px, 86vw);
+    padding: 20px 16px;
+    background: var(--paper);
+    box-shadow: 8px 0 24px var(--shadow-sheet);
+    transform: translateX(-100%);
+    visibility: hidden;
+  }
+
+  .shell.panel-open .panel {
+    transform: none;
+    visibility: visible;
+  }
+
+  /* It slides only once a phone has opened it (panel.js), so a desk that
+     narrows to a phone hides it at once instead of sliding it over the
+     view. */
+  .shell.panel-slides .panel {
+    transition: transform 200ms ease, visibility 0s linear 200ms;
+  }
+
+  .shell.panel-slides.panel-open .panel {
+    transition: transform 200ms ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shell.panel-slides .panel,
+    .shell.panel-slides.panel-open .panel { transition: none; }
+  }
+
+  .scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    background: var(--shadow-sheet);
+  }
+
+  /* With no agent open, the thread holds only the sentence asking for one,
+     which the open drawer replaces. */
+  .shell.panel-open .agent-thread:has(> .thread-empty:not([hidden])) { display: none; }
 
   .thread-back {
     display: flex;
     flex-basis: 100%;
   }
-
-  .agents-toggle { display: none; }
 
   .thread-header { padding-top: 4px; }
 

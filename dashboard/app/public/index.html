@@ -41,12 +41,12 @@
     <main id="content" class="content" tabindex="-1">
       <header class="app-header">
         <div class="header-left">
+          <button type="button" class="panel-toggle icon-button" id="panel-toggle" aria-label="Hide side panel" title="Hide side panel" aria-expanded="true" aria-controls="panel">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4.5" width="18" height="15" rx="4.5"/><path class="bar" d="M8 8.5v7"/></svg>
+          </button>
           <h1 class="header-title" id="app-header-title">Agents</h1>
           <div class="header-actions">
             <div class="header-action-group" data-actions-for="agents">
-              <button type="button" class="agents-toggle" id="agents-toggle" aria-label="Hide agents" aria-expanded="true" aria-controls="agents-list">
-                <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
-              </button>
               <button type="button" class="button" id="agent-open-terminal" data-agent-action="open-terminal" hidden>Open terminal</button>
               <button type="button" class="button icon-button" id="agent-details-toggle" data-agent-action="toggle-details" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="agent-details" hidden>
                 <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -108,154 +108,168 @@
         <button type="button" data-action="retry">Retry</button>
       </div>
 
-      <section class="view agents" id="view-agents" data-view="agents" aria-label="Agents">
-        <div class="agents-list" id="agents-list">
-          <p class="agents-message" id="agents-message" hidden></p>
-          <div id="agents-groups">
-            <details class="agents-routines" id="agents-routines" hidden>
-              <summary class="agents-routines-summary">Routines</summary>
-              <div id="agents-routines-body"></div>
-            </details>
-          </div>
-          <p class="agents-list-foot">
-            <button type="button" class="button" id="agents-new" data-agent-action="new-agent">New agent</button>
-          </p>
-        </div>
-        <div class="agent-thread" id="agent-thread">
-          <p class="thread-empty" id="agent-empty" hidden></p>
-          <div class="thread-panel" id="agent-panel" hidden>
-            <div class="thread-main" id="agent-thread-main"></div>
-            <aside class="thread-details" id="agent-details" aria-labelledby="agent-details-heading" hidden>
-              <div class="details-top">
-                <h3 class="card-name" id="agent-details-heading">Settings</h3>
-                <button type="button" class="button icon-button" data-agent-action="close-details" aria-label="Close details" title="Close details">
-                  <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
-                </button>
+      <div class="body">
+        <aside class="panel" id="panel" aria-label="Side panel">
+          <section data-panel-for="now" hidden></section>
+          <section data-panel-for="agents">
+            <div class="agents-list" id="agents-list">
+              <p class="agents-message" id="agents-message" hidden></p>
+              <div id="agents-groups">
+                <details class="agents-routines" id="agents-routines" hidden>
+                  <summary class="agents-routines-summary">Routines</summary>
+                  <div id="agents-routines-body"></div>
+                </details>
               </div>
-              <p class="details-name" id="agent-details-name"></p>
-              <div class="request-details" id="agent-details-fields"></div>
-              <form class="details-form" id="agent-form" novalidate hidden></form>
-              <p class="details-description" id="agent-details-description" hidden></p>
-              <p class="details-jobs" id="agent-details-jobs" hidden></p>
-              <section class="details-routines" id="agent-routines" aria-labelledby="agent-routines-heading" hidden></section>
-              <div class="details-delete" id="agent-delete" hidden>
-                <button type="button" class="button button-small" data-agent-action="delete-agent">Delete</button>
-                <div class="delete-confirm" id="agent-delete-confirm" role="group" aria-label="Delete agent" hidden>
-                  <p class="delete-confirm-text" id="agent-delete-text"></p>
-                  <div class="delete-confirm-actions">
-                    <button type="button" class="button button-danger" data-agent-action="confirm-delete-agent">Delete</button>
-                    <button type="button" class="button" data-agent-action="cancel-delete-agent">Cancel</button>
-                  </div>
-                </div>
-                <p class="delete-refusal" id="agent-delete-refusal" role="status" hidden></p>
-              </div>
-            </aside>
-          </div>
-        </div>
-      </section>
-
-      <section class="view" id="view-focus" data-view="focus" aria-label="Focus" hidden>
-        <div class="notice" id="focus-notice" role="status" hidden>
-          <span>Focus is not responding.</span>
-          <button type="button" data-action="retry">Retry</button>
-        </div>
-        <div class="frame-slot" id="focus-slot"></div>
-      </section>
-
-      <section class="view" id="view-feed" data-view="feed" aria-label="Feed" hidden>
-        <div class="feed-page" id="feed-page">
-          <section class="instructions" id="feed-instructions" aria-labelledby="feed-instructions-heading" hidden>
-            <h2 class="instructions-heading" id="feed-instructions-heading">Feed instructions</h2>
-            <p class="instructions-intro">The feed keeps what passes these tests. A change goes to Watch, which edits the file.</p>
-            <div id="feed-instructions-body"></div>
-            <form class="composer feed-instructions-composer" id="feed-instructions-form">
-              <label class="composer-label" for="feed-instructions-input">What should change?</label>
-              <textarea class="composer-input" id="feed-instructions-input" rows="3"></textarea>
-              <div class="composer-row instructions-actions">
-                <button type="submit" class="button button-primary">Send</button>
-                <button type="button" class="button" id="feed-instructions-cancel">Cancel</button>
-              </div>
-              <p class="composer-reason" id="feed-instructions-reason" role="status" hidden></p>
-            </form>
-          </section>
-          <p class="routines-message" id="feed-message" role="status" hidden></p>
-          <div id="feed-runs"></div>
-        </div>
-      </section>
-
-      <section class="view" id="view-goals" data-view="goals" aria-label="Goals" hidden>
-        <p class="routines-message" id="goals-message" role="status" hidden></p>
-        <div class="routines-cards" id="goals-cards"></div>
-      </section>
-
-      <section class="view" id="view-ideas" data-view="ideas" aria-label="Ideas" hidden>
-        <div class="ideas-page" id="ideas-page">
-          <section class="instructions" id="ideas-instructions" aria-labelledby="ideas-instructions-heading" hidden>
-            <h2 class="instructions-heading" id="ideas-instructions-heading">Ideas instructions</h2>
-            <p class="instructions-intro">Ideas follow these criteria. A change goes to the producer, which edits the file.</p>
-            <div id="ideas-instructions-body"></div>
-            <form class="composer ideas-instructions-composer" id="ideas-instructions-form">
-              <label class="composer-label" for="ideas-instructions-input">What should change?</label>
-              <textarea class="composer-input" id="ideas-instructions-input" rows="3"></textarea>
-              <div class="composer-row instructions-actions">
-                <button type="submit" class="button button-primary">Send</button>
-                <button type="button" class="button" id="ideas-instructions-cancel">Cancel</button>
-              </div>
-              <p class="composer-reason" id="ideas-instructions-reason" role="status" hidden></p>
-            </form>
-          </section>
-          <form class="composer ideas-add-composer" id="ideas-add-form" hidden>
-            <label class="composer-label" for="ideas-add-input">Idea</label>
-            <textarea class="composer-input" id="ideas-add-input" rows="4"></textarea>
-            <div class="composer-row ideas-add-actions">
-              <button type="submit" class="button button-primary">Send</button>
-              <button type="button" class="button" id="ideas-add-cancel">Cancel</button>
+              <p class="agents-list-foot">
+                <button type="button" class="button" id="agents-new" data-agent-action="new-agent">New agent</button>
+              </p>
             </div>
-            <p class="composer-reason" id="ideas-add-reason" role="status" hidden></p>
-          </form>
-          <p class="routines-message" id="ideas-message" role="status" hidden></p>
-          <div id="ideas-weeks"></div>
-        </div>
-      </section>
+          </section>
+          <section data-panel-for="feed" hidden></section>
+          <section data-panel-for="goals" hidden></section>
+          <section data-panel-for="ideas" hidden></section>
+          <section data-panel-for="health" hidden></section>
+        </aside>
+        <div class="scrim" id="panel-scrim" hidden></div>
+        <div class="stage">
+          <section class="view agents" id="view-agents" data-view="agents" aria-label="Agents">
+            <div class="agent-thread" id="agent-thread">
+              <p class="thread-empty" id="agent-empty" hidden></p>
+              <div class="thread-panel" id="agent-panel" hidden>
+                <div class="thread-main" id="agent-thread-main"></div>
+                <aside class="thread-details" id="agent-details" aria-labelledby="agent-details-heading" hidden>
+                  <div class="details-top">
+                    <h3 class="card-name" id="agent-details-heading">Settings</h3>
+                    <button type="button" class="button icon-button" data-agent-action="close-details" aria-label="Close details" title="Close details">
+                      <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
+                    </button>
+                  </div>
+                  <p class="details-name" id="agent-details-name"></p>
+                  <div class="request-details" id="agent-details-fields"></div>
+                  <form class="details-form" id="agent-form" novalidate hidden></form>
+                  <p class="details-description" id="agent-details-description" hidden></p>
+                  <p class="details-jobs" id="agent-details-jobs" hidden></p>
+                  <section class="details-routines" id="agent-routines" aria-labelledby="agent-routines-heading" hidden></section>
+                  <div class="details-delete" id="agent-delete" hidden>
+                    <button type="button" class="button button-small" data-agent-action="delete-agent">Delete</button>
+                    <div class="delete-confirm" id="agent-delete-confirm" role="group" aria-label="Delete agent" hidden>
+                      <p class="delete-confirm-text" id="agent-delete-text"></p>
+                      <div class="delete-confirm-actions">
+                        <button type="button" class="button button-danger" data-agent-action="confirm-delete-agent">Delete</button>
+                        <button type="button" class="button" data-agent-action="cancel-delete-agent">Cancel</button>
+                      </div>
+                    </div>
+                    <p class="delete-refusal" id="agent-delete-refusal" role="status" hidden></p>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </section>
 
-      <section class="view" id="view-health" data-view="health" aria-label="Health" hidden>
-        <div class="availability" id="health-availability" role="status" hidden></div>
-        <div class="routines-header">
-          <h1 class="health-heading">Settings</h1>
+          <section class="view" id="view-focus" data-view="focus" aria-label="Focus" hidden>
+            <div class="notice" id="focus-notice" role="status" hidden>
+              <span>Focus is not responding.</span>
+              <button type="button" data-action="retry">Retry</button>
+            </div>
+            <div class="frame-slot" id="focus-slot"></div>
+          </section>
+
+          <section class="view" id="view-feed" data-view="feed" aria-label="Feed" hidden>
+            <div class="feed-page" id="feed-page">
+              <section class="instructions" id="feed-instructions" aria-labelledby="feed-instructions-heading" hidden>
+                <h2 class="instructions-heading" id="feed-instructions-heading">Feed instructions</h2>
+                <p class="instructions-intro">The feed keeps what passes these tests. A change goes to Watch, which edits the file.</p>
+                <div id="feed-instructions-body"></div>
+                <form class="composer feed-instructions-composer" id="feed-instructions-form">
+                  <label class="composer-label" for="feed-instructions-input">What should change?</label>
+                  <textarea class="composer-input" id="feed-instructions-input" rows="3"></textarea>
+                  <div class="composer-row instructions-actions">
+                    <button type="submit" class="button button-primary">Send</button>
+                    <button type="button" class="button" id="feed-instructions-cancel">Cancel</button>
+                  </div>
+                  <p class="composer-reason" id="feed-instructions-reason" role="status" hidden></p>
+                </form>
+              </section>
+              <p class="routines-message" id="feed-message" role="status" hidden></p>
+              <div id="feed-runs"></div>
+            </div>
+          </section>
+
+          <section class="view" id="view-goals" data-view="goals" aria-label="Goals" hidden>
+            <p class="routines-message" id="goals-message" role="status" hidden></p>
+            <div class="routines-cards" id="goals-cards"></div>
+          </section>
+
+          <section class="view" id="view-ideas" data-view="ideas" aria-label="Ideas" hidden>
+            <div class="ideas-page" id="ideas-page">
+              <section class="instructions" id="ideas-instructions" aria-labelledby="ideas-instructions-heading" hidden>
+                <h2 class="instructions-heading" id="ideas-instructions-heading">Ideas instructions</h2>
+                <p class="instructions-intro">Ideas follow these criteria. A change goes to the producer, which edits the file.</p>
+                <div id="ideas-instructions-body"></div>
+                <form class="composer ideas-instructions-composer" id="ideas-instructions-form">
+                  <label class="composer-label" for="ideas-instructions-input">What should change?</label>
+                  <textarea class="composer-input" id="ideas-instructions-input" rows="3"></textarea>
+                  <div class="composer-row instructions-actions">
+                    <button type="submit" class="button button-primary">Send</button>
+                    <button type="button" class="button" id="ideas-instructions-cancel">Cancel</button>
+                  </div>
+                  <p class="composer-reason" id="ideas-instructions-reason" role="status" hidden></p>
+                </form>
+              </section>
+              <form class="composer ideas-add-composer" id="ideas-add-form" hidden>
+                <label class="composer-label" for="ideas-add-input">Idea</label>
+                <textarea class="composer-input" id="ideas-add-input" rows="4"></textarea>
+                <div class="composer-row ideas-add-actions">
+                  <button type="submit" class="button button-primary">Send</button>
+                  <button type="button" class="button" id="ideas-add-cancel">Cancel</button>
+                </div>
+                <p class="composer-reason" id="ideas-add-reason" role="status" hidden></p>
+              </form>
+              <p class="routines-message" id="ideas-message" role="status" hidden></p>
+              <div id="ideas-weeks"></div>
+            </div>
+          </section>
+
+          <section class="view" id="view-health" data-view="health" aria-label="Health" hidden>
+            <div class="availability" id="health-availability" role="status" hidden></div>
+            <div class="routines-header">
+              <h1 class="health-heading">Settings</h1>
+            </div>
+            <article class="settings-card" id="settings-card" aria-label="Settings">
+              <div class="settings-row">
+                <label class="settings-label" for="settings-model">Default model</label>
+                <select class="settings-select" id="settings-model" data-setting="model"></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="settings-effort">Default effort</label>
+                <select class="settings-select" id="settings-effort" data-setting="effort"></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="settings-brief">Brief goes to</label>
+                <select class="settings-select" id="settings-brief" data-setting="brief"></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="settings-quick-chat">Quick chat talks to</label>
+                <select class="settings-select" id="settings-quick-chat" data-setting="quickChat"></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="settings-permission">Default permissions</label>
+                <select class="settings-select" id="settings-permission" data-setting="permission"></select>
+                <p class="settings-note" id="settings-permission-note"></p>
+              </div>
+              <p class="settings-status" id="settings-status" role="status" hidden></p>
+            </article>
+            <div class="routines-header">
+              <div class="jobs-title">
+                <h1 class="health-heading">Jobs</h1>
+                <p class="jobs-updated" id="jobs-updated"></p>
+              </div>
+            </div>
+            <p class="routines-message" id="jobs-message" hidden></p>
+            <div class="routines-cards" id="jobs-cards"></div>
+          </section>
         </div>
-        <article class="settings-card" id="settings-card" aria-label="Settings">
-          <div class="settings-row">
-            <label class="settings-label" for="settings-model">Default model</label>
-            <select class="settings-select" id="settings-model" data-setting="model"></select>
-          </div>
-          <div class="settings-row">
-            <label class="settings-label" for="settings-effort">Default effort</label>
-            <select class="settings-select" id="settings-effort" data-setting="effort"></select>
-          </div>
-          <div class="settings-row">
-            <label class="settings-label" for="settings-brief">Brief goes to</label>
-            <select class="settings-select" id="settings-brief" data-setting="brief"></select>
-          </div>
-          <div class="settings-row">
-            <label class="settings-label" for="settings-quick-chat">Quick chat talks to</label>
-            <select class="settings-select" id="settings-quick-chat" data-setting="quickChat"></select>
-          </div>
-          <div class="settings-row">
-            <label class="settings-label" for="settings-permission">Default permissions</label>
-            <select class="settings-select" id="settings-permission" data-setting="permission"></select>
-            <p class="settings-note" id="settings-permission-note"></p>
-          </div>
-          <p class="settings-status" id="settings-status" role="status" hidden></p>
-        </article>
-        <div class="routines-header">
-          <div class="jobs-title">
-            <h1 class="health-heading">Jobs</h1>
-            <p class="jobs-updated" id="jobs-updated"></p>
-          </div>
-        </div>
-        <p class="routines-message" id="jobs-message" hidden></p>
-        <div class="routines-cards" id="jobs-cards"></div>
-      </section>
+      </div>
     </main>
   </div>
   <!-- Outside .shell, which the brief's overlay makes inert, so quick chat
@@ -372,7 +386,7 @@
   <script src="/assets/notifications.js"></script>
   <script src="/assets/quick-chat.js"></script>
   <script src="/assets/brief-overlay.js"></script>
+  <script src="/assets/panel.js"></script>
   <script src="/assets/shell.js"></script>
-  <script src="/assets/agents-sidebar.js"></script>
 </body>
 </html>

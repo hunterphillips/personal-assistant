@@ -129,7 +129,7 @@ test.describe('with seeded agents', () => {
     expect(hub.personas.calls).toEqual([]);
   });
 
-  test('the page at / is the list beside a sentence that asks for an agent', async ({ page, hub }) => {
+  test('the page at / is the list in the side panel beside a sentence that asks for an agent', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     await expect(page.locator('#agents-list')).toBeVisible();
@@ -139,8 +139,10 @@ test.describe('with seeded agents', () => {
     await expect(page.locator('#agents-list .agent-row').first()).toHaveAttribute('data-agent', 'cfo');
     await expect(page.locator('#view-agents .routine-card')).toHaveCount(0);
     if (phone(page)) {
+      // The list is the side panel's drawer, open from the left edge.
       await expect(page.locator('#agent-empty')).toBeHidden();
-      expect((await page.locator('#agents-list').boundingBox()).width).toBe(page.viewportSize().width);
+      await expect(page.locator('#panel-toggle')).toHaveAttribute('aria-expanded', 'true');
+      await expect.poll(async () => (await page.locator('#panel').boundingBox()).x).toBe(0);
     } else {
       const empty = page.locator('#agent-empty');
       await expect(empty).toHaveText('Choose an agent to open its thread.');
@@ -185,24 +187,24 @@ test.describe('with seeded agents', () => {
     await expect(messages(page)).toHaveCount(2);
   });
 
-  test('the header agents toggle hides and shows the list, widens and centers the thread, and a reload keeps the choice', async ({ page, hub }) => {
-    test.skip(phone(page), 'the toggle is desktop only');
+  test('the side panel toggle hides and shows the list, widens and centers the thread, and a reload keeps the choice', async ({ page, hub }) => {
+    test.skip(phone(page), 'a phone opens the list as a drawer');
     await page.goto(`${hub.origin}/?agent=cfo`);
     const list = page.locator('#agents-list');
     const threadMain = pane(page).locator('.thread-main');
     const appHeader = page.locator('.app-header');
 
     await expect(list).toBeVisible();
-    await expect(appHeader.locator('#agents-toggle')).toHaveCount(1);
-    var toggle = page.getByRole('button', { name: 'Hide agents', exact: true });
+    await expect(appHeader.locator('#panel-toggle')).toHaveCount(1);
+    var toggle = page.getByRole('button', { name: 'Hide side panel', exact: true });
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(toggle).toHaveAttribute('aria-controls', 'agents-list');
+    await expect(toggle).toHaveAttribute('aria-controls', 'panel');
     const narrowWidth = (await threadMain.boundingBox()).width;
 
     await toggle.click();
     await expect(list).toBeHidden();
-    await expect(appHeader.locator('#agents-toggle')).toHaveCount(1);
-    toggle = page.getByRole('button', { name: 'Show agents', exact: true });
+    await expect(appHeader.locator('#panel-toggle')).toHaveCount(1);
+    toggle = page.getByRole('button', { name: 'Show side panel', exact: true });
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     const wideWidth = (await threadMain.boundingBox()).width;
     expect(wideWidth).toBeGreaterThan(narrowWidth);
@@ -218,19 +220,26 @@ test.describe('with seeded agents', () => {
 
     await page.reload();
     await expect(list).toBeHidden();
-    await expect(appHeader.locator('#agents-toggle')).toHaveCount(1);
-    await expect(page.getByRole('button', { name: 'Show agents', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    await expect(appHeader.locator('#panel-toggle')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Show side panel', exact: true })).toHaveAttribute('aria-expanded', 'false');
 
-    await page.getByRole('button', { name: 'Show agents', exact: true }).click();
+    await page.getByRole('button', { name: 'Show side panel', exact: true }).click();
     await expect(list).toBeVisible();
-    await expect(appHeader.locator('#agents-toggle')).toHaveCount(1);
-    await expect(page.getByRole('button', { name: 'Hide agents', exact: true })).toHaveAttribute('aria-expanded', 'true');
+    await expect(appHeader.locator('#panel-toggle')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Hide side panel', exact: true })).toHaveAttribute('aria-expanded', 'true');
   });
 
-  test('the agents toggle does not appear on a phone', async ({ page, hub }) => {
-    test.skip(!phone(page), 'desktop only has the toggle');
+  test('on a phone the toggle opens the list over an open thread, and another row closes it', async ({ page, hub }) => {
+    test.skip(!phone(page), 'a desk keeps the list beside the thread');
     await page.goto(`${hub.origin}/?agent=cfo`);
-    await expect(page.locator('#agents-toggle')).toBeHidden();
+    await expect(page.locator('#agents-list')).toBeHidden();
+    await page.locator('#panel-toggle').click();
+    await expect(page.locator('#agents-list')).toBeVisible();
+    await expect(pane(page).locator('#agent-name')).toHaveText('CFO');
+    await row(page, 'Second brain').click();
+    await expect(page).toHaveURL(`${hub.origin}/?agent=brain`);
+    await expect(page.locator('#agents-list')).toBeHidden();
+    await expect(pane(page).locator('#agent-name')).toHaveText('Second brain');
   });
 
   test('a persona without jobs has no jobs line', async ({ page, hub }) => {
