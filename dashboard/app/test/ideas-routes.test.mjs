@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 import { LIMITS } from '../lib/config.mjs';
 import { createIdeas } from '../lib/ideas.mjs';
-import { instructionsMessage, startMessage } from '../lib/ideas-routes.mjs';
+import { ideasRoutine, instructionsMessage, startMessage } from '../lib/ideas-routes.mjs';
+import { createRoutines } from '../lib/routines.mjs';
 import { createInstructions } from '../lib/instructions.mjs';
 import { RuntimeError } from '../lib/runtime/adapter.mjs';
 import { fakeRegistry, request, startApp, tempDir } from './support/harness.mjs';
@@ -35,7 +36,7 @@ function fakeAdapter() {
   return adapter;
 }
 
-async function startIdeas(t, { agents, includeIdeas = true } = {}) {
+async function startIdeas(t, { agents, includeIdeas = true, routines = null } = {}) {
   const root = await tempDir(t);
   const dir = path.join(root, 'items');
   await cp(FIXTURE, dir, { recursive: true });
@@ -53,7 +54,7 @@ async function startIdeas(t, { agents, includeIdeas = true } = {}) {
   const app = await startApp(t, {
     focus: { checkHealth: async () => ({ available: true }) },
     brief: { latestMetadata: async () => ({ state: 'empty' }) },
-    registry: fakeRegistry(listed), adapters: { claude: adapter }, ideas, ideasInstructions: instructions,
+    registry: fakeRegistry(listed), adapters: { claude: adapter }, ideas, ideasInstructions: instructions, routines,
   });
   t.after(() => adapter.release());
   return { ...app, adapter, dir, marksFile };
@@ -71,6 +72,37 @@ test('GET /api/ideas returns runs and the newest listed producer', async (t) => 
   assert.equal(response.status, 200);
   assert.equal(response.json.producer, 'myos');
   assert.deepEqual(response.json.runs.map((run) => run.id), ['2026-09-28-myos', '2026-09-21-myos']);
+  assert.equal(response.json.routine, null);
+});
+
+function routine(id, agentId, name, instruction) {
+  return { id, name, agent: agentId, instruction, schedule: null, active: true, nextAt: null, lastRun: null };
+}
+
+test('ideasRoutine picks the producer\'s first routine naming ideas, by instruction or name', () => {
+  const items = [
+    routine('assistant-ideas', 'assistant', 'Ideas', 'Run the weekly-ideas skill.'),
+    routine('myos-digest', 'myos', 'Digest', 'Summarize the week.'),
+    routine('myos-weekly', 'myos', 'Weekly', 'Run the weekly-IDEAS skill.'),
+    routine('myos-named', 'myos', 'More Ideas', 'Something else.'),
+  ];
+  assert.equal(ideasRoutine(items, 'myos'), 'myos-weekly');
+  assert.equal(ideasRoutine(items.filter((item) => item.id !== 'myos-weekly'), 'myos'), 'myos-named');
+  assert.equal(ideasRoutine(items, 'assistant'), 'assistant-ideas');
+  assert.equal(ideasRoutine([items[1]], 'myos'), null);
+  assert.equal(ideasRoutine(items, 'watch'), null);
+  assert.equal(ideasRoutine(items, null), null);
+  assert.equal(ideasRoutine([routine('myos-x', 'myos', 'Brainstorm', 'Find good ideasmith tools.')], 'myos'), null);
+});
+
+test('GET /api/ideas names the producer\'s ideas routine', async (t) => {
+  const routines = createRoutines({ dir: path.join(await tempDir(t), 'routines'), limits: LIMITS, now: () => new Date('2026-10-03T12:00:00.000Z') });
+  await routines.load();
+  await routines.create({ name: 'Weekly ideas', agent: 'assistant', instruction: 'Run the weekly-ideas skill.', schedule: { cron: '0 4 * * 1' }, active: true });
+  await routines.create({ name: 'Weekly ideas', agent: 'myos', instruction: 'Run the weekly-ideas skill.', schedule: { cron: '0 4 * * 1' }, active: true });
+  const app = await startIdeas(t, { routines });
+  const response = await request(app, 'GET', '/api/ideas');
+  assert.deepEqual([response.json.producer, response.json.routine], ['myos', routines.current().find((r) => r.agent === 'myos').id]);
 });
 
 test('POST /api/ideas adds verbatim text and returns the fresh store', async (t) => {
