@@ -1092,8 +1092,11 @@ div.panel-row.now-row:hover { background: none; }
 .feed-page {
   flex: 1;
   min-height: 0;
-  padding: 24px 34px 40px;
+  padding: 24px 34px 136px;
   overflow: auto;
+  /* Older weeks fade toward the bottom; the padding lets the last row scroll clear. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 96px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 96px), transparent);
 }
 
 .feed-page > * {
@@ -1318,8 +1321,11 @@ div.panel-row.now-row:hover { background: none; }
 .ideas-page {
   flex: 1;
   min-height: 0;
-  padding: 24px 34px 40px;
+  padding: 24px 34px 136px;
   overflow: auto;
+  /* Older weeks fade toward the bottom; the padding lets the last row scroll clear. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 96px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 96px), transparent);
 }
 
 .ideas-page > * {
@@ -1366,6 +1372,7 @@ div.panel-row.now-row:hover { background: none; }
 .ideas-item:focus-within { background: var(--hover-tint); }
 .ideas-item:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .ideas-kind-icon { margin-top: 1px; color: var(--ink-soft); }
+.ideas-saved-icon { margin-right: 6px; vertical-align: -2px; color: var(--ink-soft); }
 .ideas-kind-icon[data-ideas-kind="workflow"] { color: var(--badge-0); }
 .ideas-kind-icon[data-ideas-kind="view"],
 .ideas-kind-icon[data-ideas-kind="app"] { color: var(--badge-1); }
@@ -2617,7 +2624,7 @@ textarea.form-input {
   #view-health { padding: 20px 16px; }
 
   .feed-page,
-  .ideas-page { padding: 16px 16px 24px; }
+  .ideas-page { padding: 16px 16px 120px; }
   .ideas-item { margin-right: -8px; margin-left: -8px; padding-right: 8px; padding-left: 8px; }
   .ideas-menu-toggle { opacity: 1; }
   .ideas-menu { right: 4px; max-width: calc(100vw - 32px); }

@@ -183,10 +183,59 @@ test.describe('Ideas', () => {
     const row = item(page, 'fixture-agent-card');
     const menu = await openIdeaMenu(page, 'fixture-agent-card');
     await expect(menu).toBeVisible();
-    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Start', 'Dismiss']);
+    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Start', 'Save', 'Dismiss']);
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();
     await expect(row.getByRole('button', { name: 'More' })).toBeFocused();
+  });
+
+  test('Save marks the row, Unsave clears it, and Start on a saved idea still works', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    const row = item(page, 'fixture-agent-card');
+    await expect(row.getByRole('img', { name: 'Saved' })).toHaveCount(0);
+    let menu = await openIdeaMenu(page, 'fixture-agent-card');
+    await menu.getByRole('button', { name: 'Save' }).click();
+    const mark = row.getByRole('img', { name: 'Saved' });
+    await expect(mark).toBeVisible();
+    const box = await mark.boundingBox();
+    expect([box.width, box.height]).toEqual([16, 16]);
+    const kind = await row.locator('.ideas-kind-icon').boundingBox();
+    const title = await row.locator('.ideas-title-text').boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(kind.x + kind.width);
+    expect(box.x + box.width).toBeLessThanOrEqual(title.x);
+    menu = await openIdeaMenu(page, 'fixture-agent-card');
+    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Start', 'Unsave', 'Dismiss']);
+    await menu.getByRole('button', { name: 'Unsave' }).click();
+    await expect(mark).toHaveCount(0);
+    menu = await openIdeaMenu(page, 'fixture-agent-card');
+    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Start', 'Save', 'Dismiss']);
+    await menu.getByRole('button', { name: 'Save' }).click();
+    await expect(mark).toBeVisible();
+
+    menu = await openIdeaMenu(page, 'fixture-agent-card');
+    await menu.getByRole('button', { name: 'Start' }).click();
+    await expectView(page, 'agents', 'Agents');
+    await nav(page, 'Ideas').click();
+    await expectView(page, 'ideas', 'Ideas');
+    await expect(mark).toHaveCount(0);
+    menu = await openIdeaMenu(page, 'fixture-agent-card');
+    await expect(row.getByRole('link', { name: 'Started with Assistant' })).toBeVisible();
+    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Dismiss']);
+    expect(hub.requests('/api/ideas/save').map((entry) => entry.status)).toEqual([200, 200]);
+    expect(hub.requests('/api/ideas/start').map((entry) => entry.status)).toEqual([202]);
+  });
+
+  test('older weeks fade under a mask on the page, never on a row', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    const masks = await page.evaluate(() => {
+      const of = (node) => { const style = getComputedStyle(node); return style.maskImage || style.webkitMaskImage; };
+      return {
+        page: of(document.getElementById('ideas-page')),
+        items: [...document.querySelectorAll('.ideas-item, .ideas-week')].map(of),
+      };
+    });
+    expect(masks.page).toContain('linear-gradient');
+    expect(masks.items.every((value) => value === 'none')).toBe(true);
   });
 
   test('clicking a row expands and collapses its text', async ({ page, hub }) => {
