@@ -55,7 +55,7 @@ test.describe('Ideas', () => {
     await expect(links).toHaveText(['Home', 'Feed', 'Focus', 'Goals', 'Ideas', 'Health']);
     await expect(page.locator('#app-header-title')).toHaveText('Ideas');
     const actions = page.locator('[data-actions-for="ideas"]');
-    await expect(actions.getByRole('button')).toHaveText(['', 'Add idea']);
+    await expect(actions.getByRole('button')).toHaveText(['', 'New ideas', 'Add idea']);
     await expect(actions.getByRole('button', { name: 'Instructions' })).toBeVisible();
     await expect(actions.getByRole('button', { name: 'Add idea' })).toBeVisible();
 
@@ -85,7 +85,7 @@ test.describe('Ideas', () => {
     const source = item(page, 'fixture-reading-tool').getByRole('link', { name: 'Source' });
     await expect(source).toHaveAttribute('href', 'https://example.com/fixture-reading-tool');
     await expect(source).toHaveAttribute('target', '_blank');
-    await expect(page.locator('#ideas-message')).toBeHidden();
+    await expect(page.locator('#ideas-message')).toHaveText('No routine writes ideas.');
     await expect(page.locator('#view-ideas [data-action]')).toHaveCount(0);
   });
 
@@ -217,6 +217,58 @@ test.describe('Ideas', () => {
     await expect(page).toHaveURL(`${hub.origin}/?agent=myos`);
     await expect(messages(page).first()).toContainText('Change the Ideas criteria.');
     expect(hub.personas.sent[0].id).toBe('myos');
+  });
+});
+
+const IDEAS_ROUTINE = Object.freeze({
+  id: 'myos-weekly-ideas', name: 'Weekly ideas', agent: 'myos', instruction: 'Run the weekly-ideas skill.', cron: '0 4 * * 1',
+});
+
+test.describe('New ideas', () => {
+  test.use({
+    withFocus: false,
+    hubOptions: {
+      ideas: IDEAS, agents: AGENTS,
+      routines: [{ id: 'assistant-ideas', name: 'Ideas', agent: 'assistant', instruction: 'Write ideas.', cron: '0 4 * * 1' }, IDEAS_ROUTINE],
+    },
+  });
+
+  test('runs the producer\'s ideas routine and names the producer', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    const button = page.locator('#ideas-new');
+    await expect(button).toBeEnabled();
+    await button.click();
+    await expect(page.locator('#ideas-message')).toHaveText('Myos is writing new ideas. They will appear here when it finishes.');
+    await expect.poll(() => hub.requests('/api/routines/myos-weekly-ideas/run')).toEqual([{ method: 'POST', status: 202 }]);
+    expect(hub.requests('/api/routines/assistant-ideas/run')).toEqual([]);
+    await expect.poll(() => hub.personas.sent.length).toBe(1);
+    expect(hub.personas.sent[0]).toMatchObject({ id: 'myos', text: 'Run the weekly-ideas skill.' });
+  });
+
+  test('a busy producer gives the busy sentence', async ({ page, hub }) => {
+    hub.personas.hold('myos');
+    await openIdeas(page, hub);
+    const button = page.locator('#ideas-new');
+    await button.click();
+    await expect(page.locator('#ideas-message')).toHaveText('Myos is writing new ideas. They will appear here when it finishes.');
+    await button.click();
+    await expect(page.locator('#ideas-message')).toHaveText('Myos is in the middle of a turn. Try again when it is idle.');
+    expect(hub.requests('/api/routines/myos-weekly-ideas/run')).toEqual([
+      { method: 'POST', status: 202 }, { method: 'POST', status: 409 },
+    ]);
+  });
+});
+
+test.describe('New ideas without a routine', () => {
+  test.use({ withFocus: false, hubOptions: { ideas: IDEAS, agents: AGENTS } });
+
+  test('disables the button and says why', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    const button = page.locator('#ideas-new');
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute('title', 'No routine writes ideas.');
+    await expect(page.locator('#ideas-message')).toHaveText('No routine writes ideas.');
+    expect(hub.requests('/api/routines/myos-weekly-ideas/run')).toEqual([]);
   });
 });
 
