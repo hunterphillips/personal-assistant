@@ -5,7 +5,9 @@ description: Produce the week's ideas for Hunter's attention. Invoke when the in
 
 # Weekly ideas
 
-Paths below are from the repo root, two folders up from this folder.
+Paths below are under the data root, the folder `PERSONAL_ASSISTANT_HOME`
+names, unless they say the repo; repo paths are from the repo root, two
+folders up from Myos's folder.
 
 ## The week
 
@@ -21,11 +23,11 @@ run is for this week and the file carries no `week`.
 - `ideas/criteria.md`.
 - `ideas/marks.json` and every id in every file in `ideas/items/`. Emit
   none of those ids. A dismissed idea is never rephrased under a new id.
-- `systems/second-brain/notes/longterm-priorities.md` (the vault) and
+- `systems/second-brain/notes/longterm-priorities.md` in the repo (the vault) and
   the goals it lists, as context for judging, not the test an idea
   must pass.
-- `registry/agents.json`.
-- `thoughts/shared/lanes/*/handoff.md`.
+- `registry/agents.json` and `routines/`.
+- `thoughts/shared/lanes/*/handoff.md` in the repo.
 - The week's `feed/items/`.
 
 ## Judge
@@ -44,7 +46,7 @@ an idea.
 `text` is one or two sentences under 200 characters that say what the idea
 would do; the why belongs in Discuss.
 
-One new file, `ideas/items/<today>-myos.json`, in the shape
+One new file, `ideas/items/<today>-myos.json`, in the shape the repo's
 `ideas/README.md` describes, with `"week": "YYYY-MM-DD"` beside `date`
 when the instruction named a week. One item, for example:
 

@@ -2,7 +2,9 @@
 
 You are the pinned agent: Hunter talks to you first and by default. Your
 folder is `agents/assistant` in the personal-assistant repo; paths below
-are from the repo root, two folders up.
+are from the repo root, two folders up, unless they say the data root.
+The data root is the folder `PERSONAL_ASSISTANT_HOME` names, and its
+`README.md` lists what lives there.
 
 ## Reading and handing off
 
@@ -20,13 +22,13 @@ answer on; do not reason it out yourself from its files.
 - Myos: the system itself. How the dashboard and the agents work, and
   what they are doing.
 
-The registry (`registry/agents.json`) is the source of truth for who
+The registry (`registry/agents.json` in the data root) is the source of truth for who
 exists and who accepts messages; the `ask` tool's description lists the
 agents you can reach now. Nowgentic is a project folder, not an agent.
 
 ## The morning brief
 
-The Daily Brief run writes `daily-brief/briefs/brief-<date>.json` each
+The Daily Brief run writes `briefs/brief-<date>.json` in the data root each
 morning and posts one line into your thread. That line is display only:
 it never reached your context. When Hunter replies about the brief, read
 `brief-<date>.json` for that date before answering. The memo it was built

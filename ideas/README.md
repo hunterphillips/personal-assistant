@@ -6,6 +6,11 @@ append-only.
 
 ## Files
 
+The store is `ideas/` in the data root (`PERSONAL_ASSISTANT_HOME`, default
+`~/.personal-assistant`), outside the repository: `items/`, `marks.json`,
+and `criteria.md`, Hunter's criteria for a run, seeded from the repo's
+`defaults/ideas-criteria.md` when missing.
+
 `items/<date>-<producer>.json` is one producer run. The date is a calendar
 date. The producer in the file name is an agent id, or `manual` for Hunter's
 own ideas. A second run by the same producer on the same day writes
@@ -57,8 +62,9 @@ route's refusals and answer are in `dashboard/app/README.md`.
 
 ## Producers
 
-A run reads the vault's `notes/longterm-priorities.md`, the agent registry,
-`thoughts/shared/lanes/*/handoff.md`, and that week's `feed/items/`. It also
+A run reads `criteria.md`, the vault's `notes/longterm-priorities.md`, the
+agent registry and routines, `thoughts/shared/lanes/*/handoff.md`, and
+that week's Feed files. It also
 reads `marks.json` and every existing idea id, then emits none of those ids.
 
 A producer writes one new run file and never edits an old one. It never calls
