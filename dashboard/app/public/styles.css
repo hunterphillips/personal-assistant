@@ -1230,12 +1230,17 @@ div.panel-row.now-row:hover { background: none; }
   margin-bottom: 16px;
 }
 
-.feed-date {
-  margin: 0;
+/* The headings that split a view into its parts: the Feed's days, the
+   Ideas weeks, and the Goals areas. */
+.section-heading {
+  color: var(--ink);
   font-family: var(--serif);
   font-size: 20px;
-  font-weight: 400;
+  font-weight: 600;
+  line-height: 1.3;
 }
+
+.feed-date { margin: 0; }
 
 .feed-since {
   color: var(--muted);
@@ -1407,12 +1412,7 @@ div.panel-row.now-row:hover { background: none; }
 .ideas-add-actions { margin-top: 8px; }
 
 .ideas-week + .ideas-week { margin-top: 36px; }
-.ideas-week-title {
-  margin: 0 0 18px;
-  font-family: var(--serif);
-  font-size: 20px;
-  font-weight: 400;
-}
+.ideas-week-title { margin: 0 0 18px; }
 .ideas-run:empty { display: none; }
 .ideas-run + .ideas-run:not(:empty) { margin-top: 24px; }
 .ideas-item {
@@ -1550,7 +1550,8 @@ div.panel-row.now-row:hover { background: none; }
 
 .goal-section .card-header > .card-name { flex: 1; min-width: 0; }
 
-.goal-count { color: var(--muted); }
+/* With the grid's gap, the same space above each area as above a Feed day. */
+.goal-section + .goal-section { margin-top: 20px; }
 
 .goal-item + .goal-item { border-top: 1px solid var(--line); }
 

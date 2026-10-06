@@ -232,22 +232,20 @@
       }
     }
 
-    // A section: its heading is a button with the title and the count of
-    // items, which opens or folds the rows under it.
+    // A section: its heading is a button with the title, which opens or
+    // folds the rows under it. The side panel's Areas rows carry the counts.
     function renderSection(section) {
       var node = element('section', 'goal-section');
       var headingId = 'goals-section-' + section.id;
       node.setAttribute('aria-labelledby', headingId);
       node.setAttribute('data-goal-section', section.id);
       var header = element('div', 'card-header');
-      var title = element('h2', 'card-name');
+      var title = element('h2', 'card-name section-heading');
       title.id = headingId;
       var button = element('button', 'goal-section-toggle', section.title);
       button.type = 'button';
       button.setAttribute('data-goal-action', 'section');
       button.setAttribute('data-goal-id', section.id);
-      button.appendChild(document.createTextNode(' '));
-      button.appendChild(element('span', 'goal-count', String(objectsIn(section.items).length)));
       title.appendChild(button);
       header.appendChild(title);
       if (section.updated) header.appendChild(element('span', 'card-note', 'Updated ' + section.updated));

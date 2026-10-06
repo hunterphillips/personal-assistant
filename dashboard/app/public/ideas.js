@@ -284,7 +284,7 @@
     function renderWeek(group) {
       var node = element('section', 'ideas-week');
       node.setAttribute('data-ideas-week', group.key);
-      node.appendChild(element('h2', 'ideas-week-title', group.title));
+      node.appendChild(element('h2', 'ideas-week-title section-heading', group.title));
       group.runs.forEach(function (run) {
         var runNode = element('div', 'ideas-run');
         runNode.setAttribute('data-ideas-run', run.id);

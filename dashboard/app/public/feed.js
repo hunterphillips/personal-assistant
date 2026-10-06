@@ -228,7 +228,7 @@
       group.setAttribute('aria-labelledby', headingId);
       group.setAttribute('data-feed-run', run.id);
       var header = element('div', 'feed-run-header');
-      var title = element('h2', 'feed-date', dateSentence(run.date));
+      var title = element('h2', 'feed-date section-heading', dateSentence(run.date));
       title.id = headingId;
       header.appendChild(title);
       var since = sinceSentence(run.since);

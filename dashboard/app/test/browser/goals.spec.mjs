@@ -19,7 +19,7 @@ const composer = (page) => page.locator('#goals-cards form.goal-composer');
 const messages = (page) => page.locator('#agent-messages .thread-message');
 
 async function openRow(page, section, id) {
-  await page.locator('#goals-cards').getByRole('button', { name: new RegExp(`^${section} \\d+$`) }).click();
+  await page.locator('#goals-cards').getByRole('button', { name: section, exact: true }).click();
   await row(page, id).click();
 }
 
@@ -108,20 +108,25 @@ test.describe('with the fixture vault', () => {
     const lefts = await page.locator('#goals-cards [data-goal-section="goals"] .goal-row')
       .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().left));
     expect(new Set(lefts).size).toBe(1);
-    const count = page.locator('[data-goal-section="goals"] .goal-count');
-    await expect(count).toBeVisible();
-    await expect(count).toBeInViewport();
-    expect(await count.evaluate((node) => getComputedStyle(node).color))
-      .toBe(await page.locator('.card-note').first().evaluate((node) => getComputedStyle(node).color));
+    const style = (locator) => locator.evaluate((node) => {
+      const computed = getComputedStyle(node);
+      return { color: computed.color, weight: computed.fontWeight };
+    });
+    const heading = await style(page.locator('[data-goal-section="goals"] .goal-section-toggle'));
+    const body = await style(page.locator('body'));
+    const note = await style(page.locator('[data-goal-section="later"] .card-note'));
+    expect(heading.color).toBe(body.color);
+    expect(Number(heading.weight)).toBeGreaterThanOrEqual(600);
+    expect(note.color).not.toBe(heading.color);
   });
 
-  test('the other sections are folded headers with counts that open to their rows', async ({ page, hub }) => {
+  test('the other sections are folded headers without counts that open to their rows', async ({ page, hub }) => {
     await openGoals(page, hub);
     const toggles = page.locator('#goals-cards .goal-section-toggle');
-    await expect(toggles).toHaveText(['Now 2', 'Later 4', 'Not now 2', 'Long term 3', 'Goal notes 4']);
+    await expect(toggles).toHaveText(['Now', 'Later', 'Not now', 'Long term', 'Goal notes']);
     expect(await toggles.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-expanded'))))
       .toEqual(['true', 'false', 'false', 'false', 'false']);
-    await expect(page.locator('[data-goal-section="later"] .goal-count')).toHaveText('4');
+    await expect(page.locator('#goals-cards .goal-count')).toHaveCount(0);
     await expect(page.locator('[data-goal-section="later"] .card-note')).toHaveText('Updated 2026-03-04');
     await expect(row(page, 'later:kayak-trip')).toBeHidden();
 
@@ -157,7 +162,7 @@ test.describe('with the fixture vault', () => {
 
   test('renders the five sections in order under the Updated note', async ({ page, hub }) => {
     await openGoals(page, hub);
-    await expect(sections(page).locator('.card-name')).toHaveText(['Now 2', 'Later 4', 'Not now 2', 'Long term 3', 'Goal notes 4']);
+    await expect(sections(page).locator('.card-name')).toHaveText(['Now', 'Later', 'Not now', 'Long term', 'Goal notes']);
     await expect(sections(page).first().locator('.card-note')).toHaveText('Updated 2026-03-04');
     await expect(page.locator('#goals-message')).toBeHidden();
   });
@@ -262,7 +267,7 @@ test.describe('with the fixture vault', () => {
     await expect.poll(() => hub.requests('/api/goals').length).toBe(before + 1);
     await expect(row(page, 'goal:swim')).toBeVisible();
     await expect(item(page, 'goal:zine')).toHaveCount(0);
-    await expect(page.locator('[data-goal-section="goals"] .goal-count')).toHaveText('4');
+    await expect(page.locator('[data-goal-section="goals"] .goal-row')).toHaveCount(4);
     await expect(row(page, 'goal:swim')).toHaveAttribute('aria-expanded', 'false');
     await expect(row(page, 'later:kayak-trip')).toHaveAttribute('aria-expanded', 'true');
     await expect(row(page, 'goal:boat')).toHaveAttribute('aria-expanded', 'true');
@@ -345,7 +350,7 @@ test.describe('the side panel', () => {
     await expect(side(page).locator('h2.panel-heading')).toHaveText(['Areas']);
     await expect(side(page).locator('.panel-row-name')).toHaveText(['Now', 'Later', 'Not now', 'Long term', 'Goal notes']);
     await expect(side(page).locator('.panel-row-count')).toHaveText(['2', '4', '2', '3', '4']);
-    const counts = await page.locator('#goals-cards .goal-count').allTextContents();
+    const counts = await sections(page).evaluateAll((nodes) => nodes.map((node) => String(node.querySelectorAll('[data-goal-item]').length)));
     expect(await side(page).locator('.panel-row-count').allTextContents()).toEqual(counts);
     expect(await side(page).locator('.panel-row').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-goal-area'))))
       .toEqual(await sections(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-goal-section'))));
