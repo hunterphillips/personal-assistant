@@ -5,6 +5,14 @@
 // Escape, closePanel(), or another view (shell.js), and nothing is stored.
 // openPanel() and closePanel() act only on that drawer.
 //
+// On a desk the panel's right edge is a handle that sets its width, from 220
+// to 480px, by dragging, by the arrow keys (16px a press), or Home and End;
+// a double-click puts it back to 288. The width is stored apart from the
+// collapsed choice, so hiding the panel keeps it, and theme-boot.js applies
+// it before first paint. While the handle drags, the shell takes the
+// resizing class, which keeps the Focus frame from catching the pointer.
+// A phone's drawer has no handle.
+//
 // The `now` section, shown for a view with no panel of its own (Focus), is
 // drawn here from the snapshot on every state change (update(state)) and
 // fetches nothing: the agents waiting on Hunter (the ones the rail's Home dot
@@ -112,6 +120,94 @@
     if (!isPhone()) shell.classList.remove('panel-open', 'panel-slides');
     render();
   });
+
+  // The width, on a desk.
+  var WIDTH_KEY = 'dashboard.panelWidth';
+  var MIN_WIDTH = 220;
+  var MAX_WIDTH = 480;
+  var DEFAULT_WIDTH = 288;
+  var STEP = 16;
+  var handle = document.getElementById('panel-resize');
+  var width = DEFAULT_WIDTH;
+  var drag = null; // { pointer, startX, startWidth, moved } while the handle drags
+
+  function clampWidth(value) {
+    return Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, value)));
+  }
+
+  function readWidth() {
+    try {
+      var value = Number(window.localStorage.getItem(WIDTH_KEY));
+      return value > 0 && isFinite(value) ? clampWidth(value) : DEFAULT_WIDTH;
+    } catch (err) {
+      return DEFAULT_WIDTH;
+    }
+  }
+
+  function writeWidth(value) {
+    try {
+      if (value === null) window.localStorage.removeItem(WIDTH_KEY);
+      else window.localStorage.setItem(WIDTH_KEY, String(value));
+    } catch (err) {
+      // No storage: the width holds for this page only.
+    }
+  }
+
+  function applyWidth(value) {
+    width = clampWidth(value);
+    document.documentElement.style.setProperty('--panel-w', width + 'px');
+    if (handle) handle.setAttribute('aria-valuenow', String(width));
+  }
+
+  function endDrag() {
+    if (!drag) return;
+    var moved = drag.moved;
+    drag = null;
+    shell.classList.remove('panel-resizing');
+    // A click that did not move, a double-click's halves included, stores nothing.
+    if (moved) writeWidth(width);
+  }
+
+  if (handle) {
+    applyWidth(readWidth());
+
+    handle.addEventListener('pointerdown', function (event) {
+      if (isPhone() || event.button !== 0) return;
+      event.preventDefault();
+      drag = { pointer: event.pointerId, startX: event.clientX, startWidth: width, moved: false };
+      handle.setPointerCapture(event.pointerId);
+      shell.classList.add('panel-resizing');
+    });
+
+    handle.addEventListener('pointermove', function (event) {
+      if (!drag || event.pointerId !== drag.pointer) return;
+      if (event.clientX !== drag.startX) drag.moved = true;
+      applyWidth(drag.startWidth + event.clientX - drag.startX);
+    });
+
+    handle.addEventListener('pointerup', endDrag);
+    handle.addEventListener('pointercancel', endDrag);
+    handle.addEventListener('lostpointercapture', endDrag);
+
+    handle.addEventListener('dblclick', function () {
+      if (isPhone()) return;
+      applyWidth(DEFAULT_WIDTH);
+      writeWidth(null);
+    });
+
+    handle.addEventListener('keydown', function (event) {
+      if (isPhone()) return;
+      var next = null;
+      if (event.key === 'ArrowLeft') next = width - STEP;
+      else if (event.key === 'ArrowRight') next = width + STEP;
+      else if (event.key === 'Home') next = MIN_WIDTH;
+      else if (event.key === 'End') next = MAX_WIDTH;
+      if (next === null) return;
+      event.preventDefault();
+      applyWidth(next);
+      writeWidth(width);
+    });
+  }
 
   // The Now section.
   var now = document.querySelector('[data-panel-for="now"]');

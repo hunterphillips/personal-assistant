@@ -1,7 +1,7 @@
 // The side panel between the rail and every view, and its one toggle at the
 // head of the header. On a desk the toggle collapses the panel on every view
-// and the choice is stored; on a phone the panel is a drawer over a scrim
-// that nothing stores.
+// and the choice is stored, and the panel's right edge sets its width; on a
+// phone the panel is a drawer over a scrim that nothing stores.
 
 import { expect, expectView, nav, test } from '../support/browser-test.mjs';
 
@@ -24,6 +24,19 @@ const phone = (page) => page.viewportSize().width < 720;
 const toggle = (page) => page.locator('#panel-toggle');
 const panel = (page) => page.locator('#panel');
 const stored = (page, key) => page.evaluate((name) => window.localStorage.getItem(name), key);
+const handle = (page) => page.locator('#panel-resize');
+const panelWidth = async (page) => (await panel(page).boundingBox()).width;
+
+// Drags the handle by dx with the mouse, in steps so pointermove fires.
+async function dragHandle(page, dx) {
+  const box = await handle(page).boundingBox();
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y, { steps: 8 });
+  await page.mouse.up();
+}
 
 function row(page, name) {
   return page.locator('.agent-row').filter({ has: page.locator('.agent-row-name', { hasText: new RegExp(`^${name}$`) }) });
@@ -120,10 +133,109 @@ test.describe('on a desk', () => {
     expect(await stored(page, 'dashboard.agentsListHidden')).toBe(null);
     expect(await stored(page, 'dashboard.panelHidden')).toBe('1');
   });
+
+  test('dragging the edge widens the panel, the stage takes the rest, and a reload keeps the width', async ({ page, hub }) => {
+    await page.goto(hub.origin + '/feed');
+    await expectView(page, 'feed', 'Feed');
+    await expect(handle(page)).toBeVisible();
+    await expect(handle(page)).toHaveAttribute('role', 'separator');
+    await expect(handle(page)).toHaveAttribute('aria-orientation', 'vertical');
+    await expect(handle(page)).toHaveAttribute('aria-label', 'Resize side panel');
+    await expect(handle(page)).toHaveAttribute('aria-valuemin', '220');
+    await expect(handle(page)).toHaveAttribute('aria-valuemax', '480');
+    await expect(handle(page)).toHaveAttribute('aria-valuenow', '288');
+    expect(await panelWidth(page)).toBe(288);
+    const body = (await page.locator('.body').boundingBox()).width;
+
+    await dragHandle(page, 100);
+    await expect.poll(() => panelWidth(page)).toBe(388);
+    await expect(handle(page)).toHaveAttribute('aria-valuenow', '388');
+    await expect(page.locator('.shell')).not.toHaveClass(/panel-resizing/);
+    expect((await page.locator('.stage').boundingBox()).width).toBe(body - 388);
+    expect(await stored(page, 'dashboard.panelWidth')).toBe('388');
+
+    await page.reload();
+    await expectView(page, 'feed', 'Feed');
+    expect(await panelWidth(page)).toBe(388);
+    await expect(handle(page)).toHaveAttribute('aria-valuenow', '388');
+
+    // Collapsing hides it and keeps the width for when it shows again.
+    await toggle(page).click();
+    await expectCollapsed(page);
+    await expect(handle(page)).toBeHidden();
+    await toggle(page).click();
+    await expectShown(page);
+    expect(await panelWidth(page)).toBe(388);
+  });
+
+  test('the width stops at 480 and 220, and a double-click puts it back to 288 and forgets it', async ({ page, hub }) => {
+    await page.goto(hub.origin + '/goals');
+    await expectView(page, 'goals', 'Goals');
+
+    await dragHandle(page, 600);
+    await expect.poll(() => panelWidth(page)).toBe(480);
+    expect(await stored(page, 'dashboard.panelWidth')).toBe('480');
+
+    await dragHandle(page, -600);
+    await expect.poll(() => panelWidth(page)).toBe(220);
+    expect(await stored(page, 'dashboard.panelWidth')).toBe('220');
+
+    await handle(page).dblclick();
+    await expect.poll(() => panelWidth(page)).toBe(288);
+    await expect(handle(page)).toHaveAttribute('aria-valuenow', '288');
+    expect(await stored(page, 'dashboard.panelWidth')).toBe(null);
+  });
+
+  test('the arrow keys move the edge 16px, and Home and End go to the ends', async ({ page, hub }) => {
+    await page.goto(hub.origin + '/health');
+    await expectView(page, 'health', 'Health');
+    await handle(page).focus();
+
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(() => panelWidth(page)).toBe(304);
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await expect.poll(() => panelWidth(page)).toBe(272);
+    await expect(handle(page)).toHaveAttribute('aria-valuenow', '272');
+    expect(await stored(page, 'dashboard.panelWidth')).toBe('272');
+
+    await page.keyboard.press('End');
+    await expect.poll(() => panelWidth(page)).toBe(480);
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(() => panelWidth(page)).toBe(480);
+    await page.keyboard.press('Home');
+    await expect.poll(() => panelWidth(page)).toBe(220);
+    await expect(handle(page)).toHaveAttribute('aria-valuenow', '220');
+  });
+
+  test('a stored width out of range opens clamped, and one that is not a number opens at 288', async ({ page, hub }) => {
+    await page.goto(hub.origin + '/goals');
+    await page.evaluate(() => window.localStorage.setItem('dashboard.panelWidth', '900'));
+    await page.reload();
+    await expectView(page, 'goals', 'Goals');
+    expect(await panelWidth(page)).toBe(480);
+
+    await page.evaluate(() => window.localStorage.setItem('dashboard.panelWidth', 'wide'));
+    await page.reload();
+    await expectView(page, 'goals', 'Goals');
+    expect(await panelWidth(page)).toBe(288);
+  });
 });
 
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
+
+  test('the drawer has no resize handle, and a stored width does not change it', async ({ page, hub }) => {
+    await page.goto(hub.origin + '/goals');
+    await page.evaluate(() => window.localStorage.setItem('dashboard.panelWidth', '420'));
+    await page.reload();
+    await expectView(page, 'goals', 'Goals');
+    await toggle(page).click();
+    await expectShown(page);
+    await expect(handle(page)).toBeHidden();
+    await expect.poll(async () => (await panel(page).boundingBox()).x).toBe(0);
+    expect(await panelWidth(page)).toBe(Math.min(320, page.viewportSize().width * 0.86));
+  });
 
   test('the toggle opens the drawer; the scrim, Escape, and another view close it; nothing is stored', async ({ page, hub }) => {
     await page.goto(hub.origin + '/goals');

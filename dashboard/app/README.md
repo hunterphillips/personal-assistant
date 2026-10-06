@@ -514,7 +514,10 @@ Its toggle, "Hide side panel" or "Show side
 panel", comes first in the header, before the view's title, on every view.
 From 720px the toggle collapses the panel on every view and the choice is
 kept in `localStorage` under `dashboard.panelHidden` (an old
-`dashboard.agentsListHidden` is read once and removed). Below 720px the
+`dashboard.agentsListHidden` is read once and removed). Dragging the
+panel's right edge, or its arrow keys, sets its width from 220 to 480px,
+kept under `dashboard.panelWidth`; a double-click puts it back to 288.
+Below 720px the
 panel is a drawer from the left over a scrim, between the header and the
 bottom bar: the toggle opens it, and the scrim, Escape, or another view
 closes it; nothing stores it. The script switches views

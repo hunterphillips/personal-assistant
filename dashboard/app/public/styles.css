@@ -881,13 +881,76 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   overflow: hidden;
 }
 
+/* The panel's right edge, a handle that sets its width on a desk (panel.js).
+   It sits on the body rather than in the panel so it stays put while the
+   panel scrolls. While it drags, the stage takes no pointer, so the Focus
+   frame cannot swallow the drag. */
+.panel-resize {
+  display: none;
+}
+
 @media (min-width: 720px) {
+  .body {
+    position: relative;
+  }
+
   .shell.panel-collapsed .body {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .shell.panel-collapsed .panel {
     display: none;
+  }
+
+  .panel-resize {
+    display: block;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--panel-w, 288px) - 3px);
+    z-index: 2;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .panel-resize::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 2px;
+    background: transparent;
+    transition: background 120ms ease;
+  }
+
+  .panel-resize:hover::after,
+  .shell.panel-resizing .panel-resize::after {
+    background: var(--rule);
+  }
+
+  .panel-resize:focus-visible {
+    outline: none;
+  }
+
+  .panel-resize:focus-visible::after {
+    background: var(--green);
+  }
+
+  .shell.panel-collapsed .panel-resize {
+    display: none;
+  }
+
+  .shell.panel-resizing,
+  .shell.panel-resizing * {
+    cursor: col-resize;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .shell.panel-resizing .stage {
+    pointer-events: none;
   }
 }
 
