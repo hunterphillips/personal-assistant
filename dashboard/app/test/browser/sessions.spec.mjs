@@ -132,7 +132,7 @@ test.describe('with sessions', () => {
     const fix = row(page, 'Fix the flaky test');
     await expect(fix).toHaveClass(/agent-row-session/);
     await expect(fix).toHaveAttribute('href', '/?agent=codex%3At1');
-    await expect(fix.locator('.provider-chip')).toHaveText('Codex');
+    await expect(fix.locator('.provider-icon')).toHaveAttribute('aria-label', 'Codex');
     await expect(fix.locator('.role-chip')).toHaveCount(0);
     await expect(fix.locator('.agent-row-preview')).toHaveText('~/work/catchup/sub');
     await expect(fix.locator('.agent-row-time')).toHaveText('5 minutes ago');
@@ -141,7 +141,7 @@ test.describe('with sessions', () => {
 
     const terminal = row(page, 'catchup');
     await expect(terminal).toHaveAttribute('href', `/?agent=claude%3A${C_BUSY}`);
-    await expect(terminal.locator('.provider-chip')).toHaveText('Claude');
+    await expect(terminal.locator('.provider-icon')).toHaveAttribute('aria-label', 'Claude');
     await expect(terminal.locator('.agent-row-preview')).toHaveText('~/work/catchup');
     await expect(terminal.locator('.agent-row-state')).toHaveText('Working');
 
@@ -164,7 +164,7 @@ test.describe('with sessions', () => {
     await row(page, 'Fix the flaky test').click();
     await expect(page).toHaveURL(`${hub.origin}/?agent=codex%3At1`);
     await expect(pane(page).locator('#agent-name')).toHaveText('Fix the flaky test');
-    await expect(pane(page).locator('#agent-chips .provider-chip')).toHaveText('Codex');
+    await expect(pane(page).locator('#agent-chips .provider-icon')).toHaveAttribute('aria-label', 'Codex');
     await expect(pane(page).locator('#agent-chips .role-chip')).toHaveCount(0);
     await expect(page.locator('#agent-description')).toHaveText('~/work/catchup/sub');
     await expect(page.locator('#agent-cost')).toBeEmpty();
@@ -316,7 +316,7 @@ test.describe('with sessions', () => {
   test('a Claude terminal shows where it runs and its state, with no messages and no composer', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=claude:${C_BUSY}`);
     await expect(pane(page).locator('#agent-name')).toHaveText('catchup');
-    await expect(pane(page).locator('#agent-chips .provider-chip')).toHaveText('Claude');
+    await expect(pane(page).locator('#agent-chips .provider-icon')).toHaveAttribute('aria-label', 'Claude');
     await expect(page.locator('#agent-description')).toHaveText('~/work/catchup');
     await expect(page.locator('#agent-messages .thread-line')).toHaveText(['Claude is working.']);
     await expect(messages(page)).toHaveCount(0);

@@ -567,9 +567,12 @@ The Agents view is the page at `/`. It lists every registry agent under
 the registry's groups (`groups` in the file, in that order, with those
 names; a group an agent names that the file leaves out follows them under
 its id with the first letter raised), in registry order within a group:
-its avatar (Avatars, below) and name, role (left out when it only repeats
-the name), provider (Claude or Codex), and for a persona its last message
-with a relative time. A row wanting Hunter shows an amber dot beside its
+its avatar (Avatars, below) and name, the provider's icon, and for a
+persona its last message with a relative time. The role is not shown on
+the row, but the search matches it. Each icon is a Simple Icons file
+under `public/providers/` (CC0; `NOTICE` there names the source), served
+as `/assets/provider-<id>.svg`, titled and labelled with the provider's
+name; a provider with no icon shows its name as a text chip. A row wanting Hunter shows an amber dot beside its
 name, titled and labelled "Waiting for you" (a question or approval open)
 or "Needs you" (a routine's run left a card unanswered and nothing has
 been written in the thread since; Routines under Personas) rather than a
@@ -605,7 +608,7 @@ lasts until the page reloads.
 The snapshot's coding sessions (see Sessions in the snapshot) are rows
 too. Each sits under the project row its `projectId` names, indented,
 newest first; sessions under no project sit in an "Other sessions" group
-after Personal. A session row shows its provider chip, a title (a Codex
+after Personal. A session row shows its provider icon, a title (a Codex
 thread's title, else the last segment of its folder; a Claude terminal
 always uses the folder), the folder with the home directory as `~`, and a
 relative time. A session wanting Hunter shows the same amber dot beside
@@ -628,7 +631,7 @@ A session's id goes in `?agent=` like an agent's (`/?agent=codex%3A<threadId>`;
 the plain `codex:` form works too), and the phone flow is the same. An id
 that is not in the snapshot shows "That session is not listed."
 
-A Codex session opens the thread pane: its title and provider chip, its
+A Codex session opens the thread pane: its title and provider icon, its
 folder, the messages from `GET /api/sessions/<id>/thread` (fetched on the
 same occasions as a persona's), the working or waiting line with
 Interrupt (`POST /api/sessions/<id>/interrupt`), and a question or
@@ -653,7 +656,7 @@ for a persona ("Answer this one in the terminal." for `not_supported`,
 "The Codex server is not connected." for `unavailable`, "That session is
 no longer listed." for `no_such_session`).
 
-A Claude terminal opens a pane with the folder name, the Claude chip, and
+A Claude terminal opens a pane with the folder name, the Claude icon, and
 the folder, then its state: "Claude is working.", "Claude is idle.",
 "Claude is waiting for you.", "Claude has not reported its state.", or
 "The terminal is closed." It has no messages, no request, no Interrupt,

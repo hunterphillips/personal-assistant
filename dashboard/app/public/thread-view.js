@@ -56,6 +56,7 @@
     var hasThread = H.hasThread;
     var turnOpen = H.turnOpen;
     var providerName = H.providerName;
+    var providerBadge = H.providerBadge;
     var shortPath = H.shortPath;
     var displayName = H.displayName;
     var effortNameOf = H.effortNameOf;
@@ -483,7 +484,7 @@
       nameNode.textContent = name;
       chips.textContent = '';
       if (roleChip(agent)) chips.appendChild(chip('role-chip', agent.role));
-      if (providerName(agent)) chips.appendChild(chip('provider-chip', providerName(agent)));
+      if (providerName(agent)) chips.appendChild(providerBadge(agent));
       cost.textContent = persona && typeof agent.costUsd === 'number' ? '$' + agent.costUsd.toFixed(2) + ' this session' : '';
       description.textContent = session ? shortPath(agent.cwd, state.home) : persona ? '' : agent.description || '';
       description.hidden = !description.textContent;

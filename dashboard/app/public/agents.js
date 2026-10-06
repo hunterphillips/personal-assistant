@@ -72,6 +72,19 @@
 
   var PINNED = 'pinned';
   var PROVIDERS = { claude: 'Claude', codex: 'Codex' };
+  // Each provider's mark, a Simple Icons file under public/providers/
+  // served as /assets/<name> (lib/assets.mjs lists them). A provider not
+  // here shows its name as a text chip.
+  var PROVIDER_ICONS = {
+    claude: 'provider-claude.svg',
+    codex: 'provider-codex.svg',
+    gemini: 'provider-gemini.svg',
+    meta: 'provider-meta.svg',
+    xai: 'provider-xai.svg',
+    grok: 'provider-xai.svg',
+    mistral: 'provider-mistral.svg',
+    ollama: 'provider-ollama.svg',
+  };
   var WATCHED = ['agents', 'groups', 'registry', 'sessions', 'codex', 'cmux', 'settings', 'routines'];
   var EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
   var EFFORT_NAMES = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
@@ -364,6 +377,25 @@
     var provider = agent && agent.provider;
     if (!provider) return '';
     return Object.prototype.hasOwnProperty.call(PROVIDERS, provider) ? PROVIDERS[provider] : provider;
+  }
+
+  // The provider's mark for an agent row or thread header: the icon, drawn
+  // in the text color through a mask, with the name as its label; or the
+  // name as a text chip when the provider has no icon. Null without a
+  // provider.
+  function providerBadge(agent) {
+    var name = providerName(agent);
+    if (!name) return null;
+    var icon = Object.prototype.hasOwnProperty.call(PROVIDER_ICONS, agent.provider) ? PROVIDER_ICONS[agent.provider] : '';
+    if (!icon) return element('span', 'provider-chip', name);
+    var node = element('span', 'provider-icon');
+    var url = 'url("/assets/' + icon + '")';
+    node.style.setProperty('-webkit-mask-image', url);
+    node.style.setProperty('mask-image', url);
+    node.setAttribute('role', 'img');
+    node.setAttribute('aria-label', name);
+    node.title = name;
+    return node;
   }
 
   // The heading for a group id: the registry's name when it lists the
@@ -1207,10 +1239,6 @@
       return null;
     }
 
-    function chip(className, text) {
-      return element('span', className, text);
-    }
-
     // A row wanting Hunter ("Waiting for you", "Needs you") shows a small
     // dot beside the name instead of the text chip; the sentence stays as
     // the dot's title and aria-label for anyone not reading color.
@@ -1234,8 +1262,7 @@
       head.appendChild(window.DashboardAvatar.node(agent, 'small'));
       head.appendChild(element('span', 'agent-row-name', agent.name));
       if (line && line.tone === 'wait') head.appendChild(stateDot(line));
-      if (roleChip(agent)) head.appendChild(chip('role-chip', agent.role));
-      if (providerName(agent)) head.appendChild(chip('provider-chip', providerName(agent)));
+      if (providerName(agent)) head.appendChild(providerBadge(agent));
       if (persona && agent.lastMessage) head.appendChild(timeSpan('agent-row-time', agent.lastMessage.at));
       node.appendChild(head);
 
@@ -1264,7 +1291,7 @@
       var head = element('span', 'agent-row-head');
       head.appendChild(element('span', 'agent-row-name', displayName(session)));
       if (line && line.tone === 'wait') head.appendChild(stateDot(line));
-      if (providerName(session)) head.appendChild(chip('provider-chip', providerName(session)));
+      if (providerName(session)) head.appendChild(providerBadge(session));
       if (session.updatedAt) head.appendChild(timeSpan('agent-row-time', session.updatedAt));
       node.appendChild(head);
 
@@ -2753,6 +2780,7 @@
       hasThread: hasThread,
       turnOpen: turnOpen,
       providerName: providerName,
+      providerBadge: providerBadge,
       shortPath: shortPath,
       displayName: displayName,
       modelNameOf: modelNameOf,

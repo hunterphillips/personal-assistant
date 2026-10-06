@@ -98,15 +98,17 @@ const historyLength = (page) => page.evaluate(() => history.length);
 test.describe('with seeded agents', () => {
   test.use({ hubOptions: seeded() });
 
-  test('the list groups agents under Work and Personal with role and provider chips', async ({ page, hub }) => {
+  test('the list groups agents under Work and Personal with role chips and provider icons', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     await expect(page.locator('.agent-group-heading')).toHaveText(['Work', 'Personal']);
     await expect(page.locator('#agents-groups .agent-row .agent-row-name')).toHaveText(['CFO', 'Catchup', 'Second brain', 'Dev', 'Focus']);
 
     const cfo = row(page, 'CFO');
-    await expect(cfo.locator('.role-chip')).toHaveText('Money');
-    await expect(cfo.locator('.provider-chip')).toHaveText('Claude');
+    // The row reads like a messaging list: no role chip, but search still matches the role.
+    await expect(page.locator('#agents-groups .agent-row .role-chip')).toHaveCount(0);
+    await expect(cfo).toHaveAttribute('data-search', /(^|\n)money(\n|$)/);
+    await expect(cfo.locator('.provider-icon')).toHaveAttribute('aria-label', 'Claude');
     await expect(cfo.locator('.agent-row-preview')).toHaveText('Cash is fine.');
     await expect(cfo.locator('.agent-row-time')).toHaveText('12 minutes ago');
     await expect(cfo.locator('.agent-row-state')).toHaveCount(0);
@@ -114,13 +116,19 @@ test.describe('with seeded agents', () => {
 
     const catchup = row(page, 'Catchup');
     await expect(catchup).not.toHaveAttribute('href', /.*/);
-    await expect(catchup.locator('.provider-chip')).toHaveText('Codex');
+    await expect(catchup.locator('.provider-icon')).toHaveAttribute('aria-label', 'Codex');
+    await expect(catchup.locator('.provider-icon')).toHaveAttribute('title', 'Codex');
+    await expect(catchup.locator('.provider-icon')).toHaveAttribute('role', 'img');
+    await expect(catchup.locator('.provider-chip')).toHaveCount(0);
+    const icon = await page.request.get(`${hub.origin}/assets/provider-codex.svg`);
+    expect(icon.status()).toBe(200);
+    expect(icon.headers()['content-type']).toBe('image/svg+xml');
     await expect(catchup.locator('.agent-row-preview')).toHaveText('Invented work folder.');
     await expect(catchup.locator('.agent-row-state')).toHaveCount(0);
 
     await expect(row(page, 'Second brain').locator('.agent-row-dot')).toHaveAttribute('aria-label', 'Waiting for you');
     await expect(row(page, 'Dev').locator('.agent-row-state')).toHaveText('Unavailable');
-    await expect(row(page, 'Focus').locator('.provider-chip')).toHaveCount(0);
+    await expect(row(page, 'Focus').locator('.provider-icon, .provider-chip')).toHaveCount(0);
     await expect(row(page, 'Focus').locator('.agent-row-state')).toHaveCount(0);
 
     for (const link of await page.locator('#agents-groups a.agent-row').all()) {
@@ -257,7 +265,7 @@ test.describe('with seeded agents', () => {
     await expect(page).toHaveURL(`${hub.origin}/?agent=cfo`);
     await expect(pane(page).locator('#agent-name')).toHaveText('CFO');
     await expect(pane(page).locator('#agent-chips .role-chip')).toHaveText('Money');
-    await expect(pane(page).locator('#agent-chips .provider-chip')).toHaveText('Claude');
+    await expect(pane(page).locator('#agent-chips .provider-icon')).toHaveAttribute('aria-label', 'Claude');
     await expect(messages(page)).toHaveText(['How is cash?', 'Cash is fine.'].map((text) => new RegExp(`^${text}`)));
     await expect(messages(page).nth(0)).toHaveClass(/thread-message-user/);
     await expect(messages(page).nth(1)).toHaveClass(/thread-message-assistant/);
@@ -750,9 +758,9 @@ test.describe('with a pinned persona and a group the list leaves out', () => {
     await expect(page.locator('#agents-groups > section').first()).toHaveAttribute('aria-label', 'Pinned');
     await expect(page.locator('.agent-group-heading')).toHaveText(['Work', 'Personal', 'Family']);
     await expect(page.locator('#agents-groups .agent-row .agent-row-name')).toHaveText(['Assistant', 'CFO', 'Catchup', 'Second brain', 'Dev', 'Focus', 'Kin']);
-    // A role that only repeats the name is not shown as a chip.
-    await expect(row(page, 'Assistant').locator('.role-chip')).toHaveCount(0);
-    await expect(row(page, 'Kin').locator('.role-chip')).toHaveText('Family');
+    // Rows carry no role chip; the role stays in what search matches.
+    await expect(page.locator('#agents-groups .agent-row .role-chip')).toHaveCount(0);
+    await expect(row(page, 'Kin')).toHaveAttribute('data-search', /(^|\n)family(\n|$)/);
     await expect(nav(page, 'Home').locator('svg.nav-icon')).toHaveCount(1);
     await expect(nav(page, 'Home').locator('svg.nav-icon path')).toHaveCount(1);
   });
@@ -1254,7 +1262,7 @@ test.describe('the settings form', () => {
       id: 'cfo', name: 'CFO', role: 'Finance', description: 'Invented.', group: 'work', kind: 'persona', cwd: '/invented/cfo',
       provider: 'claude', model: 'sonnet', effort: 'low', jobs: ['com.hunter.cfo.daily', 'com.hunter.cfo.weekly'],
     });
-    if (!phone(page)) await expect(row(page, 'CFO').locator('.role-chip')).toHaveText('Finance');
+    if (!phone(page)) await expect(row(page, 'CFO')).toHaveAttribute('data-search', /(^|\n)finance(\n|$)/);
     // The composer follows the agent's level.
     if (!phone(page)) await expect(page.locator('#agent-model-label')).toHaveText('Sonnet · Low');
   });
@@ -1397,9 +1405,9 @@ test.describe('the settings form', () => {
     expect(Object.keys(written)).toEqual(['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'permission', 'jobs']);
     await expect(field(page, 'permission')).toHaveValue('full');
     await expect(note).toHaveText('Runs every tool without asking.');
-    // The level shows nowhere but the form: the row's chips are as before.
+    // The level shows nowhere but the form: the row is as before.
     if (!phone(page)) {
-      await expect(row(page, 'CFO').locator('.role-chip')).toHaveText('Money');
+      await expect(row(page, 'CFO')).toHaveAttribute('data-search', /(^|\n)money(\n|$)/);
       await expect(row(page, 'CFO').getByText('Full access')).toHaveCount(0);
     }
     await expect(page.locator('#agent-chips').getByText('Full access')).toHaveCount(0);
@@ -1450,7 +1458,7 @@ test.describe('the settings form', () => {
     await expect(page).toHaveURL(`${hub.origin}/?agent=scout-two`);
     await expect(page.locator('#agent-messages .thread-line')).toHaveText('No messages yet.');
     await expect(page.locator('#agent-details')).toBeHidden();
-    if (!phone(page)) await expect(row(page, 'Scout Two').locator('.role-chip')).toHaveText('Files');
+    if (!phone(page)) await expect(row(page, 'Scout Two')).toHaveAttribute('data-search', /(^|\n)files(\n|$)/);
     const written = hub.registry.writes[0].agents.at(-1);
     expect(written).toMatchObject({ id: 'scout-two', name: 'Scout Two', role: 'Files', description: 'Reads my files.', group: 'work', kind: 'persona', provider: 'claude' });
     expect(written.cwd.endsWith('/scout')).toBe(true);

@@ -1702,6 +1702,17 @@ a.agent-row[aria-current="true"] {
   font-size: 12px;
 }
 
+/* A provider's mark, filled with the text color through its SVG as a mask. */
+.provider-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  background-color: currentColor;
+  -webkit-mask: no-repeat center / contain;
+  mask: no-repeat center / contain;
+}
+
 .agent-row-time {
   margin-left: auto;
   color: var(--muted);

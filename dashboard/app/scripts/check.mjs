@@ -1,5 +1,6 @@
 // npm run check: syntax-check every .mjs/.js source file, then confirm every
-// /assets/<name> the shell references is allowlisted and present in public/.
+// /assets/<name> the shell references is allowlisted, and every allowlisted
+// file is present in public/.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -35,8 +36,12 @@ for (const name of referenced) {
   else if (!existsSync(path.join(root, 'public', asset.file))) problems.push(`asset file missing: public/${asset.file}`);
 }
 
+for (const [name, asset] of Object.entries(ASSETS)) {
+  if (!existsSync(path.join(root, 'public', asset.file))) problems.push(`asset file missing: /assets/${name} -> public/${asset.file}`);
+}
+
 if (problems.length > 0) {
   console.error(problems.join('\n'));
   process.exit(1);
 }
-console.log(`check: ${files.length} source files parse; ${referenced.size} shell asset references resolve`);
+console.log(`check: ${files.length} source files parse; ${referenced.size} shell asset references resolve; ${Object.keys(ASSETS).length} assets present`);

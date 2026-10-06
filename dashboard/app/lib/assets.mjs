@@ -21,4 +21,11 @@ export const ASSETS = Object.freeze({
   'theme.js': { file: 'theme.js', type: 'text/javascript; charset=utf-8' },
   'thread-view.js': { file: 'thread-view.js', type: 'text/javascript; charset=utf-8' },
   'quick-chat.js': { file: 'quick-chat.js', type: 'text/javascript; charset=utf-8' },
+  'provider-claude.svg': { file: 'providers/claude.svg', type: 'image/svg+xml' },
+  'provider-codex.svg': { file: 'providers/codex.svg', type: 'image/svg+xml' },
+  'provider-gemini.svg': { file: 'providers/gemini.svg', type: 'image/svg+xml' },
+  'provider-meta.svg': { file: 'providers/meta.svg', type: 'image/svg+xml' },
+  'provider-xai.svg': { file: 'providers/xai.svg', type: 'image/svg+xml' },
+  'provider-mistral.svg': { file: 'providers/mistral.svg', type: 'image/svg+xml' },
+  'provider-ollama.svg': { file: 'providers/ollama.svg', type: 'image/svg+xml' },
 });
