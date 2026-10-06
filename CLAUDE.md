@@ -48,7 +48,7 @@ from here.
   embedded through a proxy and takes the dashboard's theme, Goals reads
   the vault's priorities with add and edit going through the Second
   brain agent, Ideas lists what the weekly run on Myos suggests (at most
-  five a week, from the criteria file), with Discuss opening quick chat,
+  five a run, from the criteria file), with Discuss opening quick chat,
   Start handing the idea to the pinned agent, Dismiss, and Add idea for
   his own; the ideas live in `ideas/items/`, the marks in
   `ideas/marks.json`, Health holds Settings (the default model, effort, and

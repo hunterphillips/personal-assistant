@@ -25,8 +25,9 @@ Weigh each candidate against `ideas/criteria.md`. An idea is about the
 system: what it, one of its agents, or a new agent or tool could do.
 Never an action for Hunter to take. `ideas/criteria.md` is Hunter's own
 note; when it names a theme for the week, that takes precedence. Write
-at most five in this run, whatever earlier runs this week wrote. Draw across the seven kinds; no kind needs an entry.
-Something already built, already running, or already in a plan is not
+at most five in this run, whatever earlier runs this week wrote; a count
+in `ideas/criteria.md` is a count per run. Draw across the seven kinds;
+no kind needs an entry. Something already built, already running, or already in a plan is not
 an idea.
 
 ## Write

@@ -276,8 +276,10 @@
       shellApi.closePanel();
     }
 
+    // The produced runs' ids; Hunter's own ideas never end the wait.
     function runIds(value) {
-      return objectsIn(value && value.runs).map(function (run) { return run.id; }).join('\n');
+      return objectsIn(value && value.runs).filter(function (run) { return run.producer !== 'manual'; })
+        .map(function (run) { return run.id; }).join('\n');
     }
 
     function producerName() { return agentName(data && data.producer) || 'That agent'; }
@@ -342,14 +344,15 @@
       poll = setInterval(load, fast ? FAST_POLL_MS : POLL_MS);
     }
 
-    // Leaves fast polling once a new run lands (clearing the sentence) or
+    // Leaves fast polling, and clears the sentence, once a new run lands or
     // ten minutes pass.
     function settleFast(next) {
       if (!fast) return;
       var landed = runIds(next) !== fast.runs;
       if (!landed && Date.now() < fast.until) return;
       fast = null;
-      if (landed) notice = null;
+      notice = null;
+      rendered = null;
       if (visible) startPoll();
     }
 
