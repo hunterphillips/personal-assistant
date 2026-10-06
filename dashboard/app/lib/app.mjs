@@ -53,6 +53,7 @@ import {
   applyCommonHeaders,
   closedSignal,
   declaredLengthExceeds,
+  hasBody,
   isJsonContentType,
   limitRequestBody,
   readJsonBody,
@@ -197,12 +198,14 @@ export function createApp({
   }
 
   // Every mutation needs an exact allowed Origin. A route that takes a body
-  // needs JSON; a bodyless route refuses any body instead.
+  // needs JSON; a bodyless route refuses any body instead; an optionalBody
+  // route needs JSON only when a body is sent.
   function checkMutation(req, route) {
     const origin = req.headers.origin;
     if (!origin || !allowedOrigins.has(origin) || new URL(origin).host !== req.headers.host.toLowerCase()) {
       throw new HttpError(403, 'forbidden_origin');
     }
+    if (route.optionalBody === true && !hasBody(req)) return;
     // `bodyless` is true for the whole route, or the list of its methods
     // that take no body (a route whose PUT has one and whose DELETE has not).
     const bodyless = Array.isArray(route.bodyless) ? route.bodyless.includes(req.method) : route.bodyless === true;

@@ -6,7 +6,7 @@ import { LIMITS, TIMEOUTS } from '../lib/config.mjs';
 import { createHub } from '../lib/hub.mjs';
 import { createRoutines } from '../lib/routines.mjs';
 import { RuntimeError } from '../lib/runtime/adapter.mjs';
-import { createScheduler } from '../lib/scheduler.mjs';
+import { createScheduler, promptFor } from '../lib/scheduler.mjs';
 import { fakeJobs, fakeRegistry, tempDir } from './support/harness.mjs';
 
 const ZONE = 'America/Chicago';
@@ -483,4 +483,19 @@ test('a tick is single-flight and a routine removed mid-run still ends without t
   await settle(() => logs.some((entry) => entry.event === 'routine_run'));
   assert.deepEqual(logs.filter((entry) => entry.event === 'routine_log_error').map((entry) => entry.error), ['no_such_routine']);
   assert.deepEqual(logs.filter((entry) => entry.event === 'routine_run').map((entry) => entry.outcome), ['finished']);
+});
+
+test('promptFor puts a context between the instruction and the standing paragraph, and a test run with one carries it on its start line', async (t) => {
+  const routine = { name: 'Weekly ideas', instruction: 'Write ideas.' };
+  const standing = 'You may ask other agents. Your reply is recorded in this routine\'s log, not shown as a message; if something in it needs Hunter\'s attention, use notify.';
+  assert.equal(promptFor(routine), `Routine "Weekly ideas" (a scheduled run, not the user): Write ideas.\n\n${standing}`);
+  assert.equal(promptFor(routine, 'For the week of October 5.'), `Routine "Weekly ideas" (a scheduled run, not the user): Write ideas.\n\nFor the week of October 5.\n\n${standing}`);
+
+  const { routines, runtime, scheduler, set, runs } = await setup(t);
+  await routines.create(FIELDS);
+  set('2026-10-05T11:10:00.000Z');
+  assert.deepEqual(await scheduler.testRun('daily-drift', { context: 'For the week of October 5.' }), { ok: true });
+  await settle(() => runs().length === 1);
+  assert.deepEqual(runs(), [{ run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-05T11:10:00.000Z', context: 'For the week of October 5.' }]);
+  assert.match(runtime.sent[0].context.prompt, /\n\nFor the week of October 5\.\n\nYou may ask/);
 });
