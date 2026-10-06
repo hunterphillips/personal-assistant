@@ -50,11 +50,12 @@ from here.
   brain agent, Ideas lists what the weekly run on Myos suggests (at most
   five a run, from the criteria file), with Discuss opening quick chat,
   Start handing the idea to the pinned agent, Dismiss, and Add idea for
-  his own; the ideas live in `ideas/items/`, the marks in
-  `ideas/marks.json`, Health holds Settings (the default model, effort, and
-  permission level, which agent receives the brief, which agent quick
-  chat talks to) and lists the launchd jobs and their state. Every turn
-  runs with the SDK's Claude Code preset system prompt. The design (the
+  his own; the ideas live in `ideas/items/` under the data root, the
+  marks in `ideas/marks.json` there, Health holds Settings (the default
+  model, effort, and permission level, which agent receives the brief,
+  which agent quick chat talks to) and lists the launchd jobs and their
+  state. Every turn runs with the SDK's Claude Code preset system
+  prompt. The design (the
   Assistant as the pinned agent, delegation, models, routines, and what
   comes next: Ideas) is
   `thoughts/shared/plans/2026-09-30-assistant-system-design.md`; the app
@@ -64,19 +65,20 @@ from here.
   `thoughts/shared/plans/2026-10-03-app-header-implementation.md`. The
   app README and `docs/operations.md` hold routes, snapshot shape,
   helpers, and setup.
-- **Registry**: `registry/agents.json`, the agents and project folders the
-  daemon runs and lists: role, description, group, cwd, provider, model
-  and effort, `accepts` (who may message it), launchd labels, `pinned`,
-  `builtin` (seeded from `registry/builtin.json`, no Delete); plus the
-  `groups` list that sets group order and labels. Local data the
-  dashboard writes, never committed; back it up when moving machines.
-  Absolute paths; the daemon keeps the last good copy on a bad edit. Since 2026-10-02 the
+- **Registry**: `registry/agents.json` under the data root, the agents
+  and project folders the daemon runs and lists: role, description,
+  group, cwd, provider, model and effort, `accepts` (who may message
+  it), launchd labels, `pinned`, `builtin` (seeded from the repo's
+  `registry/builtin.json`, no Delete); plus the `groups` list that sets
+  group order and labels. Back it up when moving machines. Absolute
+  paths; the daemon keeps the last good copy on a bad edit. Since 2026-10-02 the
   dashboard writes it (an agent's settings, New agent) as 2-space JSON in
   the schema's key order; hand edits still load.
 - **Use cases**: `daily-brief/`, running every morning since 2026-09-27
   (gather one packet per domain, curate, build, verify), with the newsletter
-  `watch` domain daily; `feed/`, the store behind the Feed, which
-  watch writes and the dashboard reads. A later weekly review or decision
+  `watch` domain daily; the Feed's store under the data root, which
+  watch writes and the dashboard reads, with `feed/README.md` in the
+  repo documenting its schema. A later weekly review or decision
   prep sits beside them with its own contract.
 - **The agents' repos**, each its own repo with its own CLAUDE.md, launchd
   jobs, and state (CFO, Focus, Second brain, personal-context; Watch lives
@@ -129,24 +131,40 @@ picks one up and ends by updating it.
 
 ## Structure
 
+- **The data root**: `~/.personal-assistant/`, or the absolute path
+  `PERSONAL_ASSISTANT_HOME` names. Everything the product writes while it
+  runs lives there; the daemon copies `dashboard/app/docs/root-README.md`
+  into it as `README.md`, the root's layout contract. The daemon holds
+  `daemon.lock` while it runs; a second daemon on the same root refuses
+  to start. The move happened 2026-10-06; the repo's old copies are
+  renamed `.migrated` and are deleted a week later.
 - `dashboard/app/`: the daemon. Three runtime dependencies (the Claude Agent
-  SDK, `ws`, and `zod`); run `npm ci` after pulling. `var/` is local state.
+  SDK, `ws`, and `zod`); run `npm ci` after pulling. `var/` held local state
+  before 2026-10-06; its paths now live under the data root, with the
+  repo's copies renamed `.migrated` until deleted a week later.
 - `dashboard/prototype/`: a static design study with illustrative data; its
   own repository, ignored here.
-- `registry/agents.json`: the agent registry, local data gitignored like
-  `routines/`; `registry/builtin.json`, the committed built-in agents it is
-  seeded from.
-- `routines/`: one file per routine, written by the dashboard; local data,
-  gitignored, never committed; `runs/` beside them holds the runs logs,
-  gitignored too.
-- `notifications/`: the notifications store, gitignored.
+- `registry/agents.json`: the agent registry, under the data root since
+  2026-10-06;
+  `registry/builtin.json`, the committed built-in agents it is seeded from.
+- `routines/`: one file per routine, written by the dashboard, under the
+  data root since 2026-10-06; `runs/` beside them holds the runs logs.
+- `notifications/`: the notifications store, under the data root since
+  2026-10-06.
 - `daily-brief/`: contract, schema, curator rules, `bin/run-brief` and its
-  prompts, `launchd/`, `watch/`. `contributions/` and `briefs/` are outputs,
-  gitignored; each build writes the viewer and `brief-<date>.json`;
+  prompts, `launchd/`, `watch/` (the code; Watch's state lives under the
+  data root's `watch/`). `contributions/` and `briefs/` moved under the
+  data root on 2026-10-06 (the repo's copies renamed `.migrated`, deleted
+  a week later); each build writes the viewer and `brief-<date>.json`;
   `build.py` and `check-viewer.mjs` beside the briefs are code.
-- `feed/`: the feed store's README; `items/` is its output, gitignored.
-- `ideas/`: the store's README and criteria; `items/` and `marks.json`
-  are outputs, gitignored.
+- `feed/`: the feed store's README; `items/` and `relevance.md` are
+  outputs, under the data root since 2026-10-06 (the repo's copies
+  renamed `.migrated`, deleted a week later), with `defaults/feed-relevance.md`
+  seeding the root's copy when it is missing.
+- `ideas/`: the store's README; `items/`, `marks.json`, and `criteria.md`
+  are outputs, under the data root since 2026-10-06 (the repo's copies
+  renamed `.migrated`, deleted a week later), with `defaults/ideas-criteria.md`
+  seeding the root's copy when it is missing.
 - `agents/`: one folder per agent that lives in this repo (Assistant,
   Watch, Myos), its CLAUDE.md and skills; the folder is the agent's `cwd`.
 - `systems/`: symlinks to the agents' repos.
@@ -156,28 +174,31 @@ picks one up and ends by updating it.
 
 - Dashboard: `npm ci`, `npm run check`, `npm test`, `npm run test:browser`
   in `dashboard/app/`. The suites use fixtures, scripted servers, and an
-  isolated Focus copy; never point them at ports 4242 or 4243, the real
-  `daily-brief/briefs/`, the real cmux socket, or `~/.codex`. Build phases
-  in a worktree beside the live checkout, then merge and reinstall back to
-  back, since `public/` is served per request. Reinstall with
-  `bin/dashboard-install` (see `docs/operations.md`).
+  isolated Focus copy, run against a temporary data root, and never point
+  at ports 4242 or 4243, the real data root, the real cmux socket, or
+  `~/.codex`. Build phases in a worktree beside the live checkout, then
+  merge and reinstall back to back, since `public/` is served per request.
+  Reinstall with `bin/dashboard-install` (see `docs/operations.md`).
 - Brief: `daily-brief/bin/run-brief --dry-run`, `--force`, `--date <d>
   --stage <gather|curate|verify>`. Idempotent by date: it exits only when the
-  viewer and valid brief data exist. Never run it from a test against a real
-  date.
+  viewer and valid brief data exist under the data root. Never run it from
+  a test against a real date.
 - The agents' repos: change them through `systems/<name>/` under that repo's own
   rules, and commit there.
 
 ## Cautions
 
 - **Contributions and briefs carry exact financial figures and personal
-  context.** Gitignored, local only. Never commit, publish, or send them.
+  context.** They live under the data root, local only. Never commit,
+  publish, or send them.
 - **Nothing invented reaches the dashboard.** It serves the newest viewer in
-  `daily-brief/briefs/` as the real brief. Sample content goes in the
+  the data root's `briefs/` as the real brief. Sample content goes in the
   scratchpad. Hunter read an invented sample as real on 2026-09-25.
 - **Writes are narrow.** Contributors are read-only toward their repos and
-  the curator toward all of them. The Daily Brief writes contribution files,
-  briefs, and the feedback file saved beside a brief. The dashboard forwards
+  the curator toward all of them, and under the data root the daemon is
+  the only writer of a file once it exists. The Daily Brief writes
+  contribution files, briefs, and the feedback file saved beside a
+  brief. The dashboard forwards
   Focus actions to Focus unchanged and holds no task state; Goals reads the
   vault and only messages the Second brain agent. The dashboard writes
   Ideas marks and manual ideas; Myos's weekly run writes one run file.
