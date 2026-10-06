@@ -109,6 +109,12 @@ what `lib/app.mjs` expects from it.
 - `lib/bindings.mjs` reads the terminal bindings `bin/codex-new` records.
 - `lib/config.mjs` and `lib/assets.mjs` hold configuration and the asset allowlist.
 
+`lib/root.mjs` is the data root's layout and migration module: it knows the
+layout of `~/.personal-assistant/` (or `PERSONAL_ASSISTANT_HOME`), seeds a new
+root with its defaults and `docs/root-README.md`, moves the data a checkout
+holds into the root once, renaming each source to `.migrated`, and guards the
+root with `daemon.lock`. The daemon does not call it yet.
+
 ### Dashboard status
 
 `GET /api/dashboard/status` always answers 200 with
