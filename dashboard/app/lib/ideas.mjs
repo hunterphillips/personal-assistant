@@ -1,7 +1,8 @@
 // Ideas: producer runs plus the marks and manual ideas the dashboard writes.
 // Reads never reject. Files are indexed oldest first so the first occurrence
 // of an id owns it across the store, while only the newest feedFiles runs are
-// returned. add() and mark() share one serialized, atomic write queue.
+// returned. add(), mark(), and unmark() share one serialized, atomic write
+// queue.
 
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
@@ -14,6 +15,7 @@ const FILE_NAME = /^\d{4}-\d{2}-\d{2}-[a-z][a-z0-9-]*\.json$/;
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const URL = /^https?:\/\//i;
 const KINDS = new Set(['workflow', 'view', 'app', 'tool', 'skill', 'plugin', 'agent']);
+const MARKS = new Set(['taken', 'dismissed', 'saved']);
 
 export class IdeasError extends Error {
   constructor(code) {
@@ -101,6 +103,19 @@ export function createIdeas({ dir, marksFile, limits, zone, log: rawLog = () => 
     });
   }
 
+  function unmark(id) {
+    return serialized(async () => {
+      await read();
+      if (!cache?.marksWritable) throw new IdeasError('marks_invalid');
+      if (!cache?.index.has(id)) throw new IdeasError('no_such_item');
+      const marks = { ...cache.marks };
+      delete marks[id];
+      await atomicJson(marksFile, marks);
+      await read();
+      return cache.index.get(id) ?? null;
+    });
+  }
+
   function add(value) {
     return serialized(async () => {
       await read();
@@ -137,7 +152,7 @@ export function createIdeas({ dir, marksFile, limits, zone, log: rawLog = () => 
     return [...(cache?.allRuns ?? [])].reverse().find((run) => listed.has(run.producer))?.producer ?? defaultAgentId(agents);
   }
 
-  return { read, find, mark, add, producerAgent };
+  return { read, find, mark, unmark, add, producerAgent };
 }
 
 async function scanStore(dir, marksFile, log) {
@@ -175,7 +190,7 @@ async function readMarks(file, stats, max, problems, fail) {
     if (!isRecord(value)) throw new Error('shape');
     const marks = {};
     for (const [id, mark] of Object.entries(value)) {
-      if (!ID.test(id) || !isRecord(mark) || !['taken', 'dismissed'].includes(mark.status) || typeof mark.at !== 'string') continue;
+      if (!ID.test(id) || !isRecord(mark) || !MARKS.has(mark.status) || typeof mark.at !== 'string') continue;
       marks[id] = { status: mark.status, at: mark.at, ...(typeof mark.agent === 'string' ? { agent: mark.agent } : {}) };
     }
     return { value: marks, writable: true };
@@ -261,7 +276,7 @@ function parseRun(text, name, limits, ids, marks, problems, index) {
     const item = {
       id: entry.id, title: entry.title, text: entry.text, kind: KINDS.has(entry.kind) ? entry.kind : null,
       agents: [...entry.agents], source: entry.source,
-      status: mark?.status === 'taken' ? 'taken' : 'new', ...(mark?.status === 'taken' && mark.agent ? { agent: mark.agent } : {}),
+      status: mark?.status === 'taken' || mark?.status === 'saved' ? mark.status : 'new', ...(mark?.status === 'taken' && mark.agent ? { agent: mark.agent } : {}),
     };
     items.push(item);
     index.set(item.id, Object.freeze({ ...item, producer: body.producer, date: body.date }));
