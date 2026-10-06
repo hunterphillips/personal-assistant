@@ -311,6 +311,7 @@
       savedOnly = true;
       chosen = null;
       render();
+      document.getElementById('ideas-page').scrollTop = 0;
       shellApi.closePanel();
     }
 

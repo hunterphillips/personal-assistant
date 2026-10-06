@@ -1092,11 +1092,8 @@ div.panel-row.now-row:hover { background: none; }
 .feed-page {
   flex: 1;
   min-height: 0;
-  padding: 24px 34px 136px;
+  padding: 24px 34px 40px;
   overflow: auto;
-  /* Older weeks fade toward the bottom; the padding lets the last row scroll clear. */
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 96px), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 96px), transparent);
 }
 
 .feed-page > * {
@@ -2623,7 +2620,7 @@ textarea.form-input {
   #view-goals,
   #view-health { padding: 20px 16px; }
 
-  .feed-page,
+  .feed-page { padding: 16px 16px 24px; }
   .ideas-page { padding: 16px 16px 120px; }
   .ideas-item { margin-right: -8px; margin-left: -8px; padding-right: 8px; padding-left: 8px; }
   .ideas-menu-toggle { opacity: 1; }

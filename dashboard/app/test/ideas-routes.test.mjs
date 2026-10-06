@@ -132,6 +132,9 @@ test('save refuses a started idea and start takes a saved one', async (t) => {
   assert.equal(JSON.parse(await readFile(app.marksFile, 'utf8'))['fixture-agent-card'].status, 'taken');
   const again = await post(app, '/api/ideas/save', { id: 'fixture-agent-card' });
   assert.deepEqual([again.status, again.json], [409, { error: 'already_started' }]);
+  const unsave = await post(app, '/api/ideas/unsave', { id: 'fixture-agent-card' });
+  assert.deepEqual([unsave.status, unsave.json], [409, { error: 'already_started' }]);
+  assert.equal(JSON.parse(await readFile(app.marksFile, 'utf8'))['fixture-agent-card'].status, 'taken');
 });
 
 test('start targets the first pinned Claude agent, sends context, then writes the mark', async (t) => {

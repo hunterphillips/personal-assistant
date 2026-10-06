@@ -509,7 +509,7 @@ rail of six icon links, Home, Feed, Focus, Goals, Ideas, and Health; a
 path the shell does not know lands on Agents. Between the rail and every
 view sits a side panel (`aside#panel`) holding one section per view: the
 view's own list (agents with search, Feed sources, Goals areas, Health
-jobs, Ideas Saved and weeks) or Now (agents waiting, open notifications, today's
+jobs, Ideas: Saved and weeks) or Now (agents waiting, open notifications, today's
 brief), which a view without its own, Focus, shows. `public/panel.js`
 draws Now from every state and opens a row's target through the shell.
 Its toggle, "Hide side panel" or "Show side

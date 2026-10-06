@@ -231,10 +231,12 @@ test.describe('Ideas', () => {
       const of = (node) => { const style = getComputedStyle(node); return style.maskImage || style.webkitMaskImage; };
       return {
         page: of(document.getElementById('ideas-page')),
+        feed: of(document.getElementById('feed-page')),
         items: [...document.querySelectorAll('.ideas-item, .ideas-week')].map(of),
       };
     });
     expect(masks.page).toContain('linear-gradient');
+    expect(masks.feed).toBe('none');
     expect(masks.items.every((value) => value === 'none')).toBe(true);
   });
 
