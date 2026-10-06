@@ -13,7 +13,7 @@ lives in its repository; the data lives here, as plain files you can read.
 | `layout.json` | The layout's version, when the root was created, and the checkout its data came from. |
 | `daemon.lock` | The running daemon's pid and start time. |
 | `settings.json` | The dashboard's settings. |
-| `thread-reads.json` | Which replies have been read in each thread. |
+| `thread-reads.json` | When each agent's thread was last read. |
 | `registry/agents.json` | The agent registry. |
 | `routines/` | One `<id>.json` per routine, and `runs/<id>.jsonl` with each routine's runs. |
 | `threads/` | Each agent's thread, `<id>.json` and `<id>.jsonl`, and `brief-notices.json`. |
