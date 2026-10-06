@@ -22,7 +22,7 @@ lives in its repository; the data lives here, as plain files you can read.
 | `feed/items/` | One `<date>-<producer>.json` per run of a Feed producer. |
 | `feed/relevance.md` | Hunter's criteria for the Feed. |
 | `ideas/items/` | One `<date>-<producer>.json` per run of an Ideas producer. |
-| `ideas/marks.json` | The marks on ideas: taken, dismissed, saved. |
+| `ideas/marks.json` | The marks on ideas: taken, dismissed, saved, replaced. |
 | `ideas/criteria.md` | Hunter's criteria for Ideas. |
 | `briefs/` | Each day's brief, memo, viewer, brief data, notice, and feedback, and the run lock. |
 | `briefs/contributions/` | Each day's contributions, one folder per date. |

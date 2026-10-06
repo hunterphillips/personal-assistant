@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, cp, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -259,8 +259,15 @@ test('replaceWeek retires only that week\'s new ideas in one write and answers w
   await writeFile(path.join(paths.dir, '2026-09-21-manual.json'), JSON.stringify({
     producer: 'manual', date: '2026-09-21', items: [item('fixture-own', { kind: null, agents: [] })],
   }));
+  const runFiles = async () => {
+    const names = (await readdir(paths.dir)).filter((name) => name.endsWith('.json')).sort();
+    return Promise.all(names.map(async (name) => [name, await readFile(path.join(paths.dir, name), 'utf8')]));
+  };
+  const before = await runFiles();
   const ideas = store(paths);
   const answer = await ideas.replaceWeek('2026-09-21');
+  // Nothing is deleted from any run file; only marks.json changes.
+  assert.deepEqual(await runFiles(), before);
   assert.deepEqual(answer.replaced.sort(), ['fixture-midweek', 'fixture-reading-tool', 'fixture-written-later']);
   assert.deepEqual(answer.saved, [{ id: 'fixture-weekly-map', title: 'Fixture weekly map' }]);
   const marks = JSON.parse(await readFile(paths.marksFile, 'utf8'));

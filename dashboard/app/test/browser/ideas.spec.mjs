@@ -470,6 +470,27 @@ test.describe('Refresh a week', () => {
     await expect(item(page, 'fixture-weekly-map')).toBeVisible();
   });
 
+  test('Hunter\'s own ideas stay through a refresh, and a week of only his ideas has the button', async ({ page, hub }) => {
+    const manual = (date, id, title) => writeFile(path.join(hub.ideasDir, `${date}-manual.json`), JSON.stringify({
+      producer: 'manual', date, generated_at: `${date}T09:00:00Z`,
+      items: [{ id, title, text: '', kind: null, agents: [], source: null }],
+    }));
+    await manual('2026-09-23', 'fixture-own-idea', 'Fixture own idea');
+    await manual('2026-08-31', 'fixture-own-old', 'Fixture own old');
+    await page.goto(`${hub.origin}/ideas`);
+    await expectView(page, 'ideas', 'Ideas');
+    await expect(weeks(page).locator('.ideas-week-title')).toHaveText(['Week of September 28', 'Week of September 21', 'Week of August 31']);
+    await expect(refresh(page, '2026-08-31')).toBeEnabled();
+    await refresh(page, '2026-09-21').click();
+    await expect(weekNotice(page, '2026-09-21')).toHaveText(WRITING);
+    await expect(item(page, 'fixture-reading-tool')).toHaveCount(0);
+    await expect(item(page, 'fixture-weekly-map')).toHaveCount(0);
+    await expect(item(page, 'fixture-own-idea')).toBeVisible();
+    await expect(item(page, 'fixture-own-old')).toBeVisible();
+    await expect.poll(() => hub.routines.runs(IDEAS_ROUTINE.id)[0]?.context).toBe(
+      'Write this run\'s ideas for the week of September 21 (`week: "2026-09-21"` in the file).\nThat week has no saved ideas.');
+  });
+
   test('a run file with a week groups under that week', async ({ page, hub }) => {
     await writeFile(path.join(hub.ideasDir, '2026-10-02-myos.json'), JSON.stringify({
       fixture: true, producer: 'myos', date: '2026-10-02', week: '2026-09-21',
