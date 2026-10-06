@@ -239,21 +239,26 @@ test.describe('the side panel', () => {
     await openSide(page);
     await expect(side(page)).toBeVisible();
     await expect(page.locator('#panel [data-panel-for="now"]')).toBeHidden();
+    // watch/2026-09-28/5's source joins two newsletters ("Invented Gazette,
+    // Invented Weekly"); it counts once under each, with no combined row.
     await expect(side(page).locator('.panel-row-name')).toHaveText([
-      'All', 'Invented Gazette', 'Invented Letters', 'Invented Weekly', 'Invented Gazette, Invented Weekly',
+      'All', 'Invented Gazette', 'Invented Letters', 'Invented Weekly',
     ]);
-    await expect(side(page).locator('.panel-row-count')).toHaveText(['10', '4', '3', '2', '1']);
+    await expect(side(page).locator('.panel-row-count')).toHaveText(['10', '5', '3', '3']);
     await expect(side(page).locator('h2.panel-heading')).toHaveText(['Sources']);
     await expect(side(page).locator('.panel-heading')).toHaveCSS('text-transform', 'uppercase');
     await expect(sourceRow(page, '')).toHaveAttribute('aria-current', 'true');
     await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(1);
     await expect(sourceRow(page, 'Invented Gazette')).toHaveCSS('height', '40px');
 
-    // The rows' counts are the posts' own.
+    // The rows' counts are the posts' own, splitting a joined source on
+    // "/" and ",".
     const posts = await page.locator('#feed-runs .feed-item .feed-badge').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')));
     expect(posts).toHaveLength(10);
-    for (const name of ['Invented Gazette', 'Invented Letters', 'Invented Weekly', 'Invented Gazette, Invented Weekly']) {
-      await expect(sourceRow(page, name).locator('.panel-row-count')).toHaveText(String(posts.filter((source) => source === name).length));
+    const splitNames = (source) => source.split(/[/,]/).map((part) => part.trim());
+    for (const name of ['Invented Gazette', 'Invented Letters', 'Invented Weekly']) {
+      const matching = posts.filter((source) => splitNames(source).includes(name)).length;
+      await expect(sourceRow(page, name).locator('.panel-row-count')).toHaveText(String(matching));
     }
 
     // The same initials and colour as the posts' badges.
@@ -264,6 +269,27 @@ test.describe('the side panel', () => {
     await expect(sourceRow(page, '').locator('.feed-badge')).toHaveCount(0);
   });
 
+  test('a source named with another in one item is split into its own row', async ({ page, hub }) => {
+    await writeFile(path.join(hub.feedDir, '2026-10-05-watch.json'), JSON.stringify({
+      producer: 'watch', date: '2026-10-05', items: [
+        { id: 'watch/2026-10-05/1', title: 'Story one', source: 'A / B', url: 'https://example.com/1', summary: 'Summary one.' },
+        { id: 'watch/2026-10-05/2', title: 'Story two', source: 'B, A', url: 'https://example.com/2', summary: 'Summary two.' },
+      ],
+    }));
+    await page.goto(`${hub.origin}/feed`);
+    await expectView(page, 'feed', 'Feed');
+    await expect(runs(page)).toHaveCount(3);
+    await openSide(page);
+    await expect(sourceRow(page, 'A / B')).toHaveCount(0);
+    await expect(sourceRow(page, 'B, A')).toHaveCount(0);
+    await expect(sourceRow(page, 'A').locator('.panel-row-count')).toHaveText('2');
+    await expect(sourceRow(page, 'B').locator('.panel-row-count')).toHaveText('2');
+
+    await sourceRow(page, 'A').click();
+    await expect(item(page, 'watch/2026-10-05/1')).toBeVisible();
+    await expect(item(page, 'watch/2026-10-05/2')).toBeVisible();
+  });
+
   test('choosing a source shows only its posts; Show all and All restore them', async ({ page, hub }) => {
     await openFeed(page, hub);
     const line = page.locator('#feed-filter');
@@ -272,11 +298,13 @@ test.describe('the side panel', () => {
     await pick(page, 'Invented Weekly');
     await expect(sourceRow(page, 'Invented Weekly')).toHaveAttribute('aria-current', 'true');
     await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(1);
-    await expect(shownItems(page)).toHaveCount(2);
+    // watch/2026-09-28/5 names both Invented Gazette and Invented Weekly,
+    // so it shows under either.
+    await expect(shownItems(page)).toHaveCount(3);
     await expect(item(page, 'watch/2026-09-28/2')).toBeVisible();
+    await expect(item(page, 'watch/2026-09-28/5')).toBeVisible();
     await expect(item(page, 'watch/2026-09-28/6')).toBeVisible();
     await expect(item(page, 'watch/2026-09-28/1')).toBeHidden();
-    await expect(item(page, 'watch/2026-09-28/5')).toBeHidden();
     // The run with no Weekly post is hidden whole.
     await expect(page.locator('[data-feed-run="2026-09-21-watch"]')).toBeHidden();
     await expect(line).toBeVisible();
@@ -303,11 +331,11 @@ test.describe('the side panel', () => {
     await page.clock.install();
     await openFeed(page, hub);
     await pick(page, 'Invented Weekly');
-    await expect(shownItems(page)).toHaveCount(2);
+    await expect(shownItems(page)).toHaveCount(3);
     const before = hub.requests('/api/feed').length;
     await page.clock.runFor(60_000);
     await expect.poll(() => hub.requests('/api/feed').length).toBeGreaterThan(before);
-    await expect(shownItems(page)).toHaveCount(2);
+    await expect(shownItems(page)).toHaveCount(3);
 
     await nav(page, 'Home').click();
     await expectView(page, 'agents', 'Agents');
@@ -323,7 +351,7 @@ test.describe('the side panel', () => {
   test('on a phone a choice closes the drawer', async ({ page, hub }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openFeed(page, hub);
-    await expect(side(page).locator('.panel-row')).toHaveCount(5);
+    await expect(side(page).locator('.panel-row')).toHaveCount(4);
     await page.locator('#panel-toggle').click();
     await expect(page.locator('#panel')).toBeVisible();
     await expect(page.locator('#panel-scrim')).toBeVisible();
@@ -331,7 +359,8 @@ test.describe('the side panel', () => {
     await expect(page.locator('#panel-toggle')).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('#panel')).toBeHidden();
     await expect(page.locator('#panel-scrim')).toBeHidden();
-    await expect(shownItems(page)).toHaveCount(4);
+    // watch/2026-09-28/5 names both Invented Gazette and Invented Weekly.
+    await expect(shownItems(page)).toHaveCount(5);
     await expect(page.locator('#feed-filter-text')).toHaveText('Showing Invented Gazette only.');
   });
 });

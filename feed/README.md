@@ -26,7 +26,9 @@ redo a run, delete its file first.
 
 - `id` is `<producer>/<date>/<n>`, unique across the store.
 - `title`, `source`, `url`, `summary` are required and non-empty; `url` is
-  `http` or `https`.
+  `http` or `https`. A story that ran in more than one newsletter names them
+  in one `source` string joined by " / " or ", "; the Feed lists each name
+  as its own source.
 - `kept` is true for an item the producer also handed to the Daily Brief.
 - `test` is the producer's relevance criterion number, or null. Not shown.
 - `image`, optional, is an absolute `http` or `https` URL of the story's

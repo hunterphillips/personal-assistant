@@ -84,6 +84,15 @@
     return words.map(function (word) { return Array.from(word)[0]; }).join('').toUpperCase();
   }
 
+  // An item's source names: the producer joins two newsletter names with
+  // " / " or ", " when a story ran in both, so the panel counts and filters
+  // by each name rather than the joined string.
+  function splitSourceNames(source) {
+    return String(source).split(/[/,]/).map(function (part) {
+      return part.replace(/\s+/g, ' ').trim();
+    }).filter(Boolean);
+  }
+
   // One of the badge colours, the same for a source every time.
   function colourIndex(source) {
     var hash = 0;
@@ -229,14 +238,16 @@
       return group;
     }
 
-    // Each source with its count across the runs drawn, most posts first,
-    // then by name.
+    // Each source name with its count across the runs drawn, most posts
+    // first, then by name. An item whose source names two newsletters
+    // counts once under each name.
     function sourceCounts(shown) {
       var counts = {};
       shown.forEach(function (run) {
         objectsIn(run.items).forEach(function (item) {
-          var key = String(item.source);
-          counts[key] = (counts[key] || 0) + 1;
+          splitSourceNames(item.source).forEach(function (name) {
+            counts[name] = (counts[name] || 0) + 1;
+          });
         });
       });
       return Object.keys(counts).map(function (name) { return { name: name, count: counts[name] }; })
@@ -257,10 +268,9 @@
       return row;
     }
 
-    function renderPanel(sources) {
+    function renderPanel(sources, total) {
       if (!side) return;
       side.textContent = '';
-      var total = sources.reduce(function (sum, entry) { return sum + entry.count; }, 0);
       side.appendChild(panelRow('', 'All', total));
       side.appendChild(element('h2', 'panel-heading', 'Sources'));
       sources.forEach(function (entry) { side.appendChild(panelRow(entry.name, entry.name, entry.count)); });
@@ -271,7 +281,8 @@
     function applyFilter() {
       var items = runs.querySelectorAll('.feed-item');
       for (var i = 0; i < items.length; i += 1) {
-        items[i].hidden = source !== null && items[i].getAttribute('data-feed-source') !== source;
+        var names = splitSourceNames(items[i].getAttribute('data-feed-source'));
+        items[i].hidden = source !== null && names.indexOf(source) === -1;
       }
       var groups = runs.querySelectorAll('.feed-run');
       for (var g = 0; g < groups.length; g += 1) {
@@ -333,8 +344,10 @@
       var sources = sourceCounts(shown);
       // A source gone from the store takes its filter with it.
       if (source !== null && !sources.some(function (entry) { return entry.name === source; })) source = null;
-      if (built.length > 0) renderPanel(sources);
-      else if (side) side.textContent = '';
+      if (built.length > 0) {
+        var total = shown.reduce(function (sum, run) { return sum + objectsIn(run.items).length; }, 0);
+        renderPanel(sources, total);
+      } else if (side) side.textContent = '';
       applyFilter();
       shellApi.panelChanged();
       rendered = JSON.stringify(data);
