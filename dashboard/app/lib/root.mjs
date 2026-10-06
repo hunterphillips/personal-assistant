@@ -36,7 +36,9 @@
 //   anything is copied or renamed. Then each missing target is copied into
 //   place (a temporary name beside it, then a rename), verified file by file
 //   (relative path, type, mode, size, SHA-256), and each source is renamed to
-//   <source>.migrated. Nothing is deleted. A run cut off between the steps
+//   <source>.migrated. daily-brief/briefs/ stays for its code: its data files
+//   and any other file but build.py, check-viewer.mjs, and __pycache__/ move
+//   into daily-brief/briefs.migrated/ instead. Nothing is deleted. A run cut off between the steps
 //   reruns cleanly: a copied source compares equal and is renamed. `rename`
 //   replaces fs.rename for the tests.
 //
@@ -301,9 +303,17 @@ export async function prepareRoot(root, { migrateFrom, defaultsDir, readmeFile, 
   return { created: true, moved: migration.moved, skipped: migration.skipped, seeded };
 }
 
-// A pair's units: the source itself when it exists, else none.
+// A pair's units: the source itself when it is a file, link, or directory,
+// else none.
 async function entryUnits(source, target) {
-  return (await exists(source)) ? [{ source, target }] : [];
+  let stats;
+  try {
+    stats = await lstat(source);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+  return stats.isFile() || stats.isDirectory() || stats.isSymbolicLink() ? [{ source, target }] : [];
 }
 
 // The briefs directory's units: each data file goes to the root and then to
@@ -373,9 +383,9 @@ async function listTree(top) {
     } else if (stats.isFile()) {
       const hash = createHash('sha256').update(await readFile(file)).digest('hex');
       entries.set(rel, { type: 'file', mode: stats.mode & 0o7777, size: stats.size, hash });
-    } else {
-      entries.set(rel, { type: 'other' });
     }
+    // Sockets and FIFOs (a running Codex server's app.sock) are not data:
+    // they are neither compared nor copied, and stay with the source.
   };
   await visit(top, '', info);
   return entries;
@@ -405,7 +415,7 @@ async function copyTree(source, target) {
     await chmod(target, stats.mode & 0o7777);
   } else if (stats.isSymbolicLink()) {
     await symlink(await readlink(source), target);
-  } else {
+  } else if (stats.isFile()) {
     await copyFile(source, target, constants.COPYFILE_EXCL);
     await chmod(target, stats.mode & 0o7777);
   }

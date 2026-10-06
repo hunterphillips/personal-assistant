@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -291,6 +292,21 @@ test('a target already holding the same bytes counts as moved', async (t) => {
   assert.ok(existsSync(path.join(repo, 'feed/items.migrated')));
 });
 
+test('a socket in a source directory is left with the source and does not stop the move', async (t) => {
+  const dir = await tempDir(t);
+  const repo = await fixtureRepo(dir);
+  const root = path.join(dir, 'root');
+  const socket = path.join(repo, 'dashboard/app/var/codex/app.sock');
+  const server = createServer();
+  await new Promise((resolve) => server.listen(socket, resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const result = await migrateFromRepo(root, { migrateFrom: repo, log: () => {} });
+  assert.deepEqual(result.moved, ALL_KEYS);
+  assert.equal(await readFile(path.join(root, 'codex/bindings.json'), 'utf8'), '[]\n');
+  assert.ok(!existsSync(path.join(root, 'codex/app.sock')));
+  assert.ok((await lstat(path.join(repo, 'dashboard/app/var/codex.migrated/app.sock'))).isSocket());
+});
+
 test('a target with different bytes is a conflict that renames nothing and writes no layout', async (t) => {
   const dir = await tempDir(t);
   const repo = await fixtureRepo(dir);
@@ -368,4 +384,38 @@ test('claimLock refuses a live holder, takes over a stale one, and releases only
   await writeFile(lock, other);
   await winner.release();
   assert.equal(await readFile(lock, 'utf8'), other);
+});
+
+test('two processes racing over a stale lock leave exactly one holder', async (t) => {
+  const dir = await tempDir(t);
+  const root = path.join(dir, 'root');
+  await mkdir(root);
+  const dead = spawnSync(process.execPath, ['-e', '']).pid;
+  const moduleUrl = new URL('../lib/root.mjs', import.meta.url).href;
+  // Each child claims, says what happened, and holds a won claim until
+  // stdin closes, so the winner is still alive while the loser looks.
+  const script = `
+    const { claimLock } = await import(${JSON.stringify(moduleUrl)});
+    try { await claimLock(process.argv[1]); console.log('won'); }
+    catch (error) { console.log(error.code); }
+    process.stdin.resume();
+    process.stdin.on('end', () => process.exit(0));
+  `;
+  for (let round = 0; round < 5; round += 1) {
+    await writeFile(path.join(root, 'daemon.lock'), JSON.stringify({ pid: dead, startedAt: '2026-10-01T00:00:00.000Z' }));
+    const children = [0, 1].map(() => spawn(process.execPath, ['--input-type=module', '-e', script, root], { stdio: ['pipe', 'pipe', 'inherit'] }));
+    t.after(() => { for (const child of children) child.kill(); });
+    const outcomes = await Promise.all(children.map((child) => new Promise((resolve) => {
+      let out = '';
+      child.stdout.on('data', (chunk) => {
+        out += chunk;
+        if (out.includes('\n')) resolve(out.trim());
+      });
+    })));
+    assert.deepEqual(outcomes.sort(), ['root_locked', 'won'], `round ${round}`);
+    const holder = JSON.parse(await readFile(path.join(root, 'daemon.lock'), 'utf8')).pid;
+    assert.ok(children.some((child) => child.pid === holder));
+    for (const child of children) child.stdin.end();
+    await Promise.all(children.map((child) => new Promise((resolve) => child.once('exit', resolve))));
+  }
 });
