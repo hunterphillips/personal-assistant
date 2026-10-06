@@ -1978,4 +1978,4 @@ They never contain request bodies, brief text, persona messages, tool
 inputs, or the cmux password.
 
 Real briefs, contributions, and feedback contain personal data. They stay in
-`daily-brief/` and never enter this repository.
+the data root's `briefs/` and never enter this repository.

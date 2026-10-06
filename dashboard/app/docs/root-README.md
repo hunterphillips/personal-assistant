@@ -17,7 +17,7 @@ lives in its repository; the data lives here, as plain files you can read.
 | `registry/agents.json` | The agent registry. |
 | `routines/` | One `<id>.json` per routine, and `runs/<id>.jsonl` with each routine's runs. |
 | `threads/` | Each agent's thread, `<id>.json` and `<id>.jsonl`, and `brief-notices.json`. |
-| `codex/` | `bindings.json`, `owner.json`, and `waiting/` for the Codex threads. |
+| `codex/` | `bindings.json` and its `bindings.lock`, `owner.json`, the server's `app.sock`, and `waiting/` for the Codex threads. |
 | `notifications/` | `notifications.jsonl`. |
 | `feed/items/` | One `<date>-<producer>.json` per run of a Feed producer. |
 | `feed/relevance.md` | Hunter's criteria for the Feed. |
@@ -26,7 +26,7 @@ lives in its repository; the data lives here, as plain files you can read.
 | `ideas/criteria.md` | Hunter's criteria for Ideas. |
 | `briefs/` | Each day's brief, memo, viewer, brief data, notice, and feedback, and the run lock. |
 | `briefs/contributions/` | Each day's contributions, one folder per date. |
-| `watch/` | Watch's `packets/`, `overflow/`, `seen.jsonl`, and `state.json`. |
+| `watch/` | Watch's `packets/`, `overflow/`, `seen.jsonl`, `state.json`, and its run lock. |
 | `log/` | `dashboard.log`, and under `checkout/` the log the checkout held before the move. |
 | `cache/` | The rendered launchd plist and its backups under `launchd/` (the checkout's under `launchd/checkout/`), and `ops/`. |
 
@@ -35,7 +35,8 @@ lives in its repository; the data lives here, as plain files you can read.
 The daemon owns every file that is edited after it is created. A producer, a
 scheduled run that adds something, only creates its own run files, such as a
 new file under `feed/items/` or `ideas/items/`, and never edits one that
-exists.
+exists. The brief run writes `briefs/` and marks a packet reported in
+`watch/state.json`; Watch writes `watch/` and its Feed file.
 
 `layout.json` names the layout version. A daemon that finds a version newer
 than the one it knows leaves the root alone.
@@ -49,7 +50,8 @@ else is the record; back it up when moving machines.
 absolute path. The daemon sets that variable for every agent turn and
 routine it runs, so an agent finds this file at
 `$PERSONAL_ASSISTANT_HOME/README.md`. Agents change daemon-owned files only
-through the dashboard's routes and tools.
+through the dashboard's routes and tools. The brief run and Watch read the
+variable from their own environment, with the same default.
 
 ## The lock
 
