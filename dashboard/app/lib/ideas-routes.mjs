@@ -1,6 +1,8 @@
 // Ideas routes over ideas.mjs and the criteria instructions reader.
 // Mutations answer with the fresh store so the acting browser updates at
-// once. Starting marks an idea only after an agent accepts the turn.
+// once. Starting marks an idea only after an agent accepts the turn. The
+// read names the producer and its ideas routine, which New ideas runs
+// through POST /api/routines/:id/run.
 
 import { startTurn } from './agent-routes.mjs';
 import { defaultAgentId } from './builtins.mjs';
@@ -22,10 +24,22 @@ export function instructionsMessage(text) {
     'Ask me what you need, then edit the file under its own rules and tell me what changed.';
 }
 
+// The producer's ideas routine: of `items` (the snapshot's routines, in its
+// order), the first of `agentId`'s whose instruction or name contains the
+// word "ideas", case-insensitive. Its id, or null.
+export function ideasRoutine(items, agentId) {
+  const word = /\bideas\b/i;
+  const found = (Array.isArray(items) ? items : []).find((routine) => routine.agent === agentId &&
+    (word.test(routine.instruction ?? '') || word.test(routine.name ?? '')));
+  return found ? found.id : null;
+}
+
 export function createIdeasRoutes({ ideas, instructions, hub, log, limits, shuttingDown }) {
   async function result() {
     const value = await ideas.read();
-    return { ...value, producer: await ideas.producerAgent(hub.snapshot().agents) };
+    const snapshot = hub.snapshot();
+    const producer = await ideas.producerAgent(snapshot.agents);
+    return { ...value, producer, routine: ideasRoutine(snapshot.routines?.items, producer) };
   }
 
   async function serveRead(res) {

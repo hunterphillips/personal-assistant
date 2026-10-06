@@ -1,7 +1,9 @@
 // Ideas: suggestions from producer runs and Hunter's own additions, grouped
 // into Monday-start weeks. The view fetches /api/ideas on show and every 60
 // seconds. Discuss opens quick chat without sending a turn; Start sends the
-// idea to the pinned agent; Dismiss removes it from the returned list. The
+// idea to the pinned agent; Dismiss removes it from the returned list. New
+// ideas runs the producer's ideas routine (the store's `routine`) now and
+// polls every 10 seconds until a new run lands or ten minutes pass. The
 // criteria panel is instructions.js's. Each row expands its description and
 // owns one overflow menu whose buttons use data-ideas-action so the shell's
 // data-action handler never owns them.
@@ -14,6 +16,9 @@
   'use strict';
 
   var POLL_MS = 60000;
+  var FAST_POLL_MS = 10000;
+  var FAST_FOR_MS = 600000;
+  var NO_ROUTINE = 'No routine writes ideas.';
   var TIMEOUT_MS = 8000;
   var NO_ANSWER = 'The dashboard did not respond.';
   var EMPTY = 'No ideas yet.';
@@ -91,6 +96,7 @@
     var addCancel = document.getElementById('ideas-add-cancel');
     var addSend = addForm.querySelector('button[type="submit"]');
     var addReason = document.getElementById('ideas-add-reason');
+    var newButton = document.getElementById('ideas-new');
     var data = null;
     var state = null;
     var visible = false;
@@ -101,6 +107,9 @@
     var discussed = null;
     var openMenu = null;
     var chosen = null; // the week key of the panel's current row, or null
+    var notice = null; // the New ideas sentence, or null
+    var running = false; // a New ideas request is in flight
+    var fast = null; // { runs, until } while a New ideas run is awaited
 
     function agents() { return state && Array.isArray(state.agents) ? state.agents : []; }
     function agent(id) { return agents().find(function (entry) { return entry.id === id; }) || null; }
@@ -267,6 +276,25 @@
       shellApi.closePanel();
     }
 
+    // The produced runs' ids; Hunter's own ideas never end the wait.
+    function runIds(value) {
+      return objectsIn(value && value.runs).filter(function (run) { return run.producer !== 'manual'; })
+        .map(function (run) { return run.id; }).join('\n');
+    }
+
+    function producerName() { return agentName(data && data.producer) || 'That agent'; }
+
+    function hasRoutine() { return Boolean(data && typeof data.routine === 'string'); }
+
+    function syncNew() {
+      var missing = Boolean(data) && !hasRoutine();
+      newButton.disabled = running || missing;
+      if (missing) newButton.title = NO_ROUTINE;
+      else newButton.removeAttribute('title');
+    }
+
+    function noticeLine() { return notice || (data && !hasRoutine() ? NO_ROUTINE : null); }
+
     function setMessage(lines) {
       message.textContent = '';
       lines.forEach(function (text, index) {
@@ -299,7 +327,9 @@
       }
       var built = groups.map(renderWeek);
       var problems = arrayOf(data.problems).filter(function (text) { return typeof text === 'string'; });
-      setMessage(built.length === 0 ? [EMPTY].concat(problems) : problems);
+      var line = noticeLine();
+      setMessage((built.length === 0 ? [EMPTY] : []).concat(line ? [line] : [], problems));
+      syncNew();
       weeks.textContent = '';
       built.forEach(function (node) { weeks.appendChild(node); });
       // A week gone from the store takes its mark with it.
@@ -309,7 +339,53 @@
       rendered = JSON.stringify(data);
     }
 
+    function startPoll() {
+      if (poll !== null) clearInterval(poll);
+      poll = setInterval(load, fast ? FAST_POLL_MS : POLL_MS);
+    }
+
+    // Leaves fast polling, and clears the sentence, once a new run lands or
+    // ten minutes pass.
+    function settleFast(next) {
+      if (!fast) return;
+      var landed = runIds(next) !== fast.runs;
+      if (!landed && Date.now() < fast.until) return;
+      fast = null;
+      notice = null;
+      rendered = null;
+      if (visible) startPoll();
+    }
+
+    function say(text) {
+      notice = text;
+      rendered = null;
+      if (visible && data) render();
+      else if (visible) setMessage([text]);
+    }
+
+    function runNew() {
+      if (running || !hasRoutine()) return;
+      running = true;
+      syncNew();
+      var name = producerName();
+      request('/api/routines/' + encodeURIComponent(data.routine) + '/run', { method: 'POST' }).then(function (result) {
+        running = false;
+        syncNew();
+        var code = result && result.body && typeof result.body.error === 'string' ? result.body.error : null;
+        if (!result) say(NO_ANSWER);
+        else if (result.status === 202) {
+          fast = { runs: runIds(data), until: Date.now() + FAST_FOR_MS };
+          if (visible) startPoll();
+          say(name + ' is writing new ideas. They will appear here when it finishes.');
+        } else if (result.status === 409 && code === 'busy') say(name + ' is in the middle of a turn. Try again when it is idle.');
+        else if (result.status === 404 || result.status === 503 || (result.status === 409 && code === 'agent_unavailable')) {
+          say(name + ' is not running.');
+        } else say(NO_ANSWER);
+      });
+    }
+
     function apply(next) {
+      settleFast(next);
       data = next;
       var text = JSON.stringify(next);
       if (visible && text !== rendered) render();
@@ -460,6 +536,7 @@
     document.addEventListener('click', function (event) {
       if (openMenu && !openMenu.contains(event.target)) closeMenu(false);
     });
+    newButton.addEventListener('click', runNew);
     addToggle.setAttribute('aria-controls', 'ideas-add-form');
     addToggle.setAttribute('aria-expanded', 'false');
     addToggle.addEventListener('click', function () { if (addForm.hidden) openAdd(); else closeAdd(true, false); });
@@ -478,10 +555,11 @@
         if (visible) return;
         visible = true;
         addToggle.hidden = false;
+        newButton.hidden = false;
         if (panel) panel.show();
         if (data) render();
         load();
-        poll = setInterval(load, POLL_MS);
+        startPoll();
       },
       context: function () {
         var item = discussed || (visible ? itemInView() : null);
@@ -500,6 +578,7 @@
         if (side) side.textContent = '';
         closeMenu(false);
         addToggle.hidden = true;
+        newButton.hidden = true;
         closeAdd(false, false);
         if (panel) panel.hide();
         if (poll !== null) clearInterval(poll);
