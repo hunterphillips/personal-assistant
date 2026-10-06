@@ -57,9 +57,10 @@ async function startIdeas(t, { agents, includeIdeas = true, routines = null } = 
     focus: { checkHealth: async () => ({ available: true }) },
     brief: { latestMetadata: async () => ({ state: 'empty' }) },
     registry: fakeRegistry(listed), adapters: { claude: adapter }, ideas, ideasInstructions: instructions, routines,
+    env: { DASHBOARD_IDEAS_INSTRUCTIONS: criteria },
   });
   t.after(() => adapter.release());
-  return { ...app, adapter, dir, marksFile };
+  return { ...app, adapter, dir, marksFile, criteria };
 }
 
 function post(app, pathname, body, headers = {}) {
@@ -210,7 +211,8 @@ test('instructions read and propose resolves the newest producer', async (t) => 
   assert.deepEqual([read.status, read.json.path, read.json.problem], [200, 'ideas/criteria.md', null]);
   const response = await post(app, '/api/ideas/instructions/propose', { text: 'Prefer smaller fixture tasks.' });
   assert.deepEqual([response.status, response.json], [202, { ok: true, agentId: 'myos' }]);
-  assert.deepEqual(app.adapter.calls[0].slice(0, 2), ['myos', instructionsMessage('Prefer smaller fixture tasks.')]);
+  assert.deepEqual(app.adapter.calls[0].slice(0, 2), ['myos', instructionsMessage('Prefer smaller fixture tasks.', app.criteria)]);
+  assert.ok(app.adapter.calls[0][1].includes(`The criteria are in ${app.criteria},`));
   assert.match(app.adapter.calls[0][1], /^Change the Ideas criteria\./);
 });
 

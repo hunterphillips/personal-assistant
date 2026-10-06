@@ -154,12 +154,12 @@ export function createApp({
     : null;
   const feedRoutes = feed && feedInstructions
     ? createFeedRoutes({
-      feed, instructions: feedInstructions, hub, log, limits: config.limits, shuttingDown: isShuttingDown,
+      feed, instructions: feedInstructions, instructionsFile: config.feedInstructionsPath, hub, log, limits: config.limits, shuttingDown: isShuttingDown,
     })
     : null;
   const ideasRoutes = ideas && ideasInstructions
     ? createIdeasRoutes({
-      ideas, instructions: ideasInstructions, hub, scheduler, log, limits: config.limits, shuttingDown: isShuttingDown,
+      ideas, instructions: ideasInstructions, instructionsFile: config.ideasInstructionsPath, hub, scheduler, log, limits: config.limits, shuttingDown: isShuttingDown,
     })
     : null;
   const routineRoutes = routines

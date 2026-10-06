@@ -208,7 +208,7 @@ test('GET /api/feed/instructions returns the path, the file time, and the prose'
   const response = await request(app, 'GET', '/api/feed/instructions');
   assert.equal(response.status, 200);
   assert.equal(response.headers['cache-control'], 'no-store');
-  assert.equal(response.json.path, 'daily-brief/watch/relevance.md');
+  assert.equal(response.json.path, 'feed/relevance.md');
   assert.equal(response.json.problem, null);
   assert.ok(!Number.isNaN(Date.parse(response.json.updated)));
   assert.deepEqual(response.json.blocks.map((block) => block.type), ['h', 'p', 'h', 'table', 'list', 'h', 'list']);
@@ -229,13 +229,14 @@ test('propose sends the change to the watch persona and answers 202 with its id'
   assert.deepEqual(app.adapter.calls, [[
     'watch',
     "Change the feed's criteria.\n\n" +
-      'The criteria are in daily-brief/watch/relevance.md, which you read every run.\n\n' +
+      `The criteria are in ${app.instructionsFile}, which you read every run.\n\n` +
       'What I want changed:\nDrop AINews; it repeats Latent Space.\n\n' +
       'Ask me what you need, then edit the file under its own rules, keep the\n' +
       'sender list in daily-brief/watch/contribute in step with the sources table,\n' +
       'and tell me what changed.',
   ]]);
-  assert.equal(app.adapter.calls[0][1], instructionsMessage('Drop AINews; it repeats Latent Space.'));
+  assert.equal(app.adapter.calls[0][1], instructionsMessage('Drop AINews; it repeats Latent Space.', app.instructionsFile));
+  assert.ok(path.isAbsolute(app.instructionsFile));
 });
 
 test('propose validates the body, the text, and its size', async (t) => {

@@ -26,7 +26,7 @@
 // limits.sendTextBytes), then as discuss from 503 shutting_down on,
 // without no_such_item.
 //
-// createFeedRoutes({ feed, instructions, hub, log, limits, shuttingDown }) returns
+// createFeedRoutes({ feed, instructions, instructionsFile, hub, log, limits, shuttingDown }) returns
 //   serveRead(res) -> Promise<void>
 //   serveDiscuss(req, res) -> Promise<void>
 //   serveInstructions(res) -> Promise<void>
@@ -35,7 +35,6 @@
 // type; the POST routes read the body themselves.
 
 import { startTurn } from './agent-routes.mjs';
-import { INSTRUCTIONS_PATH } from './feed-instructions.mjs';
 import { HttpError, readJsonBody, sendJson } from './http.mjs';
 import { createInstructionsRoutes, listedPersona } from './instructions-routes.mjs';
 
@@ -48,16 +47,18 @@ export function discussMessage({ title, source, url, summary }) {
     'Then wait for my question.';
 }
 
-export function instructionsMessage(text) {
+// `file` is the criteria file's absolute path (config.feedInstructionsPath),
+// so the agent edits the copy the daemon and the watch job read.
+export function instructionsMessage(text, file) {
   return "Change the feed's criteria.\n\n" +
-    `The criteria are in ${INSTRUCTIONS_PATH}, which you read every run.\n\n` +
+    `The criteria are in ${file}, which you read every run.\n\n` +
     `What I want changed:\n${text}\n\n` +
     'Ask me what you need, then edit the file under its own rules, keep the\n' +
     'sender list in daily-brief/watch/contribute in step with the sources table,\n' +
     'and tell me what changed.';
 }
 
-export function createFeedRoutes({ feed, instructions, hub, log, limits, shuttingDown }) {
+export function createFeedRoutes({ feed, instructions, instructionsFile, hub, log, limits, shuttingDown }) {
   async function serveRead(res) {
     sendJson(res, 200, await feed.read());
   }
@@ -86,7 +87,7 @@ export function createFeedRoutes({ feed, instructions, hub, log, limits, shuttin
   const { serveInstructions, serveProposeInstructions } = createInstructionsRoutes({
     instructions, hub, log, limits, shuttingDown,
     resolveAgent: async () => (await feed.read()).agentId,
-    message: instructionsMessage,
+    message: (text) => instructionsMessage(text, instructionsFile),
   });
 
   return { serveRead, serveDiscuss, serveInstructions, serveProposeInstructions };

@@ -1,6 +1,7 @@
 // Feed instructions: the criteria file the watch job reads
-// (config.feedInstructionsPath, by default daily-brief/watch/relevance.md),
-// read on demand for the Feed view as prose through instructions.mjs.
+// (config.feedInstructionsPath, by default feed/relevance.md under the data
+// root), read on demand for the Feed view as prose through instructions.mjs.
+// INSTRUCTIONS_PATH is the label the view shows, the file under the root.
 //
 // createFeedInstructions({ file, limits, log }) returns { read }, as
 // createInstructions does, with `path` INSTRUCTIONS_PATH, the cap
@@ -10,7 +11,7 @@
 
 import { createInstructions } from './instructions.mjs';
 
-export const INSTRUCTIONS_PATH = 'daily-brief/watch/relevance.md';
+export const INSTRUCTIONS_PATH = 'feed/relevance.md';
 
 export function createFeedInstructions({ file, limits, log }) {
   return createInstructions({

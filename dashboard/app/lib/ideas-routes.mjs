@@ -19,7 +19,6 @@ import { CONTEXT_MAX } from './routine-routes.mjs';
 import { DETAIL_MAX, LABEL_MAX } from './send-context.mjs';
 
 const ID_MAX = 80;
-const INSTRUCTIONS_PATH = 'ideas/criteria.md';
 const WEEK = /^\d{4}-\d{2}-\d{2}$/;
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -27,9 +26,10 @@ export function startMessage() {
   return 'Start on the idea above. Plan it, or hand it to the agent that owns it, and tell me what you did.';
 }
 
-export function instructionsMessage(text) {
+// `file` is the criteria file's absolute path (config.ideasInstructionsPath).
+export function instructionsMessage(text, file) {
   return 'Change the Ideas criteria.\n\n' +
-    `The criteria are in ${INSTRUCTIONS_PATH}, which you read every run.\n\n` +
+    `The criteria are in ${file}, which you read every run.\n\n` +
     `What I want changed:\n${text}\n\n` +
     'Ask me what you need, then edit the file under its own rules and tell me what changed.';
 }
@@ -60,7 +60,7 @@ export function ideasRoutine(items, agentId) {
   return found ? found.id : null;
 }
 
-export function createIdeasRoutes({ ideas, instructions, hub, scheduler = null, log, limits, shuttingDown }) {
+export function createIdeasRoutes({ ideas, instructions, instructionsFile, hub, scheduler = null, log, limits, shuttingDown }) {
   async function result() {
     const value = await ideas.read();
     const snapshot = hub.snapshot();
@@ -143,7 +143,7 @@ export function createIdeasRoutes({ ideas, instructions, hub, scheduler = null, 
   const instructionRoutes = createInstructionsRoutes({
     instructions, hub, log, limits, shuttingDown,
     resolveAgent: () => ideas.producerAgent(hub.snapshot().agents),
-    message: instructionsMessage,
+    message: (text) => instructionsMessage(text, instructionsFile),
   });
 
   return { serveRead, serveAdd, serveDismiss, serveSave, serveUnsave, serveStart, serveRefresh, ...instructionRoutes };

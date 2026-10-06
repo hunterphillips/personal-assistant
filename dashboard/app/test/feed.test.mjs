@@ -227,7 +227,7 @@ test('the instructions read as the path, the file time, and prose blocks', async
   await utimes(file, mtime, mtime);
   const result = await createFeedInstructions({ file, limits: LIMITS }).read();
   assert.deepEqual(result, {
-    path: 'daily-brief/watch/relevance.md',
+    path: 'feed/relevance.md',
     updated: '2026-09-25T12:00:00.000Z',
     problem: null,
     blocks: [
@@ -270,7 +270,7 @@ test('missing, oversized, and non-regular instructions are empty blocks and one 
   const instructions = createFeedInstructions({ file, limits: LIMITS });
   const missing = await instructions.read();
   assert.deepEqual(missing, {
-    path: 'daily-brief/watch/relevance.md', updated: null, problem: 'The feed instructions file is missing.', blocks: [],
+    path: 'feed/relevance.md', updated: null, problem: 'The feed instructions file is missing.', blocks: [],
   });
 
   await writeFile(file, 'x'.repeat(64 * 1024 + 1));

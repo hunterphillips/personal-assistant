@@ -11,7 +11,7 @@
 //
 //     result, deeply frozen:
 //       { path, updated, problem, blocks }
-//     - `path` is the file as the agent knows it, repo-relative (the `path`
+//     - `path` is the label the view shows for the file (the `path`
 //       option).
 //     - `updated` is the file's modification time as ISO, or null.
 //     - `blocks` are the markdown parsed by goals-markdown.mjs into the
