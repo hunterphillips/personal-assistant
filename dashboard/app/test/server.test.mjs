@@ -5,7 +5,7 @@ import net from 'node:net';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { TIMEOUTS } from '../lib/config.mjs';
@@ -520,3 +520,138 @@ test('start seeds the built-in agents when the registry file does not exist, and
   assert.deepEqual(file.agents.map((entry) => entry.id), ['myos']);
 });
 
+// The data root: the lock, the migration from a checkout, and the variable.
+
+// A checkout holding a little of every kind of data, all invented.
+async function fixtureCheckout(dir) {
+  const repo = path.join(dir, 'checkout');
+  const files = {
+    'registry/agents.json': `${JSON.stringify({ version: 1, agents: [{
+      id: 'fixture', name: 'Fixture', role: 'Invented', description: 'Invented.', group: 'work', kind: 'persona',
+      cwd: dir, provider: 'claude',
+    }] })}\n`,
+    'dashboard/app/var/settings.json': `${JSON.stringify({ version: 1, model: { default: 'haiku', effort: null }, brief: { agent: null } })}\n`,
+    'feed/items/2026-10-01-watch.json': '{"invented":true}\n',
+    'daily-brief/briefs/build.py': 'print("code")\n',
+    'daily-brief/briefs/notice-2026-10-01.json': '{"invented":true}\n',
+  };
+  for (const [rel, body] of Object.entries(files)) {
+    await mkdir(path.dirname(path.join(repo, rel)), { recursive: true });
+    await writeFile(path.join(repo, rel), body);
+  }
+  return repo;
+}
+
+// The minimal environment of a start whose stores all default under the root.
+async function rootEnv(t, home, migrateFrom = '') {
+  return {
+    PERSONAL_ASSISTANT_HOME: home,
+    DASHBOARD_MIGRATE_FROM: migrateFrom,
+    DASHBOARD_PORT: String(await freePort()),
+    DASHBOARD_FOCUS_ORIGIN: `http://127.0.0.1:${await freePort()}`,
+    DASHBOARD_BUILTIN_PATH: path.join(home, '..', 'builtin-missing.json'),
+    DASHBOARD_LAUNCH_AGENTS_DIR: path.join(home, '..', 'launch-agents'),
+    DASHBOARD_CMUX_SOCKET_PATH_FILE: path.join(home, '..', 'no-cmux-socket'),
+    DASHBOARD_CMUX_PASSWORD_FILE: path.join(home, '..', 'no-cmux-password'),
+    DASHBOARD_CMUX_CLI: path.join(home, '..', 'no-cmux'),
+  };
+}
+
+test('a first start moves a fixture checkout into the root and touches nothing outside the temporary directory', async (t) => {
+  const dir = await tempDir(t);
+  const repo = await fixtureCheckout(dir);
+  const home = path.join(dir, 'root');
+  const env = await rootEnv(t, home, repo);
+  const logs = [];
+  const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => dashboard.close());
+
+  for (const key of ['home', 'settingsPath', 'registryPath', 'routinesDir', 'notificationsDir', 'threadsDir', 'codexDir',
+    'feedDir', 'feedInstructionsPath', 'ideasDir', 'ideasMarksPath', 'ideasInstructionsPath', 'briefsDir', 'migrateFrom']) {
+    assert.ok(dashboard.config[key].startsWith(`${dir}${path.sep}`), key);
+  }
+  assert.equal(process.env.PERSONAL_ASSISTANT_HOME, home);
+  const layout = JSON.parse(await readFile(path.join(home, 'layout.json'), 'utf8'));
+  assert.deepEqual([layout.version, layout.migratedFrom], [1, repo]);
+  assert.deepEqual(JSON.parse(await readFile(path.join(home, 'daemon.lock'), 'utf8')).pid, process.pid);
+  assert.ok((await lstat(path.join(repo, 'registry/agents.json.migrated'))).isFile());
+  assert.ok((await lstat(path.join(repo, 'dashboard/app/var/settings.json.migrated'))).isFile());
+  assert.ok((await lstat(path.join(repo, 'feed/items.migrated'))).isDirectory());
+  assert.deepEqual(await readdir(path.join(repo, 'daily-brief/briefs')), ['build.py']);
+  assert.deepEqual(await readdir(path.join(home, 'feed/items')), ['2026-10-01-watch.json']);
+  assert.ok((await lstat(path.join(home, 'README.md'))).isFile());
+  assert.ok((await lstat(path.join(home, 'ideas/criteria.md'))).isFile(), 'the default criteria are seeded');
+
+  const moved = logs.filter((entry) => entry.event === 'migration_moved').map((entry) => entry.key);
+  assert.deepEqual(moved, ['settings', 'registry', 'feedDir', 'briefsDir']);
+  assert.deepEqual(logs.find((entry) => entry.event === 'migration_done'), { event: 'migration_done', moved: 4, skipped: 17 });
+  assert.deepEqual(logs.find((entry) => entry.event === 'root'), {
+    event: 'root', root: home, migrateFrom: repo, version: 1, created: true, moved: 4,
+  });
+  const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
+  assert.deepEqual(state.agents.map((agent) => agent.id), ['fixture']);
+  assert.deepEqual(state.settings.model, { default: 'haiku', effort: null });
+
+  // The lock goes with the daemon.
+  await dashboard.close();
+  await assert.rejects(lstat(path.join(home, 'daemon.lock')), { code: 'ENOENT' });
+});
+
+test('a second daemon on the same root refuses with root_locked, and the root is free again after close', async (t) => {
+  const home = path.join(await tempDir(t), 'root');
+  const first = await startDashboard({ env: await rootEnv(t, home), log: () => {}, createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => first.close());
+  const logs = [];
+  await assert.rejects(
+    startDashboard({ env: await rootEnv(t, home), log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) }),
+    (error) => error.code === 'root_locked' && error.details.pid === process.pid &&
+      error.message === `The lock ${path.join(home, 'daemon.lock')} is held by process ${process.pid}, so this daemon does not start over the same root.`,
+  );
+  assert.deepEqual(logs, [{ event: 'root_locked', root: home, pid: process.pid }]);
+  await first.close();
+  const again = await startDashboard({ env: await rootEnv(t, home), log: () => {}, createAdapters: () => ({ claude: idleAdapter() }) });
+  await again.close();
+});
+
+test('a start that fails after the claim releases the lock: a taken port and a migration conflict', async (t) => {
+  const dir = await tempDir(t);
+  const home = path.join(dir, 'root');
+  const env = await rootEnv(t, home);
+  const blocker = http.createServer();
+  await new Promise((resolve) => blocker.listen(Number(env.DASHBOARD_PORT), '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => blocker.close(resolve)));
+  await assert.rejects(startDashboard({ env, log: () => {}, createAdapters: () => ({ claude: idleAdapter() }) }), { code: 'EADDRINUSE' });
+  await assert.rejects(lstat(path.join(home, 'daemon.lock')), { code: 'ENOENT' });
+
+  // A fresh root whose target already differs from the checkout's copy.
+  const repo = await fixtureCheckout(dir);
+  const conflicted = path.join(dir, 'conflicted');
+  await mkdir(path.join(conflicted, 'registry'), { recursive: true });
+  await writeFile(path.join(conflicted, 'registry/agents.json'), '{"version":1,"agents":[]}\n');
+  const logs = [];
+  await assert.rejects(
+    startDashboard({ env: await rootEnv(t, conflicted, repo), log: (entry) => logs.push(entry) }),
+    { code: 'migration_conflict' },
+  );
+  assert.equal(logs[0].event, 'migration_conflict');
+  await assert.rejects(lstat(path.join(conflicted, 'daemon.lock')), { code: 'ENOENT' });
+  await assert.rejects(lstat(path.join(conflicted, 'layout.json')), { code: 'ENOENT' });
+  assert.ok((await lstat(path.join(repo, 'registry/agents.json'))).isFile(), 'nothing was renamed');
+});
+
+test('a second node process on a held root exits 1 with one sentence', async (t) => {
+  const home = path.join(await tempDir(t), 'root');
+  const env = await rootEnv(t, home);
+  const first = await startDashboard({ env, log: () => {}, createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => first.close());
+  const inherited = { ...process.env };
+  delete inherited.ANTHROPIC_API_KEY;
+  delete inherited.OPENAI_API_KEY;
+  const result = spawnSync(process.execPath, ['server.mjs'], {
+    cwd: APP_DIR, encoding: 'utf8', timeout: 10_000, env: { ...inherited, ...(await rootEnv(t, home)) },
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /"event":"root_locked"/);
+  assert.equal(result.stderr,
+    `dashboard: The lock ${path.join(home, 'daemon.lock')} is held by process ${process.pid}, so this daemon does not start over the same root.\n`);
+});

@@ -25,33 +25,6 @@ __pycache__/
 
 .DS_Store
 
-# Watch outputs: newsletter stories and run state, local only.
-daily-brief/watch/packets/
-daily-brief/watch/overflow/
-daily-brief/watch/seen.jsonl
-daily-brief/watch/state.json
-
-# Feed store: what the producers found and judged, local only.
-feed/items/
-
-# Ideas store: suggestions and their dashboard marks, local only.
-ideas/items/
-ideas/marks.json
-
-# Registry: local data the dashboard writes from the interface (an agent's
-# settings, New agent, Delete), never committed. registry/builtin.json
-# (committed) seeds the built-in agents into a registry that is missing
-# or lacks them. Back this file up when moving machines.
-registry/agents.json
-
-# Routines: local data the dashboard writes from the routine form, never
-# committed; a fresh checkout starts with none. Runs logs are local too.
-routines/*.json
-routines/runs/
-
-# Notifications agents raise: a sentence may carry a figure, local only.
-/notifications/
-
 # What the data root's migration leaves behind in the checkout: the moved
 # sources, renamed rather than deleted. They hold the same private data.
 *.migrated

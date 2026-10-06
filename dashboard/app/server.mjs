@@ -1,4 +1,9 @@
-// Entry point: load configuration, load the agent registry and the Codex
+// Entry point: load configuration, claim the data root's lock (root.mjs;
+// a second daemon on the same root refuses with root_locked), prepare the
+// root (a first start moves the checkout's data in from migrateFrom and
+// seeds the defaults; a conflict or a newer layout refuses to start), name
+// the root in PERSONAL_ASSISTANT_HOME for every agent turn this process
+// starts, log `root`, then load the agent registry and the Codex
 // terminal bindings, compose the jobs view, thread store, runtime
 // adapters (Claude for personas, Codex for the shared app-server's threads),
 // the cmux client, the routine store (loaded before the hub, so its
@@ -27,7 +32,8 @@
 // close the cmux client's socket, close the hub, stop the registry and
 // bindings polls, then close the server
 // (shutdownMs grace). main() forces exit
-// forcedExitMs(timeouts) after the signal: one second past that sum.
+// forcedExitMs(timeouts) after the signal: one second past that sum. The
+// root's lock is released last, and on any failure after it was claimed.
 
 import http from 'node:http';
 import path from 'node:path';
@@ -50,6 +56,7 @@ import { createNotices } from './lib/notices.mjs';
 import { NOTIFICATIONS_FILE, createNotifications } from './lib/notifications.mjs';
 import { createReads } from './lib/reads.mjs';
 import { createRegistry } from './lib/registry.mjs';
+import { RootError, claimLock, prepareRoot, readLayout } from './lib/root.mjs';
 import { createRoutines } from './lib/routines.mjs';
 import { createScheduler } from './lib/scheduler.mjs';
 import { createJobs } from './lib/jobs.mjs';
@@ -79,16 +86,54 @@ function defaultAdapters({ config, store, log, bindings, turnTools = null }) {
 }
 
 // Starts the dashboard and resolves once it is listening. Rejects on invalid
-// configuration or a port already in use; it never picks another port.
+// configuration, a root another daemon holds (RootError root_locked), a root
+// it cannot prepare (RootError migration_conflict, layout_newer,
+// layout_invalid), or a port already in use; it never picks another port.
+// It sets process.env.PERSONAL_ASSISTANT_HOME to the resolved root, so the
+// SDK's children and every routine session inherit it.
 // `createAdapters({ config, store, log, bindings, turnTools })` returns the adapters by provider;
 // tests pass fakes. It is not called when an API key is in `env`. `timeouts`
 // overrides entries of the configured timeouts; tests shorten polls with it.
 export async function startDashboard({ env = process.env, log, createAdapters = defaultAdapters, timeouts = null } = {}) {
   const loaded = loadConfig(env);
   const config = timeouts ? Object.freeze({ ...loaded, timeouts: Object.freeze({ ...loaded.timeouts, ...timeouts }) }) : loaded;
+  const logEntry = log ?? defaultLog;
+  let lock;
+  try {
+    lock = await claimLock(config.home);
+  } catch (error) {
+    if (error instanceof RootError) logEntry({ event: error.code, root: config.home, pid: error.details?.pid ?? null });
+    throw error;
+  }
+  try {
+    const dashboard = await startOnRoot({ env, config, logEntry, createAdapters });
+    let closing;
+    const close = () => (closing ??= dashboard.close().finally(() => lock.release()));
+    return { server: dashboard.server, config, close };
+  } catch (error) {
+    await lock.release();
+    throw error;
+  }
+}
+
+// Everything after the lock: the root, then the stores and the server.
+async function startOnRoot({ env, config, logEntry, createAdapters }) {
+  let prepared;
+  try {
+    prepared = await prepareRoot(config.home, {
+      migrateFrom: config.migrateFrom ?? '', defaultsDir: config.defaultsDir, readmeFile: config.rootReadme, log: logEntry,
+    });
+  } catch (error) {
+    if (error instanceof RootError) logEntry({ event: error.code, root: config.home, ...error.details });
+    throw error;
+  }
+  process.env.PERSONAL_ASSISTANT_HOME = config.home;
+  logEntry({
+    event: 'root', root: config.home, migrateFrom: config.migrateFrom, version: (await readLayout(config.home))?.version ?? null,
+    created: prepared.created, moved: prepared.moved.length,
+  });
   const focus = createFocusProxy(config);
   const brief = createBriefRoutes(config);
-  const logEntry = log ?? defaultLog;
   const registry = createRegistry({ path: config.registryPath, log: logEntry });
   const bindings = createBindings({ path: path.join(config.codexDir, 'bindings.json'), pollMs: config.timeouts.codexPollMs, log: logEntry });
   const jobs = createJobs({
@@ -216,9 +261,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     throw error;
   }
 
-  let closing;
-  const close = () => (closing ??= shutdownState().then(() => closeServer(server, config.timeouts.shutdownMs)));
-  return { server, config, close };
+  return { server, close: () => shutdownState().then(() => closeServer(server, config.timeouts.shutdownMs)) };
 }
 
 // First start: when there is no settings file yet, write the defaults with
@@ -266,6 +309,7 @@ async function main() {
     dashboard = await startDashboard();
   } catch (error) {
     if (error instanceof ConfigError) console.error(`dashboard: invalid configuration: ${error.message}`);
+    else if (error instanceof RootError) console.error(`dashboard: ${error.message}`);
     else if (error.code === 'EADDRINUSE') console.error(`dashboard: port already in use: ${error.port}`);
     else console.error(`dashboard: failed to start: ${error.code ?? error.name}`);
     process.exitCode = 1;
