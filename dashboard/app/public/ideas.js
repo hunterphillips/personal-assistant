@@ -298,7 +298,7 @@
       button.setAttribute('aria-label', REFRESH_LABEL);
       button.disabled = refreshing || !hasRoutine();
       button.title = hasRoutine() ? REFRESH_LABEL : NO_ROUTINE;
-      button.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + ICONS.refresh + '</svg>';
+      button.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + ICONS.refresh + '</svg>';
       return button;
     }
 

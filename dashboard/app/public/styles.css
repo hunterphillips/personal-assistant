@@ -1415,8 +1415,7 @@ div.panel-row.now-row:hover { background: none; }
 .ideas-week-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   margin: 0 0 18px;
 }
 .ideas-week-title { margin: 0; }
@@ -1425,12 +1424,15 @@ div.panel-row.now-row:hover { background: none; }
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  margin: -8px -8px -8px 0;
+  width: 28px;
+  height: 28px;
+  /* The button is centered on its icon, which sits 7px inside this box;
+     pull it left by that much so the icon lands the head's 8px gap from
+     the title, instead of 8px plus the icon's own inset. */
+  margin-left: -7px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: none;
   color: var(--muted);
   cursor: pointer;
