@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, lstat, mkdir, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -110,6 +110,18 @@ async function fixtureDefaults(dir) {
   const readmeFile = path.join(dir, 'root-README.md');
   await put(readmeFile, '# The data root\n');
   return { defaultsDir, readmeFile };
+}
+
+// A temporary directory with a short path, under /tmp where it exists.
+async function shortTempDir(t) {
+  let dir;
+  try {
+    dir = await mkdtemp('/tmp/pa-root-');
+  } catch {
+    return tempDir(t);
+  }
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  return dir;
 }
 
 const sha = async (file) => createHash('sha256').update(await readFile(file)).digest('hex');
@@ -293,7 +305,9 @@ test('a target already holding the same bytes counts as moved', async (t) => {
 });
 
 test('a socket in a source directory is left with the source and does not stop the move', async (t) => {
-  const dir = await tempDir(t);
+  // A socket path is capped at 104 bytes on macOS, which the default
+  // temporary directory leaves too little room for; /tmp when it is there.
+  const dir = await shortTempDir(t);
   const repo = await fixtureRepo(dir);
   const root = path.join(dir, 'root');
   const socket = path.join(repo, 'dashboard/app/var/codex/app.sock');
