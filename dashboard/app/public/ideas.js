@@ -1,12 +1,12 @@
 // Ideas: suggestions from producer runs and Hunter's own additions, grouped
 // into Monday-start weeks. The view fetches /api/ideas on show and every 60
 // seconds. Discuss opens quick chat without sending a turn; Start sends the
-// idea to the pinned agent; Save keeps it, marked, until Unsave or Start;
-// Dismiss removes it from the returned list. New ideas runs the producer's
-// ideas routine (the store's `routine`) now and polls every 10 seconds until
-// a new run lands or ten minutes pass. The
-// criteria panel is instructions.js's. Each row expands its description and
-// owns one overflow menu whose buttons use data-ideas-action so the shell's
+// idea to the pinned agent; the row's bookmark saves it, filled, until Unsave
+// or Start; Dismiss removes it from the returned list. New ideas runs the
+// producer's ideas routine (the store's `routine`) now and polls every 10
+// seconds until a new run lands or ten minutes pass. The criteria panel is
+// instructions.js's. Each row expands its description and owns a bookmark
+// and one overflow menu whose buttons use data-ideas-action so the shell's
 // data-action handler never owns them.
 //
 // The side panel's Ideas section, drawn on the same render as the weeks and
@@ -163,21 +163,23 @@
       return icon;
     }
 
-    function savedIcon() {
-      var icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      icon.setAttribute('class', 'ideas-saved-icon');
-      icon.setAttribute('width', '16');
-      icon.setAttribute('height', '16');
-      icon.setAttribute('viewBox', '0 0 24 24');
-      icon.setAttribute('stroke', 'currentColor');
-      icon.setAttribute('fill', 'none');
-      icon.setAttribute('stroke-width', '2');
-      icon.setAttribute('stroke-linecap', 'round');
-      icon.setAttribute('stroke-linejoin', 'round');
-      icon.setAttribute('role', 'img');
-      icon.setAttribute('aria-label', 'Saved');
-      icon.innerHTML = ICONS.saved;
-      return icon;
+    // The row's bookmark: outline while new, filled once saved; the click goes
+    // through mutate() like the menu's entries.
+    function saveToggle(item) {
+      var saved = item.status === 'saved';
+      var name = saved ? 'Unsave' : 'Save';
+      var button = element('button', 'ideas-save-toggle');
+      button.type = 'button';
+      button.setAttribute('data-ideas-action', name.toLowerCase());
+      button.setAttribute('data-ideas-id', item.id);
+      button.setAttribute('aria-label', name);
+      button.setAttribute('title', name);
+      button.setAttribute('aria-pressed', saved ? 'true' : 'false');
+      button.disabled = pending === item.id;
+      button.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="' + (saved ? 'currentColor' : 'none') +
+        '" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+        ICONS.saved + '</svg>';
+      return button;
     }
 
     function closeMenu(restore) {
@@ -208,7 +210,6 @@
       node.appendChild(kindIcon(item.kind));
       var content = element('div', 'ideas-content');
       var title = element('h3', 'ideas-title');
-      if (item.status === 'saved') title.appendChild(savedIcon());
       title.appendChild(element('span', 'ideas-title-text', item.title));
       content.appendChild(title);
       if (item.text) {
@@ -230,6 +231,8 @@
       }
       if (metaNode.childNodes.length) content.appendChild(metaNode);
       node.appendChild(content);
+      var buttons = element('div', 'ideas-row-buttons');
+      if (item.status !== 'taken') buttons.appendChild(saveToggle(item));
       var toggle = element('button', 'ideas-menu-toggle');
       toggle.type = 'button';
       toggle.setAttribute('aria-label', 'More');
@@ -237,7 +240,8 @@
       toggle.setAttribute('aria-expanded', 'false');
       toggle.setAttribute('aria-haspopup', 'menu');
       toggle.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
-      node.appendChild(toggle);
+      buttons.appendChild(toggle);
+      node.appendChild(buttons);
       var actions = element('div', 'app-menu ideas-menu');
       actions.setAttribute('role', 'menu');
       actions.hidden = true;
@@ -248,7 +252,6 @@
         actions.appendChild(started);
       } else {
         actions.appendChild(action('Start', item.id));
-        actions.appendChild(action(item.status === 'saved' ? 'Unsave' : 'Save', item.id));
       }
       actions.appendChild(action('Dismiss', item.id));
       node.appendChild(actions);

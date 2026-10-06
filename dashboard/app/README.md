@@ -437,6 +437,16 @@ dashboard never writes the file; the persona does.
 On the Feed tab, the Feed instructions button at the end of the tab row
 opens these criteria above the posts with a box for the change.
 
+### Ideas
+
+Each idea row ends in two buttons. The bookmark saves the idea through
+`POST /api/ideas/save`, and on a saved idea it is filled and unsaves it
+through `POST /api/ideas/unsave`; its label is Save or Unsave and
+`aria-pressed` says whether the idea is saved. On a desk it shows on the
+row's hover and focus, and a saved row always shows it; on a phone it is
+always shown. A started idea has no bookmark. The `…` menu beside it holds
+Discuss, Start or "Started with" the agent, and Dismiss.
+
 ### Focus proxy
 
 `lib/focus-proxy.mjs` forwards a fixed set of routes to
