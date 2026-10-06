@@ -1,5 +1,5 @@
 // Settings: the one small file the daemon owns for what the interface sets
-// system-wide (config.settingsPath, default var/settings.json). Version 1:
+// system-wide (config.settingsPath, default settings.json under the data root). Version 1:
 //
 //   { "version": 1,
 //     "model": { "default": null, "effort": null },

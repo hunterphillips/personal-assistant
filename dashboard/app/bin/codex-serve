@@ -2,7 +2,7 @@
 
 // Foreground owner of the shared Codex app-server. Run it in a cmux
 // terminal you keep open: it starts `codex app-server` on a Unix socket
-// under the Codex directory, writes var/codex/owner.json so the dashboard
+// under the Codex directory, writes codex/owner.json so the dashboard
 // can find the server, and removes that file when the server stops. On
 // SIGINT, SIGTERM, or SIGHUP the file goes first, before the signal is
 // forwarded to the server: the server closes its socket at once but can
@@ -31,7 +31,7 @@ const USAGE = `usage: codex-serve [--socket PATH]
 
 Starts \`codex app-server\` on a Unix socket for the dashboard and keeps it in
 the foreground. Writes owner.json to the Codex directory (DASHBOARD_CODEX_DIR,
-default var/codex) and removes it on exit.
+default codex/ under the data root) and removes it on exit.
 
   --socket PATH   listen on PATH instead of <codex dir>/app.sock (at most
                   ${SOCKET_PATH_MAX_BYTES} bytes)

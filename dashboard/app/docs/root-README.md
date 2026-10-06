@@ -27,8 +27,8 @@ lives in its repository; the data lives here, as plain files you can read.
 | `briefs/` | Each day's brief, memo, viewer, brief data, notice, and feedback, and the run lock. |
 | `briefs/contributions/` | Each day's contributions, one folder per date. |
 | `watch/` | Watch's `packets/`, `overflow/`, `seen.jsonl`, and `state.json`. |
-| `log/` | `dashboard.log`. |
-| `cache/` | The rendered launchd plist and its backups under `launchd/`, and `ops/`. |
+| `log/` | `dashboard.log`, and under `checkout/` the log the checkout held before the move. |
+| `cache/` | The rendered launchd plist and its backups under `launchd/` (the checkout's under `launchd/checkout/`), and `ops/`. |
 
 ## Who writes what
 
@@ -42,3 +42,42 @@ than the one it knows leaves the root alone.
 
 `log/` and `cache/` can be rebuilt and are left out of backups. Everything
 else is the record; back it up when moving machines.
+
+## Where the root is
+
+`~/.personal-assistant/`, unless `PERSONAL_ASSISTANT_HOME` names another
+absolute path. The daemon sets that variable for every agent turn and
+routine it runs, so an agent finds this file at
+`$PERSONAL_ASSISTANT_HOME/README.md`. Agents change daemon-owned files only
+through the dashboard's routes and tools.
+
+## The lock
+
+While a daemon runs it holds `daemon.lock`. A second daemon started over the
+same root logs `root_locked` with the holder's pid and exits. A lock whose
+process has died is taken over at the next start.
+
+## The move from the checkout
+
+A daemon that finds no `layout.json` moves the data the repository checkout
+held before this folder existed: it copies each source here, checks every
+copied file against its source, and renames the source to
+`<source>.migrated` beside itself. The briefs' data files go to
+`daily-brief/briefs.migrated/`, and the brief's code stays where it is. When a
+file here already differs from its source, the daemon names both and does
+not start until one of them is removed or made to match. `layout.json` is
+written last, so a move cut off midway runs again cleanly. Nothing is
+deleted; remove the `.migrated` paths once the dashboard has run from here
+for a week.
+
+## Backups and moving machines
+
+Time Machine keeps this folder. Leave `log/` and `cache/` out:
+
+```sh
+tmutil addexclusion ~/.personal-assistant/log ~/.personal-assistant/cache
+```
+
+To move to another Mac, stop the daemon and copy the whole folder to the
+same place there. There is no git history here and never a remote: the
+briefs and contributions carry exact financial figures.

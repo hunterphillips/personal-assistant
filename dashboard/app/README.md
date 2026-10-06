@@ -9,7 +9,14 @@ Daily Brief opens from the header as an overlay over any view. Personas
 run on the Claude Agent SDK, Codex threads are observed on a shared
 app-server, and cmux terminals are listed with their state.
 Focus runs in an iframe through a proxy to its own server. Briefs are read
-from `daily-brief/briefs/` as data, and feedback is saved beside them.
+from `briefs/` in the data root, and feedback is saved beside them.
+
+Everything the daemon and the producers write lives in the data root,
+`~/.personal-assistant/` or the absolute path `PERSONAL_ASSISTANT_HOME`
+names, never in the repository: the registry, routines, threads,
+settings, notifications, the Feed and Ideas stores and their criteria,
+and the briefs. `docs/root-README.md` is its layout, copied into the root
+as `README.md`; `docs/operations.md` covers the start and the move.
 
 The plan is
 `thoughts/shared/plans/2026-09-25-dashboard-assistant-daemon-implementation.md`
@@ -110,11 +117,13 @@ what `lib/app.mjs` expects from it.
 - `lib/bindings.mjs` reads the terminal bindings `bin/codex-new` records.
 - `lib/config.mjs` and `lib/assets.mjs` hold configuration and the asset allowlist.
 
-`lib/root.mjs` is the data root's layout and migration module: it knows the
-layout of `~/.personal-assistant/` (or `PERSONAL_ASSISTANT_HOME`), seeds a new
-root with its defaults and `docs/root-README.md`, moves the data a checkout
-holds into the root once, renaming each source to `.migrated`, and guards the
-root with `daemon.lock`. The daemon does not call it yet.
+`lib/root.mjs` prepares the data root before any store starts: it claims
+`daemon.lock`, moves the data the checkout at `DASHBOARD_MIGRATE_FROM` holds
+into a root without `layout.json` once, renaming each source to
+`.migrated`, seeds the criteria files from `defaults/` and the root's
+`README.md` from `docs/root-README.md`, and writes `layout.json` last.
+`lib/layout.mjs` holds the layout table, which `lib/config.mjs` derives
+every store default from.
 
 ### Dashboard status
 
@@ -231,7 +240,7 @@ a jobs refresh.
 ### Routines
 
 A routine is a scheduled prompt to one agent, kept as a file the daemon
-writes (`lib/routines.mjs`, one `<id>.json` under `routines/` at the repo
+writes (`lib/routines.mjs`, one `<id>.json` under `routines/` in the data
 root, `DASHBOARD_ROUTINES_DIR`). `routines.items` lists them in registry
 agent order, then by name. Each item carries:
 
@@ -268,8 +277,8 @@ ten runs from the log, newest first, as `lastRun` is shaped.
 A notification is a sentence an agent judged worth Hunter's attention
 soon, raised with the `notify` tool (Delegation, under Personas). The
 store (`lib/notifications.mjs`) is one file,
-`notifications/notifications.jsonl` at the repo root
-(`DASHBOARD_NOTIFICATIONS_DIR`), gitignored because a sentence may carry
+`notifications/notifications.jsonl` in the data root
+(`DASHBOARD_NOTIFICATIONS_DIR`), user-only because a sentence may carry
 a figure: one JSON line per notification, `{ id, agent, text, link, at,
 acknowledgedAt }`, oldest first. `link` is null or what the header opens:
 `agent:<id>` (the agent's thread), `feed:<run>/<index>` (the Feed
@@ -386,7 +395,7 @@ turn.
 
 ### Feed
 
-`GET /api/feed` reads the feed store, `feed/items/` at the umbrella root
+`GET /api/feed` reads the feed store, `feed/items/` in the data root
 (`DASHBOARD_FEED_DIR`; `feed/README.md` describes the files), and answers
 
 ```json
@@ -418,10 +427,10 @@ refusals (409 `busy` and the rest). The dashboard never writes the store;
 the producers do.
 
 `GET /api/feed/instructions` reads the criteria the watch job applies,
-`daily-brief/watch/relevance.md` (`DASHBOARD_FEED_INSTRUCTIONS`), and answers
+`feed/relevance.md` in the data root (`DASHBOARD_FEED_INSTRUCTIONS`), and answers
 
 ```json
-{ "path": "daily-brief/watch/relevance.md", "updated": "<ISO or null>", "problem": null,
+{ "path": "feed/relevance.md", "updated": "<ISO or null>", "problem": null,
   "blocks": [{ "type": "h", "text": "..." }, { "type": "p", "text": "..." },
              { "type": "list", "ordered": true, "items": ["..."] },
              { "type": "table", "head": ["..."], "rows": [["..."]] }] }
@@ -1635,23 +1644,23 @@ are passed per launch by `bin/codex-serve`.
 ### Helpers
 
 - `bin/codex-serve` owns the server. Run it in a terminal you keep open: it
-  starts `codex app-server --listen unix:///<absolute path>/var/codex/app.sock`
+  starts `codex app-server --listen unix:///<absolute path>/codex/app.sock`
   (the path is resolved to an absolute one first) with both
-  feature flags, writes `var/codex/owner.json` (`socket`, `pid`,
+  feature flags, writes `codex/owner.json` (`socket`, `pid`,
   `startedAt`, `codexVersion`), and removes that file when the server
   stops: on Ctrl-C, SIGTERM, or SIGHUP the file goes first, then the
   signal is forwarded and the helper waits for the server to exit, which
   can take half a minute while a TUI is attached. It refuses while
   `owner.json` names a running process, and it
   refuses a socket path over 100 bytes, since macOS allows 104 for a Unix
-  socket path; that is why the socket lives under `var/codex/` rather than a
-  deeper directory. `--socket PATH` overrides the path.
+  socket path; that is why the socket lives under `codex/` in the data root
+  rather than a deeper directory. `--socket PATH` overrides the path.
 - `bin/codex-new [--cwd DIR]` opens the Codex TUI on that server in the
   given working directory (default: the current one) and records the
   thread it starts. It connects to the server, runs
   `codex --remote unix://<socket> -C <cwd>`, waits for the
   `thread/started` notification whose cwd is that directory, writes the
-  thread to `var/codex/bindings.json` with the cmux workspace and surface
+  thread to `codex/bindings.json` with the cmux workspace and surface
   ids from `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`, drops its own
   connection, and exits with the TUI's status. The TUI must start the
   thread: one started over the socket has no rollout until its first
@@ -1664,7 +1673,7 @@ are passed per launch by `bin/codex-serve`.
   One launcher waits per folder at a time: the server announces every
   new thread to every client, so a second launcher in the same folder
   could adopt the first one's thread. While waiting, the helper holds
-  `var/codex/waiting/<sha256 of the real cwd>.json` with its pid, and
+  `codex/waiting/<sha256 of the real cwd>.json` with its pid, and
   another launcher that finds it held by a live pid refuses before
   starting anything ("Another codex-new is waiting in this folder");
   a marker whose pid is gone is taken over. The marker is removed once
@@ -1673,8 +1682,8 @@ are passed per launch by `bin/codex-serve`.
   so. Writers to `bindings.json` take turns through `bindings.lock`
   beside it.
 
-Both read `DASHBOARD_CODEX_DIR` (default `var/codex`, created with mode
-0700) so they agree with the daemon.
+Both read `DASHBOARD_CODEX_DIR` (default `codex/` in the data root,
+created with mode 0700) so they agree with the daemon.
 
 ### Runtime
 
@@ -1914,20 +1923,25 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
+| `PERSONAL_ASSISTANT_HOME` | `~/.personal-assistant` | The data root, an absolute path. Every store default below that names `<root>` derives from it, and the daemon sets it for every agent turn. |
+| `DASHBOARD_MIGRATE_FROM` | this repository | The checkout the first start over a new root moves its data out of, an absolute path. Empty moves nothing; every test harness and throwaway instance sets it empty. |
 | `DASHBOARD_PORT` | `4243` | Startup fails if the port is taken. |
 | `DASHBOARD_PUBLIC_ORIGIN` | unset | The tailnet `https://` origin. When set, its host is accepted as a Host header and it is accepted as an Origin. When unset, only `127.0.0.1:<port>` and `localhost:<port>` are accepted. |
-| `DASHBOARD_BRIEFS_DIR` | `../../daily-brief/briefs` | Resolved from this directory, not the working directory. |
-| `DASHBOARD_FEED_DIR` | `../../feed/items` | The feed store the producers write. Resolved from this directory; does not need to exist at startup. |
-| `DASHBOARD_FEED_INSTRUCTIONS` | `../../daily-brief/watch/relevance.md` | The criteria file the watch job reads, shown on the Feed tab. Resolved from this directory; does not need to exist at startup. |
+| `DASHBOARD_BRIEFS_DIR` | `<root>/briefs` | The briefs. A relative override resolves from this directory, not the working directory, as for every path below. |
+| `DASHBOARD_FEED_DIR` | `<root>/feed/items` | The feed store the producers write; does not need to exist at startup. |
+| `DASHBOARD_FEED_INSTRUCTIONS` | `<root>/feed/relevance.md` | The criteria file the watch job reads, shown on the Feed tab; seeded from `defaults/feed-relevance.md` when missing. |
+| `DASHBOARD_IDEAS_DIR` | `<root>/ideas/items` | The Ideas runs the producers write; does not need to exist at startup. |
+| `DASHBOARD_IDEAS_MARKS` | `<root>/ideas/marks.json` | The marks the Ideas view writes. |
+| `DASHBOARD_IDEAS_INSTRUCTIONS` | `<root>/ideas/criteria.md` | The criteria the ideas producer reads; seeded from `defaults/ideas-criteria.md` when missing. |
 | `DASHBOARD_BRIEF_INSTRUCTIONS` | `../../daily-brief/curator.md` | The rules the brief's curator follows, shown from Instructions in the brief's overlay. Resolved from this directory; does not need to exist at startup. |
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
-| `DASHBOARD_REGISTRY_PATH` | `../../registry/agents.json` | Agent registry JSON file. Resolved from this directory, not the working directory; does not need to exist at startup. |
+| `DASHBOARD_REGISTRY_PATH` | `<root>/registry/agents.json` | Agent registry JSON file; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
-| `DASHBOARD_THREADS_DIR` | `var/threads` | Persona session pointers and message caches. Resolved from this directory; created on the first write. |
-| `DASHBOARD_SETTINGS_PATH` | `var/settings.json` | The settings file the interface writes (below). Resolved from this directory; written on first start. |
-| `DASHBOARD_ROUTINES_DIR` | `../../routines` | The routine files and, under `runs/`, their logs. Resolved from this directory; created on the first write. |
-| `DASHBOARD_NOTIFICATIONS_DIR` | `../../notifications` | The notifications file agents raise into. Resolved from this directory; created, user-only, on the first raise. |
-| `DASHBOARD_CODEX_DIR` | `var/codex` | The Codex socket, `owner.json`, `bindings.json` and its `bindings.lock`, and the `waiting/` markers, shared with `bin/codex-serve` and `bin/codex-new`. Resolved from this directory. |
+| `DASHBOARD_THREADS_DIR` | `<root>/threads` | Persona session pointers and message caches; the read times are `thread-reads.json` beside the directory. |
+| `DASHBOARD_SETTINGS_PATH` | `<root>/settings.json` | The settings file the interface writes (below); written on first start. |
+| `DASHBOARD_ROUTINES_DIR` | `<root>/routines` | The routine files and, under `runs/`, their logs. |
+| `DASHBOARD_NOTIFICATIONS_DIR` | `<root>/notifications` | The notifications file agents raise into. |
+| `DASHBOARD_CODEX_DIR` | `<root>/codex` | The Codex socket, `owner.json`, `bindings.json` and its `bindings.lock`, and the `waiting/` markers, shared with `bin/codex-serve` and `bin/codex-new`. |
 | `DASHBOARD_CMUX_SOCKET_PATH_FILE` | `~/.local/state/cmux/last-socket-path` | File cmux writes its socket path to while it runs. Missing means cmux is not running. |
 | `DASHBOARD_CMUX_PASSWORD_FILE` | `~/.local/state/cmux/socket-control-password` | The cmux socket password, where cmux keeps it. Read on each call, never logged. |
 | `DASHBOARD_CMUX_CLI` | `/Applications/cmux.app/Contents/Resources/bin/cmux` | The cmux binary for `sessions list`. The LaunchAgent's `PATH` has no `cmux`. |

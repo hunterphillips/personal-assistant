@@ -5,7 +5,7 @@
 // the server, runs `codex --remote unix://<socket> -C <cwd>`, waits for the
 // `thread/started` notification for that cwd, writes the thread with the
 // cmux workspace and surface from the environment to
-// var/codex/bindings.json (how the dashboard's "Open terminal" finds the
+// codex/bindings.json under the data root (how the dashboard's "Open terminal" finds the
 // right terminal), drops its connection, and exits with the TUI's status.
 //
 //   bin/codex-new [--cwd DIR] [--help]
@@ -23,7 +23,7 @@
 // One launcher per folder at a time. The server tells every client about
 // every thread/started, so two launchers waiting in the same folder could
 // each adopt the other's thread. While waiting, this one holds
-// var/codex/waiting/<sha256 of the real cwd>.json with its pid; a second
+// codex/waiting/<sha256 of the real cwd>.json with its pid; a second
 // launcher that finds the marker held by a live pid refuses before
 // starting anything, and a marker whose pid is dead is taken over. The
 // marker is removed once the thread is recorded or the TUI exits. A

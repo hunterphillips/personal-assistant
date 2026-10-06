@@ -9,7 +9,7 @@
 // confirms the resolution and the finished turn, archives the thread, stops
 // the server, and prints the versions. It runs one short model turn, which
 // bills the Codex subscription, so it refuses without --yes. It never
-// touches var/codex or the dashboard's own server, and it leaves nothing
+// touches the Codex directory or the dashboard's own server, and it leaves nothing
 // behind but the archived thread in ~/.codex/sessions.
 //
 // The thread is started after the adapter has connected, so the run also

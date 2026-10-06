@@ -1,6 +1,6 @@
 // Feed: the runs the producers wrote to the feed store, read on demand for
 // the Feed view. The store is a directory (config.feedDir, by default
-// feed/items/ at the repo root; its README describes the files) of one JSON
+// feed/items/ under the data root; its README describes the files) of one JSON
 // file per producer run, named <YYYY-MM-DD>-<producer>.json. The module never
 // writes and runs nothing on a timer: the caller reads on demand.
 //
