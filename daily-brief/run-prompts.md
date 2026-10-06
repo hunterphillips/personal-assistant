@@ -14,7 +14,7 @@ Contribute to Hunter's Daily Brief for 2026-09-25. The last brief he read was
 dated 2026-09-23; report what changed since then. Read
 ~/workspace/personal-assistant/daily-brief/contribution-contract.md and follow
 it. Write your packet to
-~/workspace/personal-assistant/daily-brief/contributions/2026-09-25/<domain>.yaml
+~/.personal-assistant/briefs/contributions/2026-09-25/<domain>.yaml
 where <domain> is cfo, focus, or second-brain.
 ```
 

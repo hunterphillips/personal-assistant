@@ -115,7 +115,7 @@ item once, then read it back.
 Write one YAML file:
 
 ```
-~/workspace/personal-assistant/daily-brief/contributions/YYYY-MM-DD/<domain>.yaml
+~/.personal-assistant/briefs/contributions/YYYY-MM-DD/<domain>.yaml
 ```
 
 ```yaml
@@ -297,7 +297,7 @@ automatically stale; apply the note's own review cadence and evidence. Do not
 capture, distill, edit notes, or read across into `~/workspace/personal-context`.
 
 **watch** — the world outside his systems. `context` items only, at most five,
-once a week. Sources are the five newsletters in `watch/relevance.md`
+once a week. Sources are the five newsletters in the data root's `feed/relevance.md`
 (Latent Space, AINews on trial, Hacker Newsletter, Simon Willison's
 newsletter, Axios Nashville), read from Gmail by `watch/contribute` on
 Mondays: it lists the issues since the last run, extracts their stories,
@@ -306,8 +306,8 @@ and triages them against the criteria in that file. Every item is
 headline, and carries the story's link as its receipt. A story seen in the
 last fourteen days is not new. A week with nothing that passes contributes
 an empty packet with `status: ok`; that is the expected outcome most weeks.
-Stories that pass but miss the cap go to `watch/overflow/`, for a later
-dashboard feed, never to the brief. The packet waits in `watch/packets/`
+Stories that pass but miss the cap go to the data root's `watch/overflow/`
+and the Feed, never to the brief. The packet waits in the root's `watch/packets/`
 and the next brief run reports it.
 
 **calendar** — Hunter's personal Google calendars, read-only, every calendar

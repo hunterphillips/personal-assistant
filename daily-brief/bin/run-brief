@@ -5,18 +5,25 @@
 #
 #   run-brief [--date YYYY-MM-DD] [--dry-run] [--force] [--stage gather|curate|verify]
 #
-# Read-only toward every domain repo. The only writes are under
-# daily-brief/contributions/<date>/, daily-brief/briefs/ (the brief, its
-# viewer, and notice-<date>.json for the dashboard), and the logs.
+# Read-only toward every domain repo. The only writes are under the data
+# root (PERSONAL_ASSISTANT_HOME, default ~/.personal-assistant): its
+# briefs/contributions/<date>/, briefs/ (the brief, its viewer, and
+# notice-<date>.json for the dashboard), and watch/state.json's reported
+# marker; and the logs. The contracts, prompts, build.py, and
+# check-viewer.mjs stay in the repository.
 # The plan: thoughts/shared/plans/2026-09-27-daily-brief-scheduled-run.md.
 
 set -u
 
 root=/Users/hunterphillips/workspace/personal-assistant
 brief_dir=$root/daily-brief
-briefs=$brief_dir/briefs
-contributions=$brief_dir/contributions
+brief_code=$brief_dir/briefs
 prompts=$brief_dir/bin/prompts
+data=${PERSONAL_ASSISTANT_HOME:-$HOME/.personal-assistant}
+case $data in /*) ;; *) printf 'run-brief: PERSONAL_ASSISTANT_HOME must be an absolute path: %s\n' "$data" >&2; exit 2 ;; esac
+briefs=$data/briefs
+contributions=$briefs/contributions
+watch_data=$data/watch
 claude=/Users/hunterphillips/.local/bin/claude
 node=/Users/hunterphillips/.nvm/versions/node/v24.18.0/bin/node
 python3=/usr/bin/python3
@@ -91,6 +98,8 @@ render() {
         -e "s|{{CURSOR}}|$cursor|g" \
         -e "s|{{DOMAIN}}|${domain:-}|g" \
         -e "s|{{ROOT}}|$root|g" \
+        -e "s|{{CONTRIBUTIONS}}|$contributions|g" \
+        -e "s|{{BRIEFS}}|$briefs|g" \
         -e "s|{{WINDOW_START}}|${window_start:-}|g" \
         -e "s|{{WINDOW_END}}|${window_end:-}|g" \
         -e "s|{{PREVIOUS_MEMOS}}|${previous_memos:-none}|g" \
@@ -174,7 +183,7 @@ for f in "$claude" "$node" "$python3"; do
 done
 for f in "$brief_dir/contribution-contract.md" "$brief_dir/curator.md" \
          "$prompts/contribute.md" "$prompts/calendar.md" "$prompts/curate.md" \
-         "$briefs/build.py" "$briefs/check-viewer.mjs"; do
+         "$brief_code/build.py" "$brief_code/check-viewer.mjs"; do
     [ -f "$f" ] || { log "exit=1 date=$date reason=missing-file $f"; say "missing $f"; exit 1; }
 done
 
@@ -209,6 +218,7 @@ previous_memos=$(printf '%s\n' $previous_memos | /usr/bin/sort | /usr/bin/tail -
 
 if [ "$dry_run" = 1 ]; then
     say "dry run for $date"
+    say "  data root $data"
     say "  cursor=$cursor"
     say "  calendar window $window_start .. $window_end"
     say "  previous memos: ${previous_memos:-none}"
@@ -218,16 +228,16 @@ if [ "$dry_run" = 1 ]; then
         model=$(model_for "$domain" "$model")
         case $kind in
             repo) say "  gather $domain: (cd $cwd && $claude -p <prompts/contribute.md> --model $model --permission-mode auto --add-dir $contributions --allowedTools <read-only + Edit($contributions/$date/$domain.yaml)> --disallowedTools NotebookEdit,mcp__* --strict-mcp-config) timeout ${gather_seconds}s" ;;
-            connector) say "  gather $domain: (cd $root && $claude -p <prompts/calendar.md> --model $model --permission-mode auto --allowedTools <Google Calendar read tools + Edit($contributions/$date/calendar.yaml)>) timeout ${gather_seconds}s" ;;
+            connector) say "  gather $domain: (cd $root && $claude -p <prompts/calendar.md> --model $model --permission-mode auto --add-dir $contributions --allowedTools <Google Calendar read tools + Edit($contributions/$date/calendar.yaml)>) timeout ${gather_seconds}s" ;;
         esac
     done <<ROSTER
 $roster
 ROSTER
-    pending=$(ls "$brief_dir"/watch/packets/*.yaml 2>/dev/null | /usr/bin/xargs -n1 /usr/bin/basename 2>/dev/null | /usr/bin/sed 's/\.yaml$//' | /usr/bin/tr '\n' ' ')
-    say "  watch: copy the newest unreported packet in watch/packets/ (${pending:-none}) as watch.yaml; mark reported after verify"
+    pending=$(ls "$watch_data"/packets/*.yaml 2>/dev/null | /usr/bin/xargs -n1 /usr/bin/basename 2>/dev/null | /usr/bin/sed 's/\.yaml$//' | /usr/bin/tr '\n' ' ')
+    say "  watch: copy the newest packet in $watch_data/packets/ not reported in $watch_data/state.json (${pending:-none}) as watch.yaml; mark reported after verify"
     say "  write $contributions/$date/run.yaml"
-    say "  curate: (cd $root && $claude -p <prompts/curate.md> --model $curator_model --effort $curator_effort --permission-mode auto --allowedTools Skill,Read,Glob,Grep,Edit(memo),Bash(build.py),Bash(check-viewer.mjs) --disallowedTools mcp__* --strict-mcp-config) timeout ${curate_seconds}s"
-    say "  verify: $python3 $briefs/build.py $date && $node $briefs/check-viewer.mjs $date"
+    say "  curate: (cd $root && $claude -p <prompts/curate.md> --model $curator_model --effort $curator_effort --permission-mode auto --add-dir $briefs --allowedTools Skill,Read,Glob,Grep,Edit($briefs/memo-$date.md),Bash(build.py),Bash(check-viewer.mjs) --disallowedTools mcp__* --strict-mcp-config) timeout ${curate_seconds}s"
+    say "  verify: $python3 $brief_code/build.py $date --dir $briefs && $node $brief_code/check-viewer.mjs $date --dir $briefs"
     exit 0
 fi
 
@@ -241,6 +251,7 @@ done
 
 # --- single-run lock ----------------------------------------------------------
 stale_minutes=$(( (wait_seconds + gather_seconds + curate_seconds) / 60 + 5 ))
+(umask 077 && /bin/mkdir -p "$briefs") || { log "exit=1 date=$date reason=no-briefs-dir $briefs"; exit 1; }
 if ! /bin/mkdir "$lock_dir" 2>/dev/null; then
     if [ -n "$(/usr/bin/find "$lock_dir" -maxdepth 0 -mmin +$stale_minutes 2>/dev/null)" ]; then
         /bin/rm -rf "$lock_dir"
@@ -252,7 +263,7 @@ fi
 trap '/bin/rm -rf "$lock_dir"' EXIT INT TERM
 
 cd "$root" || exit 1
-/bin/mkdir -p "$contributions/$date" || exit 1
+(umask 077 && /bin/mkdir -p "$contributions/$date") || exit 1
 started=$(/bin/date +%s)
 
 # --- late start ---------------------------------------------------------------
@@ -315,6 +326,7 @@ if [ "$stage" = all ] || [ "$stage" = gather ]; then
                 prompt=$(render calendar.md)
                 (cd "$root" && run_limited "$gather_seconds" "$out" "$claude" -p "$prompt" \
                     --model "$model" --permission-mode auto \
+                    --add-dir "$contributions" \
                     --allowedTools "mcp__claude_ai_Google_Calendar__list_calendars,mcp__claude_ai_Google_Calendar__list_events,mcp__claude_ai_Google_Calendar__list_events_for_calendars,mcp__claude_ai_Google_Calendar__search_events,mcp__claude_ai_Google_Calendar__get_event,Read,Edit(/$target)" \
                     --disallowedTools "NotebookEdit,Bash,Glob,Grep,Agent"
                  printf 'exit=%s\n' "$?" >>"$out") &
@@ -345,18 +357,18 @@ $roster
 ROSTER
     for f in "$transcripts/$date"-*.log; do [ -f "$f" ] && /bin/chmod 600 "$f"; done
 
-    # Watch: the daily contributor leaves packets in watch/packets/; the newest
+    # Watch: the daily contributor leaves packets in the root's watch/packets/; the newest
     # one not yet reported rides into this brief and is marked after verify.
     watch_packet=
-    for f in "$brief_dir"/watch/packets/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].yaml; do
+    for f in "$watch_data"/packets/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].yaml; do
         [ -f "$f" ] || continue
         d=$(/usr/bin/basename "$f" .yaml)
         [ "$d" \> "$date" ] && continue
-        if [ -f "$brief_dir/watch/state.json" ] && /usr/bin/jq -e --arg d "$d" '.reported | index($d)' "$brief_dir/watch/state.json" >/dev/null 2>&1; then continue; fi
+        if [ -f "$watch_data/state.json" ] && /usr/bin/jq -e --arg d "$d" '.reported | index($d)' "$watch_data/state.json" >/dev/null 2>&1; then continue; fi
         [ "$d" \> "${watch_packet:-}" ] && watch_packet=$d
     done
     if [ -n "$watch_packet" ]; then
-        /bin/cp "$brief_dir/watch/packets/$watch_packet.yaml" "$contributions/$date/watch.yaml" && /bin/chmod 600 "$contributions/$date/watch.yaml"
+        /bin/cp "$watch_data/packets/$watch_packet.yaml" "$contributions/$date/watch.yaml" && /bin/chmod 600 "$contributions/$date/watch.yaml"
     fi
 
     write_run_packet
@@ -371,6 +383,7 @@ if [ "$stage" = all ] || [ "$stage" = curate ]; then
     out=$transcripts/$date-curator.log
     run_limited "$curate_seconds" "$out" "$claude" -p "$prompt" \
         --model "$curator_model" --effort "$curator_effort" --permission-mode auto \
+        --add-dir "$briefs" \
         --allowedTools "Skill,Read,Glob,Grep,Edit(/$briefs/memo-$date.md),Bash($python3 daily-brief/briefs/build.py:*),Bash(python3 daily-brief/briefs/build.py:*),Bash($node daily-brief/briefs/check-viewer.mjs:*),Bash(node daily-brief/briefs/check-viewer.mjs:*)" \
         --disallowedTools "mcp__*,Agent,NotebookEdit" --strict-mcp-config
     curate_exit=$?
@@ -390,15 +403,15 @@ write_failed_notice() {
 # --- verify -------------------------------------------------------------------
 viewer=MISSING; exit_code=0; notice=none
 if [ -f "$briefs/memo-$date.md" ]; then
-    if "$python3" "$briefs/build.py" "$date" >>"$transcripts/$date-verify.log" 2>&1 \
-       && "$node" "$briefs/check-viewer.mjs" "$date" >>"$transcripts/$date-verify.log" 2>&1 \
+    if "$python3" "$brief_code/build.py" "$date" --dir "$briefs" >>"$transcripts/$date-verify.log" 2>&1 \
+       && "$node" "$brief_code/check-viewer.mjs" "$date" --dir "$briefs" >>"$transcripts/$date-verify.log" 2>&1 \
        && [ -f "$briefs/viewer-$date.html" ] \
        && [ -f "$briefs/brief-$date.json" ] \
        && brief_json_valid "$briefs/brief-$date.json"; then
         viewer=written
         if [ -n "${watch_packet:-}" ]; then
-            /usr/bin/jq --arg d "$watch_packet" '.reported = ((.reported // []) + [$d] | unique)' "$brief_dir/watch/state.json" >"$brief_dir/watch/state.json.tmp" \
-                && /bin/mv "$brief_dir/watch/state.json.tmp" "$brief_dir/watch/state.json"
+            /usr/bin/jq --arg d "$watch_packet" '.reported = ((.reported // []) + [$d] | unique)' "$watch_data/state.json" >"$watch_data/state.json.tmp" \
+                && /bin/mv "$watch_data/state.json.tmp" "$watch_data/state.json"
         fi
     else
         exit_code=1

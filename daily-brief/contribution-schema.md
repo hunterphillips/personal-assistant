@@ -13,7 +13,7 @@ assembler parses.
 One YAML file per domain per day:
 
 ```
-daily-brief/contributions/YYYY-MM-DD/<domain>.yaml
+~/.personal-assistant/briefs/contributions/YYYY-MM-DD/<domain>.yaml
 ```
 
 YAML because the assembler is code. Domains are agents writing files, so

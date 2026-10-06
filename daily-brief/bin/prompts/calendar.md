@@ -23,5 +23,5 @@ Rules:
 - An empty window is `status: ok` with `items: []`.
 
 This is a non-interactive scheduled run: do not ask anything. Write the
-packet to {{ROOT}}/daily-brief/contributions/{{DATE}}/calendar.yaml and
+packet to {{CONTRIBUTIONS}}/{{DATE}}/calendar.yaml and
 stop.

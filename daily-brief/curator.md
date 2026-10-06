@@ -2,12 +2,13 @@
 
 The curator is one session, started by `bin/run-brief` every morning with
 `bin/prompts/curate.md`, that reads the day's packets and writes
-`briefs/memo-<date>.md`. `briefs/build.py <date>` turns the memo into
-`<date>.md` and `viewer-<date>.html`, which the dashboard serves.
+`memo-<date>.md` in the data root's `briefs/`. `briefs/build.py <date>
+--dir <that folder>` turns the memo into `<date>.md` and
+`viewer-<date>.html` beside it, which the dashboard serves.
 
 ## Inputs
 
-One packet per domain in `contributions/<date>/`, written against
+One packet per domain in the data root's `briefs/contributions/<date>/`, written against
 `contribution-contract.md`: `cfo.yaml`, `focus.yaml`, `second-brain.yaml`,
 `calendar.yaml`, `watch.yaml` (most days absent), and `run.yaml` (the
 coordinator's own caveats about missing or stale inputs). Plus the previous
@@ -46,6 +47,6 @@ the builder refuses more than 550 words. Empty sections are omitted.
 
 ## After
 
-Feedback arrives per paragraph in `briefs/feedback-<date>.md`, keyed by the
+Feedback arrives per paragraph in `feedback-<date>.md` beside the memo, keyed by the
 paragraph's id, with the paragraph's text quoted under the mark. A mark changes
 one of the rules above, a domain's contract, or nothing.

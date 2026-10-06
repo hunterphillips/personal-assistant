@@ -1,7 +1,7 @@
 Contribute to Hunter's Daily Brief for {{DATE}}. The last brief he read was
 dated {{CURSOR}}; report what changed since then. Read
 {{ROOT}}/daily-brief/contribution-contract.md and follow it. Write your
-packet to {{ROOT}}/daily-brief/contributions/{{DATE}}/{{DOMAIN}}.yaml.
+packet to {{CONTRIBUTIONS}}/{{DATE}}/{{DOMAIN}}.yaml.
 
 This is a non-interactive scheduled run. Do not ask anything, do not open a
 browser, do not wait for input. Read the contract in full before you write,
