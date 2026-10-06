@@ -413,6 +413,103 @@ test.describe('New ideas without a routine', () => {
   });
 });
 
+test.describe('Refresh a week', () => {
+  test.use({ withFocus: false, hubOptions: { ideas: IDEAS, agents: AGENTS, routines: [IDEAS_ROUTINE] } });
+  const refresh = (page, key) => page.locator(`#ideas-weeks .ideas-week[data-ideas-week="${key}"] .ideas-week-refresh`);
+  const weekNotice = (page, key) => page.locator(`#ideas-weeks .ideas-week[data-ideas-week="${key}"] .ideas-week-notice`);
+  const WRITING = 'Myos is writing new ideas for this week. They will appear here when it finishes.';
+
+  test('the week button retires the week\'s new ideas, keeps the saved one, and runs the routine for that week', async ({ page, hub }) => {
+    await writeFile(hub.ideasMarksFile, JSON.stringify({ 'fixture-weekly-map': { status: 'saved', at: '2026-09-22T00:00:00Z' } }));
+    hub.personas.hold('myos');
+    await page.clock.install();
+    await openIdeas(page, hub);
+    const button = refresh(page, '2026-09-21');
+    await expect(button).toHaveAttribute('aria-label', 'New ideas for this week');
+    await expect(button).toHaveAttribute('title', 'New ideas for this week');
+    await button.click();
+    await expect(weekNotice(page, '2026-09-21')).toHaveText(WRITING);
+    await expect(weekNotice(page, '2026-09-21')).toHaveAttribute('role', 'status');
+    await expect(item(page, 'fixture-reading-tool')).toHaveCount(0);
+    await expect(item(page, 'fixture-weekly-map')).toBeVisible();
+    await expect(item(page, 'fixture-agent-card')).toBeVisible();
+    await expect(page.locator('#ideas-message')).toBeHidden();
+    expect(hub.requests('/api/ideas/refresh')).toEqual([{ method: 'POST', status: 202 }]);
+    await expect.poll(() => hub.routines.runs(IDEAS_ROUTINE.id)[0]?.context).toBe(
+      'Write this run\'s ideas for the week of September 21 (`week: "2026-09-21"` in the file).\n'
+        + 'These ideas of that week are saved and stay; do not repeat them: Fixture weekly map.');
+    expect(hub.personas.sent[0].context.prompt).toContain('Run the weekly-ideas skill.\n\nWrite this run\'s ideas for the week of September 21');
+
+    const run = {
+      fixture: true, producer: 'myos', date: '2026-10-02', week: '2026-09-21', generated_at: '2026-10-02T09:00:00-05:00',
+      items: [{ id: 'fixture-refreshed', title: 'Fixture refreshed', text: 'Invented.', kind: 'view', agents: [], source: null }],
+    };
+    await writeFile(path.join(hub.ideasDir, '2026-10-02-myos.json'), JSON.stringify(run));
+    await page.clock.runFor(10_000);
+    await expect(page.locator('#ideas-weeks .ideas-week[data-ideas-week="2026-09-21"] [data-ideas-item="fixture-refreshed"]')).toBeVisible();
+    await expect(weekNotice(page, '2026-09-21')).toHaveCount(0);
+  });
+
+  test('a week left with no rows keeps its heading and sentence', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    await refresh(page, '2026-09-28').click();
+    await expect(weekNotice(page, '2026-09-28')).toHaveText(WRITING);
+    await expect(item(page, 'fixture-agent-card')).toHaveCount(0);
+    await expect(weeks(page).locator('.ideas-week-title')).toHaveText(['Week of September 28', 'Week of September 21']);
+  });
+
+  test('a held producer gives the busy sentence and the rows stay', async ({ page, hub }) => {
+    hub.personas.hold('myos');
+    await openIdeas(page, hub);
+    await page.locator('#ideas-new').click();
+    await expect(page.locator('#ideas-message')).toHaveText('Myos is writing new ideas. They will appear here when it finishes.');
+    await refresh(page, '2026-09-21').click();
+    await expect(weekNotice(page, '2026-09-21')).toHaveText('Myos is in the middle of a turn. Try again when it is idle.');
+    expect(hub.requests('/api/ideas/refresh')).toEqual([{ method: 'POST', status: 409 }]);
+    await expect(item(page, 'fixture-reading-tool')).toBeVisible();
+    await expect(item(page, 'fixture-weekly-map')).toBeVisible();
+  });
+
+  test('a run file with a week groups under that week', async ({ page, hub }) => {
+    await writeFile(path.join(hub.ideasDir, '2026-10-02-myos.json'), JSON.stringify({
+      fixture: true, producer: 'myos', date: '2026-10-02', week: '2026-09-21',
+      items: [{ id: 'fixture-week-run', title: 'Fixture week run', text: 'Invented.', kind: 'tool', agents: [], source: null }],
+    }));
+    await openIdeas(page, hub);
+    await expect(page.locator('#ideas-weeks .ideas-week[data-ideas-week="2026-09-21"] [data-ideas-item="fixture-week-run"]')).toBeVisible();
+    await expect(weeks(page).locator('.ideas-week-title')).toHaveText(['Week of September 28', 'Week of September 21']);
+  });
+});
+
+test.describe('Refresh a week with the producer not started', () => {
+  test.use({
+    withFocus: false,
+    hubOptions: { ideas: IDEAS, agents: AGENTS, routines: [IDEAS_ROUTINE], personas: { myos: { startFails: true } } },
+  });
+
+  test('gives the not running sentence and retires nothing', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    await page.locator('#ideas-weeks .ideas-week[data-ideas-week="2026-09-21"] .ideas-week-refresh').click();
+    await expect(page.locator('#ideas-weeks .ideas-week[data-ideas-week="2026-09-21"] .ideas-week-notice')).toHaveText('Myos is not running.');
+    await expect(item(page, 'fixture-reading-tool')).toBeVisible();
+  });
+});
+
+test.describe('Refresh a week without a routine', () => {
+  test.use({ withFocus: false, hubOptions: { ideas: IDEAS, agents: AGENTS } });
+
+  test('disables every week button and says why', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    const buttons = page.locator('#ideas-weeks .ideas-week-refresh');
+    await expect(buttons).toHaveCount(2);
+    for (const button of await buttons.all()) {
+      await expect(button).toBeDisabled();
+      await expect(button).toHaveAttribute('title', 'No routine writes ideas.');
+    }
+    expect(hub.requests('/api/ideas/refresh')).toEqual([]);
+  });
+});
+
 test.describe('Ideas side panel', () => {
   test.use({ withFocus: false, hubOptions: { ideas: IDEAS, agents: AGENTS } });
 

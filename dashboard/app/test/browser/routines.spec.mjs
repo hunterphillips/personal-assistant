@@ -48,7 +48,7 @@ function routines() {
       id: 'morning-drift', name: 'Morning drift', agent: 'cfo', instruction: DRIFT, cron: '30 6 * * 1-5',
       runs: [
         { outcome: 'missed', count: 1, from: ago(3 * DAY), to: ago(2 * DAY) },
-        { run: 'run-failed', occurrence: ago(2 * DAY), trigger: 'schedule', startedAt: ago(2 * DAY), endedAt: ago(2 * DAY - 10_000), outcome: 'failed', reply: 'Partial answer.', detail: 'Invented failure' },
+        { run: 'run-failed', occurrence: ago(2 * DAY), trigger: 'schedule', startedAt: ago(2 * DAY), context: 'Write for the week of September 21.\nNo saved ideas.', endedAt: ago(2 * DAY - 10_000), outcome: 'failed', reply: 'Partial answer.', detail: 'Invented failure' },
         { run: 'run-1', occurrence: yesterday, trigger: 'schedule', startedAt: yesterday },
         { run: 'run-1', endedAt: new Date(Date.parse(yesterday) + 48_000).toISOString(), outcome: 'finished', reply: 'Every bucket is within its band.\n\nBonds sit 1.2 points under.' },
       ],
@@ -249,6 +249,8 @@ test.describe('with seeded routines', () => {
     await expect(runs.nth(1).locator('.routine-chip')).toHaveText('Failed');
     await expect(runs.nth(1).locator('.routine-run-note')).toHaveText('The turn failed.');
     await expect(runs.nth(1).locator('.routine-run-reply')).toHaveText('Invented failure');
+    await expect(runs.nth(1).locator('.routine-run-context')).toHaveText('Write for the week of September 21.');
+    await expect(runs.nth(0).locator('.routine-run-context')).toHaveCount(0);
     await expect(runs.nth(2).locator('.routine-chip')).toHaveText('Missed');
     await expect(runs.nth(2).locator('.routine-run-note')).toHaveText('One fire was missed.');
 

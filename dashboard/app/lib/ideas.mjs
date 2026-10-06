@@ -287,7 +287,7 @@ function parseRun(text, name, limits, ids, marks, problems, index) {
       (Object.hasOwn(body, 'week') && !nonEmpty(body.week))) {
     return pushNull(problems, `${name} is not an ideas run.`);
   }
-  const week = body.week ?? weekOf(body.date);
+  const week = weekOf(body.week ?? body.date);
   const items = [];
   let skipped = 0;
   for (const entry of body.items) {

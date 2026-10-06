@@ -39,10 +39,15 @@ export function instructionsMessage(text) {
 export function refreshContext(week, titles) {
   const day = new Date(`${week}T12:00:00Z`);
   const first = `Write this run's ideas for the week of ${MONTHS[day.getUTCMonth()]} ${day.getUTCDate()} (\`week: "${week}"\` in the file).`;
-  const second = titles.length > 0
-    ? `These ideas of that week are saved and stay; do not repeat them: ${titles.join('; ')}.`
-    : 'That week has no saved ideas.';
-  return Array.from(`${first}\n${second}`).slice(0, CONTEXT_MAX).join('');
+  if (titles.length === 0) return `${first}\nThat week has no saved ideas.`;
+  // Whole titles only; the run's context is capped at CONTEXT_MAX.
+  const listed = [...titles];
+  let text;
+  do {
+    const more = titles.length - listed.length;
+    text = `${first}\nThese ideas of that week are saved and stay; do not repeat them: ${listed.join('; ')}${more ? `; and ${more} more` : ''}.`;
+  } while (Array.from(text).length > CONTEXT_MAX && listed.pop() !== undefined);
+  return Array.from(text).slice(0, CONTEXT_MAX).join('');
 }
 
 // The producer's ideas routine: of `items` (the snapshot's routines, in its

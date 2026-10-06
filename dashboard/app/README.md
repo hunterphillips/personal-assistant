@@ -68,6 +68,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/ideas/save` | Saves an idea that has not been started and returns the fresh Ideas store. |
 | `POST /api/ideas/unsave` | Removes an idea's saved mark and returns the fresh Ideas store. |
 | `POST /api/ideas/start` | Starts the pinned agent on an idea, marks it taken, and returns the fresh Ideas store. |
+| `POST /api/ideas/refresh` | `{ "week": "YYYY-MM-DD" }`, a Monday. Refuses 503 `shutting_down`, 404 `no_routine`, 409 `busy`, or 409 `agent_unavailable` before writing anything; then marks the week's new produced ideas `replaced` (saved, taken, and manual ones stay) and runs the producer's ideas routine with a context naming the week and its saved titles. 202 `{ ok, replaced, ideas }`; a run the scheduler still refuses answers its refusal with `ideas`, the fresh store. |
 | `GET /api/ideas/instructions` | The Ideas criteria, read as prose. |
 | `POST /api/ideas/instructions/propose` | Sends a criteria change to the newest listed producer. |
 | `PUT /api/settings` | Saves a partial patch of the settings (default model and effort, which agent receives the brief, which agent quick chat opens on, the default permission level) and answers the whole document (below). |
@@ -76,7 +77,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `PUT /api/routines/<id>` | Rewrites a routine from the same five keys and answers it. |
 | `DELETE /api/routines/<id>` | Removes the routine and its runs log; `{"ok": true}`. |
 | `GET /api/routines/<id>/runs` | The routine's newest ten runs, newest first (below). |
-| `POST /api/routines/<id>/run` | Runs the routine now, outside its schedule; 202 once the turn has started, 409 `busy` or `agent_unavailable` when it cannot (below). |
+| `POST /api/routines/<id>/run` | Runs the routine now, outside its schedule; bodyless, or `{ "context": "<text>" }` (1 to 2000 characters, trimmed) added to the run's prompt after the instruction, any other body 400 `invalid_body`; 202 once the turn has started, 409 `busy` or `agent_unavailable` when it cannot (below). |
 | `GET /api/notifications` | The notifications as the snapshot carries them: `{"open", "items"}` (below). |
 | `POST /api/notifications/<id>/acknowledge` | Bodyless. Acknowledges one; `{"ok": true, "acknowledged": 1}`, or `0` when it already was; 404 `no_such_notification` when the store no longer keeps it. |
 | `POST /api/notifications/acknowledge` | Bodyless. Acknowledges every open one; `{"ok": true, "acknowledged": <n>}`. |
@@ -1436,7 +1437,8 @@ closed as `interrupted` when the daemon starts. `POST
 /api/routines/<id>/run` is a run outside the schedule, `trigger` `test`
 with `occurrence` null, so it never moves the marker; it answers 409
 `busy` while the agent has a turn open and 409 `agent_unavailable` when
-it is not started, writing nothing.
+it is not started, writing nothing. A run given a `context` carries it on
+its start line, so Last runs shows it.
 
 Each run's end line may carry `reply`, cut at `LIMITS.routineReplyChars`
 with `truncated: true`, and `detail`. Its outcome is `finished` when the turn ended with every card

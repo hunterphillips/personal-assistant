@@ -1412,7 +1412,40 @@ div.panel-row.now-row:hover { background: none; }
 .ideas-add-actions { margin-top: 8px; }
 
 .ideas-week + .ideas-week { margin-top: 36px; }
-.ideas-week-title { margin: 0 0 18px; }
+.ideas-week-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+.ideas-week-title { margin: 0; }
+.ideas-week-refresh {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: -8px -8px -8px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.ideas-week-head:hover .ideas-week-refresh,
+.ideas-week-head:focus-within .ideas-week-refresh { opacity: 1; }
+.ideas-week-refresh:hover:not(:disabled) { background: var(--hover-tint); color: var(--ink); }
+.ideas-week-refresh:disabled { cursor: default; }
+.ideas-week-head:hover .ideas-week-refresh:disabled { opacity: 0.5; }
+.ideas-week-notice {
+  margin: -8px 0 18px;
+  color: var(--muted);
+  font-size: 14px;
+}
 .ideas-run:empty { display: none; }
 .ideas-run + .ideas-run:not(:empty) { margin-top: 24px; }
 .ideas-item {
@@ -1514,7 +1547,9 @@ div.panel-row.now-row:hover { background: none; }
 }
 @media (hover: none) {
   .ideas-save-toggle,
-  .ideas-menu-toggle { opacity: 1; }
+  .ideas-menu-toggle,
+  .ideas-week-refresh { opacity: 1; }
+  .ideas-week-refresh:disabled { opacity: 0.5; }
 }
 
 /* Goals: the vault's priorities and goal notes, one row per goal under each
@@ -2709,7 +2744,9 @@ textarea.form-input {
   .ideas-page { padding: 16px 16px 120px; }
   .ideas-item { margin-right: -8px; margin-left: -8px; padding-right: 8px; padding-left: 8px; }
   .ideas-save-toggle,
-  .ideas-menu-toggle { opacity: 1; }
+  .ideas-menu-toggle,
+  .ideas-week-refresh { opacity: 1; }
+  .ideas-week-refresh:disabled { opacity: 0.5; }
   .ideas-menu { right: 4px; max-width: calc(100vw - 32px); }
   .feed-item { grid-template-columns: 24px minmax(0, 1fr); }
   .feed-badge { width: 24px; height: 24px; }
@@ -2977,7 +3014,8 @@ textarea.form-input {
   gap: 4px 8px;
 }
 .routine-run-time { color: var(--muted); white-space: nowrap; }
-.routine-run-note {
+.routine-run-note,
+.routine-run-context {
   color: var(--muted);
   overflow-wrap: anywhere;
 }

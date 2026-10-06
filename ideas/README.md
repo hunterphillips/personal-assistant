@@ -8,7 +8,9 @@ append-only.
 
 `items/<date>-<producer>.json` is one producer run. The date is a calendar
 date. The producer in the file name is an agent id, or `manual` for Hunter's
-own ideas.
+own ideas. A second run by the same producer on the same day writes
+`items/<date>-<producer>-2.json`, then `-3`, and so on; the file's
+`producer` stays the agent id.
 
 ```json
 { "producer": "myos", "date": "2026-10-04", "generated_at": "2026-10-04T09:00:00-05:00",
@@ -20,6 +22,9 @@ own ideas.
       "source": null } ] }
 ```
 
+- `week` is optional: the Monday, `YYYY-MM-DD`, the run was written for.
+  A refresh's run carries it. The view groups a run under its `week` when
+  present, else under the Monday of its `date`.
 - `id` is a lowercase slug of at most 80 characters. It matches
   `^[a-z0-9][a-z0-9-]{0,79}$` and is unique across the store.
 - `title` is required and non-empty.
@@ -36,10 +41,19 @@ own ideas.
   { "status": "taken", "at": "2026-10-04T14:12:00.000Z", "agent": "assistant" } }
 ```
 
-The status is `taken`, `dismissed`, or `saved`. A taken mark names the agent
-when one accepted the idea. A saved idea stays listed in its own run until
-Unsave removes the mark or Start replaces it with `taken`. Only the dashboard
-writes this file.
+The status is `taken`, `dismissed`, `saved`, or `replaced`. A taken mark
+names the agent when one accepted the idea. A saved idea stays listed in its
+own run until Unsave removes the mark or Start replaces it with `taken`. A
+replaced idea, like a dismissed one, is hidden and its id stays taken. Only
+the dashboard writes this file.
+
+## Refresh
+
+`POST /api/ideas/refresh` with `{ "week": "YYYY-MM-DD" }`, a Monday, marks
+that week's new produced ideas `replaced` and runs the producer's ideas
+routine with a context naming the week and its saved titles. Saved, taken,
+and manual ideas keep their marks; nothing is deleted from any file. The
+route's refusals and answer are in `dashboard/app/README.md`.
 
 ## Producers
 

@@ -271,6 +271,11 @@ test('refreshContext names the week and its saved titles', () => {
       + 'These ideas of that week are saved and stay; do not repeat them: One; Two.');
   assert.equal(refreshContext('2026-10-05', []),
     'Write this run\'s ideas for the week of October 5 (`week: "2026-10-05"` in the file).\nThat week has no saved ideas.');
+  const long = Array.from({ length: 12 }, (_, i) => `${String(i).padStart(2, '0')}${'x'.repeat(198)}`);
+  const capped = refreshContext('2026-09-21', long);
+  assert.ok(capped.length <= 2000);
+  assert.match(capped, /; and \d+ more\.$/);
+  assert.ok(capped.split('them: ')[1].split('; ').slice(0, -1).every((title) => title.length === 200));
 });
 
 test('refresh retires the week\'s new ideas, keeps the saved one, and runs the routine with the week in its context', async (t) => {
