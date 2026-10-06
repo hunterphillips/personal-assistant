@@ -257,6 +257,50 @@ test.describe('New ideas', () => {
       { method: 'POST', status: 202 }, { method: 'POST', status: 409 },
     ]);
   });
+
+  test('a manual idea leaves the sentence and a new run clears it', async ({ page, hub }) => {
+    await page.clock.install();
+    await openIdeas(page, hub);
+    const notice = page.locator('#ideas-message');
+    await page.locator('#ideas-new').click();
+    await expect(notice).toHaveText('Myos is writing new ideas. They will appear here when it finishes.');
+    await page.getByRole('button', { name: 'Add idea' }).click();
+    const form = page.locator('#ideas-add-form');
+    await form.getByLabel('Idea').fill('Fixture manual idea');
+    await form.getByRole('button', { name: 'Send' }).click();
+    await expect(item(page, 'fixture-manual-idea')).toBeVisible();
+    await expect(notice).toHaveText('Myos is writing new ideas. They will appear here when it finishes.');
+    const run = {
+      fixture: true, producer: 'myos', date: '2026-09-29', generated_at: '2026-09-29T09:00:00-05:00',
+      items: [{ id: 'fixture-new-run', title: 'Fixture new run', text: 'Invented.', kind: 'view', agents: [], source: null }],
+    };
+    await writeFile(path.join(hub.ideasDir, '2026-09-29-myos.json'), JSON.stringify(run));
+    await page.clock.runFor(10_000);
+    await expect(item(page, 'fixture-new-run')).toBeVisible();
+    await expect(notice).toBeHidden();
+  });
+
+  test('a routine gone since the last read gives the not running sentence', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    await hub.routines.remove(IDEAS_ROUTINE.id);
+    await page.locator('#ideas-new').click();
+    await expect(page.locator('#ideas-message')).toHaveText('Myos is not running.');
+    expect(hub.requests('/api/routines/myos-weekly-ideas/run')).toEqual([{ method: 'POST', status: 404 }]);
+  });
+});
+
+test.describe('New ideas with the producer not started', () => {
+  test.use({
+    withFocus: false,
+    hubOptions: { ideas: IDEAS, agents: AGENTS, routines: [IDEAS_ROUTINE], personas: { myos: { startFails: true } } },
+  });
+
+  test('gives the not running sentence', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    await page.locator('#ideas-new').click();
+    await expect(page.locator('#ideas-message')).toHaveText('Myos is not running.');
+    expect(hub.requests('/api/routines/myos-weekly-ideas/run')).toEqual([{ method: 'POST', status: 409 }]);
+  });
 });
 
 test.describe('New ideas without a routine', () => {
