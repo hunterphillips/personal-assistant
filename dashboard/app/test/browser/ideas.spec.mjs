@@ -183,46 +183,92 @@ test.describe('Ideas', () => {
     const row = item(page, 'fixture-agent-card');
     const menu = await openIdeaMenu(page, 'fixture-agent-card');
     await expect(menu).toBeVisible();
-    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Start', 'Save', 'Dismiss']);
+    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Start', 'Dismiss']);
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();
     await expect(row.getByRole('button', { name: 'More' })).toBeFocused();
   });
 
-  test('Save marks the row, Unsave clears it, and Start on a saved idea still works', async ({ page, hub }) => {
+  test('the bookmark saves and unsaves the row, and Start on a saved idea still works', async ({ page, hub }) => {
     await openIdeas(page, hub);
     const row = item(page, 'fixture-agent-card');
-    await expect(row.getByRole('img', { name: 'Saved' })).toHaveCount(0);
-    let menu = await openIdeaMenu(page, 'fixture-agent-card');
-    await menu.getByRole('button', { name: 'Save' }).click();
-    const mark = row.getByRole('img', { name: 'Saved' });
-    await expect(mark).toBeVisible();
-    const box = await mark.boundingBox();
-    expect([box.width, box.height]).toEqual([16, 16]);
-    const kind = await row.locator('.ideas-kind-icon').boundingBox();
-    const title = await row.locator('.ideas-title-text').boundingBox();
-    expect(box.x).toBeGreaterThanOrEqual(kind.x + kind.width);
-    expect(box.x + box.width).toBeLessThanOrEqual(title.x);
-    menu = await openIdeaMenu(page, 'fixture-agent-card');
-    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Start', 'Unsave', 'Dismiss']);
-    await menu.getByRole('button', { name: 'Unsave' }).click();
-    await expect(mark).toHaveCount(0);
-    menu = await openIdeaMenu(page, 'fixture-agent-card');
-    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Start', 'Save', 'Dismiss']);
-    await menu.getByRole('button', { name: 'Save' }).click();
-    await expect(mark).toBeVisible();
+    const bookmark = row.locator('.ideas-save-toggle');
+    await expect(bookmark).toHaveAttribute('aria-label', 'Save');
+    await expect(bookmark).toHaveAttribute('title', 'Save');
+    await expect(bookmark).toHaveAttribute('aria-pressed', 'false');
+    const box = await bookmark.boundingBox();
+    const more = await row.getByRole('button', { name: 'More' }).boundingBox();
+    expect([box.width, box.height]).toEqual([44, 44]);
+    expect(box.x + box.width).toBeLessThanOrEqual(more.x);
+    expect(await bookmark.evaluate((node) => getComputedStyle(node.querySelector('svg path')).fill)).toBe('none');
 
-    menu = await openIdeaMenu(page, 'fixture-agent-card');
+    await bookmark.click();
+    await expect(bookmark).toHaveAttribute('aria-pressed', 'true');
+    await expect(bookmark).toHaveAttribute('aria-label', 'Unsave');
+    await expect(bookmark).toHaveAttribute('title', 'Unsave');
+    expect(await bookmark.evaluate((node) => getComputedStyle(node.querySelector('svg path')).fill)).not.toBe('none');
+    await expect(row).toHaveAttribute('aria-expanded', 'false');
+    await bookmark.click();
+    await expect(bookmark).toHaveAttribute('aria-pressed', 'false');
+    await expect(bookmark).toHaveAttribute('aria-label', 'Save');
+    await expect(row).toHaveAttribute('aria-expanded', 'false');
+    await bookmark.click();
+    await expect(bookmark).toHaveAttribute('aria-pressed', 'true');
+
+    const menu = await openIdeaMenu(page, 'fixture-agent-card');
     await menu.getByRole('button', { name: 'Start' }).click();
     await expectView(page, 'agents', 'Agents');
     await nav(page, 'Ideas').click();
     await expectView(page, 'ideas', 'Ideas');
-    await expect(mark).toHaveCount(0);
-    menu = await openIdeaMenu(page, 'fixture-agent-card');
+    await expect(row.locator('.ideas-started')).toHaveCount(1);
+    await expect(bookmark).toHaveCount(0);
+    await openIdeaMenu(page, 'fixture-agent-card');
     await expect(row.getByRole('link', { name: 'Started with Assistant' })).toBeVisible();
-    await expect(menu.getByRole('button')).toHaveText(['Discuss', 'Dismiss']);
+    await expect(row.locator('.ideas-menu').getByRole('button')).toHaveText(['Discuss', 'Dismiss']);
     expect(hub.requests('/api/ideas/save').map((entry) => entry.status)).toEqual([200, 200]);
+    expect(hub.requests('/api/ideas/unsave').map((entry) => entry.status)).toEqual([200]);
     expect(hub.requests('/api/ideas/start').map((entry) => entry.status)).toEqual([202]);
+  });
+
+  test('the bookmark keeps keyboard focus across a save and an unsave', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    const bookmark = item(page, 'fixture-agent-card').locator('.ideas-save-toggle');
+    await bookmark.focus();
+    await page.keyboard.press('Enter');
+    await expect(bookmark).toHaveAttribute('aria-pressed', 'true');
+    await expect(bookmark).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(bookmark).toHaveAttribute('aria-pressed', 'false');
+    await expect(bookmark).toBeFocused();
+    await expect(item(page, 'fixture-agent-card')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('a refused save shows its sentence on the row', async ({ page, hub }) => {
+    await page.route('**/api/ideas/save', (route) => route.fulfill({ status: 404, json: { error: 'no_such_item' } }));
+    await openIdeas(page, hub);
+    const row = item(page, 'fixture-agent-card');
+    await row.locator('.ideas-save-toggle').click();
+    await expect(row.locator('.ideas-reason')).toHaveText('That idea is no longer available.');
+    await expect(row.locator('.ideas-save-toggle')).toHaveAttribute('aria-pressed', 'false');
+    await expect(row.locator('.ideas-save-toggle')).toBeEnabled();
+  });
+
+  test('a saved row keeps its bookmark shown at rest, and a new row shows it on hover', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    await item(page, 'fixture-agent-card').locator('.ideas-save-toggle').click();
+    await expect(item(page, 'fixture-agent-card').locator('.ideas-save-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    const opacity = (id) => item(page, id).locator('.ideas-save-toggle').evaluate((node) => getComputedStyle(node).opacity);
+    await expect.poll(() => opacity('fixture-agent-card')).toBe('1');
+    if (page.viewportSize().width >= 720) {
+      await expect.poll(() => opacity('fixture-reading-tool')).toBe('0');
+      await item(page, 'fixture-reading-tool').hover();
+      await expect.poll(() => opacity('fixture-reading-tool')).toBe('1');
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.mouse.move(0, 0);
+    }
+    await expect.poll(() => opacity('fixture-weekly-map')).toBe('1');
   });
 
   test('older weeks fade under a mask on the page, never on a row', async ({ page, hub }) => {
@@ -436,9 +482,9 @@ test.describe('Ideas side panel', () => {
   });
 
   async function save(page, id) {
-    const menu = await openIdeaMenu(page, id);
-    await menu.getByRole('button', { name: 'Save' }).click();
-    await expect(item(page, id).getByRole('img', { name: 'Saved' })).toBeVisible();
+    const bookmark = item(page, id).getByRole('button', { name: 'Save', exact: true });
+    await bookmark.click();
+    await expect(item(page, id).locator('.ideas-save-toggle')).toHaveAttribute('aria-pressed', 'true');
   }
 
   const saved = (page) => side(page).locator('.panel-row[data-ideas-saved]');
@@ -483,6 +529,18 @@ test.describe('Ideas side panel', () => {
     await expectView(page, 'ideas', 'Ideas');
     await expect(weeks(page)).toHaveCount(2);
     await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(0);
+  });
+
+  test('the Saved row\'s count follows the bookmark', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    await save(page, 'fixture-reading-tool');
+    await expect(saved(page).locator('.panel-row-count')).toHaveText('1');
+    await save(page, 'fixture-agent-card');
+    await expect(saved(page).locator('.panel-row-count')).toHaveText('2');
+    await item(page, 'fixture-agent-card').getByRole('button', { name: 'Unsave' }).click();
+    await expect(saved(page).locator('.panel-row-count')).toHaveText('1');
+    await item(page, 'fixture-reading-tool').getByRole('button', { name: 'Unsave' }).click();
+    await expect(saved(page)).toHaveCount(0);
   });
 
   test('on a phone choosing Saved closes the drawer', async ({ page, hub }) => {
