@@ -112,7 +112,7 @@
 // turn also runs with the Claude Code preset system prompt, so an agent
 // behaves as its repo's CLAUDE.md expects; CLAUDE.md itself loads through
 // the default setting sources. The preset carries an `append` naming the
-// agent from its registry entry (identityPrompt below), built per turn,
+// agent from its registry entry and the data root (identityPrompt below), built per turn,
 // since several agents share one folder and could not tell which they
 // are. The SDK records the system prompt on a session's first request, so
 // the append reaches an existing thread, and a rename takes effect, only
@@ -193,6 +193,7 @@
 // to a turn; the ask tool for agents lives behind it.
 
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 
 import { TIMEOUTS } from '../config.mjs';
 import { contextLine, contextPrompt, parseContext } from '../send-context.mjs';
@@ -499,7 +500,7 @@ export function createClaudeAdapter({
         cwd: turn.detached ? agent.cwd : entry.cwd,
         ...(resume ? { resume } : {}),
         ...sdkModeFor(turn.permission),
-        systemPrompt: systemPromptFor(agent),
+        systemPrompt: systemPromptFor(agent, config.home),
         maxTurns: limits.turnMaxTurns,
         abortController: turn.controller,
         canUseTool: makeCanUseTool(entry, turn),
@@ -837,15 +838,21 @@ function isRoutineRef(value) {
 
 // The preset with the agent's identity appended, or the bare preset for an
 // entry without a name (a registry entry always has one).
-function systemPromptFor(agent) {
-  const append = identityPrompt(agent);
+function systemPromptFor(agent, home) {
+  const append = identityPrompt(agent, { home });
   return append ? { type: 'preset', preset: 'claude_code', append } : { type: 'preset', preset: 'claude_code' };
 }
 
-export function identityPrompt(agent) {
+// `home` is the data root (config.home); when given, the prompt names it and
+// its README, which says where each file the system writes lives.
+export function identityPrompt(agent, { home = null } = {}) {
   if (typeof agent?.name !== 'string' || agent.name === '') return null;
   const parts = [`You are ${agent.name}, one of Hunter's agents in his personal assistant system.`];
   if (typeof agent.role === 'string' && agent.role !== '') parts.push(`Your role: ${agent.role}.`);
   if (typeof agent.description === 'string' && agent.description !== '') parts.push(`In your own words: ${agent.description}`);
+  if (typeof home === 'string' && home !== '') {
+    parts.push(`The system's data root is ${home}; its layout is in ${path.join(home, 'README.md')}. ` +
+      "Write there only through the dashboard's routes and tools, or a run file your skill names.");
+  }
   return parts.join(' ');
 }

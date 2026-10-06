@@ -63,14 +63,14 @@ function gate() {
   return { promise, open };
 }
 
-async function setup(t, { query = simple(), timeouts = {}, limits = {}, turnTools = null } = {}) {
+async function setup(t, { query = simple(), timeouts = {}, limits = {}, turnTools = null, home = undefined } = {}) {
   const dir = path.join(await tempDir(t), 'threads');
   const store = createThreadStore({ dir, limits: { ...LIMITS, ...limits } });
   const logs = [];
   const adapter = createClaudeAdapter({
     query,
     store,
-    config: { limits: { ...LIMITS, ...limits }, timeouts: { drainMs: 2_000, requestMaxAgeMs: 60_000, ...timeouts } },
+    config: { limits: { ...LIMITS, ...limits }, timeouts: { drainMs: 2_000, requestMaxAgeMs: 60_000, ...timeouts }, home },
     log: (entry) => logs.push(entry),
     now: () => new Date(AT),
     turnTools,
@@ -1189,8 +1189,23 @@ test('the preset carries the agent\'s identity from its registry entry, built on
     preset: 'claude_code',
     append: "You are Myos, one of Hunter's agents in his personal assistant system. Your role: Guide. In your own words: I know how this dashboard works.",
   });
+  assert.equal(identityPrompt(named, { home: '/data/root' }),
+    "You are Myos, one of Hunter's agents in his personal assistant system. Your role: Guide. In your own words: I know how this dashboard works. " +
+    "The system's data root is /data/root; its layout is in /data/root/README.md. " +
+    "Write there only through the dashboard's routes and tools, or a run file your skill names.");
   // A rename reaches the next turn's options.
   await adapter.send({ ...named, name: 'Guide' }, 'Again');
   assert.match(query.calls[1].options.systemPrompt.append, /^You are Guide, /);
   assert.equal(identityPrompt({ id: 'x' }), null);
+});
+
+test('a thread turn and a routine run both name the configured data root in the preset', async (t) => {
+  const { adapter, query } = await setup(t, { home: '/data/root' });
+  const named = { ...AGENT, name: 'Myos' };
+  await adapter.send(named, 'Where is the registry?');
+  await adapter.send(named, 'Run it.', { routine: { id: 'weekly', name: 'Weekly' } });
+  for (const call of query.calls) {
+    assert.match(call.options.systemPrompt.append, /The system's data root is \/data\/root; its layout is in \/data\/root\/README\.md\./);
+  }
+  assert.equal(query.calls.length, 2);
 });
