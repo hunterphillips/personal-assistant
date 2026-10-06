@@ -73,17 +73,20 @@
   var PINNED = 'pinned';
   var PROVIDERS = { claude: 'Claude', codex: 'Codex' };
   // Each provider's mark, a Simple Icons file under public/providers/
-  // served as /assets/<name> (lib/assets.mjs lists them). A provider not
-  // here shows its name as a text chip.
+  // served as /assets/<name> (lib/assets.mjs lists them), and the color it
+  // draws in: a brand hex (Simple Icons' `hex` field for the slug the file
+  // came from, see public/providers/NOTICE), or `var(--ink)` for a brand
+  // whose mark is black or white, so it reads in both themes. A provider
+  // not here shows its name as a text chip.
   var PROVIDER_ICONS = {
-    claude: 'provider-claude.svg',
-    codex: 'provider-codex.svg',
-    gemini: 'provider-gemini.svg',
-    meta: 'provider-meta.svg',
-    xai: 'provider-xai.svg',
-    grok: 'provider-xai.svg',
-    mistral: 'provider-mistral.svg',
-    ollama: 'provider-ollama.svg',
+    claude: { file: 'provider-claude.svg', color: '#D97757' },
+    codex: { file: 'provider-codex.svg', color: 'var(--ink)' },
+    gemini: { file: 'provider-gemini.svg', color: '#8E75B2' },
+    meta: { file: 'provider-meta.svg', color: '#0467DF' },
+    xai: { file: 'provider-xai.svg', color: 'var(--ink)' },
+    grok: { file: 'provider-xai.svg', color: 'var(--ink)' },
+    mistral: { file: 'provider-mistral.svg', color: '#FA520F' },
+    ollama: { file: 'provider-ollama.svg', color: 'var(--ink)' },
   };
   var WATCHED = ['agents', 'groups', 'registry', 'sessions', 'codex', 'cmux', 'settings', 'routines'];
   var EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -379,19 +382,19 @@
     return Object.prototype.hasOwnProperty.call(PROVIDERS, provider) ? PROVIDERS[provider] : provider;
   }
 
-  // The provider's mark for an agent row or thread header: the icon, drawn
-  // in the text color through a mask, with the name as its label; or the
-  // name as a text chip when the provider has no icon. Null without a
-  // provider.
+  // The provider's mark for the thread header: the icon, drawn through a
+  // mask in its brand color, with the name as its label; or the name as a
+  // text chip when the provider has no icon. Null without a provider.
   function providerBadge(agent) {
     var name = providerName(agent);
     if (!name) return null;
-    var icon = Object.prototype.hasOwnProperty.call(PROVIDER_ICONS, agent.provider) ? PROVIDER_ICONS[agent.provider] : '';
-    if (!icon) return element('span', 'provider-chip', name);
+    var entry = Object.prototype.hasOwnProperty.call(PROVIDER_ICONS, agent.provider) ? PROVIDER_ICONS[agent.provider] : null;
+    if (!entry) return element('span', 'provider-chip', name);
     var node = element('span', 'provider-icon');
-    var url = 'url("/assets/' + icon + '")';
+    var url = 'url("/assets/' + entry.file + '")';
     node.style.setProperty('-webkit-mask-image', url);
     node.style.setProperty('mask-image', url);
+    node.style.setProperty('--provider-color', entry.color);
     node.setAttribute('role', 'img');
     node.setAttribute('aria-label', name);
     node.title = name;
@@ -1262,7 +1265,6 @@
       head.appendChild(window.DashboardAvatar.node(agent, 'small'));
       head.appendChild(element('span', 'agent-row-name', agent.name));
       if (line && line.tone === 'wait') head.appendChild(stateDot(line));
-      if (providerName(agent)) head.appendChild(providerBadge(agent));
       if (persona && agent.lastMessage) head.appendChild(timeSpan('agent-row-time', agent.lastMessage.at));
       node.appendChild(head);
 
@@ -1291,7 +1293,6 @@
       var head = element('span', 'agent-row-head');
       head.appendChild(element('span', 'agent-row-name', displayName(session)));
       if (line && line.tone === 'wait') head.appendChild(stateDot(line));
-      if (providerName(session)) head.appendChild(providerBadge(session));
       if (session.updatedAt) head.appendChild(timeSpan('agent-row-time', session.updatedAt));
       node.appendChild(head);
 

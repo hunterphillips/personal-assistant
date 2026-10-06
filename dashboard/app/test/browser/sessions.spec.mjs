@@ -132,7 +132,8 @@ test.describe('with sessions', () => {
     const fix = row(page, 'Fix the flaky test');
     await expect(fix).toHaveClass(/agent-row-session/);
     await expect(fix).toHaveAttribute('href', '/?agent=codex%3At1');
-    await expect(fix.locator('.provider-icon')).toHaveAttribute('aria-label', 'Codex');
+    // The provider mark stays off session rows too; it is in the thread header.
+    await expect(fix.locator('.provider-icon, .provider-chip')).toHaveCount(0);
     await expect(fix.locator('.role-chip')).toHaveCount(0);
     await expect(fix.locator('.agent-row-preview')).toHaveText('~/work/catchup/sub');
     await expect(fix.locator('.agent-row-time')).toHaveText('5 minutes ago');
@@ -141,7 +142,7 @@ test.describe('with sessions', () => {
 
     const terminal = row(page, 'catchup');
     await expect(terminal).toHaveAttribute('href', `/?agent=claude%3A${C_BUSY}`);
-    await expect(terminal.locator('.provider-icon')).toHaveAttribute('aria-label', 'Claude');
+    await expect(terminal.locator('.provider-icon, .provider-chip')).toHaveCount(0);
     await expect(terminal.locator('.agent-row-preview')).toHaveText('~/work/catchup');
     await expect(terminal.locator('.agent-row-state')).toHaveText('Working');
 

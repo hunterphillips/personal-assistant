@@ -98,7 +98,7 @@ const historyLength = (page) => page.evaluate(() => history.length);
 test.describe('with seeded agents', () => {
   test.use({ hubOptions: seeded() });
 
-  test('the list groups agents under Work and Personal with role chips and provider icons', async ({ page, hub }) => {
+  test('the list groups agents under Work and Personal with role chips, and no provider mark', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     await expect(page.locator('.agent-group-heading')).toHaveText(['Work', 'Personal']);
@@ -108,7 +108,7 @@ test.describe('with seeded agents', () => {
     // The row reads like a messaging list: no role chip, but search still matches the role.
     await expect(page.locator('#agents-groups .agent-row .role-chip')).toHaveCount(0);
     await expect(cfo).toHaveAttribute('data-search', /(^|\n)money(\n|$)/);
-    await expect(cfo.locator('.provider-icon')).toHaveAttribute('aria-label', 'Claude');
+    await expect(cfo.locator('.provider-icon, .provider-chip')).toHaveCount(0);
     await expect(cfo.locator('.agent-row-preview')).toHaveText('Cash is fine.');
     await expect(cfo.locator('.agent-row-time')).toHaveText('12 minutes ago');
     await expect(cfo.locator('.agent-row-state')).toHaveCount(0);
@@ -116,10 +116,9 @@ test.describe('with seeded agents', () => {
 
     const catchup = row(page, 'Catchup');
     await expect(catchup).not.toHaveAttribute('href', /.*/);
-    await expect(catchup.locator('.provider-icon')).toHaveAttribute('aria-label', 'Codex');
-    await expect(catchup.locator('.provider-icon')).toHaveAttribute('title', 'Codex');
-    await expect(catchup.locator('.provider-icon')).toHaveAttribute('role', 'img');
-    await expect(catchup.locator('.provider-chip')).toHaveCount(0);
+    // The provider mark no longer shows on the row itself (it stays in the
+    // thread header), but the asset route it uses there still serves.
+    await expect(catchup.locator('.provider-icon, .provider-chip')).toHaveCount(0);
     const icon = await page.request.get(`${hub.origin}/assets/provider-codex.svg`);
     expect(icon.status()).toBe(200);
     expect(icon.headers()['content-type']).toBe('image/svg+xml');

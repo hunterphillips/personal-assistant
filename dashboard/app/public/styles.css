@@ -1750,13 +1750,13 @@ a.agent-row[aria-current="true"] {
   font-size: 12px;
 }
 
-/* A provider's mark, filled with the text color through its SVG as a mask. */
+/* A provider's mark, filled in its brand color through its SVG as a mask;
+   --provider-color is set per badge from agents.js's PROVIDER_ICONS map. */
 .provider-icon {
   flex: none;
   width: 16px;
   height: 16px;
-  color: var(--muted);
-  background-color: currentColor;
+  background-color: var(--provider-color, var(--muted));
   -webkit-mask: no-repeat center / contain;
   mask: no-repeat center / contain;
 }
