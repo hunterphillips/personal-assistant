@@ -50,6 +50,7 @@ async function fixture(t) {
   const env = {
     ...process.env,
     PATH: `${fakeBin}:${process.env.PATH}`,
+    PERSONAL_ASSISTANT_HOME: path.join(root, 'home'),
     DASHBOARD_CODEX_DIR: codexDir,
     FAKE_CODEX_LOG: log,
   };

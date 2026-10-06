@@ -215,7 +215,11 @@ export async function startHub({
     const settingsPath = path.join(root, 'settings.json');
     if (settingsSeed === 'broken') await writeFile(settingsPath, '{ not json');
     else if (settingsSeed) await writeFile(settingsPath, JSON.stringify({ version: 1, ...settingsSeed }));
+    // A data root of its own and no checkout to migrate, so a store this
+    // harness does not name still defaults under the temporary directory.
     const loaded = loadConfig({
+      PERSONAL_ASSISTANT_HOME: path.join(root, 'home'),
+      DASHBOARD_MIGRATE_FROM: '',
       DASHBOARD_PORT: String(plainPort),
       DASHBOARD_PUBLIC_ORIGIN: `https://localhost:${securePort}`,
       DASHBOARD_BRIEFS_DIR: briefsDir,
@@ -225,6 +229,9 @@ export async function startHub({
       DASHBOARD_FOCUS_ORIGIN: focusOrigin,
       DASHBOARD_SETTINGS_PATH: settingsPath,
       DASHBOARD_ROUTINES_DIR: routinesDir,
+      DASHBOARD_IDEAS_DIR: ideasDir,
+      DASHBOARD_IDEAS_MARKS: ideasMarksFile,
+      DASHBOARD_IDEAS_INSTRUCTIONS: ideasInstructionsFile,
     });
     // A shorter ask wait lets a test see the pending sentence.
     const config = delegationWaitMs === null

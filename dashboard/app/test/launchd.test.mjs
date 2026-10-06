@@ -511,6 +511,7 @@ async function makeInstallerFixture(fakeState = {}) {
     fsp.copyFile(path.join(APP_DIR, 'bin', 'dashboard-start'), path.join(appDir, 'bin', 'dashboard-start')),
     fsp.copyFile(path.join(APP_DIR, 'lib', 'launchd.mjs'), path.join(appDir, 'lib', 'launchd.mjs')),
     fsp.copyFile(path.join(APP_DIR, 'lib', 'config.mjs'), path.join(appDir, 'lib', 'config.mjs')),
+    fsp.copyFile(path.join(APP_DIR, 'lib', 'layout.mjs'), path.join(appDir, 'lib', 'layout.mjs')),
     fsp.copyFile(path.join(APP_DIR, 'package.json'), path.join(appDir, 'package.json')),
     fsp.copyFile(
       path.join(APP_DIR, 'launchd', `${LABEL}.plist.template`),

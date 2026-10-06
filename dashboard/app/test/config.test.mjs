@@ -3,18 +3,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { APP_ROOT, ConfigError, loadConfig } from '../lib/config.mjs';
+import { APP_ROOT, ConfigError, codexDirFrom, loadConfig } from '../lib/config.mjs';
 
-test('defaults resolve from the source location', () => {
-  const config = loadConfig({});
+const HOME = '/data/root';
+const REPO = path.resolve(APP_ROOT, '../..');
+
+test('defaults resolve from the source location and the data root', () => {
+  const config = loadConfig({ PERSONAL_ASSISTANT_HOME: HOME });
   assert.equal(config.port, 4243);
   assert.equal(config.bindHost, '127.0.0.1');
   assert.equal(config.focusOrigin, 'http://127.0.0.1:4242');
   assert.equal(config.publicOrigin, null);
-  assert.equal(config.briefsDir, path.resolve(APP_ROOT, '../../daily-brief/briefs'));
-  assert.ok(path.isAbsolute(config.briefsDir));
-  assert.equal(config.registryPath, path.resolve(APP_ROOT, '../../registry/agents.json'));
-  assert.ok(path.isAbsolute(config.registryPath));
+  assert.equal(config.home, HOME);
+  assert.equal(config.briefsDir, '/data/root/briefs');
+  assert.equal(config.registryPath, '/data/root/registry/agents.json');
   assert.equal(config.launchAgentsDir, path.join(os.homedir(), 'Library', 'LaunchAgents'));
   assert.ok(path.isAbsolute(config.launchAgentsDir));
   assert.deepEqual([...config.allowedHosts], ['127.0.0.1:4243', 'localhost:4243']);
@@ -47,10 +49,97 @@ test('defaults do not depend on the working directory', () => {
   const before = process.cwd();
   try {
     process.chdir(path.parse(before).root);
-    assert.equal(loadConfig({}).briefsDir, path.resolve(APP_ROOT, '../../daily-brief/briefs'));
+    assert.equal(loadConfig({}).briefsDir, path.join(os.homedir(), '.personal-assistant', 'briefs'));
+    assert.equal(loadConfig({}).builtinPath, path.join(REPO, 'registry', 'builtin.json'));
   } finally {
     process.chdir(before);
   }
+});
+
+test('the data root defaults to ~/.personal-assistant and every store default derives from it', () => {
+  assert.equal(loadConfig({}).home, path.join(os.homedir(), '.personal-assistant'));
+  assert.equal(loadConfig({ PERSONAL_ASSISTANT_HOME: '' }).home, path.join(os.homedir(), '.personal-assistant'));
+  const config = loadConfig({ PERSONAL_ASSISTANT_HOME: '/data/root/' });
+  assert.equal(config.home, HOME);
+  assert.deepEqual({
+    settingsPath: config.settingsPath,
+    registryPath: config.registryPath,
+    routinesDir: config.routinesDir,
+    notificationsDir: config.notificationsDir,
+    threadsDir: config.threadsDir,
+    codexDir: config.codexDir,
+    feedDir: config.feedDir,
+    feedInstructionsPath: config.feedInstructionsPath,
+    ideasDir: config.ideasDir,
+    ideasMarksPath: config.ideasMarksPath,
+    ideasInstructionsPath: config.ideasInstructionsPath,
+    briefsDir: config.briefsDir,
+  }, {
+    settingsPath: '/data/root/settings.json',
+    registryPath: '/data/root/registry/agents.json',
+    routinesDir: '/data/root/routines',
+    notificationsDir: '/data/root/notifications',
+    threadsDir: '/data/root/threads',
+    codexDir: '/data/root/codex',
+    feedDir: '/data/root/feed/items',
+    feedInstructionsPath: '/data/root/feed/relevance.md',
+    ideasDir: '/data/root/ideas/items',
+    ideasMarksPath: '/data/root/ideas/marks.json',
+    ideasInstructionsPath: '/data/root/ideas/criteria.md',
+    briefsDir: '/data/root/briefs',
+  });
+  // The read times sit beside the threads directory, so at the root.
+  assert.equal(path.join(path.dirname(config.threadsDir), 'thread-reads.json'), '/data/root/thread-reads.json');
+  // Code and contracts stay in the repository.
+  assert.equal(config.briefInstructionsPath, path.join(REPO, 'daily-brief', 'curator.md'));
+  assert.equal(config.builtinPath, path.join(REPO, 'registry', 'builtin.json'));
+  assert.equal(config.repoRoot, REPO);
+  assert.equal(config.defaultsDir, path.join(REPO, 'defaults'));
+  assert.equal(config.rootReadme, path.join(APP_ROOT, 'docs', 'root-README.md'));
+});
+
+test('each store override still wins over the data root', () => {
+  const overrides = {
+    DASHBOARD_SETTINGS_PATH: ['settingsPath', '/o/settings.json'],
+    DASHBOARD_REGISTRY_PATH: ['registryPath', '/o/agents.json'],
+    DASHBOARD_ROUTINES_DIR: ['routinesDir', '/o/routines'],
+    DASHBOARD_NOTIFICATIONS_DIR: ['notificationsDir', '/o/notifications'],
+    DASHBOARD_THREADS_DIR: ['threadsDir', '/o/threads'],
+    DASHBOARD_CODEX_DIR: ['codexDir', '/o/codex'],
+    DASHBOARD_FEED_DIR: ['feedDir', '/o/feed'],
+    DASHBOARD_FEED_INSTRUCTIONS: ['feedInstructionsPath', '/o/relevance.md'],
+    DASHBOARD_IDEAS_DIR: ['ideasDir', '/o/ideas'],
+    DASHBOARD_IDEAS_MARKS: ['ideasMarksPath', '/o/marks.json'],
+    DASHBOARD_IDEAS_INSTRUCTIONS: ['ideasInstructionsPath', '/o/criteria.md'],
+    DASHBOARD_BRIEFS_DIR: ['briefsDir', '/o/briefs'],
+  };
+  for (const [name, [key, value]] of Object.entries(overrides)) {
+    assert.equal(loadConfig({ PERSONAL_ASSISTANT_HOME: HOME, [name]: value })[key], value, name);
+  }
+  assert.equal(loadConfig({ PERSONAL_ASSISTANT_HOME: HOME, DASHBOARD_IDEAS_MARKS: 'var/marks.json' }).ideasMarksPath,
+    path.resolve(APP_ROOT, 'var/marks.json'));
+});
+
+test('migrate-from defaults to the repository, is null when empty, and takes an absolute override', () => {
+  assert.equal(loadConfig({}).migrateFrom, REPO);
+  assert.equal(loadConfig({ DASHBOARD_MIGRATE_FROM: '' }).migrateFrom, null);
+  assert.equal(loadConfig({ DASHBOARD_MIGRATE_FROM: '/fixture/repo/' }).migrateFrom, '/fixture/repo');
+});
+
+test('a relative data root or migrate-from is refused', () => {
+  assert.throws(() => loadConfig({ PERSONAL_ASSISTANT_HOME: 'data' }), (error) => error instanceof ConfigError &&
+    error.problems.includes('PERSONAL_ASSISTANT_HOME must be an absolute path'));
+  assert.throws(() => loadConfig({ DASHBOARD_MIGRATE_FROM: '../..' }), (error) => error instanceof ConfigError &&
+    error.problems.includes('DASHBOARD_MIGRATE_FROM must be an absolute path or empty'));
+  assert.throws(() => codexDirFrom({ PERSONAL_ASSISTANT_HOME: 'data' }), ConfigError);
+});
+
+test('codexDirFrom agrees with loadConfig', () => {
+  for (const env of [{}, { PERSONAL_ASSISTANT_HOME: HOME }, { PERSONAL_ASSISTANT_HOME: HOME, DASHBOARD_CODEX_DIR: '/o/codex' },
+    { DASHBOARD_CODEX_DIR: 'var/codex' }]) {
+    assert.equal(codexDirFrom(env), loadConfig(env).codexDir, JSON.stringify(env));
+  }
+  assert.equal(codexDirFrom({ PERSONAL_ASSISTANT_HOME: HOME }), '/data/root/codex');
 });
 
 test('public origin joins the Host and Origin allowlists', () => {
@@ -96,9 +185,8 @@ for (const [name, env] of Object.entries(invalid)) {
   });
 }
 
-test('threads dir defaults under APP_ROOT and honors absolute and relative overrides', () => {
-  assert.equal(loadConfig({}).threadsDir, path.resolve(APP_ROOT, 'var/threads'));
-  assert.ok(path.isAbsolute(loadConfig({}).threadsDir));
+test('threads dir defaults under the data root and honors absolute and relative overrides', () => {
+  assert.equal(loadConfig({ PERSONAL_ASSISTANT_HOME: HOME }).threadsDir, '/data/root/threads');
   assert.equal(loadConfig({ DASHBOARD_THREADS_DIR: '/etc/threads' }).threadsDir, '/etc/threads');
   assert.equal(loadConfig({ DASHBOARD_THREADS_DIR: 'var/other' }).threadsDir, path.resolve(APP_ROOT, 'var/other'));
 });
@@ -136,8 +224,8 @@ test('persona limits and timeouts are exposed', () => {
   assert.equal(config.timeouts.delegationWaitMs, 5_000);
 });
 
-test('the feed instructions path defaults beside the watch job and takes an override', () => {
-  assert.equal(loadConfig({}).feedInstructionsPath, path.resolve(APP_ROOT, '../../daily-brief/watch/relevance.md'));
+test('the feed instructions path defaults under the data root and takes an override', () => {
+  assert.equal(loadConfig({ PERSONAL_ASSISTANT_HOME: HOME }).feedInstructionsPath, '/data/root/feed/relevance.md');
   assert.equal(loadConfig({}).briefInstructionsPath, path.resolve(APP_ROOT, '../../daily-brief/curator.md'));
   assert.equal(loadConfig({ DASHBOARD_BRIEF_INSTRUCTIONS: '/tmp/rules.md' }).briefInstructionsPath, '/tmp/rules.md');
   assert.equal(loadConfig({ DASHBOARD_FEED_INSTRUCTIONS: '/tmp/criteria.md' }).feedInstructionsPath, '/tmp/criteria.md');

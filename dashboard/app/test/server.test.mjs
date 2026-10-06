@@ -23,8 +23,12 @@ function canConnect(port) {
   });
 }
 
+// Every real start runs on a fresh data root with nothing to migrate, so no
+// test reaches ~/.personal-assistant or the live checkout.
 async function testEnv(t) {
   return {
+    PERSONAL_ASSISTANT_HOME: path.join(await tempDir(t), 'root'),
+    DASHBOARD_MIGRATE_FROM: '',
     DASHBOARD_PORT: String(await freePort()),
     DASHBOARD_FOCUS_ORIGIN: `http://127.0.0.1:${await freePort()}`,
     DASHBOARD_BRIEFS_DIR: await tempDir(t),
@@ -515,3 +519,4 @@ test('start seeds the built-in agents when the registry file does not exist, and
   const file = JSON.parse(await readFile(env.DASHBOARD_REGISTRY_PATH, 'utf8'));
   assert.deepEqual(file.agents.map((entry) => entry.id), ['myos']);
 });
+

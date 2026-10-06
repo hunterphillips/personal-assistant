@@ -233,6 +233,9 @@ export function fakeCmux(inventory = null) {
 // listens. `goals` defaults to createGoals over the same registry; pass null
 // for an app without the Goals routes, and pass `registry` along with `hub`
 // when a test of Goals brings its own hub, so both read one registry.
+// The config's data root is a fresh temporary directory unless `env` names
+// PERSONAL_ASSISTANT_HOME, and DASHBOARD_MIGRATE_FROM is empty unless `env`
+// names it, so every store default lands under the temporary root.
 // `feed` defaults to createFeed over the feed directory, which is a missing
 // path in a temporary directory unless `env` names DASHBOARD_FEED_DIR, so no
 // test reads the real store; pass null for an app without the Feed routes.
@@ -261,8 +264,13 @@ export async function startApp(t, {
   const feedInstructions = env.DASHBOARD_FEED_INSTRUCTIONS ?? path.join(await tempDir(t), 'relevance-missing.md');
   const briefInstructionsFile = env.DASHBOARD_BRIEF_INSTRUCTIONS ?? path.join(await tempDir(t), 'curator-missing.md');
   const focusOrigin = env.DASHBOARD_FOCUS_ORIGIN ?? `http://127.0.0.1:${await freePort()}`;
+  // A fresh data root and no checkout to migrate, so no default reaches the
+  // real root or the live checkout; `env` may name either.
+  const home = env.PERSONAL_ASSISTANT_HOME ?? path.join(await tempDir(t), 'root');
   const config = configure(loadConfig({
+    DASHBOARD_MIGRATE_FROM: '',
     ...env,
+    PERSONAL_ASSISTANT_HOME: home,
     DASHBOARD_PORT: String(port),
     DASHBOARD_BRIEFS_DIR: briefsDir,
     DASHBOARD_FEED_DIR: feedDir,

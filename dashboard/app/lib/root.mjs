@@ -8,7 +8,8 @@
 // The root is ~/.personal-assistant/ unless PERSONAL_ASSISTANT_HOME names
 // another; the caller resolves that and passes an absolute path.
 //
-// layoutPaths(root) -> frozen { key: absolute path }, layout version 1.
+// layoutPaths(root) -> frozen { key: absolute path }, layout version 1
+//   (layout.mjs, re-exported here).
 //
 // readLayout(root) -> Promise<{ version, createdAt, migratedFrom } | null>
 //   null when layout.json is missing. Rejects with layout_invalid for a file
@@ -63,32 +64,10 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 
 import { claimPidFile } from './bindings.mjs';
+import { LAYOUT_VERSION, layoutPaths } from './layout.mjs';
 import { atomicWrite } from './threads.mjs';
 
-export const LAYOUT_VERSION = 1;
-
-const LAYOUT = {
-  readme: 'README.md',
-  layout: 'layout.json',
-  lock: 'daemon.lock',
-  settings: 'settings.json',
-  threadReads: 'thread-reads.json',
-  registry: 'registry/agents.json',
-  routinesDir: 'routines',
-  threadsDir: 'threads',
-  codexDir: 'codex',
-  notificationsDir: 'notifications',
-  feedDir: 'feed/items',
-  feedInstructions: 'feed/relevance.md',
-  ideasDir: 'ideas/items',
-  ideasMarks: 'ideas/marks.json',
-  ideasInstructions: 'ideas/criteria.md',
-  briefsDir: 'briefs',
-  contributionsDir: 'briefs/contributions',
-  watchDir: 'watch',
-  logDir: 'log',
-  cacheDir: 'cache',
-};
+export { LAYOUT_VERSION, layoutPaths };
 
 // The migration's pairs in order: a key for the result and the log, the
 // source relative to the checkout, and the target under the root.
@@ -128,11 +107,6 @@ export class RootError extends Error {
     this.code = code;
     this.details = details;
   }
-}
-
-export function layoutPaths(root) {
-  const base = absolute(root, 'root');
-  return Object.freeze(Object.fromEntries(Object.entries(LAYOUT).map(([key, rel]) => [key, path.join(base, rel)])));
 }
 
 export async function readLayout(root) {

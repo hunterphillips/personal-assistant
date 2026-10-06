@@ -1,31 +1,42 @@
 // Configuration for the dashboard process. Everything is read from environment
-// variables once, validated, and frozen. Defaults resolve from this source
-// file's location, never from the working directory.
+// variables once, validated, and frozen. Every store defaults under the data
+// root (layout.mjs); a relative override resolves from this source file's
+// location, never from the working directory.
 //
+//   PERSONAL_ASSISTANT_HOME     the data root, an absolute path (default ~/.personal-assistant);
+//                               config.home
+//   DASHBOARD_MIGRATE_FROM      the checkout the first start moves its data out of, an
+//                               absolute path (default the repository; empty for none);
+//                               config.migrateFrom, null when empty
 //   DASHBOARD_PORT              loopback port to bind (default 4243)
 //   DASHBOARD_PUBLIC_ORIGIN     optional https:// tailnet origin; its host joins the
 //                               Host and Origin allowlists
-//   DASHBOARD_BRIEFS_DIR        generated brief directory (default ../../daily-brief/briefs)
-//   DASHBOARD_FEED_DIR          the feed store the producers write (default ../../feed/items)
+//   DASHBOARD_BRIEFS_DIR        generated brief directory (default <home>/briefs)
+//   DASHBOARD_FEED_DIR          the feed store the producers write (default <home>/feed/items)
 //   DASHBOARD_FEED_INSTRUCTIONS the criteria file the watch job reads
-//                               (default ../../daily-brief/watch/relevance.md)
-//   DASHBOARD_BRIEF_INSTRUCTIONS the rules the brief's curator follows
-//                               (default ../../daily-brief/curator.md)
+//                               (default <home>/feed/relevance.md)
+//   DASHBOARD_IDEAS_DIR         the Ideas runs the producers write (default <home>/ideas/items)
+//   DASHBOARD_IDEAS_MARKS       the marks the Ideas view writes (default <home>/ideas/marks.json)
+//   DASHBOARD_IDEAS_INSTRUCTIONS the criteria the ideas producer reads
+//                               (default <home>/ideas/criteria.md)
+//   DASHBOARD_BRIEF_INSTRUCTIONS the rules the brief's curator follows, a contract in the
+//                               repository (default ../../daily-brief/curator.md)
 //   DASHBOARD_FOCUS_ORIGIN      Focus server, http:// loopback only (default http://127.0.0.1:4242)
-//   DASHBOARD_REGISTRY_PATH     agent registry JSON file (default ../../registry/agents.json)
+//   DASHBOARD_REGISTRY_PATH     agent registry JSON file (default <home>/registry/agents.json)
 //   DASHBOARD_BUILTIN_PATH      the agents that are part of the dashboard, seeded into the
 //                               registry when missing (default ../../registry/builtin.json;
 //                               need not exist)
-//   DASHBOARD_ROUTINES_DIR      the routine files and their runs log (default ../../routines,
-//                               beside registry/; need not exist)
-//   DASHBOARD_NOTIFICATIONS_DIR the notifications file agents raise into (default
-//                               ../../notifications, beside registry/; need not exist)
-//   DASHBOARD_LAUNCH_AGENTS_DIR directory holding launchd plists (default ~/Library/LaunchAgents)
-//   DASHBOARD_THREADS_DIR       persona session pointers and message caches (default var/threads)
-//   DASHBOARD_SETTINGS_PATH     the settings file the interface writes (default var/settings.json;
+//   DASHBOARD_ROUTINES_DIR      the routine files and their runs log (default <home>/routines;
 //                               need not exist)
+//   DASHBOARD_NOTIFICATIONS_DIR the notifications file agents raise into (default
+//                               <home>/notifications; need not exist)
+//   DASHBOARD_LAUNCH_AGENTS_DIR directory holding launchd plists (default ~/Library/LaunchAgents)
+//   DASHBOARD_THREADS_DIR       persona session pointers and message caches (default
+//                               <home>/threads); the read times sit beside it
+//   DASHBOARD_SETTINGS_PATH     the settings file the interface writes (default
+//                               <home>/settings.json; need not exist)
 //   DASHBOARD_CODEX_DIR         the Codex owner file, socket, and terminal bindings written by
-//                               bin/codex-serve and bin/codex-new (default var/codex)
+//                               bin/codex-serve and bin/codex-new (default <home>/codex)
 //   DASHBOARD_CMUX_SOCKET_PATH_FILE  file cmux writes its socket path to while running
 //                               (default ~/.local/state/cmux/last-socket-path)
 //   DASHBOARD_CMUX_PASSWORD_FILE     file holding the cmux socket password
@@ -37,29 +48,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { defaultHome, layoutPaths } from './layout.mjs';
+
 export const APP_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 const DEFAULT_PORT = 4243;
 const DEFAULT_FOCUS_ORIGIN = 'http://127.0.0.1:4242';
-const DEFAULT_BRIEFS_DIR = '../../daily-brief/briefs';
-const DEFAULT_FEED_DIR = '../../feed/items';
-const DEFAULT_FEED_INSTRUCTIONS = '../../daily-brief/watch/relevance.md';
-const DEFAULT_IDEAS_DIR = '../../ideas/items';
-const DEFAULT_IDEAS_MARKS = '../../ideas/marks.json';
-const DEFAULT_IDEAS_INSTRUCTIONS = '../../ideas/criteria.md';
 const DEFAULT_BRIEF_INSTRUCTIONS = '../../daily-brief/curator.md';
-const DEFAULT_REGISTRY_PATH = '../../registry/agents.json';
-const DEFAULT_ROUTINES_DIR = '../../routines';
-const DEFAULT_NOTIFICATIONS_DIR = '../../notifications';
 const DEFAULT_BUILTIN_PATH = '../../registry/builtin.json';
 // The repository the dashboard lives in: a built-in agent's folder.
 const REPO_ROOT = path.resolve(APP_ROOT, '../..');
 // Routine schedules run on this clock, following its changes. A constant
 // until someone else runs the daemon (no configurability ahead of need).
 export const TIME_ZONE = 'America/Chicago';
-const DEFAULT_THREADS_DIR = 'var/threads';
-const DEFAULT_SETTINGS_PATH = 'var/settings.json';
-export const DEFAULT_CODEX_DIR = 'var/codex';
 const DEFAULT_CMUX_CLI = '/Applications/cmux.app/Contents/Resources/bin/cmux';
 const BIND_HOST = '127.0.0.1';
 const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
@@ -147,23 +148,26 @@ export function loadConfig(env = process.env) {
   const port = parsePort(env.DASHBOARD_PORT, problems);
   const publicOrigin = parsePublicOrigin(env.DASHBOARD_PUBLIC_ORIGIN, problems);
   const focusOrigin = parseFocusOrigin(env.DASHBOARD_FOCUS_ORIGIN, problems);
-  const briefsDir = parsePath(env.DASHBOARD_BRIEFS_DIR, DEFAULT_BRIEFS_DIR);
-  const feedDir = parsePath(env.DASHBOARD_FEED_DIR, DEFAULT_FEED_DIR);
-  const feedInstructionsPath = parsePath(env.DASHBOARD_FEED_INSTRUCTIONS, DEFAULT_FEED_INSTRUCTIONS);
-  const ideasDir = path.resolve(APP_ROOT, DEFAULT_IDEAS_DIR);
-  const ideasMarksPath = path.resolve(APP_ROOT, DEFAULT_IDEAS_MARKS);
-  const ideasInstructionsPath = path.resolve(APP_ROOT, DEFAULT_IDEAS_INSTRUCTIONS);
+  const home = parseHome(env, problems);
+  const migrateFrom = parseMigrateFrom(env.DASHBOARD_MIGRATE_FROM, problems);
+  const root = layoutPaths(home ?? defaultHome());
+  const briefsDir = parsePath(env.DASHBOARD_BRIEFS_DIR, root.briefsDir);
+  const feedDir = parsePath(env.DASHBOARD_FEED_DIR, root.feedDir);
+  const feedInstructionsPath = parsePath(env.DASHBOARD_FEED_INSTRUCTIONS, root.feedInstructions);
+  const ideasDir = parsePath(env.DASHBOARD_IDEAS_DIR, root.ideasDir);
+  const ideasMarksPath = parsePath(env.DASHBOARD_IDEAS_MARKS, root.ideasMarks);
+  const ideasInstructionsPath = parsePath(env.DASHBOARD_IDEAS_INSTRUCTIONS, root.ideasInstructions);
   const briefInstructionsPath = parsePath(env.DASHBOARD_BRIEF_INSTRUCTIONS, DEFAULT_BRIEF_INSTRUCTIONS);
-  const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, DEFAULT_REGISTRY_PATH);
-  const routinesDir = parsePath(env.DASHBOARD_ROUTINES_DIR, DEFAULT_ROUTINES_DIR);
-  const notificationsDir = parsePath(env.DASHBOARD_NOTIFICATIONS_DIR, DEFAULT_NOTIFICATIONS_DIR);
+  const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, root.registry);
+  const routinesDir = parsePath(env.DASHBOARD_ROUTINES_DIR, root.routinesDir);
+  const notificationsDir = parsePath(env.DASHBOARD_NOTIFICATIONS_DIR, root.notificationsDir);
   const builtinPath = parsePath(env.DASHBOARD_BUILTIN_PATH, DEFAULT_BUILTIN_PATH);
   // The default is already absolute, so path.resolve keeps it as-is; only a
   // relative override is resolved from APP_ROOT.
   const launchAgentsDir = parsePath(env.DASHBOARD_LAUNCH_AGENTS_DIR, path.join(os.homedir(), 'Library', 'LaunchAgents'));
-  const threadsDir = parsePath(env.DASHBOARD_THREADS_DIR, DEFAULT_THREADS_DIR);
-  const settingsPath = parsePath(env.DASHBOARD_SETTINGS_PATH, DEFAULT_SETTINGS_PATH);
-  const codexDir = codexDirFrom(env);
+  const threadsDir = parsePath(env.DASHBOARD_THREADS_DIR, root.threadsDir);
+  const settingsPath = parsePath(env.DASHBOARD_SETTINGS_PATH, root.settings);
+  const codexDir = parsePath(env.DASHBOARD_CODEX_DIR, root.codexDir);
   const cmuxSocketPathFile = parsePath(env.DASHBOARD_CMUX_SOCKET_PATH_FILE,
     path.join(os.homedir(), '.local', 'state', 'cmux', 'last-socket-path'));
   const cmuxPasswordFile = parsePath(env.DASHBOARD_CMUX_PASSWORD_FILE,
@@ -187,6 +191,11 @@ export function loadConfig(env = process.env) {
 
   return Object.freeze({
     appRoot: APP_ROOT,
+    home,
+    migrateFrom,
+    // The seeds a new root starts from, and the README written into it.
+    defaultsDir: path.join(REPO_ROOT, 'defaults'),
+    rootReadme: path.join(APP_ROOT, 'docs', 'root-README.md'),
     publicDir: path.join(APP_ROOT, 'public'),
     bindHost: BIND_HOST,
     port,
@@ -265,10 +274,38 @@ function parseFocusOrigin(value, problems) {
   return { origin: url.origin, host: `${url.hostname}:${url.port || 80}` };
 }
 
+// PERSONAL_ASSISTANT_HOME: unset or empty is the default root; anything
+// else must be absolute, since a relative root would follow the working
+// directory.
+function parseHome(env, problems) {
+  const value = env.PERSONAL_ASSISTANT_HOME;
+  if (isUnset(value)) return defaultHome();
+  if (!path.isAbsolute(value)) {
+    problems.push('PERSONAL_ASSISTANT_HOME must be an absolute path');
+    return null;
+  }
+  return path.resolve(value);
+}
+
+// DASHBOARD_MIGRATE_FROM: unset is the repository this file lives in; an
+// empty value is no migration (null), which every test harness sets.
+function parseMigrateFrom(value, problems) {
+  if (value === undefined) return REPO_ROOT;
+  if (value === '') return null;
+  if (!path.isAbsolute(value)) {
+    problems.push('DASHBOARD_MIGRATE_FROM must be an absolute path or empty');
+    return null;
+  }
+  return path.resolve(value);
+}
+
 // The Codex directory, for the daemon and for the two helper scripts, which
 // run outside loadConfig() and must agree with it.
 export function codexDirFrom(env = process.env) {
-  return parsePath(env.DASHBOARD_CODEX_DIR, DEFAULT_CODEX_DIR);
+  const problems = [];
+  const home = parseHome(env, problems);
+  if (problems.length > 0) throw new ConfigError(problems);
+  return parsePath(env.DASHBOARD_CODEX_DIR, layoutPaths(home).codexDir);
 }
 
 function parsePath(value, fallback) {
