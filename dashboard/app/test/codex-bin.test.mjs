@@ -43,17 +43,19 @@ if (args[0] === '--version') {
 async function fixture(t) {
   const root = await tempDir(t);
   const fakeBin = path.join(root, 'fake-bin');
-  const codexDir = path.join(root, 'codex');
+  // The helpers find their directory under the data root, as the daemon does.
+  const home = path.join(root, 'home');
+  const codexDir = path.join(home, 'codex');
   await fsp.mkdir(fakeBin);
   await fsp.writeFile(path.join(fakeBin, 'codex'), FAKE_CODEX, { mode: 0o755 });
   const log = path.join(root, 'codex-calls.log');
   const env = {
     ...process.env,
     PATH: `${fakeBin}:${process.env.PATH}`,
-    PERSONAL_ASSISTANT_HOME: path.join(root, 'home'),
-    DASHBOARD_CODEX_DIR: codexDir,
+    PERSONAL_ASSISTANT_HOME: home,
     FAKE_CODEX_LOG: log,
   };
+  delete env.DASHBOARD_CODEX_DIR;
   delete env.CMUX_WORKSPACE_ID;
   delete env.CMUX_SURFACE_ID;
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)) : []);
