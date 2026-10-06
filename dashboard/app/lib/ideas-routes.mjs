@@ -48,6 +48,18 @@ export function createIdeasRoutes({ ideas, instructions, hub, log, limits, shutt
     sendJson(res, 200, { ideas: await result() });
   }
 
+  async function serveSave(req, res) {
+    const { id } = await idBody(req, limits);
+    try { await ideas.mark(id, { status: 'saved' }); } catch (error) { throw storeError(error); }
+    sendJson(res, 200, { ideas: await result() });
+  }
+
+  async function serveUnsave(req, res) {
+    const { id } = await idBody(req, limits);
+    try { await ideas.unmark(id); } catch (error) { throw storeError(error); }
+    sendJson(res, 200, { ideas: await result() });
+  }
+
   async function serveStart(req, res) {
     const { id } = await idBody(req, limits);
     if (shuttingDown()) throw new HttpError(503, 'shutting_down');
@@ -72,7 +84,7 @@ export function createIdeasRoutes({ ideas, instructions, hub, log, limits, shutt
     message: instructionsMessage,
   });
 
-  return { serveRead, serveAdd, serveDismiss, serveStart, ...instructionRoutes };
+  return { serveRead, serveAdd, serveDismiss, serveSave, serveUnsave, serveStart, ...instructionRoutes };
 }
 
 async function idBody(req, limits) {
@@ -83,7 +95,9 @@ async function idBody(req, limits) {
 }
 
 function storeError(error) {
-  return error?.code === 'no_such_item' ? new HttpError(404, 'no_such_item') : error;
+  if (error?.code === 'no_such_item') return new HttpError(404, 'no_such_item');
+  if (error?.code === 'already_started') return new HttpError(409, 'already_started');
+  return error;
 }
 
 function cut(value, max) { return Array.from(value).slice(0, max).join(''); }

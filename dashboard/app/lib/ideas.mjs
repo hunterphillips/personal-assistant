@@ -94,6 +94,8 @@ export function createIdeas({ dir, marksFile, limits, zone, log: rawLog = () => 
       await read();
       if (!cache?.marksWritable) throw new IdeasError('marks_invalid');
       if (!cache?.index.has(id)) throw new IdeasError('no_such_item');
+      // Checked inside the write queue so a Start that lands first is kept.
+      if (status === 'saved' && cache.index.get(id).status === 'taken') throw new IdeasError('already_started');
       const marks = { ...cache.marks, [id]: {
         status, at: now().toISOString(), ...(status === 'taken' && agent ? { agent } : {}),
       } };

@@ -105,6 +105,35 @@ test('dismiss removes an idea and refuses an unknown id', async (t) => {
   assert.deepEqual([missing.status, missing.json], [404, { error: 'no_such_item' }]);
 });
 
+test('save marks an idea saved, unsave clears it, and both refuse an unknown id', async (t) => {
+  const app = await startIdeas(t);
+  const statusOf = (response) => response.json.ideas.runs.flatMap((run) => run.items).find((item) => item.id === 'fixture-agent-card').status;
+  const saved = await post(app, '/api/ideas/save', { id: 'fixture-agent-card' });
+  assert.deepEqual([saved.status, statusOf(saved)], [200, 'saved']);
+  assert.equal(JSON.parse(await readFile(app.marksFile, 'utf8'))['fixture-agent-card'].status, 'saved');
+  const unsaved = await post(app, '/api/ideas/unsave', { id: 'fixture-agent-card' });
+  assert.deepEqual([unsaved.status, statusOf(unsaved)], [200, 'new']);
+  assert.deepEqual(JSON.parse(await readFile(app.marksFile, 'utf8')), {});
+  for (const route of ['/api/ideas/save', '/api/ideas/unsave']) {
+    const missing = await post(app, route, { id: 'missing' });
+    assert.deepEqual([missing.status, missing.json], [404, { error: 'no_such_item' }]);
+    const invalid = await post(app, route, { id: 'x', extra: true });
+    assert.deepEqual([invalid.status, invalid.json], [400, { error: 'invalid_body' }]);
+    const over = await post(app, route, { id: 'x'.repeat(LIMITS.ideaBodyBytes) });
+    assert.equal(over.status, 413);
+  }
+});
+
+test('save refuses a started idea and start takes a saved one', async (t) => {
+  const app = await startIdeas(t);
+  assert.equal((await post(app, '/api/ideas/save', { id: 'fixture-agent-card' })).status, 200);
+  const started = await post(app, '/api/ideas/start', { id: 'fixture-agent-card' });
+  assert.equal(started.status, 202);
+  assert.equal(JSON.parse(await readFile(app.marksFile, 'utf8'))['fixture-agent-card'].status, 'taken');
+  const again = await post(app, '/api/ideas/save', { id: 'fixture-agent-card' });
+  assert.deepEqual([again.status, again.json], [409, { error: 'already_started' }]);
+});
+
 test('start targets the first pinned Claude agent, sends context, then writes the mark', async (t) => {
   const app = await startIdeas(t, { agents: [agent('myos'), agent('assistant', { pinned: true })] });
   const response = await post(app, '/api/ideas/start', { id: 'fixture-agent-card' });
@@ -152,7 +181,8 @@ test('without Ideas every route is 404 and /ideas serves the shell', async (t) =
   const app = await startIdeas(t, { includeIdeas: false });
   for (const [method, pathname, body] of [
     ['GET', '/api/ideas'], ['POST', '/api/ideas', { text: 'x' }], ['POST', '/api/ideas/dismiss', { id: 'x' }],
-    ['POST', '/api/ideas/start', { id: 'x' }], ['GET', '/api/ideas/instructions'],
+    ['POST', '/api/ideas/start', { id: 'x' }], ['POST', '/api/ideas/save', { id: 'x' }],
+    ['POST', '/api/ideas/unsave', { id: 'x' }], ['GET', '/api/ideas/instructions'],
     ['POST', '/api/ideas/instructions/propose', { text: 'x' }],
   ]) {
     const response = method === 'GET' ? await request(app, method, pathname) : await post(app, pathname, body);
