@@ -4,7 +4,10 @@
 // idea to the pinned agent; Save keeps it, marked, until Unsave or Start;
 // Dismiss removes it from the returned list. New ideas runs the producer's
 // ideas routine (the store's `routine`) now and polls every 10 seconds until
-// a new run lands or ten minutes pass. The
+// a new run lands or ten minutes pass. Each week heading's refresh button
+// posts /api/ideas/refresh, which retires the week's new ideas and runs the
+// routine for that week; it polls the same way, with its sentence under the
+// week's heading. A run carrying `week` groups under that week. The
 // criteria panel is instructions.js's. Each row expands its description and
 // owns one overflow menu whose buttons use data-ideas-action so the shell's
 // data-action handler never owns them.
@@ -22,6 +25,7 @@
   var FAST_POLL_MS = 10000;
   var FAST_FOR_MS = 600000;
   var NO_ROUTINE = 'No routine writes ideas.';
+  var REFRESH_LABEL = 'New ideas for this week';
   var TIMEOUT_MS = 8000;
   var NO_ANSWER = 'The dashboard did not respond.';
   var EMPTY = 'No ideas yet.';
@@ -39,6 +43,7 @@
     plugin: '<path d="M8.5 4v4.5H4v7h4.5V20h7v-4.5H20v-7h-4.5V4Z"/><path d="M10 4a2 2 0 1 1 4 0"/><path d="M20 10a2 2 0 1 1 0 4"/>',
     agent: '<circle cx="12" cy="8.5" r="3.25"/><path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/>',
     saved: '<path d="M7 4.5h10a1 1 0 0 1 1 1v14l-6-4-6 4v-14a1 1 0 0 1 1-1Z"/>',
+    refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
     idea: '<path d="M9 18h6"/><path d="M10 21h4"/><path d="M8.4 14.5A6 6 0 1 1 15.6 14.5C14.6 15.2 14 16.1 14 17h-4c0-.9-.6-1.8-1.6-2.5Z"/>',
   };
 
@@ -113,6 +118,8 @@
     var chosen = null; // the week key of the panel's current row, or null
     var notice = null; // the New ideas sentence, or null
     var running = false; // a New ideas request is in flight
+    var refreshing = false; // a week's refresh request is in flight
+    var weekNotices = new Map(); // week key -> the sentence under its heading
     var fast = null; // { runs, until } while a New ideas run is awaited
     var savedOnly = false; // the page shows only saved ideas; Saved is the current row
 
@@ -281,10 +288,29 @@
       return row;
     }
 
+    function refreshButton(key) {
+      var button = element('button', 'ideas-week-refresh');
+      button.type = 'button';
+      button.setAttribute('data-ideas-week', key);
+      button.setAttribute('aria-label', REFRESH_LABEL);
+      button.disabled = refreshing || !hasRoutine();
+      button.title = hasRoutine() ? REFRESH_LABEL : NO_ROUTINE;
+      button.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + ICONS.refresh + '</svg>';
+      return button;
+    }
+
     function renderWeek(group) {
       var node = element('section', 'ideas-week');
       node.setAttribute('data-ideas-week', group.key);
-      node.appendChild(element('h2', 'ideas-week-title', group.title));
+      var head = element('div', 'ideas-week-head');
+      head.appendChild(element('h2', 'ideas-week-title', group.title));
+      head.appendChild(refreshButton(group.key));
+      node.appendChild(head);
+      if (weekNotices.has(group.key)) {
+        var sentence = element('p', 'ideas-week-notice', weekNotices.get(group.key));
+        sentence.setAttribute('role', 'status');
+        node.appendChild(sentence);
+      }
       group.runs.forEach(function (run) {
         var runNode = element('div', 'ideas-run');
         runNode.setAttribute('data-ideas-run', run.id);
@@ -378,7 +404,7 @@
       try {
         objectsIn(data.runs).forEach(function (run) {
           if (objectsIn(run.items).length === 0) return;
-          var week = weekFor(run.date);
+          var week = weekFor(typeof run.week === 'string' ? run.week : run.date);
           var group = byWeek.get(week.key);
           if (!group) {
             group = { key: week.key, title: week.title, runs: [] };
@@ -386,6 +412,15 @@
             groups.push(group);
           }
           group.runs.push(run);
+        });
+        // A week refreshed down to no rows keeps its heading for its sentence.
+        weekNotices.forEach(function (_text, key) {
+          if (byWeek.has(key)) return;
+          var week = weekFor(key);
+          var group = { key: week.key, title: week.title, runs: [] };
+          byWeek.set(key, group);
+          var at = groups.findIndex(function (other) { return other.key < key; });
+          groups.splice(at === -1 ? groups.length : at, 0, group);
         });
       } catch (_error) {
         setMessage([NO_ANSWER]);
@@ -422,6 +457,7 @@
       if (!landed && Date.now() < fast.until) return;
       fast = null;
       notice = null;
+      weekNotices.clear();
       rendered = null;
       if (visible) startPoll();
     }
@@ -451,6 +487,38 @@
         else if (result.status === 404 || result.status === 503 || (result.status === 409 && code === 'agent_unavailable')) {
           say(name + ' is not running.');
         } else say(NO_ANSWER);
+      });
+    }
+
+    // The sentence under a week's heading.
+    function sayWeek(key, text) {
+      weekNotices.set(key, text);
+      rendered = null;
+      if (visible && data) render();
+    }
+
+    function refreshWeek(key) {
+      if (refreshing || !hasRoutine()) return;
+      refreshing = true;
+      rendered = null;
+      render();
+      var name = producerName();
+      request('/api/ideas/refresh', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ week: key }),
+      }).then(function (result) {
+        refreshing = false;
+        var code = result && result.body && typeof result.body.error === 'string' ? result.body.error : null;
+        var fresh = result && result.body && result.body.ideas && Array.isArray(result.body.ideas.runs) ? result.body.ideas : null;
+        if (fresh) apply(fresh);
+        if (!result) sayWeek(key, NO_ANSWER);
+        else if (result.status === 202) {
+          fast = { runs: runIds(data), until: Date.now() + FAST_FOR_MS };
+          if (visible) startPoll();
+          sayWeek(key, name + ' is writing new ideas for this week. They will appear here when it finishes.');
+        } else if (result.status === 409 && code === 'busy') sayWeek(key, name + ' is in the middle of a turn. Try again when it is idle.');
+        else if (result.status === 404 || result.status === 503 || (result.status === 409 && code === 'agent_unavailable')) {
+          sayWeek(key, name + ' is not running.');
+        } else sayWeek(key, NO_ANSWER);
       });
     }
 
@@ -570,6 +638,8 @@
       });
     }
     weeks.addEventListener('click', function (event) {
+      var refresh = event.target.closest && event.target.closest('.ideas-week-refresh');
+      if (refresh) { refreshWeek(refresh.getAttribute('data-ideas-week')); return; }
       var toggle = event.target.closest && event.target.closest('.ideas-menu-toggle');
       if (toggle) {
         var menuItem = toggle.closest('.ideas-item');

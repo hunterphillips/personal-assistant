@@ -7,6 +7,15 @@ description: Produce the week's ideas for Hunter's attention. Invoke when the in
 
 Paths below are from the repo root, two folders up from this folder.
 
+## The week
+
+The instruction may carry a week line, "Write this run's ideas for the
+week of <Month D> (`week: "YYYY-MM-DD"` in the file).", followed by the
+titles of that week's saved ideas. That is a refresh from the dashboard:
+draw ideas for that week, write its `week` in the run file, and never
+repeat a title the instruction lists as saved. With no week line, the
+run is for this week and the file carries no `week`.
+
 ## Read
 
 - `ideas/criteria.md`.
@@ -17,7 +26,7 @@ Paths below are from the repo root, two folders up from this folder.
   must pass.
 - `registry/agents.json`.
 - `thoughts/shared/lanes/*/handoff.md`.
-- This week's `feed/items/`.
+- The week's `feed/items/`.
 
 ## Judge
 
@@ -36,7 +45,8 @@ an idea.
 would do; the why belongs in Discuss.
 
 One new file, `ideas/items/<today>-myos.json`, in the shape
-`ideas/README.md` describes. One item, for example:
+`ideas/README.md` describes, with `"week": "YYYY-MM-DD"` beside `date`
+when the instruction named a week. One item, for example:
 
 ```json
 { "id": "weekly-review-routine",
@@ -45,10 +55,11 @@ One new file, `ideas/items/<today>-myos.json`, in the shape
   "kind": "workflow", "agents": ["assistant", "focus"], "source": null }
 ```
 
-`id` is a slug of the title. Never edit an old file. A run on a day
-whose week already has a file writes a new file for today. If
-`ideas/items/<today>-myos.json` already exists, write nothing and say so
-in the reply.
+`id` is a slug of the title, unique across the store. Never edit an old
+file. A run on a day whose week already has a file writes a new file for
+today. When `ideas/items/<today>-myos.json` already exists, this run
+writes `ideas/items/<today>-myos-2.json`, then `-3`, and so on; the
+run's `producer` stays `myos`.
 
 ## Do not
 
@@ -57,5 +68,5 @@ anything but the one file above.
 
 ## Reply
 
-Exactly one sentence, with no idea content: "Wrote N ideas for the week
-of <Month D>."
+Exactly one sentence, with no idea content, naming the week written
+for: "Wrote N ideas for the week of <Month D>."
