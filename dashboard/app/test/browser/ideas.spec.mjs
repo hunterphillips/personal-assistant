@@ -431,6 +431,7 @@ test.describe('Refresh a week', () => {
     }));
     await openIdeas(page, hub);
     await expect(page.locator('#ideas-weeks .ideas-week[data-ideas-week="2026-09-21"] [data-ideas-item="fixture-week-run"]')).toBeVisible();
+    await expect(weeks(page).locator('.ideas-week-title')).toHaveText(['Week of September 28', 'Week of September 21']);
   });
 });
 

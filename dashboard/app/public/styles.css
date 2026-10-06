@@ -2991,7 +2991,8 @@ textarea.form-input {
   gap: 4px 8px;
 }
 .routine-run-time { color: var(--muted); white-space: nowrap; }
-.routine-run-note {
+.routine-run-note,
+.routine-run-context {
   color: var(--muted);
   overflow-wrap: anywhere;
 }

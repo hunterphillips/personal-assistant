@@ -272,6 +272,11 @@ test('replaceWeek retires only that week\'s new ideas in one write and answers w
   const shown = (await ideas.read()).runs.flatMap((run) => run.items.map((entry) => entry.id)).sort();
   assert.deepEqual(shown, ['fixture-agent-card', 'fixture-own', 'fixture-taken', 'fixture-weekly-map']);
 
+  // A run whose week is not a Monday counts in the week that holds it.
+  await writeFile(path.join(paths.dir, '2026-10-03-myos.json'), JSON.stringify({
+    producer: 'myos', date: '2026-10-03', week: '2026-09-23', items: [item('fixture-wednesday')],
+  }));
+  assert.deepEqual((await ideas.replaceWeek('2026-09-21')).replaced, ['fixture-wednesday']);
   assert.deepEqual(await ideas.replaceWeek('2026-08-03'), { replaced: [], saved: [] });
   await writeFile(paths.marksFile, '[');
   await assert.rejects(() => store(paths).replaceWeek('2026-09-21'), { code: 'marks_invalid' });

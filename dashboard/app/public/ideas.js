@@ -419,8 +419,15 @@
           var week = weekFor(key);
           var group = { key: week.key, title: week.title, runs: [] };
           byWeek.set(key, group);
-          var at = groups.findIndex(function (other) { return other.key < key; });
-          groups.splice(at === -1 ? groups.length : at, 0, group);
+          groups.push(group);
+        });
+        // A run written for a past week arrives first, so weeks are ordered by
+        // their Monday, newest first; a week that is not a date goes last.
+        groups.sort(function (a, b) {
+          var aDate = Boolean(parseDate(a.key));
+          var bDate = Boolean(parseDate(b.key));
+          if (aDate !== bDate) return aDate ? -1 : 1;
+          return a.key < b.key ? 1 : a.key > b.key ? -1 : 0;
         });
       } catch (_error) {
         setMessage([NO_ANSWER]);
@@ -497,9 +504,15 @@
       if (visible && data) render();
     }
 
+    function focusRefresh(key) {
+      var button = weeks.querySelector('.ideas-week[data-ideas-week="' + CSS.escape(key) + '"] .ideas-week-refresh');
+      if (button) button.focus();
+    }
+
     function refreshWeek(key) {
       if (refreshing || !hasRoutine()) return;
       refreshing = true;
+      weekNotices.delete(key);
       rendered = null;
       render();
       var name = producerName();
@@ -519,6 +532,7 @@
         else if (result.status === 404 || result.status === 503 || (result.status === 409 && code === 'agent_unavailable')) {
           sayWeek(key, name + ' is not running.');
         } else sayWeek(key, NO_ANSWER);
+        if (visible) focusRefresh(key);
       });
     }
 

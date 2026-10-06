@@ -2333,6 +2333,8 @@
         item.appendChild(line);
         var note = runNote(run, names);
         if (note) item.appendChild(element('span', 'routine-run-note', note));
+        // A run given a context (a week's refresh in Ideas) shows its first line.
+        if (typeof run.context === 'string' && run.context) item.appendChild(element('span', 'routine-run-context', run.context.split(/\r?\n/, 1)[0]));
         var reply = run.outcome === 'failed' && run.detail && run.detail !== 'agent_unavailable'
           ? String(run.detail)
           : typeof run.reply === 'string' && run.reply ? run.reply : '';
