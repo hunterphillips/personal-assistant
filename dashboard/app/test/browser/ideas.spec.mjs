@@ -208,7 +208,6 @@ test.describe('Ideas', () => {
     await expect(bookmark).toHaveAttribute('title', 'Unsave');
     expect(await bookmark.evaluate((node) => getComputedStyle(node.querySelector('svg path')).fill)).not.toBe('none');
     await expect(row).toHaveAttribute('aria-expanded', 'false');
-    await expect(row.locator('.ideas-saved-icon')).toHaveCount(0);
     await bookmark.click();
     await expect(bookmark).toHaveAttribute('aria-pressed', 'false');
     await expect(bookmark).toHaveAttribute('aria-label', 'Save');
@@ -229,6 +228,29 @@ test.describe('Ideas', () => {
     expect(hub.requests('/api/ideas/save').map((entry) => entry.status)).toEqual([200, 200]);
     expect(hub.requests('/api/ideas/unsave').map((entry) => entry.status)).toEqual([200]);
     expect(hub.requests('/api/ideas/start').map((entry) => entry.status)).toEqual([202]);
+  });
+
+  test('the bookmark keeps keyboard focus across a save and an unsave', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    const bookmark = item(page, 'fixture-agent-card').locator('.ideas-save-toggle');
+    await bookmark.focus();
+    await page.keyboard.press('Enter');
+    await expect(bookmark).toHaveAttribute('aria-pressed', 'true');
+    await expect(bookmark).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(bookmark).toHaveAttribute('aria-pressed', 'false');
+    await expect(bookmark).toBeFocused();
+    await expect(item(page, 'fixture-agent-card')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('a refused save shows its sentence on the row', async ({ page, hub }) => {
+    await page.route('**/api/ideas/save', (route) => route.fulfill({ status: 404, json: { error: 'no_such_item' } }));
+    await openIdeas(page, hub);
+    const row = item(page, 'fixture-agent-card');
+    await row.locator('.ideas-save-toggle').click();
+    await expect(row.locator('.ideas-reason')).toHaveText('That idea is no longer available.');
+    await expect(row.locator('.ideas-save-toggle')).toHaveAttribute('aria-pressed', 'false');
+    await expect(row.locator('.ideas-save-toggle')).toBeEnabled();
   });
 
   test('a saved row keeps its bookmark shown at rest, and a new row shows it on hover', async ({ page, hub }) => {

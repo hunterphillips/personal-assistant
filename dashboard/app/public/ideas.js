@@ -501,6 +501,8 @@
     function mutate(path, id, button) {
       if (pending) return;
       pending = id;
+      // Read before disabling, which drops focus in Chromium.
+      var focused = document.activeElement === button && button.classList.contains('ideas-save-toggle');
       button.disabled = true;
       var reason = reasonFor(id);
       if (reason) reason.hidden = true;
@@ -511,6 +513,12 @@
         button.disabled = false;
         if (result && ((path.endsWith('/start') && result.status === 202) || (!path.endsWith('/start') && result.status === 200))) {
           if (result.body && result.body.ideas) apply(result.body.ideas);
+          // The render replaced the bookmark; a keyboard toggle keeps its place.
+          if (focused) {
+            var row = weeks.querySelector('[data-ideas-item="' + CSS.escape(id) + '"]');
+            var next = row && (row.querySelector('.ideas-save-toggle') || row);
+            if (next) next.focus();
+          }
           if (path.endsWith('/start') && visible && result.body && typeof result.body.agentId === 'string') shellApi.openAgent(result.body.agentId);
           return;
         }
