@@ -113,6 +113,8 @@ const EXACT_ROUTES = new Map([
   ['/api/feed/instructions/propose', { name: 'feed-instructions-propose', methods: ['POST'] }],
   ['/api/ideas', { name: 'ideas', methods: ['GET', 'POST'] }],
   ['/api/ideas/dismiss', { name: 'ideas-dismiss', methods: ['POST'] }],
+  ['/api/ideas/save', { name: 'ideas-save', methods: ['POST'] }],
+  ['/api/ideas/unsave', { name: 'ideas-unsave', methods: ['POST'] }],
   ['/api/ideas/start', { name: 'ideas-start', methods: ['POST'] }],
   ['/api/ideas/instructions', { name: 'ideas-instructions', methods: ['GET'] }],
   ['/api/ideas/instructions/propose', { name: 'ideas-instructions-propose', methods: ['POST'] }],
@@ -340,6 +342,12 @@ export function createApp({
       case 'ideas-dismiss':
         if (!ideasRoutes) throw new HttpError(404, 'not_found');
         return ideasRoutes.serveDismiss(req, res);
+      case 'ideas-save':
+        if (!ideasRoutes) throw new HttpError(404, 'not_found');
+        return ideasRoutes.serveSave(req, res);
+      case 'ideas-unsave':
+        if (!ideasRoutes) throw new HttpError(404, 'not_found');
+        return ideasRoutes.serveUnsave(req, res);
       case 'ideas-start':
         if (!ideasRoutes) throw new HttpError(404, 'not_found');
         return ideasRoutes.serveStart(req, res);

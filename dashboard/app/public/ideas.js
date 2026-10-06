@@ -1,17 +1,20 @@
 // Ideas: suggestions from producer runs and Hunter's own additions, grouped
 // into Monday-start weeks. The view fetches /api/ideas on show and every 60
 // seconds. Discuss opens quick chat without sending a turn; Start sends the
-// idea to the pinned agent; Dismiss removes it from the returned list. New
-// ideas runs the producer's ideas routine (the store's `routine`) now and
-// polls every 10 seconds until a new run lands or ten minutes pass. The
+// idea to the pinned agent; Save keeps it, marked, until Unsave or Start;
+// Dismiss removes it from the returned list. New ideas runs the producer's
+// ideas routine (the store's `routine`) now and polls every 10 seconds until
+// a new run lands or ten minutes pass. The
 // criteria panel is instructions.js's. Each row expands its description and
 // owns one overflow menu whose buttons use data-ideas-action so the shell's
 // data-action handler never owns them.
 //
 // The side panel's Ideas section, drawn on the same render as the weeks and
-// cleared on hide, lists Weeks: each week with its count of ideas. Choosing
-// one scrolls that week's heading into view and marks the row current until
-// another is chosen or the view hides.
+// cleared on hide, lists Saved, with its count, while any idea is saved, then
+// Weeks: each week with its count of ideas. Choosing Saved filters the page to
+// saved ideas; choosing a week clears the filter and scrolls that week's
+// heading into view. The chosen row stays current until another is chosen or
+// the view hides.
 (function () {
   'use strict';
 
@@ -35,6 +38,7 @@
     skill: '<path d="M12 3.5 14.2 8l4.8.7-3.5 3.4.8 4.9-4.3-2.3L7.7 17l.8-4.9L5 8.7 9.8 8Z"/>',
     plugin: '<path d="M8.5 4v4.5H4v7h4.5V20h7v-4.5H20v-7h-4.5V4Z"/><path d="M10 4a2 2 0 1 1 4 0"/><path d="M20 10a2 2 0 1 1 0 4"/>',
     agent: '<circle cx="12" cy="8.5" r="3.25"/><path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/>',
+    saved: '<path d="M7 4.5h10a1 1 0 0 1 1 1v14l-6-4-6 4v-14a1 1 0 0 1 1-1Z"/>',
     idea: '<path d="M9 18h6"/><path d="M10 21h4"/><path d="M8.4 14.5A6 6 0 1 1 15.6 14.5C14.6 15.2 14 16.1 14 17h-4c0-.9-.6-1.8-1.6-2.5Z"/>',
   };
 
@@ -110,6 +114,7 @@
     var notice = null; // the New ideas sentence, or null
     var running = false; // a New ideas request is in flight
     var fast = null; // { runs, until } while a New ideas run is awaited
+    var savedOnly = false; // the page shows only saved ideas; Saved is the current row
 
     function agents() { return state && Array.isArray(state.agents) ? state.agents : []; }
     function agent(id) { return agents().find(function (entry) { return entry.id === id; }) || null; }
@@ -158,6 +163,23 @@
       return icon;
     }
 
+    function savedIcon() {
+      var icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      icon.setAttribute('class', 'ideas-saved-icon');
+      icon.setAttribute('width', '16');
+      icon.setAttribute('height', '16');
+      icon.setAttribute('viewBox', '0 0 24 24');
+      icon.setAttribute('stroke', 'currentColor');
+      icon.setAttribute('fill', 'none');
+      icon.setAttribute('stroke-width', '2');
+      icon.setAttribute('stroke-linecap', 'round');
+      icon.setAttribute('stroke-linejoin', 'round');
+      icon.setAttribute('role', 'img');
+      icon.setAttribute('aria-label', 'Saved');
+      icon.innerHTML = ICONS.saved;
+      return icon;
+    }
+
     function closeMenu(restore) {
       if (!openMenu) return;
       var menu = openMenu.querySelector('.ideas-menu');
@@ -185,7 +207,10 @@
       node.setAttribute('aria-expanded', 'false');
       node.appendChild(kindIcon(item.kind));
       var content = element('div', 'ideas-content');
-      content.appendChild(element('h3', 'ideas-title', item.title));
+      var title = element('h3', 'ideas-title');
+      if (item.status === 'saved') title.appendChild(savedIcon());
+      title.appendChild(element('span', 'ideas-title-text', item.title));
+      content.appendChild(title);
       if (item.text) {
         var body = element('div', 'ideas-text markdown');
         window.DashboardMarkdown.renderInto(body, item.text);
@@ -221,7 +246,10 @@
         var started = element('a', 'menu-entry ideas-started', 'Started with ' + agentName(item.agent));
         started.href = '/?agent=' + encodeURIComponent(item.agent);
         actions.appendChild(started);
-      } else actions.appendChild(action('Start', item.id));
+      } else {
+        actions.appendChild(action('Start', item.id));
+        actions.appendChild(action(item.status === 'saved' ? 'Unsave' : 'Save', item.id));
+      }
       actions.appendChild(action('Dismiss', item.id));
       node.appendChild(actions);
       var reason = element('p', 'ideas-reason');
@@ -229,6 +257,28 @@
       reason.hidden = true;
       node.appendChild(reason);
       return node;
+    }
+
+    function countOf(group, saved) {
+      return group.runs.reduce(function (sum, run) {
+        return sum + objectsIn(run.items).filter(function (item) { return !saved || item.status === 'saved'; }).length;
+      }, 0);
+    }
+
+    // The week as the Saved filter draws it: its saved rows, or null with none.
+    function savedWeek(group) {
+      var runs = group.runs.map(function (run) {
+        return { id: run.id, items: objectsIn(run.items).filter(function (item) { return item.status === 'saved'; }) };
+      }).filter(function (run) { return run.items.length > 0; });
+      return runs.length ? { key: group.key, title: group.title, runs: runs } : null;
+    }
+
+    function panelRow(name, count) {
+      var row = element('button', 'panel-row');
+      row.type = 'button';
+      row.appendChild(element('span', 'panel-row-name', name));
+      row.appendChild(element('span', 'panel-row-count', String(count)));
+      return row;
     }
 
     function renderWeek(group) {
@@ -244,32 +294,49 @@
       return node;
     }
 
-    // The panel's Weeks group: one row per week drawn, with its count of ideas.
-    function renderPanel(groups) {
+    // The panel: a Saved row while any idea is saved, then the Weeks group,
+    // one row per week in the store with its count of ideas.
+    function renderPanel(groups, savedCount) {
       if (!side) return;
       side.textContent = '';
       if (groups.length === 0) return;
+      if (savedCount > 0) {
+        var saved = panelRow('Saved', savedCount);
+        saved.setAttribute('data-ideas-saved', '');
+        if (savedOnly) saved.setAttribute('aria-current', 'true');
+        side.appendChild(saved);
+      }
       side.appendChild(element('h2', 'panel-heading', 'Weeks'));
       groups.forEach(function (group) {
-        var count = group.runs.reduce(function (sum, run) { return sum + objectsIn(run.items).length; }, 0);
-        var row = element('button', 'panel-row');
-        row.type = 'button';
+        var row = panelRow(group.title, countOf(group, false));
         row.setAttribute('data-ideas-week', group.key);
         if (group.key === chosen) row.setAttribute('aria-current', 'true');
-        row.appendChild(element('span', 'panel-row-name', group.title));
-        row.appendChild(element('span', 'panel-row-count', String(count)));
         side.appendChild(row);
       });
     }
 
-    // Scrolls the week's heading into view and marks its row current.
+    // Filters the page to saved ideas and marks the Saved row current.
+    function chooseSaved() {
+      savedOnly = true;
+      chosen = null;
+      render();
+      document.getElementById('ideas-page').scrollTop = 0;
+      shellApi.closePanel();
+    }
+
+    // Clears the Saved filter, scrolls the week's heading into view, and marks
+    // its row current.
     function choose(key) {
+      if (savedOnly) {
+        savedOnly = false;
+        render();
+      }
       var week = weeks.querySelector('[data-ideas-week="' + CSS.escape(key) + '"]');
       if (!week) return;
       chosen = key;
       var rows = side.querySelectorAll('.panel-row');
       for (var r = 0; r < rows.length; r += 1) {
-        if (rows[r].getAttribute('data-ideas-week') === key) rows[r].setAttribute('aria-current', 'true');
+        if (rows[r].hasAttribute('data-ideas-week') && rows[r].getAttribute('data-ideas-week') === key) rows[r].setAttribute('aria-current', 'true');
         else rows[r].removeAttribute('aria-current');
       }
       week.querySelector('.ideas-week-title').scrollIntoView({ block: 'start' });
@@ -325,16 +392,19 @@
         rendered = null;
         return;
       }
-      var built = groups.map(renderWeek);
+      var savedCount = groups.reduce(function (sum, group) { return sum + countOf(group, true); }, 0);
+      // The last saved idea gone takes the filter with it.
+      if (savedCount === 0) savedOnly = false;
+      var built = (savedOnly ? groups.map(savedWeek).filter(Boolean) : groups).map(renderWeek);
       var problems = arrayOf(data.problems).filter(function (text) { return typeof text === 'string'; });
       var line = noticeLine();
-      setMessage((built.length === 0 ? [EMPTY] : []).concat(line ? [line] : [], problems));
+      setMessage((groups.length === 0 ? [EMPTY] : []).concat(line ? [line] : [], problems));
       syncNew();
       weeks.textContent = '';
       built.forEach(function (node) { weeks.appendChild(node); });
       // A week gone from the store takes its mark with it.
       if (!groups.some(function (group) { return group.key === chosen; })) chosen = null;
-      renderPanel(groups);
+      renderPanel(groups, savedCount);
       shellApi.panelChanged();
       rendered = JSON.stringify(data);
     }
@@ -494,6 +564,7 @@
 
     if (side) {
       side.addEventListener('click', function (event) {
+        if (event.target.closest && event.target.closest('button[data-ideas-saved]')) { chooseSaved(); return; }
         var row = event.target.closest && event.target.closest('button[data-ideas-week]');
         if (row) choose(row.getAttribute('data-ideas-week'));
       });
@@ -513,8 +584,7 @@
         if (button.getAttribute('data-ideas-action') === 'discuss') {
           discussed = itemById(id);
           shellApi.openQuickChat(button);
-        } else if (button.getAttribute('data-ideas-action') === 'start') mutate('/api/ideas/start', id, button);
-        else mutate('/api/ideas/dismiss', id, button);
+        } else mutate('/api/ideas/' + button.getAttribute('data-ideas-action'), id, button);
         return;
       }
       if (event.target.closest && event.target.closest('.ideas-started')) { closeMenu(false); return; }
@@ -575,6 +645,7 @@
         visible = false;
         discussed = null;
         chosen = null;
+        savedOnly = false;
         if (side) side.textContent = '';
         closeMenu(false);
         addToggle.hidden = true;

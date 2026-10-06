@@ -65,6 +65,8 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/ideas` | The Ideas runs, marks, and producing agent, newest first, with `routine`: the id of the producer's ideas routine (its first routine whose instruction or name contains "ideas"), or null. The New ideas action runs it through `POST /api/routines/:id/run`. |
 | `POST /api/ideas` | Adds a manual idea and returns the fresh Ideas store. |
 | `POST /api/ideas/dismiss` | Dismisses an idea and returns the fresh Ideas store. |
+| `POST /api/ideas/save` | Saves an idea that has not been started and returns the fresh Ideas store. |
+| `POST /api/ideas/unsave` | Removes an idea's saved mark and returns the fresh Ideas store. |
 | `POST /api/ideas/start` | Starts the pinned agent on an idea, marks it taken, and returns the fresh Ideas store. |
 | `GET /api/ideas/instructions` | The Ideas criteria, read as prose. |
 | `POST /api/ideas/instructions/propose` | Sends a criteria change to the newest listed producer. |
@@ -507,7 +509,7 @@ rail of six icon links, Home, Feed, Focus, Goals, Ideas, and Health; a
 path the shell does not know lands on Agents. Between the rail and every
 view sits a side panel (`aside#panel`) holding one section per view: the
 view's own list (agents with search, Feed sources, Goals areas, Health
-jobs, Ideas weeks) or Now (agents waiting, open notifications, today's
+jobs, Ideas: Saved and weeks) or Now (agents waiting, open notifications, today's
 brief), which a view without its own, Focus, shows. `public/panel.js`
 draws Now from every state and opens a row's target through the shell.
 Its toggle, "Hide side panel" or "Show side

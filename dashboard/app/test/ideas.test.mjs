@@ -95,12 +95,56 @@ test('mark writes an atomic private marks file and refuses an unknown id', async
   await assert.rejects(() => ideas.mark('missing', { status: 'dismissed' }), (error) => error instanceof IdeasError && error.code === 'no_such_item');
 });
 
+test('a saved mark reads back as saved and the idea stays in its run when a later run repeats its id', async (t) => {
+  const paths = await copy(t);
+  await writeFile(paths.marksFile, JSON.stringify({ 'fixture-reading-tool': { status: 'saved', at: '2026-10-06T14:12:00.000Z' } }));
+  await writeFile(path.join(paths.dir, '2026-10-05-myos.json'), JSON.stringify({
+    producer: 'myos', date: '2026-10-05', items: [item('fixture-reading-tool'), item('fixture-later')],
+  }));
+  const ideas = store(paths);
+  const result = await ideas.read();
+  assert.deepEqual(result.runs.map((run) => run.id), ['2026-10-05-myos', '2026-09-28-myos', '2026-09-21-myos']);
+  assert.deepEqual(result.runs[0].items.map((entry) => entry.id), ['fixture-later']);
+  const saved = result.runs[2].items.find((entry) => entry.id === 'fixture-reading-tool');
+  assert.equal(saved.status, 'saved');
+  assert.equal((await ideas.find('fixture-reading-tool')).status, 'saved');
+});
+
+test('the marks reader drops statuses other than taken, dismissed, and saved', async (t) => {
+  const paths = await copy(t);
+  await writeFile(paths.marksFile, JSON.stringify({ 'fixture-reading-tool': { status: 'kept', at: '2026-10-06T14:12:00.000Z' } }));
+  assert.equal((await store(paths).find('fixture-reading-tool')).status, 'new');
+});
+
+test('starting a saved idea overwrites the mark with taken', async (t) => {
+  const paths = await copy(t);
+  const ideas = store(paths);
+  await ideas.mark('fixture-agent-card', { status: 'saved' });
+  await ideas.mark('fixture-agent-card', { status: 'taken', agent: 'assistant' });
+  const marks = JSON.parse(await readFile(paths.marksFile, 'utf8'));
+  assert.deepEqual([marks['fixture-agent-card'].status, marks['fixture-agent-card'].agent], ['taken', 'assistant']);
+});
+
+test('unmark removes the entry atomically and refuses an unknown id', async (t) => {
+  const paths = await copy(t);
+  const ideas = store(paths);
+  await ideas.mark('fixture-agent-card', { status: 'saved' });
+  await ideas.mark('fixture-reading-tool', { status: 'saved' });
+  const item = await ideas.unmark('fixture-agent-card');
+  assert.equal(item.status, 'new');
+  const marks = JSON.parse(await readFile(paths.marksFile, 'utf8'));
+  assert.deepEqual(Object.keys(marks), ['fixture-reading-tool']);
+  assert.equal((await stat(paths.marksFile)).mode & 0o777, 0o600);
+  await assert.rejects(() => ideas.unmark('missing'), (error) => error instanceof IdeasError && error.code === 'no_such_item');
+});
+
 test('writes preserve a corrupt marks file', async (t) => {
   const paths = await copy(t);
   await writeFile(paths.marksFile, '{corrupt fixture marks');
   const ideas = store(paths);
   await assert.rejects(() => ideas.mark('fixture-agent-card', { status: 'dismissed' }), { code: 'marks_invalid' });
   await assert.rejects(() => ideas.add('Fixture blocked by marks'), { code: 'marks_invalid' });
+  await assert.rejects(() => ideas.unmark('fixture-agent-card'), { code: 'marks_invalid' });
   assert.equal(await readFile(paths.marksFile, 'utf8'), '{corrupt fixture marks');
 });
 

@@ -36,8 +36,10 @@ own ideas.
   { "status": "taken", "at": "2026-10-04T14:12:00.000Z", "agent": "assistant" } }
 ```
 
-The status is `taken` or `dismissed`. A taken mark names the agent when one
-accepted the idea. Only the dashboard writes this file.
+The status is `taken`, `dismissed`, or `saved`. A taken mark names the agent
+when one accepted the idea. A saved idea stays listed in its own run until
+Unsave removes the mark or Start replaces it with `taken`. Only the dashboard
+writes this file.
 
 ## Producers
 
