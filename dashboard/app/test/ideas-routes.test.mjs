@@ -6,10 +6,12 @@ import { fileURLToPath } from 'node:url';
 
 import { LIMITS } from '../lib/config.mjs';
 import { createIdeas } from '../lib/ideas.mjs';
-import { ideasRoutine, instructionsMessage, startMessage } from '../lib/ideas-routes.mjs';
+import { ideasRoutine, instructionsMessage, refreshContext, startMessage } from '../lib/ideas-routes.mjs';
 import { createRoutines } from '../lib/routines.mjs';
 import { createInstructions } from '../lib/instructions.mjs';
 import { RuntimeError } from '../lib/runtime/adapter.mjs';
+import { createScheduler } from '../lib/scheduler.mjs';
+import { fakePersonas } from './support/browser-server.mjs';
 import { fakeRegistry, request, startApp, tempDir } from './support/harness.mjs';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/ideas/', import.meta.url));
@@ -217,7 +219,7 @@ test('without Ideas every route is 404 and /ideas serves the shell', async (t) =
   for (const [method, pathname, body] of [
     ['GET', '/api/ideas'], ['POST', '/api/ideas', { text: 'x' }], ['POST', '/api/ideas/dismiss', { id: 'x' }],
     ['POST', '/api/ideas/start', { id: 'x' }], ['POST', '/api/ideas/save', { id: 'x' }],
-    ['POST', '/api/ideas/unsave', { id: 'x' }], ['GET', '/api/ideas/instructions'],
+    ['POST', '/api/ideas/unsave', { id: 'x' }], ['POST', '/api/ideas/refresh', { week: '2026-09-21' }], ['GET', '/api/ideas/instructions'],
     ['POST', '/api/ideas/instructions/propose', { text: 'x' }],
   ]) {
     const response = method === 'GET' ? await request(app, method, pathname) : await post(app, pathname, body);
@@ -234,4 +236,84 @@ test('Ideas mutations require JSON, the right method, and an exact Origin', asyn
   assert.equal((await post(app, '/api/ideas', { text: 'x' }, { origin: 'http://evil.example' })).status, 403);
   const get = await request(app, 'GET', '/api/ideas/start');
   assert.deepEqual([get.status, get.headers.allow], [405, 'POST']);
+});
+
+async function startRefresh(t, { seed = {}, withRoutine = true, withScheduler = true } = {}) {
+  const root = await tempDir(t);
+  const dir = path.join(root, 'items');
+  await cp(FIXTURE, dir, { recursive: true });
+  const marksFile = path.join(root, 'marks.json');
+  await writeFile(marksFile, JSON.stringify({ 'fixture-weekly-map': { status: 'saved', at: '2026-09-22T00:00:00Z' } }));
+  const ideas = createIdeas({ dir, marksFile, limits: LIMITS, zone: 'America/Chicago', now: () => new Date('2026-10-03T12:00:00-05:00') });
+  const instructions = createInstructions({
+    file: path.join(dir, 'criteria.md'), path: 'ideas/criteria.md', maxBytes: LIMITS.ideasFileBytes, label: 'Ideas', event: 'ideas_instructions_error',
+  });
+  const routines = createRoutines({ dir: path.join(root, 'routines'), limits: LIMITS, now: () => new Date('2026-10-03T12:00:00.000Z') });
+  await routines.load();
+  if (withRoutine) await routines.create({ name: 'Weekly ideas', agent: 'myos', instruction: 'Run the weekly-ideas skill.', schedule: { cron: '0 4 * * 1' }, active: true });
+  const store = { read: async () => [], append: async () => {} };
+  const personas = fakePersonas(seed, store);
+  t.after(() => personas.adapter.close());
+  const app = await startApp(t, {
+    registry: fakeRegistry([agent('assistant', { pinned: true }), agent('myos', { name: 'Myos' })]),
+    adapters: { claude: personas.adapter }, store, ideas, ideasInstructions: instructions, routines,
+    scheduler: withScheduler ? (hub) => createScheduler({ routines, hub, now: () => new Date('2026-10-03T12:00:00.000Z'), randomUUID: () => 'run-1' }) : null,
+  });
+  return { ...app, personas, routines, marksFile };
+}
+
+const marksOf = async (file) => JSON.parse(await readFile(file, 'utf8'));
+const idsOf = (store) => store.runs.flatMap((run) => run.items.map((item) => item.id)).sort();
+
+test('refreshContext names the week and its saved titles', () => {
+  assert.equal(refreshContext('2026-09-21', ['One', 'Two']),
+    'Write this run\'s ideas for the week of September 21 (`week: "2026-09-21"` in the file).\n'
+      + 'These ideas of that week are saved and stay; do not repeat them: One; Two.');
+  assert.equal(refreshContext('2026-10-05', []),
+    'Write this run\'s ideas for the week of October 5 (`week: "2026-10-05"` in the file).\nThat week has no saved ideas.');
+});
+
+test('refresh retires the week\'s new ideas, keeps the saved one, and runs the routine with the week in its context', async (t) => {
+  const app = await startRefresh(t);
+  app.personas.hold('myos');
+  const response = await post(app, '/api/ideas/refresh', { week: '2026-09-21' });
+  assert.equal(response.status, 202);
+  assert.deepEqual([response.json.ok, response.json.replaced], [true, 1]);
+  assert.deepEqual(idsOf(response.json.ideas), ['fixture-agent-card', 'fixture-weekly-map']);
+  assert.equal((await marksOf(app.marksFile))['fixture-reading-tool'].status, 'replaced');
+  assert.equal(app.personas.sent.length, 1);
+  assert.match(app.personas.sent[0].context.prompt, /Run the weekly-ideas skill\.\n\nWrite this run's ideas for the week of September 21 \(`week: "2026-09-21"` in the file\)\.\nThese ideas of that week are saved and stay; do not repeat them: Fixture weekly map\.\n\nYou may ask/);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.match(app.routines.runs(app.routines.current()[0].id)[0].context, /^Write this run's ideas for the week of September 21/);
+
+  // The producer now has a turn open: refused before anything is written.
+  const before = await readFile(app.marksFile, 'utf8');
+  const busy = await post(app, '/api/ideas/refresh', { week: '2026-09-28' });
+  assert.deepEqual([busy.status, busy.json.error], [409, 'busy']);
+  assert.equal(await readFile(app.marksFile, 'utf8'), before);
+});
+
+test('refresh refuses in order and a refused refresh writes no mark', async (t) => {
+  const app = await startRefresh(t);
+  for (const body of [{}, { week: '2026-09-22' }, { week: '2026-9-21' }, { week: '2026-02-30' }, { week: 20260921 }, { week: '2026-09-21', extra: 1 }]) {
+    const response = await post(app, '/api/ideas/refresh', body);
+    assert.deepEqual([response.status, response.json], [400, { error: 'invalid_body' }], JSON.stringify(body));
+  }
+  const empty = await post(app, '/api/ideas/refresh', { week: '2026-08-03' });
+  assert.deepEqual([empty.status, empty.json.replaced], [202, 0]);
+
+  const none = await startRefresh(t, { withRoutine: false });
+  const noRoutine = await post(none, '/api/ideas/refresh', { week: '2026-09-21' });
+  assert.deepEqual([noRoutine.status, noRoutine.json.error], [404, 'no_routine']);
+
+  const down = await startRefresh(t, { seed: { myos: { startFails: true } } });
+  const unavailable = await post(down, '/api/ideas/refresh', { week: '2026-09-21' });
+  assert.deepEqual([unavailable.status, unavailable.json.error], [409, 'agent_unavailable']);
+
+  for (const refused of [none, down]) {
+    assert.equal((await marksOf(refused.marksFile))['fixture-reading-tool'], undefined);
+  }
+  down.handler.closeStreams();
+  const closing = await post(down, '/api/ideas/refresh', { week: '2026-09-21' });
+  assert.deepEqual([closing.status, closing.json.error], [503, 'shutting_down']);
 });
