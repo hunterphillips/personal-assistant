@@ -117,6 +117,7 @@ const EXACT_ROUTES = new Map([
   ['/api/ideas/save', { name: 'ideas-save', methods: ['POST'] }],
   ['/api/ideas/unsave', { name: 'ideas-unsave', methods: ['POST'] }],
   ['/api/ideas/start', { name: 'ideas-start', methods: ['POST'] }],
+  ['/api/ideas/refresh', { name: 'ideas-refresh', methods: ['POST'] }],
   ['/api/ideas/instructions', { name: 'ideas-instructions', methods: ['GET'] }],
   ['/api/ideas/instructions/propose', { name: 'ideas-instructions-propose', methods: ['POST'] }],
   ['/api/settings', { name: 'settings', methods: ['PUT'] }],
@@ -158,7 +159,7 @@ export function createApp({
     : null;
   const ideasRoutes = ideas && ideasInstructions
     ? createIdeasRoutes({
-      ideas, instructions: ideasInstructions, hub, log, limits: config.limits, shuttingDown: isShuttingDown,
+      ideas, instructions: ideasInstructions, hub, scheduler, log, limits: config.limits, shuttingDown: isShuttingDown,
     })
     : null;
   const routineRoutes = routines
@@ -354,6 +355,9 @@ export function createApp({
       case 'ideas-start':
         if (!ideasRoutes) throw new HttpError(404, 'not_found');
         return ideasRoutes.serveStart(req, res);
+      case 'ideas-refresh':
+        if (!ideasRoutes) throw new HttpError(404, 'not_found');
+        return ideasRoutes.serveRefresh(req, res);
       case 'ideas-instructions':
         if (!ideasRoutes) throw new HttpError(404, 'not_found');
         return ideasRoutes.serveInstructions(res);
