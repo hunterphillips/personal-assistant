@@ -1,8 +1,9 @@
 // Ideas: producer runs plus the marks and manual ideas the dashboard writes.
 // Reads never reject. Files are indexed oldest first so the first occurrence
 // of an id owns it across the store, while only the newest feedFiles runs are
-// returned. add(), mark(), and unmark() share one serialized, atomic write
-// queue.
+// returned. A run may carry `week`, the Monday it was written for; otherwise
+// its week is the Monday of its `date`. add(), mark(), unmark(), and
+// replaceWeek() share one serialized, atomic write queue.
 
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
@@ -15,7 +16,9 @@ const FILE_NAME = /^\d{4}-\d{2}-\d{2}-[a-z][a-z0-9-]*\.json$/;
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const URL = /^https?:\/\//i;
 const KINDS = new Set(['workflow', 'view', 'app', 'tool', 'skill', 'plugin', 'agent']);
-const MARKS = new Set(['taken', 'dismissed', 'saved']);
+const MARKS = new Set(['taken', 'dismissed', 'saved', 'replaced']);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const HIDDEN = new Set(['dismissed', 'replaced']);
 
 export class IdeasError extends Error {
   constructor(code) {
@@ -150,13 +153,34 @@ export function createIdeas({ dir, marksFile, limits, zone, log: rawLog = () => 
     });
   }
 
+  // Retires `week`'s produced ideas that are still new with a `replaced`
+  // mark, in one write; saved, taken, and Hunter's own ideas keep theirs.
+  // Resolves with the retired ids and the week's saved ideas.
+  function replaceWeek(week) {
+    return serialized(async () => {
+      await read();
+      if (!cache?.marksWritable) throw new IdeasError('marks_invalid');
+      const inWeek = [...cache.index.values()].filter((entry) => entry.week === week && entry.producer !== 'manual');
+      const replaced = inWeek.filter((entry) => entry.status === 'new').map((entry) => entry.id);
+      const saved = inWeek.filter((entry) => entry.status === 'saved').map(({ id, title }) => ({ id, title }));
+      if (replaced.length > 0) {
+        const at = now().toISOString();
+        const marks = { ...cache.marks };
+        for (const id of replaced) marks[id] = { status: 'replaced', at };
+        await atomicJson(marksFile, marks);
+        await read();
+      }
+      return { replaced, saved };
+    });
+  }
+
   async function producerAgent(agents) {
     await read();
     const listed = new Set((agents ?? []).filter((agent) => agent.kind === 'persona' && agent.provider === 'claude').map((agent) => agent.id));
     return [...(cache?.allRuns ?? [])].reverse().find((run) => listed.has(run.producer))?.producer ?? defaultAgentId(agents);
   }
 
-  return { read, find, mark, unmark, add, producerAgent };
+  return { read, find, mark, unmark, add, replaceWeek, producerAgent };
 }
 
 async function scanStore(dir, marksFile, log) {
@@ -259,9 +283,11 @@ async function readFileCapped(file, stats, max, name, problems, fail) {
 function parseRun(text, name, limits, ids, marks, problems, index) {
   let body;
   try { body = JSON.parse(text); } catch { return pushNull(problems, `${name} is not JSON.`); }
-  if (!isRecord(body) || !nonEmpty(body.producer) || !nonEmpty(body.date) || !Array.isArray(body.items)) {
+  if (!isRecord(body) || !nonEmpty(body.producer) || !nonEmpty(body.date) || !Array.isArray(body.items) ||
+      (Object.hasOwn(body, 'week') && !nonEmpty(body.week))) {
     return pushNull(problems, `${name} is not an ideas run.`);
   }
+  const week = body.week ?? weekOf(body.date);
   const items = [];
   let skipped = 0;
   for (const entry of body.items) {
@@ -276,17 +302,17 @@ function parseRun(text, name, limits, ids, marks, problems, index) {
       (entry.source === null || (nonEmpty(entry.source) && URL.test(entry.source)));
     if (!valid) { skipped += 1; continue; }
     const mark = marks[entry.id];
-    if (mark?.status === 'dismissed') continue;
+    if (HIDDEN.has(mark?.status)) continue;
     const item = {
       id: entry.id, title: entry.title, text: entry.text, kind: KINDS.has(entry.kind) ? entry.kind : null,
       agents: [...entry.agents], source: entry.source,
       status: mark?.status === 'taken' || mark?.status === 'saved' ? mark.status : 'new', ...(mark?.status === 'taken' && mark.agent ? { agent: mark.agent } : {}),
     };
     items.push(item);
-    index.set(item.id, Object.freeze({ ...item, producer: body.producer, date: body.date }));
+    index.set(item.id, Object.freeze({ ...item, producer: body.producer, date: body.date, week }));
   }
   if (skipped) problems.push(`${name} has ${skipped} ${skipped === 1 ? 'item' : 'items'} that could not be shown.`);
-  return { id: name.slice(0, -5), producer: body.producer, date: body.date, items };
+  return { id: name.slice(0, -5), producer: body.producer, date: body.date, ...(body.week !== undefined ? { week: body.week } : {}), items };
 }
 
 async function atomicJson(file, value) {
@@ -306,6 +332,13 @@ function monday(date, zone) {
   const offset = (noon.getUTCDay() + 6) % 7;
   noon.setUTCDate(noon.getUTCDate() - offset);
   return noon.toISOString().slice(0, 10);
+}
+
+// The Monday of a YYYY-MM-DD date as the view reckons it, by the calendar;
+// any other text is its own week.
+function weekOf(date) {
+  const noon = DAY.test(date) ? new Date(`${date}T12:00:00Z`) : null;
+  return noon && !Number.isNaN(noon.getTime()) ? monday(noon, 'UTC') : date;
 }
 
 function slug(title) {

@@ -216,3 +216,71 @@ test('add and mark serialize their writes', async (t) => {
   assert.equal(await ideas.find('concurrent-fixture') !== null, true);
   assert.equal(await ideas.find('fixture-agent-card'), null);
 });
+
+test('a replaced mark hides the item and keeps its id taken; a run keeps its week', async (t) => {
+  const paths = await copy(t);
+  await writeFile(paths.marksFile, JSON.stringify({ 'fixture-agent-card': { status: 'replaced', at: '2026-10-01T00:00:00Z' } }));
+  await writeFile(path.join(paths.dir, '2026-10-02-myos.json'), JSON.stringify({
+    producer: 'myos', date: '2026-10-02', week: '2026-09-21', items: [item('fixture-later')],
+  }));
+  const ideas = store(paths);
+  const result = await ideas.read();
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(result.runs.find((run) => run.id === '2026-09-28-myos').items, []);
+  const later = result.runs.find((run) => run.id === '2026-10-02-myos');
+  assert.equal(later.week, '2026-09-21');
+  assert.equal(Object.hasOwn(result.runs.find((run) => run.id === '2026-09-21-myos'), 'week'), false);
+  assert.equal(await ideas.find('fixture-agent-card'), null);
+  assert.equal((await ideas.add('Fixture agent card')).id, 'fixture-agent-card-2');
+});
+
+test('a run whose week is not a non-empty string is not an ideas run', async (t) => {
+  const paths = await copy(t);
+  await writeFile(path.join(paths.dir, '2026-10-02-myos.json'), JSON.stringify({
+    producer: 'myos', date: '2026-10-02', week: 42, items: [item('fixture-later')],
+  }));
+  const result = await store(paths).read();
+  assert.deepEqual(result.problems, ['2026-10-02-myos.json is not an ideas run.']);
+});
+
+test('replaceWeek retires only that week\'s new ideas in one write and answers with its saved titles', async (t) => {
+  const paths = await copy(t);
+  await writeFile(paths.marksFile, JSON.stringify({
+    'fixture-weekly-map': { status: 'saved', at: '2026-09-22T00:00:00Z' },
+    'fixture-taken': { status: 'taken', at: '2026-09-22T00:00:00Z', agent: 'assistant' },
+  }));
+  // Week of September 21 by its date, by its week, and Hunter's own; one other week.
+  await writeFile(path.join(paths.dir, '2026-09-24-myos.json'), JSON.stringify({
+    producer: 'myos', date: '2026-09-24', items: [item('fixture-taken'), item('fixture-midweek')],
+  }));
+  await writeFile(path.join(paths.dir, '2026-10-02-myos.json'), JSON.stringify({
+    producer: 'myos', date: '2026-10-02', week: '2026-09-21', items: [item('fixture-written-later')],
+  }));
+  await writeFile(path.join(paths.dir, '2026-09-21-manual.json'), JSON.stringify({
+    producer: 'manual', date: '2026-09-21', items: [item('fixture-own', { kind: null, agents: [] })],
+  }));
+  const ideas = store(paths);
+  const answer = await ideas.replaceWeek('2026-09-21');
+  assert.deepEqual(answer.replaced.sort(), ['fixture-midweek', 'fixture-reading-tool', 'fixture-written-later']);
+  assert.deepEqual(answer.saved, [{ id: 'fixture-weekly-map', title: 'Fixture weekly map' }]);
+  const marks = JSON.parse(await readFile(paths.marksFile, 'utf8'));
+  assert.deepEqual(Object.keys(marks).sort(), ['fixture-midweek', 'fixture-reading-tool', 'fixture-taken', 'fixture-weekly-map', 'fixture-written-later']);
+  assert.equal(marks['fixture-midweek'].status, 'replaced');
+  assert.equal(marks['fixture-midweek'].at, '2026-10-03T17:00:00.000Z');
+  assert.equal(marks['fixture-weekly-map'].status, 'saved');
+  assert.equal(marks['fixture-taken'].status, 'taken');
+  const shown = (await ideas.read()).runs.flatMap((run) => run.items.map((entry) => entry.id)).sort();
+  assert.deepEqual(shown, ['fixture-agent-card', 'fixture-own', 'fixture-taken', 'fixture-weekly-map']);
+
+  assert.deepEqual(await ideas.replaceWeek('2026-08-03'), { replaced: [], saved: [] });
+  await writeFile(paths.marksFile, '[');
+  await assert.rejects(() => store(paths).replaceWeek('2026-09-21'), { code: 'marks_invalid' });
+});
+
+test('a run with an impossible date still reads', async (t) => {
+  const paths = await copy(t);
+  await writeFile(path.join(paths.dir, '2026-10-02-myos.json'), JSON.stringify({ producer: 'myos', date: '2026-13-45', items: [item('fixture-odd')] }));
+  const result = await store(paths).read();
+  assert.deepEqual(result.problems, []);
+  assert.equal(result.runs[0].items[0].id, 'fixture-odd');
+});
