@@ -51,3 +51,8 @@ routines/runs/
 
 # Notifications agents raise: a sentence may carry a figure, local only.
 /notifications/
+
+# What the data root's migration leaves behind in the checkout: the moved
+# sources, renamed rather than deleted. They hold the same private data.
+*.migrated
+*.migrated-*
