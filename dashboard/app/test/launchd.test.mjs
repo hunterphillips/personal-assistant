@@ -19,6 +19,7 @@ const VALID_INPUTS = {
   label: LABEL,
   nodePath: '/opt/node/bin/node',
   appDir: '/Users/example/dashboard/app',
+  home: '/Users/example/.personal-assistant',
   port: 4243,
   publicOrigin: 'https://example.tailnet.ts.net',
 };
@@ -78,8 +79,18 @@ test('renderPlist escapes values and includes the required launchd configuration
   assert.match(xml, /<key>DASHBOARD_PUBLIC_ORIGIN<\/key>\s*<string>https:\/\/example\.tailnet\.ts\.net<\/string>/);
   assert.match(xml, /<key>DASHBOARD_BRIEFS_DIR<\/key>/);
   assert.match(xml, /<key>DASHBOARD_FOCUS_ORIGIN<\/key>/);
-  const expectedLogPath = xmlEscape(path.join(appDir, 'var', 'log', 'dashboard.log'));
+  const expectedLogPath = xmlEscape(path.join(VALID_INPUTS.home, 'log', 'dashboard.log'));
   assert.equal(xml.split(expectedLogPath).length - 1, 2);
+  assert.doesNotMatch(xml, /PERSONAL_ASSISTANT_HOME/, 'the default root is not written into the job');
+});
+
+test('renderPlist names the data root in the environment only when asked', () => {
+  const home = `/Users/example/Data & <root>`;
+  const xml = renderPlist({ ...VALID_INPUTS, home, exportHome: true });
+  assert.match(xml, new RegExp(`<key>PERSONAL_ASSISTANT_HOME</key>\\s*<string>${escapeRegExp(xmlEscape(home))}</string>`));
+  assert.equal(xml.split(xmlEscape(path.join(home, 'log', 'dashboard.log'))).length - 1, 2);
+  assert.throws(() => validatePlistInputs({ ...VALID_INPUTS, home: 'data' }), /home must be an absolute path/);
+  assert.throws(() => validatePlistInputs({ ...VALID_INPUTS, home: undefined }), /home must be an absolute path/);
 });
 
 test('validatePlistInputs rejects relative paths, insecure origins, and invalid ports', () => {
@@ -110,7 +121,7 @@ test('validatePlistInputs rejects relative paths, insecure origins, and invalid 
   }
 });
 
-test('dashboard-install dry run writes only below the app var directory', async () => {
+test('dashboard-install dry run writes only the rendered plist, in the data root\'s cache', async () => {
   const fixture = await makeInstallerFixture();
   try {
     const before = await listTree(fixture.appDir);
@@ -125,17 +136,19 @@ test('dashboard-install dry run writes only below the app var directory', async 
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
 
-    const renderedPath = path.join(fixture.appDir, 'var', 'launchd', `${LABEL}.plist`);
-    assert.equal(result.stdout.trim(), await fsp.realpath(renderedPath));
+    const renderedPath = path.join(fixture.dataHome, 'cache', 'launchd', `${LABEL}.plist`);
+    assert.equal(result.stdout.trim(), renderedPath);
     assert.equal((await fsp.stat(renderedPath)).isFile(), true);
-    assert.deepEqual(await fsp.readdir(fixture.homeDir), []);
-    assert.deepEqual(readFakeState(fixture).calls, []);
-    const added = (await listTree(fixture.appDir)).filter((entry) => !before.includes(entry));
-    assert.deepEqual(added, [
-      'var/',
-      'var/launchd/',
-      `var/launchd/${LABEL}.plist`,
+    assert.deepEqual(await listTree(fixture.homeDir), [
+      '.personal-assistant/',
+      '.personal-assistant/cache/',
+      '.personal-assistant/cache/launchd/',
+      `.personal-assistant/cache/launchd/${LABEL}.plist`,
     ]);
+    assert.equal((await fsp.stat(fixture.dataHome)).mode & 0o777, 0o700);
+    assert.match(await fsp.readFile(renderedPath, 'utf8'), new RegExp(escapeRegExp(path.join(fixture.dataHome, 'log', 'dashboard.log'))));
+    assert.deepEqual(readFakeState(fixture).calls, []);
+    assert.deepEqual(await listTree(fixture.appDir), before, 'nothing is written in the app');
   } finally {
     await fsp.rm(fixture.rootDir, { recursive: true, force: true });
   }
@@ -212,11 +225,11 @@ test('dashboard-install restores and re-bootstraps the previous plist after star
     assert.equal(countCalls(state, 'bootstrap'), 2);
     assert.equal(countCalls(state, 'kickstart'), 0);
 
-    const backups = (await fsp.readdir(path.join(fixture.appDir, 'var', 'launchd')))
+    const backups = (await fsp.readdir(path.join(fixture.dataHome, 'cache', 'launchd')))
       .filter((name) => name.startsWith('backup-'));
     assert.equal(backups.length, 1);
     assert.equal(
-      await fsp.readFile(path.join(fixture.appDir, 'var', 'launchd', backups[0]), 'utf8'),
+      await fsp.readFile(path.join(fixture.dataHome, 'cache', 'launchd', backups[0]), 'utf8'),
       previousPlist,
     );
   } finally {
@@ -275,7 +288,31 @@ test('dashboard-install installs when the job owns the listener, tolerating a no
     assert.equal(countCalls(state, 'bootout'), 1);
     assert.equal(countCalls(state, 'bootstrap'), 2);
     assert.equal(countCalls(state, 'kickstart'), 1);
-    assert.match(await fsp.readFile(fixture.installedPath, 'utf8'), /com\.personal-assistant\.dashboard/);
+    const installed = await fsp.readFile(fixture.installedPath, 'utf8');
+    assert.match(installed, /com\.personal-assistant\.dashboard/);
+    assert.match(installed, new RegExp(`<key>StandardOutPath</key>\\s*<string>${escapeRegExp(path.join(fixture.dataHome, 'log', 'dashboard.log'))}</string>`));
+    assert.doesNotMatch(installed, /PERSONAL_ASSISTANT_HOME/);
+    assert.equal((await fsp.stat(path.join(fixture.dataHome, 'log'))).mode & 0o777, 0o700);
+    assert.match(result.stdout, new RegExp(`The dashboard runs from the data root ${escapeRegExp(fixture.dataHome)}; its log is `));
+    assert.equal(fs.existsSync(path.join(fixture.appDir, 'var')), false);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test('dashboard-install carries a data root set in its environment into the job', async () => {
+  const port = await freePort();
+  const fixture = await makeInstallerFixture({ serve: true });
+  const dataHome = path.join(fixture.rootDir, 'elsewhere');
+  fixture.fakeEnv.PERSONAL_ASSISTANT_HOME = dataHome;
+  try {
+    const result = runInstall(fixture, port);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const installed = await fsp.readFile(fixture.installedPath, 'utf8');
+    assert.match(installed, new RegExp(`<key>PERSONAL_ASSISTANT_HOME</key>\\s*<string>${escapeRegExp(dataHome)}</string>`));
+    assert.match(installed, new RegExp(escapeRegExp(path.join(dataHome, 'log', 'dashboard.log'))));
+    assert.ok(fs.existsSync(path.join(dataHome, 'cache', 'launchd', `${LABEL}.plist`)));
+    assert.equal(fs.existsSync(fixture.dataHome), false);
   } finally {
     await cleanupFixture(fixture);
   }
@@ -463,10 +500,10 @@ test('dashboard-uninstall boots out only its own label and removes only its plis
   }
 });
 
-test('dashboard-start rotates an oversized log before starting Node', async () => {
+test('dashboard-start rotates an oversized log in the data root before starting Node', async () => {
   const rootDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'dashboard-start-'));
   const appDir = path.join(rootDir, 'app');
-  const logDir = path.join(appDir, 'var', 'log');
+  const logDir = path.join(rootDir, 'data', 'log');
   const fakeNode = path.join(rootDir, 'fake-node');
   await fsp.mkdir(path.join(appDir, 'bin'), { recursive: true });
   await fsp.mkdir(logDir, { recursive: true });
@@ -477,7 +514,8 @@ test('dashboard-start rotates an oversized log before starting Node', async () =
   await fsp.writeFile(path.join(logDir, 'dashboard.log'), Buffer.alloc(oversized, 'a'));
   await fsp.writeFile(path.join(logDir, 'dashboard.log.1'), 'older\n');
   try {
-    const run = () => spawnSync(path.join(appDir, 'bin', 'dashboard-start'), [fakeNode], { encoding: 'utf8' });
+    const env = { PATH: process.env.PATH, HOME: path.join(rootDir, 'home'), PERSONAL_ASSISTANT_HOME: path.join(rootDir, 'data') };
+    const run = () => spawnSync(path.join(appDir, 'bin', 'dashboard-start'), [fakeNode], { encoding: 'utf8', env });
     let result = run();
     assert.equal(result.status, 0, result.stderr);
     assert.equal((await fsp.stat(path.join(logDir, 'dashboard.log.1'))).size, oversized);
@@ -488,6 +526,34 @@ test('dashboard-start rotates an oversized log before starting Node', async () =
     assert.equal(result.status, 0, result.stderr);
     assert.equal(await fsp.readFile(path.join(logDir, 'dashboard.log'), 'utf8'), expectedLine.repeat(2));
     assert.equal((await fsp.stat(path.join(logDir, 'dashboard.log.1'))).size, oversized);
+    assert.equal(fs.existsSync(path.join(appDir, 'var')), false);
+  } finally {
+    await fsp.rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('dashboard-start defaults the log to .personal-assistant under HOME and refuses a relative root', async () => {
+  const rootDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'dashboard-start-'));
+  const appDir = path.join(rootDir, 'app');
+  const homeDir = path.join(rootDir, 'home');
+  const fakeNode = path.join(rootDir, 'fake-node');
+  await fsp.mkdir(path.join(appDir, 'bin'), { recursive: true });
+  await fsp.mkdir(homeDir);
+  await fsp.copyFile(path.join(APP_DIR, 'bin', 'dashboard-start'), path.join(appDir, 'bin', 'dashboard-start'));
+  await fsp.chmod(path.join(appDir, 'bin', 'dashboard-start'), 0o755);
+  await fsp.writeFile(fakeNode, '#!/bin/sh\nprintf \'fake node\\n\'\n', { mode: 0o755 });
+  try {
+    const start = (extra) => spawnSync(path.join(appDir, 'bin', 'dashboard-start'), [fakeNode], {
+      encoding: 'utf8', env: { PATH: process.env.PATH, HOME: homeDir, ...extra },
+    });
+    assert.equal(start({}).status, 0);
+    const logDir = path.join(homeDir, '.personal-assistant', 'log');
+    assert.equal(await fsp.readFile(path.join(logDir, 'dashboard.log'), 'utf8'), 'fake node\n');
+    assert.equal((await fsp.stat(logDir)).mode & 0o777, 0o700);
+    assert.equal((await fsp.stat(path.join(homeDir, '.personal-assistant'))).mode & 0o777, 0o700);
+    const relative = start({ PERSONAL_ASSISTANT_HOME: 'data' });
+    assert.equal(relative.status, 64);
+    assert.equal(relative.stderr, 'dashboard-start: PERSONAL_ASSISTANT_HOME must be an absolute path\n');
   } finally {
     await fsp.rm(rootDir, { recursive: true, force: true });
   }
@@ -535,6 +601,7 @@ async function makeInstallerFixture(fakeState = {}) {
     rootDir,
     appDir,
     homeDir,
+    dataHome: path.join(homeDir, '.personal-assistant'),
     fakeBinDir,
     installerPath,
     statePath,
@@ -607,6 +674,7 @@ function fakeLaunchctlEnv(fixture) {
   const inherited = { ...process.env };
   delete inherited.ANTHROPIC_API_KEY;
   delete inherited.OPENAI_API_KEY;
+  delete inherited.PERSONAL_ASSISTANT_HOME;
   return {
     ...inherited,
     HOME: fixture.homeDir,

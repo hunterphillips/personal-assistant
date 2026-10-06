@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { TIMEOUTS } from '../lib/config.mjs';
+import { layoutPaths } from '../lib/layout.mjs';
 import { renderPlist, validatePlistInputs } from '../lib/launchd.mjs';
 
 const LABEL = 'com.personal-assistant.dashboard';
@@ -42,10 +43,14 @@ async function main() {
     throw new Error('--public-origin is required for installation');
   }
 
+  const dataHome = resolveDataHome();
+  const root = layoutPaths(dataHome);
   const inputs = validatePlistInputs({
     label: LABEL,
     nodePath,
     appDir: APP_DIR,
+    home: dataHome,
+    exportHome: !isUnset(process.env.PERSONAL_ASSISTANT_HOME),
     port: options.port,
     publicOrigin: options.publicOrigin,
   });
@@ -55,8 +60,12 @@ async function main() {
   let homeDir;
   if (!options.dryRun) homeDir = resolveHome();
 
-  const renderedPath = path.join(APP_DIR, 'var', 'launchd', `${LABEL}.plist`);
-  await fsp.mkdir(path.dirname(renderedPath), { recursive: true, mode: 0o700 });
+  // The rendered plist and its backups are rebuildable, so they sit in the
+  // data root's cache; the root itself is private.
+  const stagingDir = path.join(root.cacheDir, 'launchd');
+  const renderedPath = path.join(stagingDir, `${LABEL}.plist`);
+  await fsp.mkdir(dataHome, { recursive: true, mode: 0o700 });
+  await fsp.mkdir(stagingDir, { recursive: true, mode: 0o700 });
   await fsp.writeFile(renderedPath, renderPlist(inputs), { mode: 0o600 });
   await fsp.chmod(renderedPath, 0o600);
   lintPlist(renderedPath);
@@ -68,13 +77,8 @@ async function main() {
 
   const launchAgentsDir = path.join(homeDir, 'Library', 'LaunchAgents');
   const installedPath = path.join(launchAgentsDir, `${LABEL}.plist`);
-  const logDir = path.join(APP_DIR, 'var', 'log');
-  const backupPath = path.join(
-    APP_DIR,
-    'var',
-    'launchd',
-    `backup-${new Date().toISOString().replaceAll(/[:.]/g, '-')}.plist`,
-  );
+  const logDir = root.logDir;
+  const backupPath = path.join(stagingDir, `backup-${new Date().toISOString().replaceAll(/[:.]/g, '-')}.plist`);
   const hadExistingPlist = fs.existsSync(installedPath);
 
   await fsp.mkdir(logDir, { recursive: true, mode: 0o700 });
@@ -127,6 +131,7 @@ async function main() {
 
   console.log(`Installed ${LABEL} from ${installedPath}`);
   console.log(`Health check passed at http://127.0.0.1:${inputs.port}/healthz`);
+  console.log(`The dashboard runs from the data root ${dataHome}; its log is ${path.join(logDir, 'dashboard.log')}.`);
   if (hadExistingPlist) console.log(`Previous plist saved at ${backupPath}`);
 }
 
@@ -233,6 +238,23 @@ function fetchState(port) {
     request.on('timeout', () => request.destroy());
     request.on('error', () => resolve(null));
   });
+}
+
+// The data root: PERSONAL_ASSISTANT_HOME when set, which must be absolute,
+// else .personal-assistant under HOME, as dashboard-start resolves it.
+function resolveDataHome() {
+  const value = process.env.PERSONAL_ASSISTANT_HOME;
+  if (!isUnset(value)) {
+    if (!path.isAbsolute(value)) throw new Error('PERSONAL_ASSISTANT_HOME must be an absolute path');
+    return path.resolve(value);
+  }
+  const homeDir = process.env.HOME || os.homedir();
+  if (!path.isAbsolute(homeDir)) throw new Error('HOME must be an absolute path');
+  return path.join(homeDir, '.personal-assistant');
+}
+
+function isUnset(value) {
+  return value === undefined || value === '';
 }
 
 function resolveHome() {

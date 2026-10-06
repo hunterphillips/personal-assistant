@@ -18,7 +18,16 @@ esac
 
 APP_DIR=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 cd "$APP_DIR"
-LOG_DIR="$APP_DIR/var/log"
+# The log lives in the data root, which the daemon resolves the same way.
+DATA_HOME=${PERSONAL_ASSISTANT_HOME:-$HOME/.personal-assistant}
+case "$DATA_HOME" in
+  /*) ;;
+  *)
+    echo "dashboard-start: PERSONAL_ASSISTANT_HOME must be an absolute path" >&2
+    exit 64
+    ;;
+esac
+LOG_DIR="$DATA_HOME/log"
 LOG_PATH="$LOG_DIR/dashboard.log"
 MAX_LOG_BYTES=5242880
 

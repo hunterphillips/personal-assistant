@@ -11,10 +11,15 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 // controls other than tab/newline/carriage return, lone surrogates, U+FFFE/F.
 const XML_INVALID = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
+// `home` is the data root, where the job's log goes; `exportHome` names it
+// in the job's environment too, for a root other than the default (which
+// dashboard-start and the daemon resolve from HOME on their own).
 export function validatePlistInputs({
   label,
   nodePath,
   appDir,
+  home,
+  exportHome = false,
   port,
   publicOrigin,
   briefsDir,
@@ -22,7 +27,7 @@ export function validatePlistInputs({
 }) {
   const problems = [];
 
-  for (const [name, value] of Object.entries({ label, nodePath, appDir, publicOrigin, briefsDir, focusOrigin })) {
+  for (const [name, value] of Object.entries({ label, nodePath, appDir, home, publicOrigin, briefsDir, focusOrigin })) {
     if (typeof value === 'string' && XML_INVALID.test(value)) {
       problems.push(`${name} contains characters that cannot appear in a plist`);
     }
@@ -33,6 +38,7 @@ export function validatePlistInputs({
   }
   validateAbsolutePath(nodePath, 'nodePath', problems);
   validateAbsolutePath(appDir, 'appDir', problems);
+  validateAbsolutePath(home, 'home', problems);
   if (briefsDir !== undefined) validateAbsolutePath(briefsDir, 'briefsDir', problems);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     problems.push('port must be an integer from 1 to 65535');
@@ -58,6 +64,8 @@ export function validatePlistInputs({
     label,
     nodePath,
     appDir,
+    home,
+    exportHome: exportHome === true,
     port,
     publicOrigin: normalizedPublicOrigin,
     briefsDir,
@@ -67,7 +75,7 @@ export function validatePlistInputs({
 
 export function renderPlist(input) {
   const values = validatePlistInputs(input);
-  const logPath = path.join(values.appDir, 'var', 'log', 'dashboard.log');
+  const logPath = path.join(values.home, 'log', 'dashboard.log');
   const replacements = {
     LABEL: escapeXml(values.label),
     START_PATH: escapeXml(path.join(values.appDir, 'bin', 'dashboard-start')),
@@ -75,6 +83,7 @@ export function renderPlist(input) {
     APP_DIR: escapeXml(values.appDir),
     PATH: escapeXml(`${path.dirname(values.nodePath)}:/usr/local/bin:/usr/bin:/bin`),
     PORT: escapeXml(String(values.port)),
+    HOME_ENTRY: environmentEntry('PERSONAL_ASSISTANT_HOME', values.exportHome ? values.home : undefined),
     PUBLIC_ORIGIN_ENTRY: environmentEntry('DASHBOARD_PUBLIC_ORIGIN', values.publicOrigin),
     BRIEFS_DIR_ENTRY: environmentEntry('DASHBOARD_BRIEFS_DIR', values.briefsDir),
     FOCUS_ORIGIN_ENTRY: environmentEntry('DASHBOARD_FOCUS_ORIGIN', values.focusOrigin),

@@ -25,7 +25,7 @@ async function main() {
   bootoutIfLoaded(`gui/${process.getuid()}/${LABEL}`);
   await fsp.rm(expectedPlistPath, { force: true });
   console.log(`Uninstalled ${LABEL}`);
-  console.log('Source files, var/, logs, and brief data were preserved.');
+  console.log('The source files and the data root were preserved.');
 }
 
 function parseArgs(args, defaultPlistPath) {

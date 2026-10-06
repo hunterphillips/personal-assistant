@@ -88,8 +88,11 @@ const PAIRS = [
   ['briefsDir', 'daily-brief/briefs', (p) => p.briefsDir, 'briefs'],
   ['contributionsDir', 'daily-brief/contributions', (p) => p.contributionsDir],
   ...['packets', 'overflow', 'seen.jsonl', 'state.json'].map((name) => [`watchDir/${name}`, `daily-brief/watch/${name}`, (p) => path.join(p.watchDir, name)]),
-  ['logDir', `${VAR}/log`, (p) => p.logDir],
-  ['cacheDir/launchd', `${VAR}/launchd`, (p) => path.join(p.cacheDir, 'launchd')],
+  // The log and the installer's plists are written under the root before the
+  // daemon first starts (bin/dashboard-start and bin/dashboard-install), so
+  // the checkout's copies land in a folder of their own beside them.
+  ['logDir', `${VAR}/log`, (p) => path.join(p.logDir, 'checkout')],
+  ['cacheDir/launchd', `${VAR}/launchd`, (p) => path.join(p.cacheDir, 'launchd', 'checkout')],
   ['cacheDir/ops', `${VAR}/ops`, (p) => path.join(p.cacheDir, 'ops')],
 ].map(([key, source, target, kind = 'entry']) => ({ key, source, target, kind }));
 

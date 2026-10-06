@@ -44,8 +44,8 @@ const FIXTURE = [
   ['daily-brief/watch/overflow/o1.json', '{"overflow":1}\n', 0o644, 'watch/overflow/o1.json'],
   ['daily-brief/watch/seen.jsonl', '{"seen":1}\n', 0o644, 'watch/seen.jsonl'],
   ['daily-brief/watch/state.json', '{"state":1}\n', 0o644, 'watch/state.json'],
-  ['dashboard/app/var/log/dashboard.log', 'log line\n', 0o644, 'log/dashboard.log'],
-  ['dashboard/app/var/launchd/backup-1.plist', '<plist/>\n', 0o644, 'cache/launchd/backup-1.plist'],
+  ['dashboard/app/var/log/dashboard.log', 'log line\n', 0o644, 'log/checkout/dashboard.log'],
+  ['dashboard/app/var/launchd/backup-1.plist', '<plist/>\n', 0o644, 'cache/launchd/checkout/backup-1.plist'],
   ['dashboard/app/var/ops/state.json', '{"ops":1}\n', 0o600, 'cache/ops/state.json'],
 ];
 
