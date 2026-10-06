@@ -191,15 +191,19 @@ picks one up and ends by updating it.
   and produce no scheduled sub-briefs.
 - **Dashboard copy** goes through `/writing`: plain nouns for labels,
   sentences for states, no interface metacommentary, no placeholders.
-- **Implementation goes to the factory** (since 2026-10-05): a plan is
-  written and reviewed here, then filed as self-contained GitHub issues
-  labeled `ready-for-agent`, one per phase, sized to one unattended run
-  (45 minutes, 120 turns; the factory cannot read `thoughts/`, so the
-  issue carries the spec). **Its PRs are reviewed locally before
-  merging**: worktree, rebase on main, the three suites, screenshots on a
-  throwaway port, then squash-merge, pull, and reinstall. Two PRs that
-  touch the same files are merged through one local review branch. A run
-  the factory cuts off is finished locally on its branch. Nothing watches
-  PRs between sessions; pickup lists them.
+- **Implementation is delegated by judgment.** The session plans, reviews,
+  and lands; who builds depends on the work. The cloud factory takes
+  self-contained GitHub issues labeled `ready-for-agent`, one per phase,
+  sized to one unattended run (45 minutes, 120 turns; it cannot read
+  `thoughts/`, so the issue carries the spec), and suits phases that run
+  unattended. A local Codex Sol or Claude subagent in a worktree suits
+  small, UI-shaped, or live-machine work. Neither is the rule; on 10-05
+  Hunter moved one evening's work to the factory and later said so.
+  **Factory PRs are reviewed locally before merging**: worktree, rebase
+  on main, the three suites, screenshots on a throwaway port, then
+  squash-merge, pull, and reinstall. Two PRs that touch the same files
+  are merged through one local review branch. A run the factory cuts off
+  is finished locally on its branch. Nothing watches PRs between
+  sessions; pickup lists them.
 - Focus owns persistent task state. The brief may say Hunter owes someone a
   decision; it never becomes the store of record.
