@@ -8,9 +8,11 @@
 // data-action handler never owns them.
 //
 // The side panel's Ideas section, drawn on the same render as the weeks and
-// cleared on hide, lists Weeks: each week with its count of ideas. Choosing
-// one scrolls that week's heading into view and marks the row current until
-// another is chosen or the view hides.
+// cleared on hide, lists Saved, with its count, while any idea is saved, then
+// Weeks: each week with its count of ideas. Choosing Saved filters the page to
+// saved ideas; choosing a week clears the filter and scrolls that week's
+// heading into view. The chosen row stays current until another is chosen or
+// the view hides.
 (function () {
   'use strict';
 
@@ -103,6 +105,7 @@
     var discussed = null;
     var openMenu = null;
     var chosen = null; // the week key of the panel's current row, or null
+    var savedOnly = false; // the page shows only saved ideas; Saved is the current row
 
     function agents() { return state && Array.isArray(state.agents) ? state.agents : []; }
     function agent(id) { return agents().find(function (entry) { return entry.id === id; }) || null; }
@@ -247,6 +250,28 @@
       return node;
     }
 
+    function countOf(group, saved) {
+      return group.runs.reduce(function (sum, run) {
+        return sum + objectsIn(run.items).filter(function (item) { return !saved || item.status === 'saved'; }).length;
+      }, 0);
+    }
+
+    // The week as the Saved filter draws it: its saved rows, or null with none.
+    function savedWeek(group) {
+      var runs = group.runs.map(function (run) {
+        return { id: run.id, items: objectsIn(run.items).filter(function (item) { return item.status === 'saved'; }) };
+      }).filter(function (run) { return run.items.length > 0; });
+      return runs.length ? { key: group.key, title: group.title, runs: runs } : null;
+    }
+
+    function panelRow(name, count) {
+      var row = element('button', 'panel-row');
+      row.type = 'button';
+      row.appendChild(element('span', 'panel-row-name', name));
+      row.appendChild(element('span', 'panel-row-count', String(count)));
+      return row;
+    }
+
     function renderWeek(group) {
       var node = element('section', 'ideas-week');
       node.setAttribute('data-ideas-week', group.key);
@@ -260,32 +285,48 @@
       return node;
     }
 
-    // The panel's Weeks group: one row per week drawn, with its count of ideas.
-    function renderPanel(groups) {
+    // The panel: a Saved row while any idea is saved, then the Weeks group,
+    // one row per week in the store with its count of ideas.
+    function renderPanel(groups, savedCount) {
       if (!side) return;
       side.textContent = '';
       if (groups.length === 0) return;
+      if (savedCount > 0) {
+        var saved = panelRow('Saved', savedCount);
+        saved.setAttribute('data-ideas-saved', '');
+        if (savedOnly) saved.setAttribute('aria-current', 'true');
+        side.appendChild(saved);
+      }
       side.appendChild(element('h2', 'panel-heading', 'Weeks'));
       groups.forEach(function (group) {
-        var count = group.runs.reduce(function (sum, run) { return sum + objectsIn(run.items).length; }, 0);
-        var row = element('button', 'panel-row');
-        row.type = 'button';
+        var row = panelRow(group.title, countOf(group, false));
         row.setAttribute('data-ideas-week', group.key);
         if (group.key === chosen) row.setAttribute('aria-current', 'true');
-        row.appendChild(element('span', 'panel-row-name', group.title));
-        row.appendChild(element('span', 'panel-row-count', String(count)));
         side.appendChild(row);
       });
     }
 
-    // Scrolls the week's heading into view and marks its row current.
+    // Filters the page to saved ideas and marks the Saved row current.
+    function chooseSaved() {
+      savedOnly = true;
+      chosen = null;
+      render();
+      shellApi.closePanel();
+    }
+
+    // Clears the Saved filter, scrolls the week's heading into view, and marks
+    // its row current.
     function choose(key) {
+      if (savedOnly) {
+        savedOnly = false;
+        render();
+      }
       var week = weeks.querySelector('[data-ideas-week="' + CSS.escape(key) + '"]');
       if (!week) return;
       chosen = key;
       var rows = side.querySelectorAll('.panel-row');
       for (var r = 0; r < rows.length; r += 1) {
-        if (rows[r].getAttribute('data-ideas-week') === key) rows[r].setAttribute('aria-current', 'true');
+        if (rows[r].hasAttribute('data-ideas-week') && rows[r].getAttribute('data-ideas-week') === key) rows[r].setAttribute('aria-current', 'true');
         else rows[r].removeAttribute('aria-current');
       }
       week.querySelector('.ideas-week-title').scrollIntoView({ block: 'start' });
@@ -322,14 +363,17 @@
         rendered = null;
         return;
       }
-      var built = groups.map(renderWeek);
+      var savedCount = groups.reduce(function (sum, group) { return sum + countOf(group, true); }, 0);
+      // The last saved idea gone takes the filter with it.
+      if (savedCount === 0) savedOnly = false;
+      var built = (savedOnly ? groups.map(savedWeek).filter(Boolean) : groups).map(renderWeek);
       var problems = arrayOf(data.problems).filter(function (text) { return typeof text === 'string'; });
-      setMessage(built.length === 0 ? [EMPTY].concat(problems) : problems);
+      setMessage(groups.length === 0 ? [EMPTY].concat(problems) : problems);
       weeks.textContent = '';
       built.forEach(function (node) { weeks.appendChild(node); });
       // A week gone from the store takes its mark with it.
       if (!groups.some(function (group) { return group.key === chosen; })) chosen = null;
-      renderPanel(groups);
+      renderPanel(groups, savedCount);
       shellApi.panelChanged();
       rendered = JSON.stringify(data);
     }
@@ -443,6 +487,7 @@
 
     if (side) {
       side.addEventListener('click', function (event) {
+        if (event.target.closest && event.target.closest('button[data-ideas-saved]')) { chooseSaved(); return; }
         var row = event.target.closest && event.target.closest('button[data-ideas-week]');
         if (row) choose(row.getAttribute('data-ideas-week'));
       });
@@ -521,6 +566,7 @@
         visible = false;
         discussed = null;
         chosen = null;
+        savedOnly = false;
         if (side) side.textContent = '';
         closeMenu(false);
         addToggle.hidden = true;

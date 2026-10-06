@@ -337,6 +337,68 @@ test.describe('Ideas side panel', () => {
     await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(0);
   });
 
+  async function save(page, id) {
+    const menu = await openIdeaMenu(page, id);
+    await menu.getByRole('button', { name: 'Save' }).click();
+    await expect(item(page, id).getByRole('img', { name: 'Saved' })).toBeVisible();
+  }
+
+  const saved = (page) => side(page).locator('.panel-row[data-ideas-saved]');
+
+  test('Saved appears with its count, filters the page, and a week clears the filter', async ({ page, hub }) => {
+    await openIdeas(page, hub);
+    await expect(side(page).locator('.panel-row')).toHaveCount(2);
+    await expect(saved(page)).toHaveCount(0);
+    await save(page, 'fixture-reading-tool');
+    await openSide(page);
+    await expect(saved(page).locator('.panel-row-name')).toHaveText('Saved');
+    await expect(saved(page).locator('.panel-row-count')).toHaveText('1');
+    expect(await side(page).evaluate((node) => [...node.children].map((child) => child.textContent)))
+      .toEqual(['Saved1', 'Weeks', 'Week of September 281', 'Week of September 212']);
+
+    await week(page, '2026-09-28').click();
+    await expect(week(page, '2026-09-28')).toHaveAttribute('aria-current', 'true');
+    await openSide(page);
+    await saved(page).click();
+    await expect(saved(page)).toHaveAttribute('aria-current', 'true');
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(1);
+    await expect(weeks(page)).toHaveCount(1);
+    await expect(weeks(page).locator('.ideas-week-title')).toHaveText(['Week of September 21']);
+    await expect(page.locator('#ideas-weeks .ideas-item')).toHaveCount(1);
+    await expect(item(page, 'fixture-reading-tool')).toBeVisible();
+    await expect(side(page).locator('.panel-row[data-ideas-week]')).toHaveCount(2);
+
+    await openSide(page);
+    await week(page, '2026-09-28').click();
+    await expect(weeks(page)).toHaveCount(2);
+    await expect(page.locator('#ideas-weeks .ideas-item')).toHaveCount(3);
+    await expect(heading(page, '2026-09-28')).toBeInViewport();
+    await expect(week(page, '2026-09-28')).toHaveAttribute('aria-current', 'true');
+    await expect(saved(page)).not.toHaveAttribute('aria-current');
+
+    await openSide(page);
+    await saved(page).click();
+    await expect(weeks(page)).toHaveCount(1);
+    await nav(page, 'Home').click();
+    await expectView(page, 'agents', 'Agents');
+    await nav(page, 'Ideas').click();
+    await expectView(page, 'ideas', 'Ideas');
+    await expect(weeks(page)).toHaveCount(2);
+    await expect(side(page).locator('.panel-row[aria-current]')).toHaveCount(0);
+  });
+
+  test('on a phone choosing Saved closes the drawer', async ({ page, hub }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openIdeas(page, hub);
+    await save(page, 'fixture-reading-tool');
+    await page.locator('#panel-toggle').click();
+    await expect(page.locator('#panel')).toBeVisible();
+    await saved(page).click();
+    await expect(page.locator('#panel-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#panel')).toBeHidden();
+    await expect(weeks(page)).toHaveCount(1);
+  });
+
   test('on a phone a choice closes the drawer', async ({ page, hub }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await padNewerWeek(page);
