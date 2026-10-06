@@ -7,6 +7,8 @@
 // thread. The prompt the model gets is
 //   Routine "<name>" (a scheduled run, not the user): <instruction>
 //
+//   <context, when the run was given one>
+//
 //   You may ask other agents. Your reply is recorded in this routine's log,
 //   not shown as a message; if something in it needs Hunter's attention,
 //   use notify.
@@ -38,7 +40,7 @@
 //     busy or failed fire still moves the marker; an inactive routine is
 //     skipped without a line; an edit or a reactivation bumps `updated`,
 //     so nothing from before it is due.
-//   run(id, occurrence, trigger) -> Promise<{ ok: true } | { ok: false, reason }>
+//   run(id, occurrence, trigger, { context }?) -> Promise<{ ok: true } | { ok: false, reason }>
 //     Resolves once the turn has started or been refused, never when it
 //     ends. With no started persona for the agent (hub.persona null) the
 //     reason is 'agent_unavailable'; with the agent busy or waiting, or the
@@ -46,7 +48,7 @@
 //     scheduled or catch-up refusal writes its line ({ occurrence,
 //     trigger, outcome: 'busy' } or { ..., outcome: 'failed', detail });
 //     a test run writes none. An accepted run writes
-//     { run, occurrence, trigger, startedAt }, follows the agent's adapter
+//     { run, occurrence, trigger, startedAt, context? }, follows the agent's adapter
 //     from before the send for every `request` and `resolved` event whose
 //     agentId is the agent or whose chain starts with it (a hop's card,
 //     which the hub forwards to this thread), and posts one line to the
@@ -66,8 +68,8 @@
 //     [{ agent, kind, toolName, summary, resolved }]. Each run is logged
 //     routine_run { routineId, agentId, trigger, outcome, ms }, and
 //     hub.runEnded(id) follows every line.
-//   testRun(id) -> Promise<{ ok: true } | { ok: false, reason }>
-//     run(id, null, 'test'): a run outside the schedule whose line has
+//   testRun(id, { context }?) -> Promise<{ ok: true } | { ok: false, reason }>
+//     run(id, null, 'test', { context }): a run outside the schedule whose line has
 //     occurrence null, so it never moves the marker.
 //
 // Log lines: routine_run, routine_tick_error (a tick that threw),
@@ -229,7 +231,7 @@ export function createScheduler({
     return { ok: false, reason };
   }
 
-  async function run(id, occurrence, trigger) {
+  async function run(id, occurrence, trigger, { context: extra = null } = {}) {
     const routine = routines.current().find((item) => item.id === id);
     if (!routine) return { ok: false, reason: 'no_such_routine' };
     const test = trigger === 'test';
@@ -247,7 +249,7 @@ export function createScheduler({
     inFlight.add(context);
     const { id: model, effort } = hub.modelFor(routine.agent);
     const turn = persona.adapter.send(persona.agent, routine.instruction, {
-      model, effort, permission: hub.permissionFor(routine.agent), routine: { id: routine.id, name: routine.name }, prompt: promptFor(routine),
+      model, effort, permission: hub.permissionFor(routine.agent), routine: { id: routine.id, name: routine.name }, prompt: promptFor(routine, extra),
     });
     turn.catch(() => {});
     try {
@@ -256,7 +258,7 @@ export function createScheduler({
       detach(context);
       return refuse(routine, base, test, error?.code === 'busy' ? 'busy' : (error?.code ?? 'send_failed'));
     }
-    context.started = append(id, { run: context.run, ...base, startedAt: context.startedAt.toISOString() });
+    context.started = append(id, { run: context.run, ...base, startedAt: context.startedAt.toISOString(), ...(extra ? { context: extra } : {}) });
     turn.then((ended) => settle(context, false, ended), () => settle(context, true));
     return { ok: true };
   }
@@ -281,14 +283,17 @@ export function createScheduler({
 
     tick,
     run,
-    testRun(id) {
-      return run(id, null, 'test');
+    testRun(id, options = {}) {
+      return run(id, null, 'test', options);
     },
   };
 }
 
-function promptFor(routine) {
+// The run's prompt; a context goes after the instruction, before the
+// standing paragraph.
+export function promptFor(routine, context = null) {
   return `Routine "${routine.name}" (a scheduled run, not the user): ${routine.instruction}\n\n`
+    + (context ? `${context}\n\n` : '')
     + 'You may ask other agents. Your reply is recorded in this routine\'s log, not shown as a message; if something in it needs Hunter\'s attention, use notify.';
 }
 

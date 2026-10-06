@@ -106,6 +106,11 @@ export function declaredLengthExceeds(req, limit) {
   return declared !== undefined && Number(declared) > limit;
 }
 
+// Whether the request declares a body: chunked, or a length above zero.
+export function hasBody(req) {
+  return req.headers['transfer-encoding'] !== undefined || declaredLengthExceeds(req, 0);
+}
+
 // An AbortSignal that aborts when `res` closes before it finished.
 export function closedSignal(res) {
   const controller = new AbortController();

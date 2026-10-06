@@ -9,8 +9,11 @@
 //   DELETE /api/routines/:id        bodyless -> 200 { ok: true }
 //   GET    /api/routines/:id/runs   -> 200 { runs }, the newest
 //                                     limits.routineRunsShown, newest first
-//   POST   /api/routines/:id/run    bodyless -> 202 { ok: true } once the
-//                                     scheduler has started the turn now
+//   POST   /api/routines/:id/run    bodyless, or { context } (1 to
+//                                     CONTEXT_MAX characters once trimmed,
+//                                     added to the run's prompt) -> 202
+//                                     { ok: true } once the scheduler has
+//                                     started the turn now
 // `schedule` in a body is a cron line (schedule.mjs parseCron); the stored
 // routine carries { cron, text } with the daemon's words. `routine` in an
 // answer is the snapshot's item (with nextAt and lastRun). An id in the
@@ -29,15 +32,16 @@
 //
 // createRoutineRoutes({ routines, hub, scheduler, log, limits, shuttingDown })
 // returns match(pathname) -> route | null in the shape app.mjs routes on
-// ({ name: 'routine', methods, bodyless?, label, params: { id, action } })
+// ({ name: 'routine', methods, bodyless?, optionalBody?, label, params: { id, action } })
 // and serve(req, res, route). The router has already checked the method,
 // Origin, and content type before serve() runs.
 
-import { HttpError, readJsonBody, sendJson } from './http.mjs';
+import { HttpError, hasBody, readJsonBody, sendJson } from './http.mjs';
 import { ROUTINE_ID, RoutineError } from './routines.mjs';
 
 const PREFIX = '/api/routines';
 const FIELDS = ['name', 'agent', 'instruction', 'schedule', 'active'];
+export const CONTEXT_MAX = 2000;
 export const SCHEDULE_SENTENCE = 'A schedule is five cron fields: minute, hour, day of the month, month, and day of the week. "30 6 * * 1-5" is weekdays at 6:30.';
 
 const STORE_STATUS = new Map([
@@ -55,7 +59,7 @@ export function createRoutineRoutes({ routines, hub, scheduler = null, log = () 
     if (!ROUTINE_ID.test(id) || rest.length !== 0) return null;
     if (action === undefined) return { name: 'routine', methods: ['PUT', 'DELETE'], bodyless: ['DELETE'], label: `${PREFIX}/:id`, params: { id, action: 'one' } };
     if (action === 'runs') return { name: 'routine', methods: ['GET'], label: `${PREFIX}/:id/runs`, params: { id, action } };
-    if (action === 'run') return { name: 'routine', methods: ['POST'], bodyless: true, label: `${PREFIX}/:id/run`, params: { id, action } };
+    if (action === 'run') return { name: 'routine', methods: ['POST'], optionalBody: true, label: `${PREFIX}/:id/run`, params: { id, action } };
     return null;
   }
 
@@ -133,11 +137,24 @@ export function createRoutineRoutes({ routines, hub, scheduler = null, log = () 
     sendJson(res, 200, { runs: routines.runs(id, limits.routineRunsShown) });
   }
 
-  async function serveRun(res, id) {
+  // A run's optional body: { context }, trimmed, or undefined with no body.
+  async function readContext(req) {
+    if (!hasBody(req)) return undefined;
+    const body = await readJsonBody(req, { limit: limits.routineBodyBytes });
+    if (!isRecord(body) || Object.keys(body).join() !== 'context' || typeof body.context !== 'string') {
+      throw new HttpError(400, 'invalid_body');
+    }
+    const context = body.context.trim();
+    if (context === '' || Array.from(context).length > CONTEXT_MAX) throw new HttpError(400, 'invalid_body');
+    return context;
+  }
+
+  async function serveRun(req, res, id) {
     if (shuttingDown()) throw new HttpError(503, 'shutting_down');
+    const context = await readContext(req);
     if (!item(id)) throw new HttpError(404, 'no_such_routine');
     if (!scheduler) throw new HttpError(503, 'not_yet');
-    const started = await scheduler.testRun(id);
+    const started = await scheduler.testRun(id, context === undefined ? {} : { context });
     if (started.ok) {
       sendJson(res, 202, { ok: true });
       return;
@@ -155,7 +172,7 @@ export function createRoutineRoutes({ routines, hub, scheduler = null, log = () 
       case 'runs':
         return serveRuns(res, id);
       case 'run':
-        return serveRun(res, id);
+        return serveRun(req, res, id);
       default:
         throw new HttpError(404, 'not_found');
     }

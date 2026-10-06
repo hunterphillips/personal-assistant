@@ -198,3 +198,34 @@ test('a test run answers 202 and sends at the agent\'s level with the routine; 4
   assert.equal(runs[0].reply, 'Drift is fine.');
   assert.deepEqual(appended, []);
 });
+
+test('a test run takes an optional { context }, adds it to the prompt and the start line, and refuses any other body', async (t) => {
+  const dir = path.join(await tempDir(t), 'routines');
+  const routines = createRoutines({ dir, limits: LIMITS, now: () => new Date('2026-10-03T12:00:00.000Z') });
+  await routines.load();
+  const store = { read: async () => [], append: async () => {} };
+  const personas = fakePersonas({}, store);
+  t.after(() => personas.adapter.close());
+  const app = await startApp(t, {
+    registry: fakeRegistry(AGENTS), routines, adapters: { claude: personas.adapter }, store,
+    scheduler: (hub) => createScheduler({ routines, hub, now: () => new Date('2026-10-03T12:00:00.000Z'), randomUUID: () => 'run-1' }),
+  });
+  personas.hold('cfo');
+  assert.equal((await send(app, 'POST', '/api/routines', BODY)).status, 201);
+
+  for (const body of [{}, { context: '' }, { context: '   ' }, { context: 'x'.repeat(2001) }, { context: 42 }, { context: 'Week.', extra: 1 }, [], 'nope']) {
+    const response = await send(app, 'POST', '/api/routines/daily-drift/run', body);
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(response.json.error, body === 'nope' ? 'invalid_json' : 'invalid_body', JSON.stringify(body));
+  }
+  assert.equal((await request(app, 'POST', '/api/routines/daily-drift/run', { headers: { origin: app.origin, 'content-type': 'text/plain' }, body: '{}' })).status, 415);
+  assert.equal(personas.sent.length, 0);
+
+  const run = await send(app, 'POST', '/api/routines/daily-drift/run', { context: '  Write for the week of October 5.  ' });
+  assert.deepEqual([run.status, run.json], [202, { ok: true }]);
+  assert.equal(personas.sent[0].context.prompt,
+    'Routine "Daily drift" (a scheduled run, not the user): Compute drift.\n\nWrite for the week of October 5.\n\n'
+      + 'You may ask other agents. Your reply is recorded in this routine\'s log, not shown as a message; if something in it needs Hunter\'s attention, use notify.');
+  await settle();
+  assert.deepEqual(routines.runs('daily-drift'), [{ run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-03T12:00:00.000Z', context: 'Write for the week of October 5.' }]);
+});
