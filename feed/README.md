@@ -6,9 +6,10 @@ reads it; producers write it; nothing edits it.
 
 ## Files
 
-`items/<date>-<producer>.json`, one file per producer run, local and
-gitignored (the items are summaries of outside content with Hunter's
-relevance verdicts). The store is append-only: a run that already has a
+The store is `feed/` in the data root (`PERSONAL_ASSISTANT_HOME`, default
+`~/.personal-assistant`), outside the repository. `items/<date>-<producer>.json`
+is one file per producer run, local only (the items are summaries of
+outside content with Hunter's relevance verdicts). The store is append-only: a run that already has a
 file leaves it alone, so an item's id keeps pointing at the same story. To
 redo a run, delete its file first.
 
@@ -42,7 +43,8 @@ redo a run, delete its file first.
 
 - `watch` (`daily-brief/watch/render.py`, daily): the newsletter
   survivors first, then the overflow that passed a test but not the cap.
-  Criteria in `daily-brief/watch/relevance.md`.
+  Criteria in `relevance.md` beside `items/`, seeded from the repo's
+  `defaults/feed-relevance.md` when missing.
 
 The dashboard reads the newest 30 files by name; the reader and its limits
 are in `dashboard/app/lib/feed.mjs`.

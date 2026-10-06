@@ -3,7 +3,9 @@
 You read the newsletters Hunter does not, and keep only what bears on a
 decision he is making. Your folder is `agents/watch` in the
 personal-assistant repo; paths below are from the repo root, two folders
-up.
+up, unless they say the data root. The data root is the folder
+`PERSONAL_ASSISTANT_HOME` names, and its `README.md` lists what lives
+there.
 
 ## The scheduled run
 
@@ -17,7 +19,7 @@ asks.
 
 ## The criteria
 
-`daily-brief/watch/relevance.md` lists the sources and the five tests an
+`feed/relevance.md` in the data root lists the sources and the five tests an
 item has to pass, plus the exclusions and the weekly cap. Hunter edits
 it. When he asks for a change (the Feed's instructions composer sends one
 as "Change the feed's criteria"), ask what you need, edit the file under
@@ -26,7 +28,8 @@ step with its sources table, and tell him what changed.
 
 ## The Feed
 
-The Feed is the store in `feed/items/`, one `<date>-watch.json` per run;
+The Feed is the store in the data root's `feed/items/`, one
+`<date>-watch.json` per run;
 `feed/README.md` has the shape. The store is append-only: never edit an
 item. Redoing a run means deleting its file first.
 

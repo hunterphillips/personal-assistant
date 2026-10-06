@@ -17,7 +17,7 @@ The plan and its decisions:
 A normal morning finishes around 06:45. The runner does not trust the
 clock: it waits up to 30 minutes for cfo's snapshot log and Focus's
 `last-notes.json`, then proceeds and
-lists whatever is still missing in `contributions/<date>/run.yaml`, which
+lists whatever is still missing in `run.yaml` among the day's contributions, which
 the memo reports under "Things to note".
 
 If the Mac is asleep, launchd fires every missed job at wake, and the wait
@@ -63,11 +63,13 @@ curator rules they point at are the files beside this README.
 ## Watch
 
 `watch/contribute` runs daily at 05:40. It reads the five newsletters in
-`watch/relevance.md` from Gmail (haiku lists the issues and extracts each
-one's stories, one session per issue; opus triages them against the
-criteria with no tools), then `watch/render.py` writes
-`watch/packets/<date>.yaml`, `watch/overflow/<date>.json`,
-appends `watch/seen.jsonl`, and sets `last_run` in `watch/state.json`. The
+the data root's `feed/relevance.md` from Gmail (haiku lists the issues and
+extracts each one's stories, one session per issue; opus triages them
+against the criteria with no tools), then `watch/render.py --out
+<root>/watch --feed <root>/feed/items` writes `watch/packets/<date>.yaml`,
+`watch/overflow/<date>.json`, and the day's Feed file, appends
+`watch/seen.jsonl`, and sets `last_run` in `watch/state.json`, all under
+the root. The
 sources are weekly, so most days there is nothing new: the Gmail listing
 comes back empty and the run exits clean without writing a packet, a feed
 file, or touching `seen.jsonl` or `state.json`. The
@@ -85,16 +87,25 @@ models. Log lines start with `watch`.
 
 ## Where things land
 
-- `contributions/<date>/` — `cfo.yaml`, `focus.yaml`, `second-brain.yaml`,
+Everything the run writes, except the logs, lives in the data root:
+`PERSONAL_ASSISTANT_HOME`, default `~/.personal-assistant`, which both
+scripts read from the environment (the plists set only `HOME`). The
+contracts, prompts, `briefs/build.py`, and `briefs/check-viewer.mjs` stay
+here; the run calls the last two with `--dir <root>/briefs`. A dry run
+prints the root first.
+
+- `briefs/contributions/<date>/` — `cfo.yaml`, `focus.yaml`, `second-brain.yaml`,
   `calendar.yaml`, `run.yaml`, and `watch.yaml` when a packet is pending.
-  Gitignored.
 - `briefs/memo-<date>.md` — the curator's memo; `<date>.md`,
   `viewer-<date>.html`, `brief-<date>.json`, and `notice-<date>.json` built
   from it. The structured brief has one item per paragraph or list block.
   The dashboard serves the newest viewer and posts the notice (the opening
   and the memo, or `state: failed` when the run ended without a viewer) once
   into the Assistant's thread.
-  Feedback saves beside it as `feedback-<date>.md`. Gitignored.
+  Feedback saves beside it as `feedback-<date>.md`. The run's lock is
+  `briefs/.run.lock`.
+- `watch/` — Watch's packets, overflow, seen list, and `state.json`, whose
+  `reported` list the brief run updates.
 - `~/Library/Logs/daily-brief.log` — one line per run:
   `exit= date= cursor= stage= packets= stubs= waited= took= viewer= notice=`.
 - `~/Library/Logs/daily-brief/<date>-<domain>.log` — each session's output,
