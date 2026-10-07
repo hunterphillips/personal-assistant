@@ -70,7 +70,7 @@ test('groups puts pinned personas first under no heading and pinnedPersona finds
   assert.equal(view.pinnedPersona([{ id: 'cfo', kind: 'persona', provider: 'claude' }]), null);
 });
 
-test('groups nests sessions under their project in snapshot order and puts the rest under Other sessions', () => {
+test('groups nests sessions under their project in snapshot order and puts the rest under Other chats', () => {
   const agents = [{ id: 'b', group: 'work', kind: 'project' }, { id: 'a', group: 'personal', kind: 'persona' }, { id: 'c', group: 'archive', kind: 'project' }];
   const sessions = [
     { id: 'codex:1', projectId: 'b' }, { id: 'claude:2', projectId: null }, { id: 'codex:3', projectId: 'b' }, { id: 'codex:4', projectId: 'gone' },
@@ -81,15 +81,15 @@ test('groups nests sessions under their project in snapshot order and puts the r
     ['Work', [['b', ['codex:1', 'codex:3']]]],
     ['Personal', [['a', []]]],
     ['Archive', [['c', ['codex:5']]]],
-    ['Other sessions', [[null, ['claude:2', 'codex:4']]]],
+    ['Other chats', [[null, ['claude:2', 'codex:4']]]],
   ]);
-  assert.deepEqual(shape(view.groups([], sessions.slice(1, 2))), [['Other sessions', [[null, ['claude:2']]]]]);
+  assert.deepEqual(shape(view.groups([], sessions.slice(1, 2))), [['Other chats', [[null, ['claude:2']]]]]);
 });
 
 test('sessionsSentence speaks only when nothing is listed and both sources are off', () => {
   const off = { available: false, reason: 'not_running' };
   const on = { available: true };
-  const sentence = 'No coding sessions. Start the Codex server or open a terminal in cmux.';
+  const sentence = 'No Codex or terminal chats. Start the Codex server or open a terminal in cmux.';
   assert.equal(view.sessionsSentence({ sessions: [], codex: off, cmux: off }), sentence);
   assert.equal(view.sessionsSentence({ sessions: [], codex: off, cmux: on }), '');
   assert.equal(view.sessionsSentence({ sessions: [], codex: on, cmux: off }), '');
@@ -101,8 +101,8 @@ test('codexSentence and cmuxSentence say what is off and nothing while on', () =
   assert.equal(view.codexSentence({ available: true }), '');
   assert.equal(view.codexSentence({ available: false, reason: 'no_server' }), 'The Codex server is not running.');
   assert.equal(view.codexSentence({ available: false, reason: 'disconnected' }), 'The Codex server disconnected.');
-  assert.equal(view.codexSentence({ available: false, reason: 'ws_unavailable' }), 'Codex sessions are off until npm ci runs.');
-  assert.equal(view.codexSentence({ available: false, reason: 'no_adapter' }), 'Codex sessions are off.');
+  assert.equal(view.codexSentence({ available: false, reason: 'ws_unavailable' }), 'Codex is off until npm ci runs.');
+  assert.equal(view.codexSentence({ available: false, reason: 'no_adapter' }), 'Codex is off.');
   assert.equal(view.cmuxSentence({ available: true, stale: true }), '');
   assert.equal(view.cmuxSentence({ available: false, reason: 'not_running' }), 'cmux is not running.');
   assert.equal(view.cmuxSentence({ available: false, reason: 'no_password' }), 'cmux refused the connection. Check the socket password.');
@@ -114,9 +114,9 @@ test('codexSentence and cmuxSentence say what is off and nothing while on', () =
 test('terminalReason says why Open terminal is off, in order: no binding, cmux, closed', () => {
   const live = { workspaceId: 'ws', surfaceId: 'sf', live: true };
   const on = { cmux: { available: true } };
-  assert.equal(view.terminalReason({ binding: null }, on), 'This thread was not started with codex-new, so its terminal is not known.');
+  assert.equal(view.terminalReason({ binding: null }, on), 'This chat was not started with codex-new, so its terminal is not known.');
   assert.equal(view.terminalReason({ binding: { workspaceId: null, surfaceId: null, live: false } }, on),
-    'This thread was not started with codex-new, so its terminal is not known.');
+    'This chat was not started with codex-new, so its terminal is not known.');
   assert.equal(view.terminalReason({ binding: { ...live, live: false } }, { cmux: { available: false, reason: 'not_running' } }), 'cmux is not running.');
   assert.equal(view.terminalReason({ binding: { ...live, live: false } }, on), 'That terminal is closed.');
   assert.equal(view.terminalReason({ binding: live }, on), '');
@@ -124,13 +124,13 @@ test('terminalReason says why Open terminal is off, in order: no binding, cmux, 
 
 test('openRefusal turns each open-terminal refusal into a sentence', () => {
   assert.equal(view.openRefusal(null), 'The dashboard did not respond.');
-  assert.equal(view.openRefusal({ code: 'unbound' }), 'This thread was not started with codex-new, so its terminal is not known.');
+  assert.equal(view.openRefusal({ code: 'unbound' }), 'This chat was not started with codex-new, so its terminal is not known.');
   assert.equal(view.openRefusal({ code: 'terminal_closed' }), 'That terminal is closed.');
   assert.equal(view.openRefusal({ code: 'cmux_unavailable', reason: 'no_password' }), 'cmux refused the connection. Check the socket password.');
   assert.equal(view.openRefusal({ code: 'focus_failed', reason: 'not_found' }), 'That terminal is closed.');
   assert.equal(view.openRefusal({ code: 'focus_failed', reason: 'not_running' }), 'cmux is not running.');
   assert.equal(view.openRefusal({ code: 'focus_failed', reason: 'error' }), 'cmux could not open that terminal.');
-  assert.equal(view.openRefusal({ code: 'no_such_session' }), 'That session is no longer listed.');
+  assert.equal(view.openRefusal({ code: 'no_such_session' }), 'That chat is no longer listed.');
   assert.equal(view.openRefusal({ code: 'internal_error' }), 'Something went wrong on the dashboard. Try again.');
 });
 
@@ -156,12 +156,12 @@ test('terminalState is a sentence for the terminal pane', () => {
 
 test('errorSentence turns each code into a sentence and passes adapter sentences through', () => {
   assert.equal(view.errorSentence(persona({ lastError: 'api_key_in_env' })),
-    'The dashboard started with an API key in its environment, so personas are off. Unset it and restart the dashboard.');
+    'The dashboard started with an API key in its environment, so Claude agents are off. Unset it and restart the dashboard.');
   assert.equal(view.errorSentence(persona({ lastError: 'start_failed' })),
-    'The session file for CFO could not be read. Check the threads directory, then restart the dashboard.');
+    'The chat for CFO could not be read. Check the threads folder, then restart the dashboard.');
   assert.equal(view.errorSentence(persona({ lastError: 'sdk_unavailable' })),
-    'The Claude Agent SDK could not be loaded. Run npm ci in dashboard/app, then restart the dashboard.');
-  assert.equal(view.errorSentence(persona({ lastError: 'provider_unavailable', provider: 'codex' })), 'There is no runtime for Codex yet.');
+    'Claude agents could not start. Run npm ci in dashboard/app, then restart the dashboard.');
+  assert.equal(view.errorSentence(persona({ lastError: 'provider_unavailable', provider: 'codex' })), 'Codex agents are not supported yet.');
   assert.equal(view.errorSentence(persona({ lastError: 'turn_timeout' })), 'The last turn ran too long and was stopped.');
   assert.equal(view.errorSentence(persona({ lastError: 'error' })), 'The last turn failed.');
   assert.equal(view.errorSentence(persona({ lastError: null })), 'The last turn failed.');
@@ -170,7 +170,7 @@ test('errorSentence turns each code into a sentence and passes adapter sentences
   // A session is named like its row, and the Codex server's own text never reaches the pane.
   const session = (fields) => ({ id: 'codex:1', threadId: '1', title: null, cwd: '/home/h/work', state: 'error', ...fields });
   assert.equal(view.errorSentence(session({ lastError: 'start_failed' })),
-    'The session file for work could not be read. Check the threads directory, then restart the dashboard.');
+    'The chat for work could not be read. Check the threads folder, then restart the dashboard.');
   assert.equal(view.errorSentence(session({ lastError: 'server_gone' })), 'The Codex server disconnected.');
   assert.equal(view.errorSentence(session({ lastError: 'Rate limited: retry after 30s' })), 'The last turn failed.');
   assert.equal(view.errorSentence(session({ lastError: 'turn_failed' })), 'The last turn failed.');
@@ -183,7 +183,7 @@ test('composerReason says why a message cannot be sent', () => {
   assert.equal(view.composerReason(persona({ state: 'busy' })), 'CFO is working. Wait for the reply or interrupt.');
   assert.equal(view.composerReason(persona({ state: 'waiting', pending: { kind: 'question' } })), 'Answer the question first.');
   assert.equal(view.composerReason(persona({ state: 'waiting', pending: { kind: 'approval' } })), 'Allow or deny the request first.');
-  assert.equal(view.composerReason(persona({ state: 'unavailable', lastError: 'provider_unavailable' })), 'There is no runtime for Claude yet.');
+  assert.equal(view.composerReason(persona({ state: 'unavailable', lastError: 'provider_unavailable' })), 'Claude agents are not supported yet.');
   assert.equal(view.composerReason(persona({ state: 'unavailable', lastError: null })), 'CFO has not started yet.');
   assert.equal(view.composerReason(persona({ state: 'error', lastError: 'x' })), '');
 });
@@ -195,15 +195,15 @@ test('refusalSentence covers each route refusal and a missing answer', () => {
   assert.equal(view.refusalSentence({ code: 'no_such_request' }, agent), 'That request was already answered or has expired.');
   assert.equal(view.refusalSentence({ code: 'shutting_down' }, agent), 'The dashboard is shutting down. Try again in a moment.');
   assert.equal(view.refusalSentence({ code: 'persona_unavailable' }, agent), 'CFO is unavailable.');
-  assert.equal(view.refusalSentence({ code: 'thread_reset_failed' }, agent), 'The thread could not be reset. Check the dashboard log.');
+  assert.equal(view.refusalSentence({ code: 'thread_reset_failed' }, agent), 'A new chat could not be started. Check the dashboard log.');
   assert.equal(view.refusalSentence({ code: 'payload_too_large' }, agent), 'The message is too long. Shorten it.');
-  assert.equal(view.refusalSentence({ code: 'not_a_persona' }, agent), 'CFO has no thread.');
-  assert.equal(view.refusalSentence({ code: 'invalid_agent' }, agent), 'That agent is not in the registry.');
+  assert.equal(view.refusalSentence({ code: 'not_a_persona' }, agent), 'CFO has no chat.');
+  assert.equal(view.refusalSentence({ code: 'invalid_agent' }, agent), 'That agent is not registered.');
   const session = { id: 'codex:1', threadId: '1', title: 'Fix it', cwd: '/x' };
   assert.equal(view.refusalSentence({ code: 'busy' }, session), 'Fix it is still working. Wait for the reply.');
   assert.equal(view.refusalSentence({ code: 'not_supported' }, session), 'Answer this one in the terminal.');
   assert.equal(view.refusalSentence({ code: 'unavailable' }, session), 'The Codex server is not connected.');
-  assert.equal(view.refusalSentence({ code: 'no_such_session' }, session), 'That session is no longer listed.');
+  assert.equal(view.refusalSentence({ code: 'no_such_session' }, session), 'That chat is no longer listed.');
   const generic = 'Something went wrong on the dashboard. Try again.';
   assert.equal(view.refusalSentence({ code: 'internal_error' }, agent), generic);
   assert.equal(view.refusalSentence({ code: 'never_seen_before' }, agent), generic);

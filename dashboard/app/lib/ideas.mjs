@@ -67,7 +67,7 @@ export function createIdeas({ dir, marksFile, limits, zone, log: rawLog = () => 
       }
     }
     if (scan.files.length > limits.feedFiles) {
-      problems.push(`The ideas store has ${scan.files.length} files; only the newest ${limits.feedFiles} are shown.`);
+      problems.push(`There are ${scan.files.length} idea files; only the newest ${limits.feedFiles} are shown.`);
     }
     const shown = runs.reverse();
     const result = deepFreeze({ readAt: new Date().toISOString(), problems, runs: shown });
@@ -78,7 +78,7 @@ export function createIdeas({ dir, marksFile, limits, zone, log: rawLog = () => 
   async function safeLoad() {
     try { return await load(); } catch (error) {
       log({ event: 'ideas_read_error', path: null, error: error?.message ?? String(error) });
-      return deepFreeze({ readAt: new Date().toISOString(), problems: ['The ideas store could not be read.'], runs: [] });
+      return deepFreeze({ readAt: new Date().toISOString(), problems: ['The ideas could not be read.'], runs: [] });
     }
   }
 

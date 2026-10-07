@@ -607,9 +607,9 @@ test.describe('with jobs never refreshed', () => {
 test.describe('with Focus unreachable during the refresh', () => {
   test.use({ hubOptions: seeded({ focusAvailable: false }) });
 
-  test('the Focus card says it is showing launchd status', async ({ page, hub }) => {
+  test('the Focus card says its states come from macOS', async ({ page, hub }) => {
     await openHealth(page, hub);
-    await expect(card(page, 'Focus').locator('.card-note')).toHaveText('Focus is not responding; showing launchd status.');
+    await expect(card(page, 'Focus').locator('.card-note')).toHaveText('Focus is not responding; these states come from macOS.');
     await expect(card(page, 'Second brain').locator('.card-note')).toHaveCount(0);
   });
 });
@@ -617,10 +617,10 @@ test.describe('with Focus unreachable during the refresh', () => {
 test.describe('with an unreadable registry', () => {
   test.use({ hubOptions: { build: () => ({ ...seeded().build(), registry: { ok: false, error: 'registry_invalid_json' } }) } });
 
-  test('Health says the registry could not be read and keeps the last good cards', async ({ page, hub }) => {
+  test('Health says the agents file could not be read and keeps the last good cards', async ({ page, hub }) => {
     await openHealth(page, hub);
     const message = page.locator('#jobs-message');
-    await expect(message).toHaveText('The registry could not be read. registry_invalid_json');
+    await expect(message).toHaveText('The agents file could not be read. registry_invalid_json');
     await expect(message.locator('.jobs-code')).toHaveText('registry_invalid_json');
     await expect(page.locator('.routine-card').first()).toBeVisible();
   });
@@ -644,7 +644,7 @@ test.describe('Settings', () => {
     expect(await select(page, 'Default model').locator('option').allTextContents()).toEqual(['Claude Code default', 'Fable', 'Opus', 'Sonnet', 'Haiku']);
     expect(await select(page, 'Default effort').locator('option').allTextContents()).toEqual(['Claude Code default', 'Low', 'Medium', 'High', 'Extra high', 'Max']);
     // Claude personas only: not the Codex one, not the system entry.
-    expect(await select(page, 'Brief goes to').locator('option').allTextContents()).toEqual(['No thread', 'Second brain']);
+    expect(await select(page, 'Brief goes to').locator('option').allTextContents()).toEqual(['No one', 'Second brain']);
     await expect(select(page, 'Default permissions')).toHaveValue('ask');
     expect(await select(page, 'Default permissions').locator('option').allTextContents()).toEqual(['Ask', 'Auto', 'Full access']);
     await expect(page.locator('#settings-permission-note')).toHaveText('Asks before each tool that is not already allowed.');
@@ -740,7 +740,7 @@ test.describe('Settings', () => {
 test.describe('Settings with no file', () => {
   test.use({ hubOptions: seeded() });
 
-  test('every select reads Claude Code default or No thread, and the card says no agent receives the brief', async ({ page, hub }) => {
+  test('every select reads Claude Code default or No one, and the card says no agent receives the brief', async ({ page, hub }) => {
     await openHealth(page, hub);
     const card = page.locator('#settings-card');
     await expect(card.getByLabel('Default model', { exact: true })).toHaveValue('');

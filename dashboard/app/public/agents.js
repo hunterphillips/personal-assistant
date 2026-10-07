@@ -103,23 +103,23 @@
   var MODEL_BUSY = 'Wait for the turn to finish before changing the model.';
   var AGENT_ID = /^[a-z][a-z0-9-]{1,31}$/;
   var SESSION_ID = /^(?:codex|claude):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-  var NO_SESSIONS = 'No coding sessions. Start the Codex server or open a terminal in cmux.';
+  var NO_SESSIONS = 'No Codex or terminal chats. Start the Codex server or open a terminal in cmux.';
   var TERMINAL_ONLY = 'Answer this one in the terminal.';
   var FORWARDED_NOTE = 'Asked while answering you.';
-  var UNBOUND = 'This thread was not started with codex-new, so its terminal is not known.';
+  var UNBOUND = 'This chat was not started with codex-new, so its terminal is not known.';
   var TERMINAL_CLOSED = 'That terminal is closed.';
   var TICK_MS = 60000;
   var THREAD_TIMEOUT_MS = 8000;
   var SCROLL_END_PX = 80; // this close to the end counts as reading the newest message
   var NO_ANSWER = 'The dashboard did not respond.';
-  var CHOOSE = 'Choose an agent to open its thread.';
+  var CHOOSE = 'Choose an agent to open its chat.';
   var NEW_AGENT = 'New agent';
   var NEW_GROUP = '__new__'; // the Group select's "New group…" value
   var EVERYONE = '*'; // the Who may message list's first checkbox
   var NO_ONE_ACCEPTS = '!'; // the Who may message list's second checkbox
   var CODEX_NOTE = 'Codex, its own settings';
-  var FOLDER_NOTE = 'The folder applies when a new thread starts.';
-  var NOT_WRITTEN = 'The registry could not be written.';
+  var FOLDER_NOTE = 'The folder applies when a new chat starts.';
+  var NOT_WRITTEN = 'The agent could not be saved.';
 
   // --- Routines: the picker's schedules and the words for a run ----------
 
@@ -485,11 +485,11 @@
     switch (result.code) {
       case 'duplicate_id': return ['An agent with that id exists.'];
       case 'invalid_permission': return ['That permission level is not offered.'];
-      case 'registry_invalid': return ['The registry file could not be read. Fix it by hand first.'];
-      case 'not_editable': return ['This entry is edited in the registry file.'];
+      case 'registry_invalid': return ['The agents file could not be read. Fix it by hand first.'];
+      case 'not_editable': return ['This entry is edited in the agents file.'];
       case 'no_such_agent': return ['That agent is no longer registered.'];
       case 'shutting_down': return ['The dashboard is restarting.'];
-      case 'not_found': return ['The dashboard cannot write the registry.'];
+      case 'not_found': return ['The dashboard cannot write the agents file.'];
       case 'payload_too_large': return ['That is too long.'];
       default: return [NOT_WRITTEN];
     }
@@ -526,7 +526,7 @@
       if (members.length === 0) continue;
       result.push({ key: order[i], title: groupName(order[i], groupList), entries: members.map(entry) });
     }
-    if (loose.length > 0) result.push({ key: 'other', title: 'Other sessions', entries: [{ agent: null, sessions: loose }] });
+    if (loose.length > 0) result.push({ key: 'other', title: 'Other chats', entries: [{ agent: null, sessions: loose }] });
     return result;
   }
 
@@ -558,8 +558,8 @@
     switch (codex.reason) {
       case 'no_server': return 'The Codex server is not running.';
       case 'disconnected': return 'The Codex server disconnected.';
-      case 'ws_unavailable': return 'Codex sessions are off until npm ci runs.';
-      default: return 'Codex sessions are off.';
+      case 'ws_unavailable': return 'Codex is off until npm ci runs.';
+      default: return 'Codex is off.';
     }
   }
 
@@ -602,7 +602,7 @@
         if (reason === 'not_found') return TERMINAL_CLOSED;
         if (reason === 'not_running' || reason === 'no_password' || reason === 'auth_failed') return cmuxSentence({ available: false, reason: reason });
         return 'cmux could not open that terminal.';
-      case 'no_such_session': return 'That session is no longer listed.';
+      case 'no_such_session': return 'That chat is no longer listed.';
       case 'shutting_down': return 'The dashboard is shutting down. Try again in a moment.';
       default: return 'Something went wrong on the dashboard. Try again.';
     }
@@ -616,15 +616,15 @@
     var code = agent.lastError;
     switch (code) {
       case 'api_key_in_env':
-        return 'The dashboard started with an API key in its environment, so personas are off. Unset it and restart the dashboard.';
+        return 'The dashboard started with an API key in its environment, so Claude agents are off. Unset it and restart the dashboard.';
       case 'start_failed':
-        return 'The session file for ' + displayName(agent) + ' could not be read. Check the threads directory, then restart the dashboard.';
+        return 'The chat for ' + displayName(agent) + ' could not be read. Check the threads folder, then restart the dashboard.';
       case 'server_gone':
         return 'The Codex server disconnected.';
       case 'sdk_unavailable':
-        return 'The Claude Agent SDK could not be loaded. Run npm ci in dashboard/app, then restart the dashboard.';
+        return 'Claude agents could not start. Run npm ci in dashboard/app, then restart the dashboard.';
       case 'provider_unavailable':
-        return providerName(agent) ? 'There is no runtime for ' + providerName(agent) + ' yet.' : 'There is no runtime for this provider yet.';
+        return providerName(agent) ? providerName(agent) + ' agents are not supported yet.' : 'This kind of agent is not supported yet.';
       case 'turn_timeout':
         return 'The last turn ran too long and was stopped.';
       case 'turn_failed':
@@ -693,15 +693,15 @@
       case 'no_such_request': return 'That request was already answered or has expired.';
       case 'shutting_down': return 'The dashboard is shutting down. Try again in a moment.';
       case 'persona_unavailable': return name + ' is unavailable.';
-      case 'thread_reset_failed': return 'The thread could not be reset. Check the dashboard log.';
+      case 'thread_reset_failed': return 'A new chat could not be started. Check the dashboard log.';
       case 'invalid_text': return 'Type a message first.';
       case 'payload_too_large': return 'The message is too long. Shorten it.';
       case 'invalid_answer': return 'That answer could not be sent.';
-      case 'not_a_persona': return name + ' has no thread.';
-      case 'invalid_agent': return 'That agent is not in the registry.';
+      case 'not_a_persona': return name + ' has no chat.';
+      case 'invalid_agent': return 'That agent is not registered.';
       case 'not_supported': return TERMINAL_ONLY;
       case 'unavailable': return 'The Codex server is not connected.';
-      case 'no_such_session': return 'That session is no longer listed.';
+      case 'no_such_session': return 'That chat is no longer listed.';
       default: return 'Something went wrong on the dashboard. Try again.';
     }
   }
@@ -1444,7 +1444,7 @@
     function deleteSentence(agent) {
       var settings = (state && state.settings) || {};
       var next = fallbackFor(agent);
-      var text = 'Delete ' + agent.name + '? This removes it from the registry with its routines and their runs. Its thread stays on disk.';
+      var text = 'Delete ' + agent.name + '? This removes it with its routines and their runs. Its chat stays on disk.';
       if (settings.brief && settings.brief.agent === agent.id) {
         text += next ? ' The brief will go to ' + next.name + '.' : ' No agent will receive the brief.';
       }
@@ -1460,7 +1460,7 @@
       if (code === 'busy') return agent.name + ' is in the middle of a turn. Delete it once the turn ends.';
       if (code === 'not_agent') return 'Only an agent can be deleted here.';
       if (code === 'no_such_agent') return agent.name + ' is no longer registered.';
-      if (code === 'registry_invalid') return 'The registry file could not be read. Fix it by hand first.';
+      if (code === 'registry_invalid') return 'The agents file could not be read. Fix it by hand first.';
       if (code === 'shutting_down') return 'The dashboard is shutting down.';
       return agent.name + ' could not be deleted.';
     }
@@ -1903,7 +1903,7 @@
         return;
       }
       if (!agent && !creating) {
-        empty.textContent = SESSION_ID.test(selectedId) ? 'That session is not listed.' : 'No agent named ' + selectedId + ' is registered.';
+        empty.textContent = SESSION_ID.test(selectedId) ? 'That chat is not listed.' : 'No agent named ' + selectedId + ' is registered.';
         empty.hidden = false;
         panel.hidden = true;
         renderHeaderActions(null);

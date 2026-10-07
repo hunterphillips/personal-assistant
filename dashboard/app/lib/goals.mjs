@@ -102,7 +102,7 @@ export function createGoals({ registry, agentId = 'second-brain', limits, log: r
       if (cache?.signature === 'absent') return cache.result;
       const result = assemble({
         agentId: null,
-        problems: ['Goals needs the Second brain persona in the registry.'],
+        problems: ['Goals needs the Second brain agent.'],
         current: null,
         longTerm: null,
         goals: [],

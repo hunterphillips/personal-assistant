@@ -305,7 +305,7 @@ test.describe('Ideas', () => {
     await expect(panel).toBeVisible();
     await expect(panel.getByRole('heading', { name: 'Ideas instructions' })).toBeVisible();
     await expect(panel.locator('.instructions-intro'))
-      .toHaveText('Ideas follow these criteria. A change goes to the producer, which edits the file.');
+      .toHaveText('Ideas follow these criteria. A change goes to the agent that writes them, which edits the file.');
     await expect(panel.locator('.goal-prose h4')).toHaveText('Fixture criteria');
     await expect(panel.locator('.goal-prose p')).toHaveText('This invented fixture file describes ideas used only by the automated tests.');
     await panel.getByLabel('What should change?').fill('Prefer smaller fixture ideas.');

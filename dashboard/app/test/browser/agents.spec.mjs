@@ -153,7 +153,7 @@ test.describe('with seeded agents', () => {
       await expect.poll(async () => (await page.locator('#panel').boundingBox()).x).toBe(0);
     } else {
       const empty = page.locator('#agent-empty');
-      await expect(empty).toHaveText('Choose an agent to open its thread.');
+      await expect(empty).toHaveText('Choose an agent to open its chat.');
       await expect(empty).toBeVisible();
       const list = await page.locator('#agents-list').boundingBox();
       expect((await empty.boundingBox()).x).toBeGreaterThanOrEqual(list.x + list.width);
@@ -309,7 +309,7 @@ test.describe('with seeded agents', () => {
     await expect(messages(page).nth(3)).toHaveText(/^Next month looks fine\./);
     await expect(page.locator('#agent-status')).toBeHidden();
     await expect(page.locator('#agent-send')).toBeEnabled();
-    await expect(page.locator('#agent-cost')).toHaveText('$0.01 this session');
+    await expect(page.locator('#agent-cost')).toHaveText('$0.01 this chat');
     await expect(row(page, 'CFO').locator('.agent-row-state')).toHaveCount(0);
     expect(hub.personas.calls).toEqual([['send', 'cfo', 'What about next month?']]);
   });
@@ -504,12 +504,12 @@ test.describe('with seeded agents', () => {
     await page.locator('#agent-input').fill('Still there?');
     await page.locator('#agent-send').click();
     const line = page.locator('#agent-messages .thread-line');
-    await expect(line).toHaveText('The thread could not be loaded. Retry');
+    await expect(line).toHaveText('The chat could not be loaded. Retry');
     await expect(messages(page)).toHaveCount(2);
     expect(await page.locator('#agent-messages > *').first().getAttribute('class')).toBe('thread-line');
 
     await line.getByRole('button', { name: 'Retry' }).click();
-    await expect(line).toHaveText('The thread could not be loaded. Retry');
+    await expect(line).toHaveText('The chat could not be loaded. Retry');
     failing = false;
     await line.getByRole('button', { name: 'Retry' }).click();
     await expect(line).toHaveCount(0);
@@ -517,7 +517,7 @@ test.describe('with seeded agents', () => {
 
     failing = true;
     await hub.personas.reply('cfo', 'Yes.');
-    await expect(line).toHaveText('The thread could not be loaded. Retry');
+    await expect(line).toHaveText('The chat could not be loaded. Retry');
     await expect(messages(page)).toHaveCount(3);
     failing = false;
     await page.locator('#agent-input').fill('Good.');
@@ -545,7 +545,7 @@ test.describe('with seeded agents', () => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto(`${hub.origin}/`);
     const empty = page.locator('#agent-empty');
-    await expect(empty).toHaveText('Choose an agent to open its thread.');
+    await expect(empty).toHaveText('Choose an agent to open its chat.');
     await row(page, 'CFO').click();
     await expect(page).toHaveURL(`${hub.origin}/?agent=cfo`);
     await expect(pane(page)).toBeVisible();
@@ -554,7 +554,7 @@ test.describe('with seeded agents', () => {
     await page.goBack();
     await expect(page).toHaveURL(`${hub.origin}/`);
     await expect(pane(page)).toBeHidden();
-    await expect(empty).toHaveText('Choose an agent to open its thread.');
+    await expect(empty).toHaveText('Choose an agent to open its chat.');
   });
 
   test('choosing the open row from /agents?agent= adds no history entry', async ({ page, hub }) => {
@@ -602,7 +602,7 @@ test.describe('with seeded agents', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await crossed(page, true);
     await expect(page.locator('#agents-list')).toBeVisible();
-    await expect(empty).toHaveText('Choose an agent to open its thread.');
+    await expect(empty).toHaveText('Choose an agent to open its chat.');
     await expect(empty).toBeVisible();
     expect(await rebuilds(page)).toBe(0);
   });
@@ -632,7 +632,7 @@ test.describe('with seeded agents', () => {
   test('an unavailable persona shows why and a disabled composer', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=dev`);
     await expect(pane(page).locator('#agent-name')).toHaveText('Dev');
-    await expect(page.locator('#agent-composer-reason')).toHaveText('There is no runtime for Codex yet.');
+    await expect(page.locator('#agent-composer-reason')).toHaveText('Codex agents are not supported yet.');
     await expect(page.locator('#agent-input')).toBeDisabled();
     await expect(page.locator('#agent-send')).toBeDisabled();
     await expect(page.locator('#agent-new-thread')).toBeDisabled();
@@ -854,7 +854,7 @@ test.describe('with an unreadable registry', () => {
   // come from the jobs' own agent names.
   test.use({ hubOptions: { build: () => ({ ...seeded().build(), registry: { ok: false, error: 'registry_invalid_json' } }) } });
 
-  test('Health says the registry could not be read, and the list claims nothing', async ({ page, hub }) => {
+  test('Health says the agents file could not be read, and the list claims nothing', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
     const listMessage = page.locator('#agents-message');
@@ -866,7 +866,7 @@ test.describe('with an unreadable registry', () => {
 
     await nav(page, 'Health').click();
     await expectView(page, 'health', 'Health');
-    await expect(page.locator('#jobs-message')).toHaveText('The registry could not be read. registry_invalid_json');
+    await expect(page.locator('#jobs-message')).toHaveText('The agents file could not be read. registry_invalid_json');
     await expect(page.locator('.routine-card .card-name')).toHaveText(['CFO']);
   });
 });
@@ -1282,7 +1282,7 @@ test.describe('the settings form', () => {
     await openForm(page, hub, 'cfo');
     await field(page, 'cwd').fill('~/elsewhere');
     await save(page).click();
-    await expect(form(page).locator('.form-note-line')).toHaveText('The folder applies when a new thread starts.');
+    await expect(form(page).locator('.form-note-line')).toHaveText('The folder applies when a new chat starts.');
     const written = hub.registry.writes[0].agents.find((a) => a.id === 'cfo');
     expect(written.cwd.endsWith('/elsewhere')).toBe(true);
     expect(written.cwd.startsWith('/')).toBe(true);
@@ -1932,7 +1932,7 @@ test.describe('with the search field over the list', () => {
   test('typing filters the rows by name, role, or preview and hides a group with none left', async ({ page, hub }) => {
     await openList(page, hub);
     await expect(search(page)).toHaveAttribute('placeholder', 'Search');
-    await expect(search(page)).toHaveAttribute('aria-label', 'Search agents and threads');
+    await expect(search(page)).toHaveAttribute('aria-label', 'Search agents and chats');
     await expect(page.locator('#agents-list > label.search + #agents-search-empty + #agents-message')).toHaveCount(1);
     await expect(empty(page)).toBeHidden();
 

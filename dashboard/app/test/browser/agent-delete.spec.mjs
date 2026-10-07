@@ -56,7 +56,7 @@ test('Delete asks inline with what goes and where the brief moves; Cancel keeps 
   await deleteFoot(page).getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(confirm).toBeVisible();
   await expect(page.locator('#agent-delete-text')).toHaveText(
-    'Delete CFO? This removes it from the registry with its routines and their runs. Its thread stays on disk. The brief will go to Myos.',
+    'Delete CFO? This removes it with its routines and their runs. Its chat stays on disk. The brief will go to Myos.',
   );
   await expect(confirm.getByRole('button', { name: 'Delete', exact: true })).toBeFocused();
   // Destructive, not the primary teal: the theme's red behind it.
@@ -84,7 +84,7 @@ test('a Delete the daemon refuses says why in a sentence and changes nothing', a
   await openSettings(page, hub, 'scout');
   await deleteFoot(page).getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.locator('#agent-delete-text')).toHaveText(
-    'Delete Scout? This removes it from the registry with its routines and their runs. Its thread stays on disk.',
+    'Delete Scout? This removes it with its routines and their runs. Its chat stays on disk.',
   );
   await page.locator('#agent-delete-confirm').getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.locator('#agent-delete-refusal')).toHaveText('Scout is in the middle of a turn. Delete it once the turn ends.');

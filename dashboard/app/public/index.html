@@ -116,7 +116,7 @@
             <div class="agents-list" id="agents-list">
               <label class="search">
                 <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg>
-                <input type="search" id="agents-search" placeholder="Search" aria-label="Search agents and threads" autocomplete="off" autocapitalize="off" spellcheck="false">
+                <input type="search" id="agents-search" placeholder="Search" aria-label="Search agents and chats" autocomplete="off" autocapitalize="off" spellcheck="false">
               </label>
               <p class="agents-message agents-search-empty" id="agents-search-empty" hidden>Nothing matches.</p>
               <p class="agents-message" id="agents-message" hidden></p>
@@ -212,7 +212,7 @@
             <div class="ideas-page" id="ideas-page">
               <section class="instructions" id="ideas-instructions" aria-labelledby="ideas-instructions-heading" hidden>
                 <h2 class="instructions-heading" id="ideas-instructions-heading">Ideas instructions</h2>
-                <p class="instructions-intro">Ideas follow these criteria. A change goes to the producer, which edits the file.</p>
+                <p class="instructions-intro">Ideas follow these criteria. A change goes to the agent that writes them, which edits the file.</p>
                 <div id="ideas-instructions-body"></div>
                 <form class="composer ideas-instructions-composer" id="ideas-instructions-form">
                   <label class="composer-label" for="ideas-instructions-input">What should change?</label>
@@ -369,7 +369,7 @@
           <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
         </button>
         <span class="composer-note" data-part="model-note" hidden>Codex, its own settings</span>
-        <div class="model-menu" data-part="model-menu" role="dialog" aria-label="Model for this thread" hidden>
+        <div class="model-menu" data-part="model-menu" role="dialog" aria-label="Model for this chat" hidden>
           <p class="model-menu-heading" data-part="model-list-heading">Model</p>
           <div class="model-list" data-part="model-list" role="listbox" data-labelledby="model-list-heading"></div>
           <p class="model-menu-heading" data-part="effort-heading">Effort</p>

@@ -208,7 +208,7 @@
       node.appendChild(header);
 
       if (scans.length > 0 && state.jobs.focusAvailable === false) {
-        node.appendChild(element('p', 'card-note', 'Focus is not responding; showing launchd status.'));
+        node.appendChild(element('p', 'card-note', 'Focus is not responding; these states come from macOS.'));
       }
       if (scans.length > 0 && pauseError) {
         var failure = element('p', 'card-error', pauseError);
@@ -315,7 +315,7 @@
 
       // A bad registry edit keeps the last good agents on the server, so the
       // cards stay while the sentence says the file could not be read.
-      if (state.registry && state.registry.ok === false) setMessage('The registry could not be read.', state.registry.error || null);
+      if (state.registry && state.registry.ok === false) setMessage('The agents file could not be read.', state.registry.error || null);
       else if (jobs.error) setMessage('Jobs could not be refreshed.');
       else if (jobs.refreshedAt && (jobs.items || []).length === 0) setMessage('No jobs are registered.');
       else setMessage('');

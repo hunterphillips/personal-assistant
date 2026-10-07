@@ -123,10 +123,10 @@ const names = (page) => page.locator('#agents-groups .agent-row .agent-row-name'
 test.describe('with sessions', () => {
   test.use({ hubOptions: seeded() });
 
-  test('sessions nest under their project newest first, the rest under Other sessions, with folder, time, and state', async ({ page, hub }) => {
+  test('sessions nest under their project newest first, the rest under Other chats, with folder, time, and state', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/`);
     await expectView(page, 'agents', 'Agents');
-    await expect(page.locator('.agent-group-heading')).toHaveText(['Work', 'Personal', 'Other sessions']);
+    await expect(page.locator('.agent-group-heading')).toHaveText(['Work', 'Personal', 'Other chats']);
     await expect(names(page)).toHaveText(['CFO', 'Catchup', 'catchup', 'Fix the flaky test', 'Closed one', 'Second brain', 'Focus', 'other', 'notes']);
 
     const fix = row(page, 'Fix the flaky test');
@@ -174,7 +174,7 @@ test.describe('with sessions', () => {
     await expect(page.locator('#agent-details-toggle')).toBeHidden();
     await expect(page.locator('#agent-details')).toBeHidden();
     await expect(page.locator('#agent-composer')).toBeHidden();
-    await expect(page.locator('#agent-foot')).toHaveText('Type to this thread in its terminal.');
+    await expect(page.locator('#agent-foot')).toHaveText('Type to this chat in its terminal.');
     await expect(messages(page)).toHaveText([/^Fix the flaky test\./, /^Which colour\?/]);
     await expect(messages(page).nth(0)).toHaveClass(/thread-message-user/);
     await expect(row(page, 'Fix the flaky test')).toHaveAttribute('aria-current', 'true');
@@ -371,7 +371,7 @@ test.describe('with sessions', () => {
 
     await page.goto(`${hub.origin}/?agent=codex:t2`);
     await expect(openButton(page)).toBeDisabled();
-    await expect(terminalLine(page)).toHaveText('This thread was not started with codex-new, so its terminal is not known.');
+    await expect(terminalLine(page)).toHaveText('This chat was not started with codex-new, so its terminal is not known.');
 
     await page.goto(`${hub.origin}/?agent=codex:t3`);
     await expect(openButton(page)).toBeDisabled();
@@ -424,7 +424,7 @@ test.describe('with sessions', () => {
     }
 
     await page.goto(`${hub.origin}/?agent=codex:nowhere`);
-    await expect(page.locator('#agent-empty')).toHaveText('That session is not listed.');
+    await expect(page.locator('#agent-empty')).toHaveText('That chat is not listed.');
     await expect(pane(page)).toBeHidden();
   });
 });
@@ -453,7 +453,7 @@ test.describe('with the Codex server gone', () => {
     await expect(page.locator('#agent-notice')).toHaveText('The Codex server disconnected.');
     await expect(page.locator('#agent-messages')).toBeEmpty();
     await expect(page.locator('#agent-status')).toBeHidden();
-    await expect(page.locator('#agent-foot')).toHaveText('Type to this thread in its terminal.');
+    await expect(page.locator('#agent-foot')).toHaveText('Type to this chat in its terminal.');
     expect(hub.requests('/api/sessions/codex:t1/thread')).toEqual([]);
   });
 });
@@ -489,7 +489,7 @@ test.describe('with nothing to list and both sources off', () => {
     await expect(names(page)).toHaveText(['CFO', 'Catchup', 'Second brain', 'Focus']);
     await expect(page.locator('.agent-group-heading')).toHaveText(['Work', 'Personal']);
     const sentence = page.locator('.agents-sessions-message');
-    await expect(sentence).toHaveText('No coding sessions. Start the Codex server or open a terminal in cmux.');
+    await expect(sentence).toHaveText('No Codex or terminal chats. Start the Codex server or open a terminal in cmux.');
     expect((await sentence.boundingBox()).y).toBeGreaterThan((await row(page, 'Focus').boundingBox()).y);
     await expect(page.locator('#view-agents .availability')).toHaveCount(0);
 

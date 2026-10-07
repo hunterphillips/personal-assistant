@@ -213,12 +213,12 @@
       if (!hasThread(agent) || agent.state === 'unavailable') return;
       if (thread.error) {
         var line = element('p', 'thread-line');
-        line.appendChild(document.createTextNode('The thread could not be loaded. '));
+        line.appendChild(document.createTextNode('The chat could not be loaded. '));
         line.appendChild(button('link-button', 'Retry', 'retry-thread'));
         messagesNode.appendChild(line);
         if (thread.messages === null) return;
       } else if (thread.messages === null) {
-        if (thread.loading) messagesNode.appendChild(element('p', 'thread-line', 'Opening thread.'));
+        if (thread.loading) messagesNode.appendChild(element('p', 'thread-line', 'Opening the chat.'));
         return;
       }
       thread.fresh = false;
@@ -485,7 +485,7 @@
       chips.textContent = '';
       if (roleChip(agent)) chips.appendChild(chip('role-chip', agent.role));
       if (providerName(agent)) chips.appendChild(providerBadge(agent));
-      cost.textContent = persona && typeof agent.costUsd === 'number' ? '$' + agent.costUsd.toFixed(2) + ' this session' : '';
+      cost.textContent = persona && typeof agent.costUsd === 'number' ? '$' + agent.costUsd.toFixed(2) + ' this chat' : '';
       description.textContent = session ? shortPath(agent.cwd, state.home) : persona ? '' : agent.description || '';
       description.hidden = !description.textContent;
 
@@ -527,7 +527,7 @@
         reason.hidden = !reasonText;
         renderModelTools(agent);
       }
-      foot.textContent = hasThread(agent) && session ? 'Type to this thread in its terminal.' : '';
+      foot.textContent = hasThread(agent) && session ? 'Type to this chat in its terminal.' : '';
       foot.hidden = !foot.textContent;
       failure.textContent = actionError;
       failure.hidden = !actionError;
