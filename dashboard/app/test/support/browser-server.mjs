@@ -768,7 +768,7 @@ export function fakePersonas(seed, store) {
       current.model = null;
       current.lastError = null;
       setState(agent.id, 'idle');
-      await say(agent.id, 'system', 'New thread');
+      await say(agent.id, 'system', 'New chat');
     },
     async close() {
       for (const timer of timers) clearTimeout(timer);

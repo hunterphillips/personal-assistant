@@ -471,25 +471,25 @@ test.describe('with seeded agents', () => {
     expect(hub.personas.calls.at(-1)[3]).toEqual({ decision: 'allow' });
   });
 
-  test('New thread asks inline, then starts the persona over', async ({ page, hub }) => {
+  test('New chat asks inline, then starts the persona over', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=cfo`);
     await expect(messages(page)).toHaveCount(2);
     await page.locator('#agent-new-thread').click();
     const confirm = page.locator('#agent-confirm');
     await expect(confirm).toBeVisible();
-    await expect(confirm).toContainText('Start a new thread? CFO will not remember this one.');
-    await expect(confirm.getByRole('button', { name: 'Start new thread' })).toBeFocused();
+    await expect(confirm).toContainText('Start a new chat? CFO will not remember this one.');
+    await expect(confirm.getByRole('button', { name: 'Start new chat' })).toBeFocused();
     await confirm.getByRole('button', { name: 'Cancel' }).click();
     await expect(confirm).toBeHidden();
     await expect(page.locator('#agent-new-thread')).toBeFocused();
     expect(hub.personas.calls).toEqual([]);
 
     await page.locator('#agent-new-thread').click();
-    await confirm.getByRole('button', { name: 'Start new thread' }).click();
+    await confirm.getByRole('button', { name: 'Start new chat' }).click();
     await expect(confirm).toBeHidden();
-    await expect(messages(page)).toHaveText([/^New thread/]);
+    await expect(messages(page)).toHaveText([/^New chat/]);
     await expect(messages(page).first()).toHaveClass(/thread-message-system/);
-    await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('New thread');
+    await expect(row(page, 'CFO').locator('.agent-row-preview')).toHaveText('New chat');
     await expect(page.locator('#agent-new-thread')).toBeFocused();
     expect(hub.personas.calls).toEqual([['newThread', 'cfo']]);
   });
@@ -1164,15 +1164,15 @@ test.describe('with a model picker under the composer', () => {
     await expect(page.locator('#agent-failure')).toBeHidden();
   });
 
-  test('New thread returns the button to the default', async ({ page, hub }) => {
+  test('New chat returns the button to the default', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=cfo`);
     await button(page).click();
     await option(page, 'Haiku').click();
     await expect(button(page)).toHaveText('Haiku · High');
 
     await page.locator('#agent-new-thread').click();
-    await page.locator('#agent-confirm').getByRole('button', { name: 'Start new thread' }).click();
-    await expect(messages(page)).toHaveText([/^New thread/]);
+    await page.locator('#agent-confirm').getByRole('button', { name: 'Start new chat' }).click();
+    await expect(messages(page)).toHaveText([/^New chat/]);
     await expect(button(page)).toHaveText('Opus · High');
     await button(page).click();
     await expect(option(page, 'Opus Default')).toHaveAttribute('aria-selected', 'true');

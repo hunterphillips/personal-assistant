@@ -492,7 +492,7 @@
       newThread.hidden = !persona;
       newThread.disabled = busy || !persona || agent.state === 'unavailable' || turnOpen(agent);
       confirmNode.hidden = !confirming;
-      confirmText.textContent = 'Start a new thread? ' + name + ' will not remember this one.';
+      confirmText.textContent = 'Start a new chat? ' + name + ' will not remember this one.';
 
       // A failed turn, or a turn the clock stopped: the persona is idle
       // again with the reason kept until its next turn. A Codex thread

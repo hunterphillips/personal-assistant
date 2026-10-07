@@ -56,7 +56,7 @@
 //     'thread_reset_failed' (a RuntimeError whose cause is the fs error) if
 //     the pointer or cache cannot be cleared. Otherwise clears both (the
 //     thread's model choice goes with the pointer), then emits thread.state idle
-//     and a system message 'New thread' (also written to the fresh cache).
+//     and a system message 'New chat' (also written to the fresh cache).
 //     The idle emission is a boundary marker: it is sent even when the
 //     state was already idle, so views can reset the thread.
 //   state(agentId) -> { state, pending, lastError, sessionId, costUsd, cwd, model }
@@ -84,7 +84,7 @@
 //                                           assistant text per top-level
 //                                           assistant message (subagent
 //                                           messages are skipped), system
-//                                           lines ('New thread'; setModel's
+//                                           lines ('New chat'; setModel's
 //                                           { kind: 'model', model, effort });
 //                                           text is bounded to
 //                                           limits.messageTextBytes
@@ -208,8 +208,8 @@ const MODEL_MAX = 64;
 const STDERR_MAX = 2048;
 const DENIED = 'Denied from the dashboard';
 const INTERRUPTED = 'Interrupted from the dashboard';
-const RESUME_FAILED = 'The stored session could not be resumed. Start a new thread.';
-const START_FAILED = 'The turn could not start. Retry; if it keeps failing, start a new thread.';
+const RESUME_FAILED = 'This chat could not be resumed. Start a new chat.';
+const START_FAILED = 'The turn could not start. Retry; if it keeps failing, start a new chat.';
 const RUN_START_FAILED = 'The run could not start.';
 // What the CLI prints when a resume points at a session it cannot find.
 const SESSION_MISSING = /(session|conversation)[\s\S]{0,80}(not found|does not exist)|no conversation/i;
@@ -707,7 +707,7 @@ export function createClaudeAdapter({
           }
           entry.state = 'idle';
           emit('thread.state', entry.agentId, { state: 'idle' });
-          await record(entry, 'system', 'New thread');
+          await record(entry, 'system', 'New chat');
         } finally {
           entry.resetting = false;
         }

@@ -28,8 +28,9 @@ _Avoid_: category, team, workspace
 
 **Thread**:
 One agent's conversation, continuing across days. Hunter and other agents
-write into it; it is also the record of what the agent did.
-_Avoid_: session, chat, conversation (as a noun for the object)
+write into it; it is also the record of what the agent did. The word in
+code and docs; on screen it is a chat ("New chat", "Quick chat").
+_Avoid_: session, conversation (as a noun for the object)
 
 **Delegation**:
 One agent asking another, in the other's thread, on Hunter's behalf or its

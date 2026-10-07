@@ -371,7 +371,7 @@ test('a stream that fails before init while resuming, with stderr naming a missi
   const { adapter, store, events, logs } = await setup(t, { query });
   await store.writePointer('cfo', { sessionId: 'session-0', createdAt: AT });
   await adapter.send(AGENT, 'Continue');
-  const message = 'The stored session could not be resumed. Start a new thread.';
+  const message = 'This chat could not be resumed. Start a new chat.';
   assert.equal(events.find((event) => event.type === 'error').message, message);
   assert.equal(adapter.state('cfo').state, 'error');
   assert.equal(adapter.state('cfo').lastError, message);
@@ -391,7 +391,7 @@ test('a stream that fails before init for another reason keeps the pointer and a
   const { adapter, store, events, logs } = await setup(t, { query });
   await store.writePointer('cfo', { sessionId: 'session-0', createdAt: AT });
   await adapter.send(AGENT, 'Continue');
-  const message = 'The turn could not start. Retry; if it keeps failing, start a new thread.';
+  const message = 'The turn could not start. Retry; if it keeps failing, start a new chat.';
   assert.equal(events.find((event) => event.type === 'error').message, message);
   assert.equal(adapter.state('cfo').lastError, message);
   assert.equal(logs.some((entry) => entry.event === 'thread_resume_failed'), false);
@@ -546,10 +546,10 @@ test('New thread is refused while busy, otherwise clears the pointer and cache a
   await assert.rejects(adapter.send(AGENT, 'during reset'), { code: 'busy' });
   await reset;
   assert.equal(await store.readPointer('cfo'), null);
-  assert.deepEqual((await store.read('cfo')).map(({ role, text }) => ({ role, text })), [{ role: 'system', text: 'New thread' }]);
+  assert.deepEqual((await store.read('cfo')).map(({ role, text }) => ({ role, text })), [{ role: 'system', text: 'New chat' }]);
   assert.deepEqual(events.map(({ type, state, role, text }) => ({ type, state, role, text })), [
     { type: 'thread.state', state: 'idle', role: undefined, text: undefined },
-    { type: 'message', state: undefined, role: 'system', text: 'New thread' },
+    { type: 'message', state: undefined, role: 'system', text: 'New chat' },
   ]);
   assert.equal(adapter.state('cfo').sessionId, null);
   await adapter.send(AGENT, 'Fresh');
@@ -1054,7 +1054,7 @@ test('the hook result is committed once init is seen and rolled back when the tu
   const broken = await setup(t, { query: failing, turnTools: tools });
   await broken.adapter.send(AGENT, 'Continue');
   assert.deepEqual(settled, ['rollback']);
-  assert.equal(broken.events.find((event) => event.type === 'error').message, 'The turn could not start. Retry; if it keeps failing, start a new thread.');
+  assert.equal(broken.events.find((event) => event.type === 'error').message, 'The turn could not start. Retry; if it keeps failing, start a new chat.');
 
   // A stream that fails before init while resuming: rolled back too.
   settled.length = 0;

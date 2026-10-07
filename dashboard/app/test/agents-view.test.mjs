@@ -165,7 +165,7 @@ test('errorSentence turns each code into a sentence and passes adapter sentences
   assert.equal(view.errorSentence(persona({ lastError: 'turn_timeout' })), 'The last turn ran too long and was stopped.');
   assert.equal(view.errorSentence(persona({ lastError: 'error' })), 'The last turn failed.');
   assert.equal(view.errorSentence(persona({ lastError: null })), 'The last turn failed.');
-  const resume = 'The stored session could not be resumed. Start a new thread.';
+  const resume = 'This chat could not be resumed. Start a new chat.';
   assert.equal(view.errorSentence(persona({ lastError: resume })), resume);
   // A session is named like its row, and the Codex server's own text never reaches the pane.
   const session = (fields) => ({ id: 'codex:1', threadId: '1', title: null, cwd: '/home/h/work', state: 'error', ...fields });
