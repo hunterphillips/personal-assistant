@@ -1486,6 +1486,60 @@ test.describe('the settings form', () => {
   });
 });
 
+// Double-clicking the header's name, only for an open persona (the same
+// agent the settings form above would let Save rename), edits it in place
+// and saves through that same settings route.
+test.describe('double-clicking the header name to rename it', () => {
+  test.use({ hubOptions: { build: () => seeded().build() } });
+  const nameInput = (page) => page.locator('#agent-name input');
+
+  test('a double-click opens the name as an editable field with it selected', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await expect(page.locator('#agent-name')).toHaveAttribute('title', 'Double-click to rename');
+    await page.locator('#agent-name').dblclick();
+    await expect(nameInput(page)).toHaveValue('CFO');
+    await expect(nameInput(page)).toBeFocused();
+    const selected = await nameInput(page).evaluate((el) => el.value.slice(el.selectionStart, el.selectionEnd));
+    expect(selected).toBe('CFO');
+  });
+
+  test('Enter saves the new name through the settings route and the row, the header, and the form all show it', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await page.locator('#agent-name').dblclick();
+    await nameInput(page).fill('Chief Financial');
+    await nameInput(page).press('Enter');
+    await expect(page.locator('#agent-name')).toHaveText('Chief Financial');
+    if (!phone(page)) await expect(row(page, 'Chief Financial')).toBeVisible();
+    expect(hub.registry.writes).toHaveLength(1);
+    const written = hub.registry.writes[0].agents.find((a) => a.id === 'cfo');
+    expect(written).toMatchObject({ id: 'cfo', name: 'Chief Financial', role: 'Money', group: 'work', kind: 'persona', cwd: '/invented/cfo' });
+
+    await page.locator('#agent-details-toggle').click();
+    await expect(page.locator('#agent-form [name="name"]')).toHaveValue('Chief Financial');
+  });
+
+  test('Escape restores the name without saving', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await page.locator('#agent-name').dblclick();
+    await nameInput(page).fill('Something else');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#agent-name')).toHaveText('CFO');
+    expect(hub.registry.writes).toHaveLength(0);
+  });
+
+  test('a refused rename shows the sentence under the composer and restores the name', async ({ page, hub }) => {
+    await page.route('**/api/agents/cfo/settings', (route) => route.fulfill({
+      status: 409, contentType: 'application/json', body: '{"error":"not_editable"}',
+    }));
+    await page.goto(`${hub.origin}/?agent=cfo`);
+    await page.locator('#agent-name').dblclick();
+    await nameInput(page).fill('Something else');
+    await nameInput(page).press('Enter');
+    await expect(page.locator('#agent-failure')).toHaveText('This entry is edited in the registry file.');
+    await expect(page.locator('#agent-name')).toHaveText('CFO');
+  });
+});
+
 // Phase 3, piece 1: messages carry who sent them and lines about a
 // delegation render; nothing sends yet, so the threads are seeded.
 const DELEGATION = (fields) => ({ role: 'system', kind: 'delegation', ...fields });

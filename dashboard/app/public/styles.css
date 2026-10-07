@@ -1979,6 +1979,20 @@ textarea.form-input {
   line-height: 1.2;
 }
 
+.thread-name-input {
+  min-width: 120px;
+  max-width: 100%;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
 .thread-chips {
   display: inline-flex;
   flex-wrap: wrap;

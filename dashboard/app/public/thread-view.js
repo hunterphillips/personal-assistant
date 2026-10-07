@@ -24,6 +24,12 @@
 // draws the latest. While shown in a visible document, an open persona
 // with an unopened reply is marked read (POST /api/agents/<id>/read).
 //
+// Double-clicking the header's name, for an agent whose settings form
+// offers a Name field, turns it into a text input that saves through the
+// same settings route on Enter or blur and restores the name on Escape,
+// an empty value, or a refusal (shown where the composer's own refusals
+// are).
+//
 // The thread is fetched from <route>/thread when an entry is selected and
 // again whenever the snapshot shows its last message, its turn, or the
 // time of its last line outside a turn (`lastLineAt`) changed, so the
@@ -48,6 +54,7 @@
     var button = H.button;
     var parse = H.parse;
     var post = H.post;
+    var call = H.call;
     var detail = H.detail;
     var detailList = H.detailList;
     var isPersona = H.isPersona;
@@ -140,6 +147,8 @@
     var busy = false; // one of our POSTs is out
     var actionError = ''; // why the selected agent's last POST failed, or ''
     var confirming = false; // New thread awaits confirmation
+    var renaming = false; // the header's name is an editable text input
+    var renameBusy = false; // the rename's settings PUT is out
     var menuOpen = false; // the model picker is open for the selected agent
     var menuKey = null; // what the picker was last built from
     var mention = null; // the open @ picker: { start, candidates, index }, or null
@@ -443,11 +452,130 @@
       else avatarSlot.appendChild(window.DashboardAvatar.node(agent, 'large'));
     }
 
+    // Whether a double-click on the header's name may start an edit: only
+    // for a persona, the same gate the settings form's Name field uses (a
+    // session or a project/system entry has no settings form at all).
+    function canRename(agent) {
+      return isPersona(agent);
+    }
+
+    // The settings route's body for `agent` unchanged but for its name,
+    // built straight from the snapshot the way the settings form's own
+    // baseline is, since this save never opens that form.
+    function renameBody(agent, name) {
+      var level = agent.model && agent.model.agent ? agent.model.agent : { id: null, effort: null };
+      var permission = agent.permission ? agent.permission.agent : null;
+      return {
+        name: name,
+        role: agent.role || '',
+        group: agent.group || '',
+        description: agent.description || '',
+        cwd: typeof agent.cwd === 'string' ? agent.cwd : '',
+        model: level.id || null,
+        effort: level.effort || null,
+        permission: permission || null,
+        accepts: Array.isArray(agent.accepts) ? agent.accepts : null,
+        pinned: agent.pinned === true,
+      };
+    }
+
+    // The settings route's refusal as the sentence its own form already
+    // shows for the code (agents.js's formProblems); a rename reaches no
+    // other code, so none beyond these is needed.
+    function renameRefusal(result) {
+      if (!result) return 'The dashboard did not respond.';
+      if (result.code === 'invalid_registry' && result.problems && result.problems.length > 0) {
+        return result.problems[0].replace(/^agent \d+ \([^)]*\): /, '');
+      }
+      switch (result.code) {
+        case 'invalid_permission': return 'That permission level is not offered.';
+        case 'registry_invalid': return 'The registry file could not be read. Fix it by hand first.';
+        case 'not_editable': return 'This entry is edited in the registry file.';
+        case 'no_such_agent': return 'That agent is no longer registered.';
+        case 'shutting_down': return 'The dashboard is restarting.';
+        case 'not_found': return 'The dashboard cannot write the registry.';
+        case 'payload_too_large': return 'That is too long.';
+        default: return 'The registry could not be written.';
+      }
+    }
+
+    // Turns the header's name into a text input holding it, selected.
+    function startRename() {
+      var agent = selectedAgent();
+      if (renaming || !canRename(agent)) return;
+      renaming = true;
+      var field = element('input', 'thread-name-input');
+      field.type = 'text';
+      field.value = displayName(agent);
+      field.setAttribute('aria-label', 'Rename ' + displayName(agent));
+      field.addEventListener('keydown', onRenameKeydown);
+      field.addEventListener('blur', onRenameBlur);
+      nameNode.textContent = '';
+      nameNode.appendChild(field);
+      field.focus();
+      field.setSelectionRange(0, field.value.length);
+    }
+
+    // Escape, and an empty or unchanged value on Enter or blur, discard the
+    // edit and put the agent's own name back.
+    function cancelRename() {
+      renaming = false;
+      render();
+    }
+
+    // Enter and blur both save here: an empty or unchanged value cancels
+    // instead, so blur never posts when nothing was typed.
+    function commitRename(field) {
+      if (renameBusy) return;
+      var agent = selectedAgent();
+      if (!agent) {
+        cancelRename();
+        return;
+      }
+      var value = field.value.trim();
+      if (!value || value === displayName(agent)) {
+        cancelRename();
+        return;
+      }
+      renameBusy = true;
+      field.disabled = true;
+      call('PUT', routeBase(agent) + '/settings', renameBody(agent, value)).then(function (result) {
+        renameBusy = false;
+        renaming = false;
+        var ok = !!(result && result.ok);
+        var current = agent.id === selectedId;
+        if (ok) {
+          if (!shell.isStreaming()) shell.requestState();
+        } else if (current) {
+          actionError = renameRefusal(result);
+        }
+        if (current) render();
+      });
+    }
+
+    function onRenameKeydown(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commitRename(event.target);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelRename();
+      }
+    }
+
+    // A blur the Escape or Enter handler already caused (disabling or
+    // removing the input) finds `renaming` already false and does nothing.
+    function onRenameBlur(event) {
+      if (renaming) commitRename(event.target);
+    }
+
     // The column with a title and nothing else (New agent with no thread
     // open, in the Agents view).
     function blank(title) {
+      renaming = false;
       renderAvatar(null);
       nameNode.textContent = title;
+      nameNode.removeAttribute('title');
       chips.textContent = '';
       cost.textContent = '';
       description.textContent = '';
@@ -481,7 +609,12 @@
       var name = displayName(agent);
 
       renderAvatar(agent);
-      nameNode.textContent = name;
+      // While the name is being edited its node holds the input instead; a
+      // snapshot update that arrives mid-edit leaves it alone.
+      if (!renaming) {
+        nameNode.textContent = name;
+        if (canRename(agent)) nameNode.setAttribute('title', 'Double-click to rename'); else nameNode.removeAttribute('title');
+      }
       chips.textContent = '';
       if (roleChip(agent)) chips.appendChild(chip('role-chip', agent.role));
       if (providerName(agent)) chips.appendChild(providerBadge(agent));
@@ -588,6 +721,7 @@
     function setSelected(id) {
       if (menuOpen) closeModelMenu(false);
       closeMentionMenu();
+      renaming = false;
       selectedId = id;
       input.value = (id && drafts[id]) || '';
       actionError = '';
@@ -753,6 +887,7 @@
       node.setAttribute('aria-pressed', pressed ? 'false' : 'true');
     }
 
+    nameNode.addEventListener('dblclick', startRename);
 
     composer.addEventListener('submit', function (event) {
       event.preventDefault();
@@ -1036,6 +1171,7 @@
         visible = false;
         if (menuOpen) closeModelMenu(false);
         closeMentionMenu();
+        renaming = false;
         if (tick !== null) clearInterval(tick);
         tick = null;
       },
