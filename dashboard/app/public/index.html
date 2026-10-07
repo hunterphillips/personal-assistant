@@ -48,9 +48,6 @@
           <div class="header-actions">
             <div class="header-action-group" data-actions-for="agents">
               <button type="button" class="button" id="agent-open-terminal" data-agent-action="open-terminal" hidden>Open terminal</button>
-              <button type="button" class="button icon-button" id="agent-details-toggle" data-agent-action="toggle-details" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="agent-details" hidden>
-                <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-              </button>
               <p class="thread-terminal-reason header-action-reason" id="agent-terminal-reason" role="status" hidden></p>
             </div>
             <div class="header-action-group" data-actions-for="feed" hidden>
@@ -331,7 +328,11 @@
   <!-- One thread's column (thread-view.js clones it per instance: the Agents
        view and the quick chat pane). data-part becomes the id
        "<prefix>-<part>"; data-for, data-controls, and data-labelledby name a
-       part the same way. -->
+       part the same way. The settings gear (options.details) is the Agents
+       view's own, removed for quick chat; it sits in the outermost corner,
+       right of New chat, and its aria-controls names the Agents view's
+       #agent-details aside directly, since that aside lives outside this
+       template. -->
   <template id="thread-template">
     <div class="thread-header">
       <a class="thread-back" data-part="back" href="/">All agents</a>
@@ -342,6 +343,9 @@
         <span class="thread-cost" data-part="cost"></span>
       </div>
       <button type="button" class="button thread-new" data-part="new-thread" data-agent-action="new-thread">New chat</button>
+      <button type="button" class="button icon-button" data-part="details-toggle" data-agent-action="toggle-details" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="agent-details" hidden>
+        <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
     </div>
     <div class="thread-confirm" data-part="confirm" role="group" aria-label="New chat" hidden>
       <span data-part="confirm-text">Start a new chat? The agent will not remember this one.</span>

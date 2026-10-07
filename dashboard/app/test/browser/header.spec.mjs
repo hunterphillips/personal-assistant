@@ -24,7 +24,7 @@ test.describe('header shell', () => {
 
   test('every view keeps one header and only its left-side actions', async ({ page, hub }) => {
     const cases = [
-      ['/?agent=assistant', 'agents', 'Agents', ['agent-open-terminal', 'agent-details-toggle']],
+      ['/?agent=assistant', 'agents', 'Agents', ['agent-open-terminal']],
       ['/feed', 'feed', 'Feed', ['feed-instructions-toggle']],
       ['/focus', 'focus', 'Focus', []],
       ['/goals', 'goals', 'Goals', ['goals-add']],
@@ -45,6 +45,12 @@ test.describe('header shell', () => {
       await expect(header.locator(`[data-actions-for="${view}"]`)).not.toHaveAttribute('hidden', '');
       for (const id of ids) await expect(header.locator(`#${id}`)).toHaveCount(1);
       for (const id of moved) await expect(page.locator(`section.view #${id}`)).toHaveCount(0);
+      // The settings gear sits in the Agents view's own chat header, beside
+      // New chat, never in the app header.
+      if (view === 'agents') {
+        await expect(header.locator('#agent-details-toggle')).toHaveCount(0);
+        await expect(page.locator('section.view #agent-details-toggle')).toHaveCount(1);
+      }
       heights.push((await header.boundingBox()).height);
     }
 

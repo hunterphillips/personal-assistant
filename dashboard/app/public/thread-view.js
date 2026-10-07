@@ -14,6 +14,10 @@
 //   prefix       the ids' prefix
 //   shell        { requestState, isStreaming }
 //   back         false hides "All agents" (quick chat has no list)
+//   details      true keeps the settings gear beside New chat (the Agents
+//                view's own; quick chat gets none, so it is removed by
+//                default); the Agents view still owns showing, hiding, and
+//                toggling it
 //   onBack()     "All agents" was chosen
 //   onOpenAgent(id)  a link to another agent's thread was chosen
 //   decorate(body, agent) -> body   adds to a send's body (quick chat's
@@ -107,6 +111,7 @@
     var chips = part('chips');
     var cost = part('cost');
     var newThread = part('new-thread');
+    var detailsToggle = part('details-toggle');
     var confirmNode = part('confirm');
     var confirmText = part('confirm-text');
     var description = part('description');
@@ -131,6 +136,7 @@
     var mentionMenu = part('mention-menu');
     var foot = part('foot');
     if (options.back === false) back.remove();
+    if (!options.details) detailsToggle.remove();
 
     var renderer = H.messageRenderer(function () { return (state && state.agents) || []; });
     var messageNode = renderer.messageNode;

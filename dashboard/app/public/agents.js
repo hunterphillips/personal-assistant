@@ -1176,7 +1176,6 @@
     var searchEmpty = document.getElementById('agents-search-empty');
     var empty = document.getElementById('agent-empty');
     var panel = document.getElementById('agent-panel');
-    var detailsToggle = document.getElementById('agent-details-toggle');
     var details = document.getElementById('agent-details');
     var detailsName = document.getElementById('agent-details-name');
     var detailsFields = document.getElementById('agent-details-fields');
@@ -1224,13 +1223,17 @@
     var deleteNotice = null; // { agentId, text }: why its Delete was refused
     // The thread column (thread-view.js): the messages, card, status line,
     // and composer of the open agent or session. This view owns the list,
-    // the header's actions, and the settings panel beside it.
+    // the header's actions (including the settings gear beside New chat,
+    // kept by passing details: true), and the settings panel beside it.
     var thread = window.DashboardThreadView.create(document.getElementById('agent-thread-main'), {
       prefix: 'agent',
       shell: shell,
+      details: true,
       onBack: function () { select(null, true); },
       onOpenAgent: function (id) { select(id, true); },
     });
+    // The gear sits in the cloned thread header, beside New chat.
+    var detailsToggle = document.getElementById('agent-details-toggle');
 
     // The open agent or session, or null.
     function selectedAgent() {

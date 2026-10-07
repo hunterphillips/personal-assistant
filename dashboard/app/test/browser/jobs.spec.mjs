@@ -202,7 +202,7 @@ test.describe('with seeded jobs', () => {
   test('the gear opens the agent\'s settings and a jobs line pointing at Health', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=brain`);
     await expect(page.locator('#agent-name')).toHaveText('Second brain');
-    const gear = page.locator('.app-header').getByRole('button', { name: 'Settings', exact: true });
+    const gear = page.locator('#agent-panel').getByRole('button', { name: 'Settings', exact: true });
     await expect(gear).toBeVisible();
     await expect(gear).toHaveAttribute('title', 'Settings');
     await expect(gear).toHaveAttribute('aria-expanded', 'false');

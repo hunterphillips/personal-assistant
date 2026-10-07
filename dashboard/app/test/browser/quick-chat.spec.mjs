@@ -103,6 +103,22 @@ test.describe('quick chat', () => {
     }
   });
 
+  test('the settings gear sits in the Agents view\'s chat header beside New chat, and the pane has none', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/?agent=myos`);
+    const header = page.locator('#agent-panel .thread-header');
+    const gear = header.locator('#agent-details-toggle');
+    await expect(gear).toBeVisible();
+    await expect(gear).toHaveAttribute('title', 'Settings');
+    // New chat, then the gear last, in the header's outermost corner.
+    const headerButtons = header.locator('button');
+    await expect(headerButtons.last()).toHaveAttribute('id', 'agent-details-toggle');
+    await expect(headerButtons.nth((await headerButtons.count()) - 2)).toHaveText('New chat');
+
+    await openPane(page);
+    await expect(pane(page).locator('[data-agent-action="toggle-details"]')).toHaveCount(0);
+    await expect(pane(page).locator('[title="Settings"]')).toHaveCount(0);
+  });
+
   test('shows the thread the Agents view shows, and a message sent from either lands in the one thread', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=myos`);
     await expect(page.locator('#agent-messages .thread-message')).toHaveCount(2);

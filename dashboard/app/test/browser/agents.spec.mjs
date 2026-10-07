@@ -175,7 +175,7 @@ test.describe('with seeded agents', () => {
 
   test('the gear opens the settings beside the thread, whose messages stay', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/?agent=cfo`);
-    const gear = page.locator('.app-header').getByRole('button', { name: 'Settings', exact: true });
+    const gear = pane(page).getByRole('button', { name: 'Settings', exact: true });
     await expect(gear).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('#agent-details')).toBeHidden();
     await expect(messages(page)).toHaveCount(2);
