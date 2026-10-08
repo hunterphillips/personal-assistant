@@ -78,9 +78,9 @@
       go('/health');
       if (jobs) jobs.select(label);
     },
-    openFeedItem: function (run, index) {
+    openFeedItem: function (run, index, feedId) {
       go('/feed');
-      if (feed) feed.reveal(run, index);
+      if (feed) feed.reveal(run, index, feedId);
     },
     openBrief: function (date, from) {
       if (overlay) overlay.open(date, from);
@@ -292,6 +292,7 @@
     if (agents) agents.update(state, keys);
     if (goals) goals.update(state, keys);
     if (ideas) ideas.update(state, keys);
+    if (feed) feed.update(state, keys);
     if (notifications) notifications.update(state, keys);
     if (quickChat) quickChat.update(state, keys);
     if (overlay) overlay.update(state, keys);

@@ -14,8 +14,9 @@
 // agent:<id> the agent's thread, job:<label> Health with that job selected,
 // feed:<run>/<index> the Feed scrolled to that item, brief:<date> the
 // Brief. Escape and a click outside close it. A feed link's name is the
-// item's title, read from /api/feed when the list opens; until then, or when
-// the item is gone, it is "Feed item". Every text node is set with
+// post's title, read from /api/feeds and each feed's read when the list
+// opens (the first feed holding that run wins, and it is the feed the link
+// opens); until then, or when the post is gone, it is "Feed item". Every text node is set with
 // textContent. Buttons carry data-notification-*, never data-action, which
 // the shell's own click handler owns.
 (function () {
@@ -92,7 +93,7 @@
 
     var state = null;
     var pending = {}; // ids with a request out
-    var feedTitles = {}; // 'run/index' -> title, from /api/feed
+    var feedTitles = {}; // 'run/index' -> { title, feed }, from /api/feeds
     var opener = toggle; // what gets focus back on Escape
 
     function data() {
@@ -124,7 +125,7 @@
       if (link.kind === 'agent') return agentName(link.target);
       if (link.kind === 'job') return jobName(link.target);
       if (link.kind === 'brief') return 'Brief for ' + dateWords(link.target);
-      return Object.prototype.hasOwnProperty.call(feedTitles, link.target) ? feedTitles[link.target] : 'Feed item';
+      return Object.prototype.hasOwnProperty.call(feedTitles, link.target) ? feedTitles[link.target].title : 'Feed item';
     }
 
     function setCount(node, value) {
@@ -211,15 +212,30 @@
         return link && link.kind === 'feed';
       });
       if (!wanted) return;
-      fetch('/api/feed', { credentials: 'same-origin' }).then(function (response) {
-        return response.ok ? response.json() : null;
-      }).then(function (body) {
-        if (!body || !Array.isArray(body.runs)) return;
+      var read = function (path) {
+        return fetch(path, { credentials: 'same-origin' }).then(function (response) {
+          return response.ok ? response.json() : null;
+        }, function () { return null; });
+      };
+      read('/api/feeds').then(function (body) {
+        var feeds = body && Array.isArray(body.feeds) ? body.feeds.filter(function (feed) {
+          return feed && typeof feed.id === 'string';
+        }) : [];
+        return Promise.all(feeds.map(function (feed) {
+          return read('/api/feeds/' + encodeURIComponent(feed.id)).then(function (answer) { return { feed: feed.id, body: answer }; });
+        }));
+      }).then(function (answers) {
         var titles = {};
-        body.runs.forEach(function (run) {
-          if (!run || typeof run.id !== 'string' || !Array.isArray(run.items)) return;
-          run.items.forEach(function (item, index) {
-            if (item && typeof item.title === 'string') titles[run.id + '/' + index] = item.title;
+        answers.forEach(function (answer) {
+          if (!answer.body || !Array.isArray(answer.body.runs)) return;
+          answer.body.runs.forEach(function (run) {
+            if (!run || typeof run.id !== 'string' || !Array.isArray(run.items)) return;
+            run.items.forEach(function (item, index) {
+              var key = run.id + '/' + index;
+              if (item && typeof item.title === 'string' && !Object.prototype.hasOwnProperty.call(titles, key)) {
+                titles[key] = { title: item.title, feed: answer.feed };
+              }
+            });
           });
         });
         feedTitles = titles;
@@ -271,7 +287,10 @@
       close(false);
       if (link.kind === 'agent') shellApi.openAgent(link.target);
       else if (link.kind === 'job') shellApi.openJob(link.target);
-      else if (link.kind === 'feed') shellApi.openFeedItem(link.run, link.index);
+      else if (link.kind === 'feed') {
+        var found = Object.prototype.hasOwnProperty.call(feedTitles, link.target) ? feedTitles[link.target] : null;
+        shellApi.openFeedItem(link.run, link.index, found ? found.feed : null);
+      }
       else if (link.kind === 'brief') shellApi.openBrief(link.target);
     }
 

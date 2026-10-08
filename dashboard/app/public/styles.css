@@ -1380,13 +1380,31 @@ div.panel-row.now-row:hover { background: none; }
   object-fit: cover;
 }
 
-.feed-actions { margin-top: 8px; }
+/* The takeaway: a footnote under the summary, smaller and muted, never
+   read as a second summary line. */
+.feed-takeaway {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.feed-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 6px;
+}
 .feed-image + .feed-actions { margin-top: 0; }
 
-.feed-discuss {
+.feed-action {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 32px;
   padding: 2px 0;
   border: 0;
   background: none;
@@ -1396,9 +1414,86 @@ div.panel-row.now-row:hover { background: none; }
   font-weight: 600;
   cursor: pointer;
 }
-.feed-discuss:hover, .feed-discuss:focus-visible { color: var(--ink); }
-.feed-discuss:disabled { cursor: default; }
-.feed-discuss:disabled:hover { color: var(--muted); }
+.feed-action:hover, .feed-action:focus-visible { color: var(--ink); }
+.feed-action:disabled { cursor: default; }
+.feed-action:disabled:hover { color: var(--muted); }
+.feed-insights-toggle .feed-icon { transition: transform 120ms ease; }
+.feed-insights-toggle[aria-expanded="true"] { color: var(--ink); }
+.feed-insights-toggle[aria-expanded="true"] .feed-icon { transform: rotate(180deg); }
+
+/* The bookmark and the More menu, at the row's end. */
+.feed-mark-buttons {
+  position: relative;
+  display: flex;
+  margin-left: auto;
+  margin-right: -8px;
+}
+.feed-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.feed-icon-button:hover { background: var(--hover-tint); color: var(--ink); }
+.feed-icon-button:disabled { cursor: default; }
+.feed-save-toggle[aria-pressed="true"] { color: var(--green); }
+.feed-menu-toggle svg { fill: currentColor; stroke: none; }
+.feed-menu {
+  top: 40px;
+  right: 0;
+  width: 176px;
+  z-index: 7;
+}
+.feed-menu-entry { text-align: left; }
+.feed-menu-entry:disabled { cursor: default; opacity: 0.5; }
+
+/* Insights open under the action row. */
+.feed-insights {
+  margin-top: 6px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--hover-tint);
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* One tab per feed, under the header, while there are two or more. */
+.feed-tabs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding: 0 34px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+.feed-tabs[hidden] { display: none; }
+.feed-tab {
+  flex: none;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.feed-tab:hover { color: var(--ink); }
+.feed-tab[aria-selected="true"] {
+  border-bottom-color: var(--green);
+  color: var(--ink);
+}
 
 .feed-icon { flex: none; }
 
@@ -2784,6 +2879,9 @@ textarea.form-input {
   #view-health { padding: 20px 16px; }
 
   .feed-page { padding: 16px 16px 24px; }
+  .feed-tabs { padding: 0 16px; }
+  .feed-icon-button { width: 44px; height: 44px; }
+  .feed-menu { top: 48px; max-width: calc(100vw - 32px); }
   .ideas-page { padding: 16px 16px 120px; }
   .ideas-item { margin-right: -8px; margin-left: -8px; padding-right: 8px; padding-left: 8px; }
   .ideas-save-toggle,

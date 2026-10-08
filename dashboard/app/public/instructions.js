@@ -1,9 +1,9 @@
-// An instructions panel: a button (in the header for the Feed, in the
-// brief's overlay for the brief) that opens a panel showing an agent's
-// instructions file as prose (read each time it opens) with a composer that
-// sends a change to the agent that owns the file and opens its thread. feed.js makes one for the feed's criteria,
-// shell.js one for the brief's rules; the markup for each is in the page,
-// its ids prefixed `<prefix>-instructions`.
+// An instructions panel: a button (in the header for Ideas, in the brief's
+// overlay for the brief) that opens a panel showing an agent's instructions
+// file as prose (read each time it opens) with a composer that sends a
+// change to the agent that owns the file and opens its thread. ideas.js
+// makes one for the Ideas criteria, shell.js one for the brief's rules; the
+// markup for each is in the page, its ids prefixed `<prefix>-instructions`.
 //
 // DashboardInstructions.create({ prefix, readPath, proposePath, openAgent,
 // refusalSentence }) returns { show, hide, setIntro }. show() and hide()

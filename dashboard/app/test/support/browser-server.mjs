@@ -466,6 +466,12 @@ export const WATCH = Object.freeze({
   group: 'personal', kind: 'persona', provider: 'claude', cwd: '/invented/watch',
 });
 
+// The producer the fixture feed names.
+export const SCOUT = Object.freeze({
+  id: 'scout', name: 'Scout', role: 'Feeds', description: 'Invented.',
+  group: 'personal', kind: 'persona', provider: 'claude', cwd: '/invented/scout',
+});
+
 // A registry held in memory. set(fields) replaces what current() returns and
 // notifies the hub, as a changed registry file would.
 function controlledRegistry({ ok = true, error = null, agents = [], groups = [] }) {
