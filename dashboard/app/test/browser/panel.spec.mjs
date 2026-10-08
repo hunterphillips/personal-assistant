@@ -447,6 +447,22 @@ test.describe('the Now panel', () => {
       await expect(page.locator('.brief-date')).toHaveText((await today(page)).words);
       await expectView(page, 'focus', 'Focus');
     });
+
+    // The Now row names today's brief by date, not "latest"; a load it
+    // starts must still clear the Brief button's dot (brief.spec.mjs covers
+    // open(null) from the header itself).
+    test('opening today\'s brief from the Now row clears the Brief button\'s dot', async ({ page, hub }) => {
+      await page.goto(hub.origin + '/');
+      const { date } = await today(page);
+      await hub.writeBrief(date);
+      await hub.state.refreshStatus();
+      await openNow(page, hub);
+      const dot = phone(page) ? page.locator('#app-menu-dot') : page.locator('#brief-dot');
+      await expect(dot).toBeVisible();
+      await now(page).locator(`[data-now-brief="${date}"]`).click();
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+      await expect(dot).toBeHidden();
+    });
   });
 
   test.describe('with nothing open and an older brief', () => {

@@ -17,10 +17,14 @@
 // the scrolling sheet, below its sticky bar (the section's label and the
 // item's text). DashboardBriefOverlay.dayWords(date) is the date as the
 // overlay titles it, for the side panel's Now section.
-// open(null) shows the newest brief, open(date) that date's, and loading it
-// that way (POST /api/brief/read, bodyless) tells the daemon it has been
-// read, which clears the Brief button's dot everywhere; open(date) never
-// does, since it is not the newest. The overlay
+// open(null) shows the newest brief, open(date) that date's. A load that
+// shows the newest brief, whether opened as open(null) or as open(date)
+// naming that same date (a side panel row, a notification, or a thread
+// link usually names today's), tells the daemon it has been read (POST
+// /api/brief/read, bodyless), which clears the Brief button's dot
+// everywhere; "newest" is judged against the snapshot update() last gave,
+// never against the date itself, so an older date opened by its own date
+// never marks it. The overlay
 // scrolls on its own, closes with its Close button or Escape, and returns
 // focus to what opened it; the page behind is inert while it is open. The
 // Brief instructions panel (instructions.js, `instructions`) opens from the
@@ -343,14 +347,24 @@
           };
           saveSentence = '';
           render(brief);
-          if (!date) markRead();
+          if (isNewest(date, brief.date)) markRead();
         });
       });
     }
 
+    // Whether loading `date` (null for open(null)) showed `loadedDate`, the
+    // newest brief there is, per the snapshot update() last gave: always
+    // true for open(null), and true for an explicit date only when it is
+    // what the snapshot currently names newest. Never guesses when nothing
+    // has arrived yet (snapshotBrief null).
+    function isNewest(date, loadedDate) {
+      if (!date) return true;
+      return !!snapshotBrief && snapshotBrief.state === 'ready' && snapshotBrief.date === loadedDate;
+    }
+
     // Tells the daemon the newest brief has been opened, so its dot clears
     // on every browser (server-side; the next snapshot carries it). Only
-    // for the newest brief, never one opened by its own date.
+    // for the newest brief, never one opened by an older date.
     function markRead() {
       request('/api/brief/read', { method: 'POST' }).then(function () {
         if (options.shellApi && !options.shellApi.isStreaming()) options.shellApi.requestState();
