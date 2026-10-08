@@ -8,7 +8,7 @@
 // The root is ~/.personal-assistant/ unless PERSONAL_ASSISTANT_HOME names
 // another; the caller resolves that and passes an absolute path.
 //
-// layoutPaths(root) -> frozen { key: absolute path }, layout version 1
+// layoutPaths(root) -> frozen { key: absolute path }, layout version 2
 //   (layout.mjs, re-exported here).
 //
 // readLayout(root) -> Promise<{ version, createdAt, migratedFrom } | null>
@@ -22,10 +22,10 @@
 //
 // seedDefaults(root, { defaultsDir, readmeFile, log }) -> Promise<[key]>
 //   Creates every directory of the layout (0700). Writes README.md from
-//   readmeFile when the bytes differ, and copies <defaultsDir>/feed-relevance.md
-//   and ideas-criteria.md to the two criteria files only when the target is
-//   missing, so a deliberate delete starts from the default again. A missing
-//   default is skipped. Answers the keys it wrote and logs root_seeded.
+//   readmeFile when the bytes differ, and copies <defaultsDir>/ideas-criteria.md
+//   to the Ideas criteria file only when the target is missing, so a
+//   deliberate delete starts from the default again. A missing default is
+//   skipped. Answers the keys it wrote and logs root_seeded.
 //
 // migrateFromRepo(root, { migrateFrom, log, rename }) -> Promise<{ moved,
 //   skipped, migratedFrom }>
@@ -37,7 +37,8 @@
 //   anything is copied or renamed. Then each missing target is copied into
 //   place (a temporary name beside it, then a rename), verified file by file
 //   (relative path, type, mode, size, SHA-256), and each source is renamed to
-//   <source>.migrated. daily-brief/briefs/ stays for its code: its data files
+//   <source>.migrated. The pairs land on the version 1 paths (V1 below), and
+//   upgradeV1 then moves them on. daily-brief/briefs/ stays for its code: its data files
 //   and any other file but build.py, check-viewer.mjs, and __pycache__/ move
 //   into daily-brief/briefs.migrated/ instead. Nothing is deleted. A run cut off between the steps
 //   reruns cleanly: a copied source compares equal and is renamed. `rename`
@@ -49,12 +50,30 @@
 //   process holds it or won a race over a stale one. release() removes the
 //   file only while it still holds this claim.
 //
+// upgradeV1(root, { log, rename, now }) -> Promise<{ moved, retired }>
+//   The version 1 to 2 move, copy, verify, then rename, as migrateFromRepo:
+//   feed/items/ becomes feeds/news/items/ and feed/relevance.md
+//   feeds/news/note.md; watch/'s packets/, overflow/, seen.jsonl, and
+//   state.json go to feeds/.run/. A conflict rejects with
+//   migration_conflict before anything is copied or renamed. When the root
+//   had a feed/ folder, feeds/news/feed.json is written if missing (News,
+//   produced by scout, no sources, active). Then feed/ and watch/ are
+//   renamed whole to <path>.migrated; the registry loses the retired agent
+//   (and every `accepts` naming it), its version 1 file kept beside it as
+//   agents.json.migrated; the agent's thread files are renamed
+//   <file>.migrated; and its key leaves thread-reads.json. An unreadable
+//   registry or reads file is left alone and logged. Every step is skipped
+//   when already done, so a run cut off midway reruns cleanly. Logs
+//   upgrade_moved per pair and upgrade_done.
+//
 // prepareRoot(root, { migrateFrom, defaultsDir, readmeFile, log, rename })
-//   -> Promise<{ created, moved, skipped, seeded }>
+//   -> Promise<{ created, moved, skipped, upgraded, seeded }>
 //   What the daemon calls at start. A root without layout.json is migrated,
-//   seeded, and then given layout.json, always the last file written, so a
-//   first run cut off midway looks like a fresh root to the next one. A root
-//   at version 1 is only seeded.
+//   upgraded, seeded, and then given layout.json, always the last file
+//   written, so a first run cut off midway looks like a fresh root to the
+//   next one. A root at version 1 is upgraded, seeded, and given version 2
+//   last, so an upgrade cut off midway runs again. A root at version 2 is
+//   only seeded. `upgraded` lists the upgrade's moved keys.
 
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -72,6 +91,12 @@ export { LAYOUT_VERSION, layoutPaths };
 // The migration's pairs in order: a key for the result and the log, the
 // source relative to the checkout, and the target under the root.
 const VAR = 'dashboard/app/var';
+
+// The version 1 paths that version 2 retired, relative to the root. Only the
+// move from the checkout and upgradeV1 read them.
+const V1 = { feedRoot: 'feed', feedDir: 'feed/items', feedInstructions: 'feed/relevance.md', watchDir: 'watch' };
+const v1Paths = (root) => Object.fromEntries(Object.entries(V1).map(([key, rel]) => [key, path.join(path.resolve(root), rel)]));
+
 const PAIRS = [
   ['settings', `${VAR}/settings.json`, (p) => p.settings],
   ['threadReads', `${VAR}/thread-reads.json`, (p) => p.threadReads],
@@ -80,14 +105,14 @@ const PAIRS = [
   ['threadsDir', `${VAR}/threads`, (p) => p.threadsDir],
   ['codexDir', `${VAR}/codex`, (p) => p.codexDir],
   ['notificationsDir', 'notifications', (p) => p.notificationsDir],
-  ['feedDir', 'feed/items', (p) => p.feedDir],
-  ['feedInstructions', 'daily-brief/watch/relevance.md', (p) => p.feedInstructions],
+  ['feedDir', 'feed/items', (p, v1) => v1.feedDir],
+  ['feedInstructions', 'daily-brief/watch/relevance.md', (p, v1) => v1.feedInstructions],
   ['ideasDir', 'ideas/items', (p) => p.ideasDir],
   ['ideasMarks', 'ideas/marks.json', (p) => p.ideasMarks],
   ['ideasInstructions', 'ideas/criteria.md', (p) => p.ideasInstructions],
   ['briefsDir', 'daily-brief/briefs', (p) => p.briefsDir, 'briefs'],
   ['contributionsDir', 'daily-brief/contributions', (p) => p.contributionsDir],
-  ...['packets', 'overflow', 'seen.jsonl', 'state.json'].map((name) => [`watchDir/${name}`, `daily-brief/watch/${name}`, (p) => path.join(p.watchDir, name)]),
+  ...['packets', 'overflow', 'seen.jsonl', 'state.json'].map((name) => [`watchDir/${name}`, `daily-brief/watch/${name}`, (p, v1) => path.join(v1.watchDir, name)]),
   // The log and the installer's plists are written under the root before the
   // daemon first starts (bin/dashboard-start and bin/dashboard-install), so
   // the checkout's copies land in a folder of their own beside them.
@@ -101,7 +126,19 @@ const PAIRS = [
 const BRIEF_DATA = [/^viewer-.*\.html$/, /^brief-.*\.json$/, /^notice-.*\.json$/, /^memo-.*\.md$/, /^.{4}-.{2}-.{2}.*\.md$/, /^feedback-/, /^\.run\.lock$/];
 const BRIEF_CODE = new Set(['build.py', 'check-viewer.mjs', '__pycache__']);
 
-const SEEDS = [['feedInstructions', 'feed-relevance.md'], ['ideasInstructions', 'ideas-criteria.md']];
+const SEEDS = [['ideasInstructions', 'ideas-criteria.md']];
+
+// The version 1 to 2 upgrade: today's one feed becomes the feed `news`, and
+// the producer that wrote it, retired with version 1, gives way to the
+// built-in Scout (seeded from registry/builtin.json at start).
+const NEWS = { id: 'news', name: 'News', producer: 'scout' };
+const RETIRED_AGENT = 'watch';
+const UPGRADE_PAIRS = [
+  ['feedDir', (v1) => v1.feedDir, (p) => path.join(p.feedsDir, NEWS.id, 'items')],
+  ['feedInstructions', (v1) => v1.feedInstructions, (p) => path.join(p.feedsDir, NEWS.id, 'note.md')],
+  ...['packets', 'overflow', 'seen.jsonl', 'state.json'].map((name) => [
+    `watchDir/${name}`, (v1) => path.join(v1.watchDir, name), (p) => path.join(p.feedsRunDir, name)]),
+].map(([key, source, target]) => ({ key, source, target }));
 
 export class RootError extends Error {
   constructor(code, message, details = {}) {
@@ -174,6 +211,7 @@ export async function seedDefaults(root, { defaultsDir, readmeFile, log = () => 
 
 export async function migrateFromRepo(root, { migrateFrom, log = () => {}, rename = fsRename } = {}) {
   const paths = layoutPaths(root);
+  const v1 = v1Paths(root);
   if (!migrateFrom) return { moved: [], skipped: [], migratedFrom: null };
   const repo = absolute(migrateFrom, 'migrateFrom');
 
@@ -183,7 +221,7 @@ export async function migrateFromRepo(root, { migrateFrom, log = () => {}, renam
   const conflicts = [];
   for (const pair of PAIRS) {
     const source = path.join(repo, pair.source);
-    const target = pair.target(paths);
+    const target = pair.target(paths, v1);
     const units = pair.kind === 'briefs' ? await briefUnits(source, target) : await entryUnits(source, target);
     if (units.length === 0) {
       skipped.push({ key: pair.key, reason: 'missing' });
@@ -270,14 +308,125 @@ export async function claimLock(root) {
 
 export async function prepareRoot(root, { migrateFrom, defaultsDir, readmeFile, log = () => {}, rename } = {}) {
   const layout = await readLayout(root);
-  if (layout) {
+  if (layout?.version === LAYOUT_VERSION) {
     const seeded = await seedDefaults(root, { defaultsDir, readmeFile, log });
-    return { created: false, moved: [], skipped: [], seeded };
+    return { created: false, moved: [], skipped: [], upgraded: [], seeded };
+  }
+  if (layout) {
+    const upgrade = await upgradeV1(root, { log, rename });
+    const seeded = await seedDefaults(root, { defaultsDir, readmeFile, log });
+    await writeLayout(root, { ...layout, version: LAYOUT_VERSION });
+    return { created: false, moved: [], skipped: [], upgraded: upgrade.moved, seeded };
   }
   const migration = await migrateFromRepo(root, { migrateFrom, log, rename });
+  const upgrade = await upgradeV1(root, { log, rename });
   const seeded = await seedDefaults(root, { defaultsDir, readmeFile, log });
   await writeLayout(root, { version: LAYOUT_VERSION, createdAt: new Date().toISOString(), migratedFrom: migration.migratedFrom });
-  return { created: true, moved: migration.moved, skipped: migration.skipped, seeded };
+  return { created: true, moved: migration.moved, skipped: migration.skipped, upgraded: upgrade.moved, seeded };
+}
+
+export async function upgradeV1(root, { log = () => {}, rename = fsRename, now = () => new Date() } = {}) {
+  const paths = layoutPaths(root);
+  const v1 = v1Paths(root);
+
+  const plan = [];
+  const conflicts = [];
+  for (const pair of UPGRADE_PAIRS) {
+    const [unit] = await entryUnits(pair.source(v1), pair.target(paths));
+    if (!unit) continue;
+    const found = await compareUnit(unit);
+    if (found.conflict) conflicts.push({ source: unit.source, target: unit.target, file: found.file });
+    unit.copy = found.copy;
+    plan.push({ key: pair.key, unit });
+  }
+  if (conflicts.length > 0) {
+    const sentences = conflicts.map(({ source, target, file }) => (
+      `The root at ${path.dirname(paths.readme)} already holds ${joinFile(target, file)} with different contents than ${joinFile(source, file)}.`));
+    throw new RootError('migration_conflict', sentences.join(' '), { pairs: conflicts });
+  }
+  for (const { unit } of plan) if (unit.copy) await copyIntoPlace(unit.source, unit.target, rename);
+  for (const { unit } of plan) {
+    const found = await compareUnit(unit);
+    if (found.conflict || found.copy) {
+      const pair = { source: unit.source, target: unit.target, file: found.file };
+      throw new RootError('migration_conflict', `The copy of ${joinFile(pair.source, pair.file)} at ${joinFile(pair.target, pair.file)} does not match its source.`, { pairs: [pair] });
+    }
+    unit.files = found.files;
+  }
+
+  // The feed's settings, once, when the root had a feed.
+  const feedFile = path.join(paths.feedsDir, NEWS.id, 'feed.json');
+  if (await exists(v1.feedRoot) && !(await exists(feedFile))) {
+    await mkdir(path.join(paths.feedsDir, NEWS.id, 'items'), { recursive: true, mode: 0o700 });
+    const at = now().toISOString();
+    const feed = { version: 1, id: NEWS.id, name: NEWS.name, producer: NEWS.producer, sources: [], active: true, created: at, updated: at };
+    await writeAtomic(feedFile, `${JSON.stringify(feed, null, 2)}\n`);
+  }
+
+  const moved = [];
+  for (const { key, unit } of plan) {
+    moved.push(key);
+    safeLog(log, { event: 'upgrade_moved', key, source: unit.source, target: unit.target, files: unit.files ?? 0 });
+  }
+  const retired = [];
+  for (const dir of [v1.feedRoot, v1.watchDir]) {
+    if (!(await exists(dir))) continue;
+    await rename(dir, await freeName(`${dir}.migrated`));
+    retired.push(dir);
+  }
+  const agent = await retireAgent(paths, RETIRED_AGENT, log);
+  for (const name of [`${RETIRED_AGENT}.json`, `${RETIRED_AGENT}.jsonl`]) {
+    const file = path.join(paths.threadsDir, name);
+    if (await exists(file)) await rename(file, await freeName(`${file}.migrated`));
+  }
+  const reads = await dropReadKey(paths.threadReads, RETIRED_AGENT, log);
+  safeLog(log, { event: 'upgrade_done', from: 1, to: 2, moved: moved.length, retired: retired.length, agent, reads });
+  return { moved, retired };
+}
+
+// Removes the agent `id` from the registry file, and from every `accepts`
+// list, keeping the file as it was beside it. True when it removed one.
+async function retireAgent(paths, id, log) {
+  const raw = await readOptional(paths.registry);
+  if (raw === null) return false;
+  let document;
+  try {
+    document = JSON.parse(raw.toString('utf8'));
+  } catch {
+    document = null;
+  }
+  if (!isRecord(document) || !Array.isArray(document.agents)) {
+    safeLog(log, { event: 'upgrade_registry_skipped', file: paths.registry });
+    return false;
+  }
+  if (!document.agents.some((agent) => isRecord(agent) && agent.id === id)) return false;
+  await writeAtomic(await freeName(`${paths.registry}.migrated`), raw);
+  const agents = document.agents.filter((agent) => !(isRecord(agent) && agent.id === id)).map((agent) => (
+    isRecord(agent) && Array.isArray(agent.accepts) && agent.accepts.includes(id)
+      ? { ...agent, accepts: agent.accepts.filter((other) => other !== id) }
+      : agent));
+  await writeAtomic(paths.registry, `${JSON.stringify({ ...document, agents }, null, 2)}\n`);
+  return true;
+}
+
+// Removes `id` from the thread read times. True when it removed one.
+async function dropReadKey(file, id, log) {
+  const raw = await readOptional(file);
+  if (raw === null) return false;
+  let reads;
+  try {
+    reads = JSON.parse(raw.toString('utf8'));
+  } catch {
+    reads = null;
+  }
+  if (!isRecord(reads)) {
+    safeLog(log, { event: 'upgrade_reads_skipped', file });
+    return false;
+  }
+  if (!Object.hasOwn(reads, id)) return false;
+  const { [id]: _dropped, ...rest } = reads;
+  await writeAtomic(file, `${JSON.stringify(rest, null, 2)}\n`);
+  return true;
 }
 
 // A pair's units: the source itself when it is a file, link, or directory,

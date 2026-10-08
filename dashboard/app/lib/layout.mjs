@@ -5,12 +5,17 @@
 // The root is ~/.personal-assistant/ unless PERSONAL_ASSISTANT_HOME names
 // another absolute path (defaultHome()).
 //
-// layoutPaths(root) -> frozen { key: absolute path }, layout version 1.
+// layoutPaths(root) -> frozen { key: absolute path }, layout version 2.
+//
+// Version 2 (2026-10-08) replaced the one Feed store (feed/items/,
+// feed/relevance.md) and Watch's run state (watch/) with feeds/<id>/ folders,
+// sources/, and the producer's state in feeds/.run/; root.mjs upgrades a
+// version 1 root and keeps the old paths in its own table.
 
 import os from 'node:os';
 import path from 'node:path';
 
-export const LAYOUT_VERSION = 1;
+export const LAYOUT_VERSION = 2;
 
 const LAYOUT = {
   readme: 'README.md',
@@ -24,14 +29,16 @@ const LAYOUT = {
   threadsDir: 'threads',
   codexDir: 'codex',
   notificationsDir: 'notifications',
-  feedDir: 'feed/items',
-  feedInstructions: 'feed/relevance.md',
+  feedsDir: 'feeds',
+  sourcesDir: 'sources',
+  // The feeds producer's state: seen.jsonl, state.json, packets/, overflow/,
+  // and its run lock.
+  feedsRunDir: 'feeds/.run',
   ideasDir: 'ideas/items',
   ideasMarks: 'ideas/marks.json',
   ideasInstructions: 'ideas/criteria.md',
   briefsDir: 'briefs',
   contributionsDir: 'briefs/contributions',
-  watchDir: 'watch',
   logDir: 'log',
   cacheDir: 'cache',
 };

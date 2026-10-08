@@ -53,9 +53,8 @@ import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
 import { defaultAgentId } from '../../lib/builtins.mjs';
 import { createDelegation } from '../../lib/delegation.mjs';
-import { createFeed } from '../../lib/feed.mjs';
+import { createFeeds } from '../../lib/feeds.mjs';
 import { createBriefInstructions } from '../../lib/brief-instructions.mjs';
-import { createFeedInstructions } from '../../lib/feed-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
@@ -68,6 +67,7 @@ import { RegistryError, validateDocument } from '../../lib/registry.mjs';
 import { createRoutines } from '../../lib/routines.mjs';
 import { describe, parseCron } from '../../lib/schedule.mjs';
 import { createScheduler } from '../../lib/scheduler.mjs';
+import { createSources } from '../../lib/sources.mjs';
 import { createSettings } from '../../lib/settings.mjs';
 import { contextLine, parseContext } from '../../lib/send-context.mjs';
 import { createBriefReads } from '../../lib/brief-reads.mjs';
@@ -107,15 +107,17 @@ export { focusSourceAvailable };
 //              It cannot be combined with a second-brain entry in `agents`
 //              or with a `registry` that carries its own agents.
 //   feed       a directory of feed run files (such as test/fixtures/feed)
-//              copied into a temporary feed directory. It adds nothing to
-//              `agents`; a test that discusses an item adds the WATCH persona
-//              itself. `feedDir` is the copy's path.
+//              copied into the items of a temporary feed `news`, whose
+//              feed.json names the producer `scout`. It adds nothing to
+//              `agents`; a test that discusses an item adds the persona
+//              itself. `feedDir` is the items folder's path, `feedsDir` and
+//              `sourcesDir` the stores'.
 //   ideas      a directory of Ideas run files, marks, and criteria copied
 //              into the temporary directory. `ideasDir`, `ideasMarksFile`,
 //              and `ideasInstructionsFile` name the copy.
-//   instructions  a criteria file (such as
-//              test/fixtures/feed-instructions/relevance.md) copied into the
-//              temporary directory as DASHBOARD_FEED_INSTRUCTIONS.
+//   instructions  a note (such as
+//              test/fixtures/feed-instructions/relevance.md) copied in as the
+//              feed `news`'s note.md when `feed` is given.
 //              `instructionsFile` is the copy's path.
 //   briefInstructions  the brief's rules file (such as
 //              test/fixtures/brief-instructions/curator.md) copied into the
@@ -180,14 +182,22 @@ export async function startHub({
       await cp(AVATAR_FIXTURE, path.join(folder, 'avatar.png'));
       agents = agents.map((agent) => (agent.id === id ? { ...agent, cwd: folder } : agent));
     }
-    const feedDir = path.join(root, feed ? 'feed' : 'feed-missing');
-    if (feed) await cp(feed, feedDir, { recursive: true });
+    const feedsDir = path.join(root, 'feeds');
+    const sourcesDir = path.join(root, 'sources');
+    const feedDir = path.join(feedsDir, 'news', 'items');
+    if (feed) {
+      await cp(feed, feedDir, { recursive: true });
+      const at = new Date().toISOString();
+      await writeFile(path.join(feedsDir, 'news', 'feed.json'), JSON.stringify({
+        version: 1, id: 'news', name: 'News', producer: 'scout', sources: [], active: true, created: at, updated: at,
+      }));
+    }
     const ideasDir = path.join(root, ideasFixture ? 'ideas' : 'ideas-missing');
     if (ideasFixture) await cp(ideasFixture, ideasDir, { recursive: true });
     const ideasMarksFile = path.join(ideasDir, 'marks.json');
     const ideasInstructionsFile = path.join(ideasDir, 'criteria.md');
-    const instructionsFile = path.join(root, instructions ? 'relevance.md' : 'relevance-missing.md');
-    if (instructions) await cp(instructions, instructionsFile);
+    const instructionsFile = path.join(feedsDir, 'news', 'note.md');
+    if (instructions && feed) await cp(instructions, instructionsFile);
     const briefInstructionsFile = path.join(root, briefInstructions ? 'curator.md' : 'curator-missing.md');
     if (briefInstructions) await cp(briefInstructions, briefInstructionsFile);
     const routinesDir = path.join(root, 'routines');
@@ -224,8 +234,8 @@ export async function startHub({
       DASHBOARD_PORT: String(plainPort),
       DASHBOARD_PUBLIC_ORIGIN: `https://localhost:${securePort}`,
       DASHBOARD_BRIEFS_DIR: briefsDir,
-      DASHBOARD_FEED_DIR: feedDir,
-      DASHBOARD_FEED_INSTRUCTIONS: instructionsFile,
+      DASHBOARD_FEEDS_DIR: feedsDir,
+      DASHBOARD_SOURCES_DIR: sourcesDir,
       DASHBOARD_BRIEF_INSTRUCTIONS: briefInstructionsFile,
       DASHBOARD_FOCUS_ORIGIN: focusOrigin,
       DASHBOARD_SETTINGS_PATH: settingsPath,
@@ -314,8 +324,9 @@ export async function startHub({
       },
     };
     const goals = createGoals({ registry, limits: config.limits });
-    const feedReader = createFeed({ dir: feedDir, limits: config.limits });
-    const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits });
+    let feeds = null;
+    const sources = createSources({ dir: sourcesDir, limits: config.limits, usedBy: (id) => feeds.usedBy(id) });
+    feeds = createFeeds({ dir: feedsDir, sources, limits: config.limits });
     const ideas = createIdeas({
       dir: ideasDir, marksFile: ideasMarksFile, limits: config.limits, zone: config.timeZone, now: clock.now,
     });
@@ -328,7 +339,7 @@ export async function startHub({
       briefsDir, threadsDir, hub, target: () => settings.current().settings.brief.agent, limits: config.limits,
     });
     const newHandler = () => createApp({
-      config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feed: feedReader, feedInstructions,
+      config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feeds, sources,
       ideas, ideasInstructions,
       briefInstructions: briefInstructionsReader, notices, settings, registry, routines, scheduler, notifications, log: () => {},
     });
@@ -351,6 +362,8 @@ export async function startHub({
       briefsDir,
       vaultDir,
       feedDir,
+      feedsDir,
+      sourcesDir,
       ideasDir,
       ideasMarksFile,
       ideasInstructionsFile,

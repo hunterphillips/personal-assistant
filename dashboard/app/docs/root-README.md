@@ -2,7 +2,8 @@
 
 This folder holds everything the personal assistant writes while it is used:
 the agent registry, routines and their runs, threads, notifications, settings,
-the Feed and Ideas stores, the briefs, and the two criteria files. The code
+the feeds and their sources, the Ideas store, the briefs, and the Ideas
+criteria. The code
 lives in its repository; the data lives here, as plain files you can read.
 
 ## What is where
@@ -20,24 +21,29 @@ lives in its repository; the data lives here, as plain files you can read.
 | `threads/` | Each agent's thread, `<id>.json` and `<id>.jsonl`, and `brief-notices.json`. |
 | `codex/` | `bindings.json` and its `bindings.lock`, `owner.json`, the server's `app.sock`, and `waiting/` for the Codex threads. |
 | `notifications/` | `notifications.jsonl`. |
-| `feed/items/` | One `<date>-<producer>.json` per run of a Feed producer. |
-| `feed/relevance.md` | Hunter's criteria for the Feed. |
+| `feeds/<id>/feed.json` | A feed's name, the agent that produces it, its sources, and whether it runs. |
+| `feeds/<id>/note.md` | Hunter's instructions for the feed. |
+| `feeds/<id>/items/` | One `<date>.json` per run of the feed's producer; older runs are `<date>-<producer>.json`. |
+| `feeds/<id>/marks.json` | The marks on the feed's posts: saved, dismissed. |
+| `feeds/.run/` | The feeds producer's state: `packets/`, `overflow/`, `seen.jsonl`, `state.json`, and its run lock. |
+| `sources/` | One `<id>.json` per source a feed can read: an RSS feed, a newsletter's sender, a file, or a folder. |
 | `ideas/items/` | One `<date>-<producer>.json` per run of an Ideas producer. |
 | `ideas/marks.json` | The marks on ideas: taken, dismissed, saved, replaced. |
 | `ideas/criteria.md` | Hunter's criteria for Ideas. |
 | `briefs/` | Each day's brief, memo, viewer, brief data, notice, and feedback, and the run lock. |
 | `briefs/contributions/` | Each day's contributions, one folder per date. |
-| `watch/` | Watch's `packets/`, `overflow/`, `seen.jsonl`, `state.json`, and its run lock. |
 | `log/` | `dashboard.log`, and under `checkout/` the log the checkout held before the move. |
 | `cache/` | The rendered launchd plist and its backups under `launchd/` (the checkout's under `launchd/checkout/`), and `ops/`. |
 
 ## Who writes what
 
-The daemon owns every file that is edited after it is created. A producer, a
-scheduled run that adds something, only creates its own run files, such as a
-new file under `feed/items/` or `ideas/items/`, and never edits one that
-exists. The brief run writes `briefs/` and marks a packet reported in
-`watch/state.json`; Watch writes `watch/` and its Feed file.
+The daemon owns every file that is edited after it is created: a feed's
+`feed.json`, `note.md`, and `marks.json`, and every file in `sources/`. A
+producer, a scheduled run that adds something, only creates its own run
+files, such as a new file under `feeds/<id>/items/` or `ideas/items/`, and
+never edits one that exists. The feeds run writes `feeds/.run/` and its
+feeds' item files; the brief run writes `briefs/` and marks a packet
+reported in `feeds/.run/state.json`.
 
 `layout.json` names the layout version. A daemon that finds a version newer
 than the one it knows leaves the root alone.
@@ -51,8 +57,8 @@ else is the record; back it up when moving machines.
 absolute path. The daemon sets that variable for every agent turn and
 routine it runs, so an agent finds this file at
 `$PERSONAL_ASSISTANT_HOME/README.md`. Agents change daemon-owned files only
-through the dashboard's routes and tools. The brief run and Watch read the
-variable from their own environment, with the same default.
+through the dashboard's routes and tools. The brief run and the feeds run
+read the variable from their own environment, with the same default.
 
 ## The lock
 
@@ -72,6 +78,20 @@ not start until one of them is removed or made to match. `layout.json` is
 written last, so a move cut off midway runs again cleanly. Nothing is
 deleted; remove the `.migrated` paths once the dashboard has run from here
 for a week.
+
+## The upgrade to version 2
+
+A daemon that finds version 1 in `layout.json` moves the one Feed into the
+feed `news`: `feed/items/` to `feeds/news/items/`, `feed/relevance.md` to
+`feeds/news/note.md`, and Watch's `packets/`, `overflow/`, `seen.jsonl`,
+and `state.json` to `feeds/.run/`. It copies and checks each one as the
+move from the checkout does, writes `feeds/news/feed.json`, and renames
+`feed/` and `watch/` to `feed.migrated/` and `watch.migrated/`. Watch leaves
+the registry, which is kept as it was in `registry/agents.json.migrated`;
+its thread files are renamed `threads/watch.json.migrated` and
+`threads/watch.jsonl.migrated`, and Scout, the agent that produces the
+feeds, is added at the same start. A conflict names both paths and stops
+the start, as the move does. Version 2 is written last.
 
 ## Backups and moving machines
 

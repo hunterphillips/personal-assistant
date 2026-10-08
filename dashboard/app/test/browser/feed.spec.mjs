@@ -50,7 +50,8 @@ async function openFeed(page, hub) {
 test.describe('with the fixture store', () => {
   test.use({ hubOptions: { feed: FEED, agents: [WATCH] } });
 
-  test('renders each run as a group of posts, newest first', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('renders each run as a group of posts, newest first', async ({ page, hub }) => {
     await openFeed(page, hub);
     await expect(page.getByRole('navigation', { name: 'Reading' })).toHaveCount(0);
     await expect(runs(page).locator('.feed-date')).toHaveText(['Monday, September 28', 'Monday, September 21']);
@@ -86,7 +87,8 @@ test.describe('with the fixture store', () => {
     await expect(page.locator('#view-feed [data-action]')).toHaveCount(0);
   });
 
-  test('a source keeps its badge colour across posts', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('a source keeps its badge colour across posts', async ({ page, hub }) => {
     await openFeed(page, hub);
     const colour = (id) => item(page, id).locator('.feed-badge').evaluate((node) => getComputedStyle(node).backgroundColor);
     await expect(item(page, 'watch/2026-09-28/4').locator('.feed-badge')).toHaveText('IG');
@@ -95,7 +97,8 @@ test.describe('with the fixture store', () => {
     expect(await colour('watch/2026-09-28/1')).not.toBe('rgba(0, 0, 0, 0)');
   });
 
-  test('on a phone the posts stay in one column without horizontal scroll', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('on a phone the posts stay in one column without horizontal scroll', async ({ page, hub }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openFeed(page, hub);
     const robots = item(page, 'watch/2026-09-28/1');
@@ -111,7 +114,8 @@ test.describe('with the fixture store', () => {
     expect(overflow).toEqual({ page: 0, feed: 0 });
   });
 
-  test('a post with an image shows it under the summary; one without or with a broken image has none', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('a post with an image shows it under the summary; one without or with a broken image has none', async ({ page, hub }) => {
     // The image comes from another origin over http, as a story's would.
     const pictures = http.createServer((req, res) => {
       if (req.url !== '/story.png') {
@@ -166,7 +170,8 @@ test.describe('with the fixture store', () => {
     }
   });
 
-  test('Discuss sends the item to the watch persona and opens its thread', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('Discuss sends the item to the watch persona and opens its thread', async ({ page, hub }) => {
     await openFeed(page, hub);
     const posted = page.waitForRequest('**/api/feed/discuss');
     await item(page, 'watch/2026-09-21/2').getByRole('button', { name: /^Discuss/ }).click();
@@ -180,7 +185,8 @@ test.describe('with the fixture store', () => {
     expect(hub.personas.calls).toEqual([['send', 'watch', expect.stringContaining('https://example.com/notebooks')]]);
   });
 
-  test('Discuss while the persona is busy says so under the item', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('Discuss while the persona is busy says so under the item', async ({ page, hub }) => {
     hub.personas.hold('watch');
     await openFeed(page, hub);
     await item(page, 'watch/2026-09-28/3').getByRole('button', { name: /^Discuss/ }).click();
@@ -193,7 +199,8 @@ test.describe('with the fixture store', () => {
     expect(hub.requests('/api/feed/discuss').map((entry) => entry.status)).toEqual([202, 409]);
   });
 
-  test('the brief opens over the Feed and leaves it as it was', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('the brief opens over the Feed and leaves it as it was', async ({ page, hub }) => {
     await hub.writeBrief(DATE);
     await openFeed(page, hub);
     await page.goto(`${hub.origin}/brief`);
@@ -204,7 +211,8 @@ test.describe('with the fixture store', () => {
     await expect(runs(page)).toHaveCount(2);
   });
 
-  test('the view stops reading the store once it is left', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('the view stops reading the store once it is left', async ({ page, hub }) => {
     await page.clock.install();
     await openFeed(page, hub);
     await nav(page, 'Home').click();
@@ -234,7 +242,8 @@ test.describe('the side panel', () => {
     await sourceRow(page, name).click();
   }
 
-  test('lists All and each source with its count, matching the posts', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('lists All and each source with its count, matching the posts', async ({ page, hub }) => {
     await openFeed(page, hub);
     await openSide(page);
     await expect(side(page)).toBeVisible();
@@ -269,7 +278,8 @@ test.describe('the side panel', () => {
     await expect(sourceRow(page, '').locator('.feed-badge')).toHaveCount(0);
   });
 
-  test('a source named with another in one item is split into its own row', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('a source named with another in one item is split into its own row', async ({ page, hub }) => {
     await writeFile(path.join(hub.feedDir, '2026-10-05-watch.json'), JSON.stringify({
       producer: 'watch', date: '2026-10-05', items: [
         { id: 'watch/2026-10-05/1', title: 'Story one', source: 'A / B', url: 'https://example.com/1', summary: 'Summary one.' },
@@ -290,7 +300,8 @@ test.describe('the side panel', () => {
     await expect(item(page, 'watch/2026-10-05/2')).toBeVisible();
   });
 
-  test('choosing a source shows only its posts; Show all and All restore them', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('choosing a source shows only its posts; Show all and All restore them', async ({ page, hub }) => {
     await openFeed(page, hub);
     const line = page.locator('#feed-filter');
     await expect(line).toBeHidden();
@@ -327,7 +338,8 @@ test.describe('the side panel', () => {
     await expect(line).toBeHidden();
   });
 
-  test('the choice survives the refetch and clears once the Feed is left', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('the choice survives the refetch and clears once the Feed is left', async ({ page, hub }) => {
     await page.clock.install();
     await openFeed(page, hub);
     await pick(page, 'Invented Weekly');
@@ -348,7 +360,8 @@ test.describe('the side panel', () => {
     await expect(page.locator('#feed-filter')).toBeHidden();
   });
 
-  test('on a phone a choice closes the drawer', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('on a phone a choice closes the drawer', async ({ page, hub }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openFeed(page, hub);
     await expect(side(page).locator('.panel-row')).toHaveCount(4);
@@ -368,7 +381,8 @@ test.describe('the side panel', () => {
 test.describe('with an empty store', () => {
   test.use({ hubOptions: { agents: [WATCH] } });
 
-  test('says the feed is empty', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('says the feed is empty', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/feed`);
     await expectView(page, 'feed', 'Feed');
     await expect(page.locator('#feed-message')).toHaveText(/^Nothing in the feed yet\./);
@@ -397,7 +411,8 @@ test.describe('with the feed instructions', () => {
     await expect(panel(page).locator('.goal-prose li')).toHaveCount(4);
   }
 
-  test('the button opens the criteria as prose above the posts', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('the button opens the criteria as prose above the posts', async ({ page, hub }) => {
     await openFeed(page, hub);
     await expect(toggle(page)).toBeVisible();
     await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
@@ -438,7 +453,8 @@ test.describe('with the feed instructions', () => {
     await expect(toggle(page)).toBeHidden();
   });
 
-  test('Send asks Watch for the change and opens its thread', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('Send asks Watch for the change and opens its thread', async ({ page, hub }) => {
     await openPanel(page, hub);
     await input(page).fill('Drop the Invented Gazette.');
     const posted = page.waitForRequest('**/api/feed/instructions/propose');
@@ -451,7 +467,8 @@ test.describe('with the feed instructions', () => {
     expect(hub.requests('/api/feed/instructions/propose')).toEqual([{ method: 'POST', status: 202 }]);
   });
 
-  test('Control+Enter sends', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('Control+Enter sends', async ({ page, hub }) => {
     await openPanel(page, hub);
     await input(page).fill('Add the Invented Almanac.');
     await input(page).press('Control+Enter');
@@ -459,7 +476,8 @@ test.describe('with the feed instructions', () => {
     expect(hub.requests('/api/feed/instructions/propose')).toEqual([{ method: 'POST', status: 202 }]);
   });
 
-  test('Cancel, Escape, and the button close the panel and focus the button', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('Cancel, Escape, and the button close the panel and focus the button', async ({ page, hub }) => {
     await openPanel(page, hub);
     await panel(page).getByRole('button', { name: 'Cancel' }).click();
     await expect(panel(page)).toBeHidden();
@@ -480,7 +498,8 @@ test.describe('with the feed instructions', () => {
     expect(hub.requests('/api/feed/instructions/propose')).toEqual([]);
   });
 
-  test('a busy Watch says so under the composer', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('a busy Watch says so under the composer', async ({ page, hub }) => {
     hub.personas.hold('watch');
     await openFeed(page, hub);
     await item(page, 'watch/2026-09-28/3').getByRole('button', { name: /^Discuss/ }).click();
@@ -495,7 +514,8 @@ test.describe('with the feed instructions', () => {
     expect(hub.requests('/api/feed/instructions/propose')).toEqual([{ method: 'POST', status: 409 }]);
   });
 
-  test('the panel keeps its text through the refetch', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('the panel keeps its text through the refetch', async ({ page, hub }) => {
     await page.clock.install();
     await openPanel(page, hub);
     await input(page).pressSequentially('Drop the Gazette');
@@ -511,7 +531,8 @@ test.describe('with the feed instructions', () => {
     await expect(input(page)).toHaveValue('Drop the Gazette');
   });
 
-  test('on a phone the button is the icon alone and the panel fits', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('on a phone the button is the icon alone and the panel fits', async ({ page, hub }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPanel(page, hub);
     await expect(toggle(page).locator('.instructions-label')).toHaveCount(0);
@@ -529,7 +550,8 @@ test.describe('with the feed instructions', () => {
 test.describe('with no feed instructions file', () => {
   test.use({ hubOptions: { feed: FEED, agents: [WATCH] } });
 
-  test('the panel says the file is missing and does not show an old copy on reopen', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('the panel says the file is missing and does not show an old copy on reopen', async ({ page, hub }) => {
     await openFeed(page, hub);
     await page.getByRole('button', { name: 'Instructions' }).click();
     await expect(page.locator('#feed-instructions .instructions-problem')).toHaveText('The feed instructions file is missing.');

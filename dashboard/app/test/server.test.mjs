@@ -488,9 +488,10 @@ test('start seeds the built-in agents into a registry without them, lists them w
   const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
   t.after(() => dashboard.close());
   const file = JSON.parse(await readFile(env.DASHBOARD_REGISTRY_PATH, 'utf8'));
-  assert.deepEqual(file.agents.map((entry) => entry.id), ['assistant', 'myos']);
+  assert.deepEqual(file.agents.map((entry) => entry.id), ['assistant', 'myos', 'scout']);
   assert.equal(file.agents[1].cwd, path.resolve(APP_DIR, '../../agents/myos'));
-  assert.deepEqual(logs.filter((e) => e.event === 'builtins_seeded'), [{ event: 'builtins_seeded', agents: ['myos'] }]);
+  assert.equal(file.agents[2].cwd, path.resolve(APP_DIR, '../../agents/scout'));
+  assert.deepEqual(logs.filter((e) => e.event === 'builtins_seeded'), [{ event: 'builtins_seeded', agents: ['myos', 'scout'] }]);
   const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
   const myos = state.agents.find((entry) => entry.id === 'myos');
   assert.deepEqual([myos.name, myos.group, myos.builtin, myos.unread], ['Myos', 'personal', true, false]);
@@ -517,7 +518,7 @@ test('start seeds the built-in agents when the registry file does not exist, and
   assert.ok(state.agents.find((entry) => entry.id === 'myos'), 'the built-in agent is listed');
   assert.deepEqual(state.routines.items, []);
   const file = JSON.parse(await readFile(env.DASHBOARD_REGISTRY_PATH, 'utf8'));
-  assert.deepEqual(file.agents.map((entry) => entry.id), ['myos']);
+  assert.deepEqual(file.agents.map((entry) => entry.id), ['myos', 'scout']);
 });
 
 // The data root: the lock, the migration from a checkout, and the variable.
@@ -567,18 +568,18 @@ test('a first start moves a fixture checkout into the root and touches nothing o
   t.after(() => dashboard.close());
 
   for (const key of ['home', 'settingsPath', 'registryPath', 'routinesDir', 'notificationsDir', 'threadsDir', 'codexDir',
-    'feedDir', 'feedInstructionsPath', 'ideasDir', 'ideasMarksPath', 'ideasInstructionsPath', 'briefsDir', 'migrateFrom']) {
+    'feedsDir', 'sourcesDir', 'ideasDir', 'ideasMarksPath', 'ideasInstructionsPath', 'briefsDir', 'migrateFrom']) {
     assert.ok(dashboard.config[key].startsWith(`${dir}${path.sep}`), key);
   }
   assert.equal(process.env.PERSONAL_ASSISTANT_HOME, home);
   const layout = JSON.parse(await readFile(path.join(home, 'layout.json'), 'utf8'));
-  assert.deepEqual([layout.version, layout.migratedFrom], [1, repo]);
+  assert.deepEqual([layout.version, layout.migratedFrom], [2, repo]);
   assert.deepEqual(JSON.parse(await readFile(path.join(home, 'daemon.lock'), 'utf8')).pid, process.pid);
   assert.ok((await lstat(path.join(repo, 'registry/agents.json.migrated'))).isFile());
   assert.ok((await lstat(path.join(repo, 'dashboard/app/var/settings.json.migrated'))).isFile());
   assert.ok((await lstat(path.join(repo, 'feed/items.migrated'))).isDirectory());
   assert.deepEqual(await readdir(path.join(repo, 'daily-brief/briefs')), ['build.py']);
-  assert.deepEqual(await readdir(path.join(home, 'feed/items')), ['2026-10-01-watch.json']);
+  assert.deepEqual(await readdir(path.join(home, 'feeds/news/items')), ['2026-10-01-watch.json']);
   assert.ok((await lstat(path.join(home, 'README.md'))).isFile());
   assert.ok((await lstat(path.join(home, 'ideas/criteria.md'))).isFile(), 'the default criteria are seeded');
 
@@ -586,7 +587,7 @@ test('a first start moves a fixture checkout into the root and touches nothing o
   assert.deepEqual(moved, ['settings', 'registry', 'feedDir', 'briefsDir']);
   assert.deepEqual(logs.find((entry) => entry.event === 'migration_done'), { event: 'migration_done', moved: 4, skipped: 17 });
   assert.deepEqual(logs.find((entry) => entry.event === 'root'), {
-    event: 'root', root: home, migrateFrom: repo, version: 1, created: true, moved: 4,
+    event: 'root', root: home, migrateFrom: repo, version: 2, created: true, moved: 4,
   });
   const state = await (await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`)).json();
   assert.deepEqual(state.agents.map((agent) => agent.id), ['fixture']);
@@ -595,6 +596,49 @@ test('a first start moves a fixture checkout into the root and touches nothing o
   // The lock goes with the daemon.
   await dashboard.close();
   await assert.rejects(lstat(path.join(home, 'daemon.lock')), { code: 'ENOENT' });
+});
+
+test('a start over a version 1 root upgrades it: Watch leaves, Scout is seeded built-in, and the feed news lists its posts', async (t) => {
+  const dir = await tempDir(t);
+  const home = path.join(dir, 'root');
+  const files = {
+    'layout.json': JSON.stringify({ version: 1, createdAt: '2026-10-06T00:00:00.000Z' }),
+    'registry/agents.json': JSON.stringify({ version: 1, groups: [{ id: 'personal', name: 'Personal' }], agents: [
+      { id: 'fixture', name: 'Fixture', role: 'Invented', description: 'Invented.', group: 'personal', kind: 'persona', cwd: dir, provider: 'claude', accepts: ['watch'] },
+      { id: 'watch', name: 'Watch', role: 'Newsletters', description: 'Invented.', group: 'personal', kind: 'persona', cwd: dir, provider: 'claude', jobs: ['com.personal-assistant.watch'] },
+    ] }),
+    'feed/items/2026-10-01-watch.json': JSON.stringify({ producer: 'watch', date: '2026-10-01', items: [
+      { id: 'watch/2026-10-01/1', title: 'Invented', source: 'Invented Letters', url: 'https://example.com/x', summary: 'Invented.' },
+    ] }),
+    'feed/relevance.md': 'Invented criteria.\n',
+    'watch/seen.jsonl': '{"seen":1}\n',
+    'threads/watch.jsonl': '{"m":1}\n',
+  };
+  for (const [rel, body] of Object.entries(files)) {
+    await mkdir(path.dirname(path.join(home, rel)), { recursive: true });
+    await writeFile(path.join(home, rel), body);
+  }
+  const env = { ...await rootEnv(t, home), DASHBOARD_BUILTIN_PATH: fileURLToPath(new URL('../../../registry/builtin.json', import.meta.url)) };
+  const logs = [];
+  const dashboard = await startDashboard({ env, log: (entry) => logs.push(entry), createAdapters: () => ({ claude: idleAdapter() }) });
+  t.after(() => dashboard.close());
+
+  assert.equal(JSON.parse(await readFile(path.join(home, 'layout.json'), 'utf8')).version, 2);
+  assert.ok(logs.some((entry) => entry.event === 'upgrade_done'));
+  assert.deepEqual(logs.find((entry) => entry.event === 'root').version, 2);
+  const origin = `http://127.0.0.1:${dashboard.config.port}`;
+  const state = await (await fetch(`${origin}/api/state`)).json();
+  assert.deepEqual(state.agents.map((agent) => agent.id), ['fixture', 'myos', 'scout']);
+  const scout = state.agents.find((agent) => agent.id === 'scout');
+  assert.deepEqual([scout.builtin, scout.role], [true, 'Feeds']);
+  const listed = await (await fetch(`${origin}/api/feeds`)).json();
+  assert.deepEqual(listed.feeds.map((feed) => [feed.id, feed.producer]), [['news', 'scout']]);
+  const read = await (await fetch(`${origin}/api/feeds/news`)).json();
+  assert.deepEqual(read.runs.map((run) => run.items.length), [1]);
+  const note = await (await fetch(`${origin}/api/feeds/news/note`)).json();
+  assert.equal(note.text, 'Invented criteria.\n');
+  assert.ok((await lstat(path.join(home, 'threads/watch.jsonl.migrated'))).isFile());
+  assert.ok((await lstat(path.join(home, 'feeds/.run/seen.jsonl'))).isFile());
 });
 
 test('a second daemon on the same root refuses with root_locked, and the root is free again after close', async (t) => {

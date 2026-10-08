@@ -8,15 +8,15 @@ import path from 'node:path';
 
 import { createApp } from '../../lib/app.mjs';
 import { createBriefRoutes } from '../../lib/brief-adapter.mjs';
-import { createFeed } from '../../lib/feed.mjs';
+import { createFeeds } from '../../lib/feeds.mjs';
 import { createBriefInstructions } from '../../lib/brief-instructions.mjs';
-import { createFeedInstructions } from '../../lib/feed-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createGoals } from '../../lib/goals.mjs';
 import { createHub } from '../../lib/hub.mjs';
 import { RegistryError, validateDocument } from '../../lib/registry.mjs';
 import { DEFAULTS as SETTINGS_DEFAULTS, SettingsError, validatePatch } from '../../lib/settings.mjs';
+import { createSources } from '../../lib/sources.mjs';
 
 export async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -236,11 +236,11 @@ export function fakeCmux(inventory = null) {
 // The config's data root is a fresh temporary directory unless `env` names
 // PERSONAL_ASSISTANT_HOME, and DASHBOARD_MIGRATE_FROM is empty unless `env`
 // names it, so every store default lands under the temporary root.
-// `feed` defaults to createFeed over the feed directory, which is a missing
-// path in a temporary directory unless `env` names DASHBOARD_FEED_DIR, so no
-// test reads the real store; pass null for an app without the Feed routes.
-// The feed instructions reader reads DASHBOARD_FEED_INSTRUCTIONS, and the
-// brief instructions reader DASHBOARD_BRIEF_INSTRUCTIONS, each likewise a
+// `feeds` and `sources` default to createFeeds and createSources over the
+// temporary root's feeds/ and sources/ (or DASHBOARD_FEEDS_DIR and
+// DASHBOARD_SOURCES_DIR when `env` names them), so no test reads the real
+// stores; pass `feeds: null` for an app without the feed and source routes.
+// The brief instructions reader reads DASHBOARD_BRIEF_INSTRUCTIONS, a
 // missing path in a temporary directory unless `env` names it; pass
 // `briefInstructions: null` for an app without the brief instructions
 // routes.
@@ -254,15 +254,13 @@ export function fakeCmux(inventory = null) {
 // may adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), jobs, routines = null, scheduler = null, hub, adapters, store, bindings,
-  cmux = null, goals, feed, ideas = null, ideasInstructions = null, briefInstructions, notices = null, settings = fakeSettings(), reads = null,
+  cmux = null, goals, feeds, sources, ideas = null, ideasInstructions = null, briefInstructions, notices = null, settings = fakeSettings(), reads = null,
   briefReads = null, notifications = null, configure = (c) => c,
   delegation = null,
 } = {}) {
   const server = http.createServer();
   const port = await listen(server);
   const briefsDir = env.DASHBOARD_BRIEFS_DIR ?? path.join(await tempDir(t), 'briefs-missing');
-  const feedDir = env.DASHBOARD_FEED_DIR ?? path.join(await tempDir(t), 'feed-missing');
-  const feedInstructions = env.DASHBOARD_FEED_INSTRUCTIONS ?? path.join(await tempDir(t), 'relevance-missing.md');
   const briefInstructionsFile = env.DASHBOARD_BRIEF_INSTRUCTIONS ?? path.join(await tempDir(t), 'curator-missing.md');
   const focusOrigin = env.DASHBOARD_FOCUS_ORIGIN ?? `http://127.0.0.1:${await freePort()}`;
   // A fresh data root and no checkout to migrate, so no default reaches the
@@ -274,8 +272,6 @@ export async function startApp(t, {
     PERSONAL_ASSISTANT_HOME: home,
     DASHBOARD_PORT: String(port),
     DASHBOARD_BRIEFS_DIR: briefsDir,
-    DASHBOARD_FEED_DIR: feedDir,
-    DASHBOARD_FEED_INSTRUCTIONS: feedInstructions,
     DASHBOARD_BRIEF_INSTRUCTIONS: briefInstructionsFile,
     DASHBOARD_FOCUS_ORIGIN: focusOrigin,
   }));
@@ -295,14 +291,17 @@ export async function startApp(t, {
   if (schedulerService) t.after(() => schedulerService.stop());
   for (const adapter of Object.values(adapters ?? {})) adapter?.setDelegation?.(delegationService);
   const goalsReader = goals === undefined ? createGoals({ registry, limits: config.limits, log }) : goals;
-  const feedReader = feed === undefined ? createFeed({ dir: config.feedDir, limits: config.limits, log }) : feed;
-  const instructionsReader = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log });
+  let feedStore = null;
+  const sourceStore = sources ?? createSources({
+    dir: config.sourcesDir, limits: config.limits, log, usedBy: (id) => (feedStore ? feedStore.usedBy(id) : []),
+  });
+  feedStore = feeds === undefined ? createFeeds({ dir: config.feedsDir, sources: sourceStore, limits: config.limits, log }) : feeds;
   const briefInstructionsReader = briefInstructions === undefined
     ? createBriefInstructions({ file: config.briefInstructionsPath, limits: config.limits, log })
     : briefInstructions;
   const handler = createApp({
-    config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feed: feedReader,
-    feedInstructions: instructionsReader, ideas, ideasInstructions, briefInstructions: briefInstructionsReader, notices, settings, registry, routines,
+    config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feeds: feedStore,
+    sources: sourceStore, ideas, ideasInstructions, briefInstructions: briefInstructionsReader, notices, settings, registry, routines,
     scheduler: schedulerService, notifications, log,
   });
   server.on('request', handler);
@@ -314,7 +313,7 @@ export async function startApp(t, {
   const authority = `127.0.0.1:${port}`;
   return {
     port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, jobs: jobsModule, routines, settings, handler,
-    delegation: delegationService, scheduler: schedulerService, notifications,
+    delegation: delegationService, scheduler: schedulerService, notifications, feeds: feedStore, sources: sourceStore,
   };
 }
 

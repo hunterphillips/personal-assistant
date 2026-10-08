@@ -68,8 +68,8 @@ test('the data root defaults to ~/.personal-assistant and every store default de
     notificationsDir: config.notificationsDir,
     threadsDir: config.threadsDir,
     codexDir: config.codexDir,
-    feedDir: config.feedDir,
-    feedInstructionsPath: config.feedInstructionsPath,
+    feedsDir: config.feedsDir,
+    sourcesDir: config.sourcesDir,
     ideasDir: config.ideasDir,
     ideasMarksPath: config.ideasMarksPath,
     ideasInstructionsPath: config.ideasInstructionsPath,
@@ -82,8 +82,8 @@ test('the data root defaults to ~/.personal-assistant and every store default de
     notificationsDir: '/data/root/notifications',
     threadsDir: '/data/root/threads',
     codexDir: '/data/root/codex',
-    feedDir: '/data/root/feed/items',
-    feedInstructionsPath: '/data/root/feed/relevance.md',
+    feedsDir: '/data/root/feeds',
+    sourcesDir: '/data/root/sources',
     ideasDir: '/data/root/ideas/items',
     ideasMarksPath: '/data/root/ideas/marks.json',
     ideasInstructionsPath: '/data/root/ideas/criteria.md',
@@ -108,8 +108,8 @@ test('each store override still wins over the data root', () => {
     DASHBOARD_NOTIFICATIONS_DIR: ['notificationsDir', '/o/notifications'],
     DASHBOARD_THREADS_DIR: ['threadsDir', '/o/threads'],
     DASHBOARD_CODEX_DIR: ['codexDir', '/o/codex'],
-    DASHBOARD_FEED_DIR: ['feedDir', '/o/feed'],
-    DASHBOARD_FEED_INSTRUCTIONS: ['feedInstructionsPath', '/o/relevance.md'],
+    DASHBOARD_FEEDS_DIR: ['feedsDir', '/o/feeds'],
+    DASHBOARD_SOURCES_DIR: ['sourcesDir', '/o/sources'],
     DASHBOARD_IDEAS_DIR: ['ideasDir', '/o/ideas'],
     DASHBOARD_IDEAS_MARKS: ['ideasMarksPath', '/o/marks.json'],
     DASHBOARD_IDEAS_INSTRUCTIONS: ['ideasInstructionsPath', '/o/criteria.md'],
@@ -227,11 +227,12 @@ test('persona limits and timeouts are exposed', () => {
   assert.equal(config.timeouts.delegationWaitMs, 5_000);
 });
 
-test('the feed instructions path defaults under the data root and takes an override', () => {
-  assert.equal(loadConfig({ PERSONAL_ASSISTANT_HOME: HOME }).feedInstructionsPath, '/data/root/feed/relevance.md');
+test('the feeds and sources stores default under the data root; the brief rules stay in the repository', () => {
+  const config = loadConfig({ PERSONAL_ASSISTANT_HOME: HOME });
+  assert.deepEqual([config.feedsDir, config.sourcesDir], ['/data/root/feeds', '/data/root/sources']);
+  assert.ok(!('feedDir' in config) && !('feedInstructionsPath' in config));
+  assert.equal(loadConfig({ DASHBOARD_FEEDS_DIR: 'var/feeds' }).feedsDir, path.resolve(APP_ROOT, 'var/feeds'));
+  assert.equal(config.limits.feedNoteBytes, 64 * 1024);
   assert.equal(loadConfig({}).briefInstructionsPath, path.resolve(APP_ROOT, '../../daily-brief/curator.md'));
   assert.equal(loadConfig({ DASHBOARD_BRIEF_INSTRUCTIONS: '/tmp/rules.md' }).briefInstructionsPath, '/tmp/rules.md');
-  assert.equal(loadConfig({ DASHBOARD_FEED_INSTRUCTIONS: '/tmp/criteria.md' }).feedInstructionsPath, '/tmp/criteria.md');
-  assert.equal(loadConfig({ DASHBOARD_FEED_INSTRUCTIONS: 'var/criteria.md' }).feedInstructionsPath,
-    path.resolve(APP_ROOT, 'var/criteria.md'));
 });

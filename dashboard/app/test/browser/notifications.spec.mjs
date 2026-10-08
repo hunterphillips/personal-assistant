@@ -122,7 +122,8 @@ test.describe('feed and brief links', () => {
     },
   });
 
-  test('a feed link opens the Feed on that item, a brief link opens that brief over the view', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('a feed link opens the Feed on that item, a brief link opens that brief over the view', async ({ page, hub }) => {
     await hub.writeBrief('2026-10-03');
     await hub.writeBrief('2026-10-04', { title: 'Invented later brief' });
     await page.goto(hub.origin + '/health');

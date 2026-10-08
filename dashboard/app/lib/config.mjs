@@ -12,9 +12,8 @@
 //   DASHBOARD_PUBLIC_ORIGIN     optional https:// tailnet origin; its host joins the
 //                               Host and Origin allowlists
 //   DASHBOARD_BRIEFS_DIR        generated brief directory (default <home>/briefs)
-//   DASHBOARD_FEED_DIR          the feed store the producers write (default <home>/feed/items)
-//   DASHBOARD_FEED_INSTRUCTIONS the criteria file the watch job reads
-//                               (default <home>/feed/relevance.md)
+//   DASHBOARD_FEEDS_DIR         the feeds, one folder each (default <home>/feeds)
+//   DASHBOARD_SOURCES_DIR       the sources the feeds read (default <home>/sources)
 //   DASHBOARD_IDEAS_DIR         the Ideas runs the producers write (default <home>/ideas/items)
 //   DASHBOARD_IDEAS_MARKS       the marks the Ideas view writes (default <home>/ideas/marks.json)
 //   DASHBOARD_IDEAS_INSTRUCTIONS the criteria the ideas producer reads
@@ -82,11 +81,13 @@ export const LIMITS = Object.freeze({
   goalsFileBytes: 256 * 1024, // one vault note read by the Goals view
   goalsNotes: 50, // files read from the vault's notes/goals/
   feedFileBytes: 256 * 1024, // one feed run file read by the Feed view
-  feedFiles: 30, // newest feed run files read
+  feedFiles: 30, // newest run files read per feed
+  feedNoteBytes: 64 * 1024, // a feed's note.md: a safety bound, not a length rule
+  feedBodyBytes: 16 * 1024, // one feeds or sources POST or PUT body, the note's excepted
+  sourceFileBytes: 16 * 1024, // one sources/<id>.json or feeds/<id>/feed.json; marks.json is capped at feedFileBytes
   ideasFileBytes: 256 * 1024, // one ideas run, the marks, or the criteria file
   ideaTitleChars: 200, // one producer idea's title
   ideaBodyBytes: 16 * 1024, // one Ideas POST body
-  feedInstructionsBytes: 64 * 1024, // the feed's criteria file read by the Feed view
   briefInstructionsBytes: 64 * 1024, // the brief's rules file read by the Brief tab
   settingsBodyBytes: 4 * 1024, // one PUT /api/settings body
   agentBodyBytes: 16 * 1024, // one PUT /api/agents/:id/settings or POST /api/agents body
@@ -153,8 +154,8 @@ export function loadConfig(env = process.env) {
   const root = layoutPaths(home ?? defaultHome());
   const briefsDir = parsePath(env.DASHBOARD_BRIEFS_DIR, root.briefsDir);
   const briefReadsPath = parsePath(env.DASHBOARD_BRIEF_READS_PATH, root.briefReads);
-  const feedDir = parsePath(env.DASHBOARD_FEED_DIR, root.feedDir);
-  const feedInstructionsPath = parsePath(env.DASHBOARD_FEED_INSTRUCTIONS, root.feedInstructions);
+  const feedsDir = parsePath(env.DASHBOARD_FEEDS_DIR, root.feedsDir);
+  const sourcesDir = parsePath(env.DASHBOARD_SOURCES_DIR, root.sourcesDir);
   const ideasDir = parsePath(env.DASHBOARD_IDEAS_DIR, root.ideasDir);
   const ideasMarksPath = parsePath(env.DASHBOARD_IDEAS_MARKS, root.ideasMarks);
   const ideasInstructionsPath = parsePath(env.DASHBOARD_IDEAS_INSTRUCTIONS, root.ideasInstructions);
@@ -204,8 +205,8 @@ export function loadConfig(env = process.env) {
     focusOrigin: focusOrigin.origin,
     briefsDir,
     briefReadsPath,
-    feedDir,
-    feedInstructionsPath,
+    feedsDir,
+    sourcesDir,
     ideasDir,
     ideasMarksPath,
     ideasInstructionsPath,

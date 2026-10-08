@@ -19,17 +19,22 @@ function agent(id, extra = {}) {
 
 const GROUPS = [{ id: 'work', name: 'Work' }, { id: 'personal', name: 'Personal' }];
 
-test('the committed file seeds Myos once, in key order, with its folder under the repository', async (t) => {
+test('the committed file seeds Myos and Scout once, in key order, with their folders under the repository', async (t) => {
   const registry = fakeRegistry([agent('assistant', { pinned: true })], { groups: GROUPS });
   const logs = [];
   const added = await seedBuiltins({ registry, file: BUILTIN_FILE, root: '/invented/repo', log: (entry) => logs.push(entry) });
-  assert.deepEqual(added, ['myos']);
-  assert.deepEqual(logs, [{ event: 'builtins_seeded', agents: ['myos'] }]);
-  const written = registry.writes[0].agents.at(-1);
+  assert.deepEqual(added, ['myos', 'scout']);
+  assert.deepEqual(logs, [{ event: 'builtins_seeded', agents: ['myos', 'scout'] }]);
+  const [written, scout] = registry.writes[0].agents.slice(-2);
   assert.deepEqual(Object.keys(written), ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'builtin']);
   assert.deepEqual([written.name, written.group, written.cwd, written.builtin], ['Myos', 'personal', '/invented/repo/agents/myos', true]);
+  assert.deepEqual(Object.keys(scout), ['id', 'name', 'role', 'description', 'group', 'kind', 'cwd', 'provider', 'jobs', 'builtin']);
+  assert.deepEqual([scout.name, scout.role, scout.group, scout.cwd, scout.jobs, scout.builtin],
+    ['Scout', 'Feeds', 'personal', '/invented/repo/agents/scout', ['com.personal-assistant.feeds'], true]);
   const myos = registry.current().agents.find((entry) => entry.id === 'myos');
   assert.equal(myos.builtin, true);
+  // Quick chat and the brief still fall to Myos, the first built-in.
+  assert.equal(defaultAgentId(registry.current().agents), 'myos');
 
   // Present: nothing written, nothing logged.
   assert.deepEqual(await seedBuiltins({ registry, file: BUILTIN_FILE, root: '/invented/repo', log: (entry) => logs.push(entry) }), []);
@@ -50,10 +55,10 @@ test('a group the registry does not list falls back to the first group; no group
 test('a missing registry is seeded with the built-ins alone', async () => {
   const missing = fakeRegistry([], { ok: false, error: 'registry_missing' });
   const logs = [];
-  assert.deepEqual(await seedBuiltins({ registry: missing, file: BUILTIN_FILE, root: '/invented/repo', log: (entry) => logs.push(entry) }), ['myos']);
+  assert.deepEqual(await seedBuiltins({ registry: missing, file: BUILTIN_FILE, root: '/invented/repo', log: (entry) => logs.push(entry) }), ['myos', 'scout']);
   assert.equal(missing.writes.length, 1);
-  assert.deepEqual(missing.writes[0].agents.map((entry) => entry.id), ['myos']);
-  assert.deepEqual(logs, [{ event: 'builtins_seeded', agents: ['myos'] }]);
+  assert.deepEqual(missing.writes[0].agents.map((entry) => entry.id), ['myos', 'scout']);
+  assert.deepEqual(logs, [{ event: 'builtins_seeded', agents: ['myos', 'scout'] }]);
 });
 
 test('an invalid registry is skipped silently; a missing built-ins file is none; a bad file is logged', async (t) => {
@@ -133,7 +138,7 @@ test('defaultAgentId picks the built-in, else the pinned, else the first Claude 
 
 test('the committed file is the registry\'s shape, a valid persona once given a folder', async () => {
   const parsed = JSON.parse(await readFile(BUILTIN_FILE, 'utf8'));
-  assert.deepEqual(parsed.agents.map((entry) => entry.id), ['myos']);
+  assert.deepEqual(parsed.agents.map((entry) => entry.id), ['myos', 'scout']);
   for (const entry of parsed.agents) {
     assert.equal(entry.builtin, true);
     assert.equal('cwd' in entry, false);

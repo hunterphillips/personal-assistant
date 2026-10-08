@@ -6,9 +6,9 @@
 // and `brief` objects (see focus-proxy.mjs and brief-adapter.mjs for their
 // contracts); dashboard state comes from the injected `hub` (hub.mjs). The persona
 // routes are agent-routes.mjs, the Goals routes goals-routes.mjs over the
-// injected `goals` (goals.mjs), the Feed routes feed-routes.mjs over the
-// injected `feed` (feed.mjs) and `feedInstructions` (feed-instructions.mjs),
-// the Ideas routes ideas-routes.mjs over `ideas` and `ideasInstructions`,
+// injected `goals` (goals.mjs), the feed routes feed-routes.mjs over the
+// injected `feeds` (feeds.mjs) and `sources` (sources.mjs), the source
+// routes source-routes.mjs over `sources`, the Ideas routes ideas-routes.mjs over `ideas` and `ideasInstructions`,
 // the brief instructions routes brief-instructions.mjs over the injected
 // `briefInstructions` (the same module's reader), the routine routes routine-routes.mjs over the injected `routines` store
 // (routines.mjs) and `scheduler` (scheduler.mjs), the notification routes
@@ -16,13 +16,13 @@
 // (notifications.mjs), and the event stream is
 // events.mjs; this module builds them and dispatches to them. Without
 // `goals`, /api/goals and /api/goals/propose answer 404 not_found; without
-// `feed` or `feedInstructions`, /api/feed and the routes under it do; without
+// `feeds` or `sources`, /api/feeds, /api/sources, and the routes under them do; without
 // `ideas` or `ideasInstructions`, /api/ideas and the routes under it do;
 // without `briefInstructions` the two under /api/brief/instructions do, and
 // without `routines` so does everything under /api/routines, and without
 // `notifications` everything under /api/notifications.
 //
-// createApp({ config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, ideas, ideasInstructions,
+// createApp({ config, focus, brief, hub, store, cmux, goals, feeds, sources, ideas, ideasInstructions,
 //             briefInstructions, notices,
 //             settings, registry, routines, scheduler, notifications, log })
 // returns a (req, res) handler and opens nothing; server.mjs owns listening.
@@ -41,6 +41,7 @@ import { ASSETS } from './assets.mjs';
 import { createBriefInstructionsRoutes } from './brief-instructions.mjs';
 import { createEvents } from './events.mjs';
 import { createFeedRoutes } from './feed-routes.mjs';
+import { createSourceRoutes } from './source-routes.mjs';
 import { createGoalsRoutes } from './goals-routes.mjs';
 import { createIdeasRoutes } from './ideas-routes.mjs';
 import { createNotificationRoutes } from './notification-routes.mjs';
@@ -109,10 +110,6 @@ const EXACT_ROUTES = new Map([
   ['/api/brief/instructions/propose', { name: 'brief-instructions-propose', methods: ['POST'] }],
   ['/api/goals', { name: 'goals', methods: ['GET'] }],
   ['/api/goals/propose', { name: 'goals-propose', methods: ['POST'] }],
-  ['/api/feed', { name: 'feed', methods: ['GET'] }],
-  ['/api/feed/discuss', { name: 'feed-discuss', methods: ['POST'] }],
-  ['/api/feed/instructions', { name: 'feed-instructions', methods: ['GET'] }],
-  ['/api/feed/instructions/propose', { name: 'feed-instructions-propose', methods: ['POST'] }],
   ['/api/ideas', { name: 'ideas', methods: ['GET', 'POST'] }],
   ['/api/ideas/dismiss', { name: 'ideas-dismiss', methods: ['POST'] }],
   ['/api/ideas/save', { name: 'ideas-save', methods: ['POST'] }],
@@ -135,7 +132,7 @@ export function defaultLog(entry) {
 }
 
 export function createApp({
-  config, focus, brief, hub, store = null, cmux = null, goals = null, feed = null, feedInstructions = null,
+  config, focus, brief, hub, store = null, cmux = null, goals = null, feeds = null, sources = null,
   ideas = null, ideasInstructions = null,
   briefInstructions = null, notices = null, settings = null, registry = null, routines = null, scheduler = null, notifications = null,
   log = defaultLog,
@@ -153,10 +150,11 @@ export function createApp({
   const settingsRoutes = settings
     ? createSettingsRoutes({ settings, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
     : null;
-  const feedRoutes = feed && feedInstructions
-    ? createFeedRoutes({
-      feed, instructions: feedInstructions, instructionsFile: config.feedInstructionsPath, hub, log, limits: config.limits, shuttingDown: isShuttingDown,
-    })
+  const feedRoutes = feeds && sources
+    ? createFeedRoutes({ feeds, sources, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
+    : null;
+  const sourceRoutes = feeds && sources
+    ? createSourceRoutes({ sources, limits: config.limits, shuttingDown: isShuttingDown })
     : null;
   const ideasRoutes = ideas && ideasInstructions
     ? createIdeasRoutes({
@@ -188,6 +186,8 @@ export function createApp({
     if (routineRoute) return routineRoute;
     const notificationRoute = notificationRoutes?.match(pathname);
     if (notificationRoute) return notificationRoute;
+    const feedRoute = feedRoutes?.match(pathname) ?? sourceRoutes?.match(pathname);
+    if (feedRoute) return feedRoute;
     // /api/brief/<date> and /api/brief/<date>/feedback; the exact routes
     // above (latest, feedback, instructions) are matched first.
     const briefMatch = /^\/api\/brief\/([^/]+)(\/feedback)?$/.exec(pathname);
@@ -336,18 +336,10 @@ export function createApp({
       case 'settings':
         if (!settingsRoutes) throw new HttpError(404, 'not_found');
         return settingsRoutes.serveUpdate(req, res);
-      case 'feed':
-        if (!feedRoutes) throw new HttpError(404, 'not_found');
-        return feedRoutes.serveRead(res);
-      case 'feed-discuss':
-        if (!feedRoutes) throw new HttpError(404, 'not_found');
-        return feedRoutes.serveDiscuss(req, res);
-      case 'feed-instructions':
-        if (!feedRoutes) throw new HttpError(404, 'not_found');
-        return feedRoutes.serveInstructions(res);
-      case 'feed-instructions-propose':
-        if (!feedRoutes) throw new HttpError(404, 'not_found');
-        return feedRoutes.serveProposeInstructions(req, res);
+      case 'feeds':
+        return feedRoutes.serve(req, res, route);
+      case 'sources':
+        return sourceRoutes.serve(req, res, route);
       case 'ideas':
         if (!ideasRoutes) throw new HttpError(404, 'not_found');
         return req.method === 'GET' ? ideasRoutes.serveRead(res) : ideasRoutes.serveAdd(req, res);

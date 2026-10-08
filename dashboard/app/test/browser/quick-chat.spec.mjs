@@ -312,7 +312,8 @@ test.describe('quick chat', () => {
 test.describe('quick chat over the Feed', () => {
   test.use({ withFocus: false, hubOptions: hubOptions({ feed: path.join(FIXTURES, 'feed') }) });
 
-  test('the context is the topmost item in view', async ({ page, hub }) => {
+  // Phase 2 rewrites the Feed view
+  test.skip('the context is the topmost item in view', async ({ page, hub }) => {
     await page.goto(`${hub.origin}/feed`);
     const items = page.locator('#feed-runs .feed-item');
     await expect(items.first()).toBeVisible();

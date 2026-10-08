@@ -10,6 +10,18 @@
       "provider": "claude",
       "folder": "agents/myos",
       "builtin": true
+    },
+    {
+      "id": "scout",
+      "name": "Scout",
+      "role": "Feeds",
+      "description": "I make the feeds. Each morning I read every active feed's sources and keep what its instructions ask for. Ask me about any post.",
+      "group": "personal",
+      "kind": "persona",
+      "provider": "claude",
+      "folder": "agents/scout",
+      "jobs": ["com.personal-assistant.feeds"],
+      "builtin": true
     }
   ]
 }

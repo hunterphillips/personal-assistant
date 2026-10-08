@@ -1,7 +1,7 @@
-// Instructions: a markdown file an agent follows (the feed's criteria, the
+// Instructions: a markdown file an agent follows (the Ideas criteria, the
 // brief's rules), read on demand for a view as prose. The module never
-// writes and runs nothing on a timer. feed-instructions.mjs and
-// brief-instructions.mjs each bind one file to it.
+// writes and runs nothing on a timer. server.mjs binds the Ideas criteria
+// to it, and brief-instructions.mjs the brief's rules.
 //
 // createInstructions({ file, path, maxBytes, label, event, log }) returns:
 //

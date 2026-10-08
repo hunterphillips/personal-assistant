@@ -8,7 +8,7 @@
 // adapters (Claude for personas, Codex for the shared app-server's threads),
 // the cmux client, the routine store (loaded before the hub, so its
 // snapshot lists them) and the scheduler that runs them, the notification
-// store and the brief read mark (both loaded before the hub too), state hub, the Goals, Feed, Ideas, and instructions
+// store and the brief read mark (both loaded before the hub too), state hub, the Goals, feeds, sources, Ideas, and instructions
 // readers, the settings store, the brief notices, and app, add any built-in
 // agent the registry lacks (builtins.mjs), start the
 // personas, seed the settings file on first start (and add quick chat to
@@ -43,9 +43,8 @@ import { createBindings } from './lib/bindings.mjs';
 import { createBriefRoutes } from './lib/brief-adapter.mjs';
 import { defaultAgentId, seedBuiltins } from './lib/builtins.mjs';
 import { createDelegation } from './lib/delegation.mjs';
-import { createFeed } from './lib/feed.mjs';
+import { createFeeds } from './lib/feeds.mjs';
 import { createBriefInstructions } from './lib/brief-instructions.mjs';
-import { createFeedInstructions } from './lib/feed-instructions.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
 import { createGoals } from './lib/goals.mjs';
@@ -60,6 +59,7 @@ import { createRegistry } from './lib/registry.mjs';
 import { RootError, claimLock, prepareRoot, readLayout } from './lib/root.mjs';
 import { createRoutines } from './lib/routines.mjs';
 import { createScheduler } from './lib/scheduler.mjs';
+import { createSources } from './lib/sources.mjs';
 import { createJobs } from './lib/jobs.mjs';
 import { createSettings } from './lib/settings.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
@@ -203,8 +203,12 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
   delegation = createDelegation({ hub, registry, notifications, limits: config.limits, timeouts: config.timeouts, log: logEntry });
   const scheduler = createScheduler({ routines, hub, zone: config.timeZone, timeouts: config.timeouts, limits: config.limits, log: logEntry });
   const goals = createGoals({ registry, limits: config.limits, log: logEntry });
-  const feed = createFeed({ dir: config.feedDir, limits: config.limits, log: logEntry });
-  const feedInstructions = createFeedInstructions({ file: config.feedInstructionsPath, limits: config.limits, log: logEntry });
+  // The sources store asks the feeds which list a source before deleting it.
+  let feeds = null;
+  const sources = createSources({
+    dir: config.sourcesDir, limits: config.limits, log: logEntry, usedBy: (id) => feeds.usedBy(id),
+  });
+  feeds = createFeeds({ dir: config.feedsDir, sources, limits: config.limits, log: logEntry });
   const ideas = createIdeas({
     dir: config.ideasDir, marksFile: config.ideasMarksPath, limits: config.limits,
     zone: config.timeZone, log: logEntry,
@@ -223,7 +227,7 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
     log: logEntry,
   });
   const app = createApp({
-    config, focus, brief, hub, store, cmux, goals, feed, feedInstructions, ideas, ideasInstructions, briefInstructions, notices, settings, registry, routines,
+    config, focus, brief, hub, store, cmux, goals, feeds, sources, ideas, ideasInstructions, briefInstructions, notices, settings, registry, routines,
     scheduler, notifications, log: logEntry,
   });
   const server = http.createServer(app);
