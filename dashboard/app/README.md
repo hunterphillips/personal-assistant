@@ -78,6 +78,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/sources` | Adds a source; 201 `{"ok": true, "source"}`. |
 | `PUT /api/sources/<id>` | Changes any of `name`, `active`, `default`, and the kind's field; `{"ok": true, "source"}`. |
 | `DELETE /api/sources/<id>` | Removes a source no feed lists; 409 `in_use` with `feeds` otherwise. |
+| `POST /api/sources/discover` | `{"url"}`: the RSS or Atom feed the site links, or the address itself when it is a feed; `{"feed"}` or `{"feed": null}`. Writes nothing. |
 | `GET /api/ideas` | The Ideas runs, marks, and producing agent, newest first, with `routine`: the id of the producer's ideas routine (its first routine whose instruction or name contains "ideas"), or null. The New ideas action runs it through `POST /api/routines/:id/run`. |
 | `POST /api/ideas` | Adds a manual idea and returns the fresh Ideas store. |
 | `POST /api/ideas/dismiss` | Dismisses an idea and returns the fresh Ideas store. |
@@ -476,8 +477,28 @@ thread. It refuses with 400 `invalid_body`, 503 `shutting_down`, 404
 
 `GET /api/sources` lists every source with its `role` (`incoming` or
 `context`) and, for a file or folder, `missing` when the path is not there.
-A source's id is its name as a slug, with `-2` on a collision. A refused
-body is 400 `invalid_body` with `detail` naming the field.
+A source's id is its name as a slug, with `-2` on a collision (`discover`
+is never an id). A refused body is 400 `invalid_body` with `detail` naming
+the field.
+
+`POST /api/sources/discover` (`lib/discover.mjs`) fetches an http or https
+address as `feed/bin/enrich` fetches a page: 6 seconds, at most 512 KB,
+redirects followed. It answers the address when it serves RSS or Atom,
+else the first `<link rel="alternate">` of type `application/rss+xml` or
+`application/atom+xml`, else `null`; a failure is `null` too. Another
+scheme is 400 `invalid_body`.
+
+The Feed's header holds New feed and the settings gear (the agent
+settings' gear). Both open `public/feed-settings.js`'s sheet beside the
+posts, over them on a phone. Settings shows the open feed's instructions
+(`note.md`, saved with `PUT /api/feeds/<id>/note`) and its active sources,
+incoming then context, each a checkbox that saves the feed's `sources` at
+once. Manage sources lists every source with Active, "Default for new
+feeds", and Delete, and Add source: a newsletter's site is looked up with
+discover and saved as RSS when it has a feed, else as email once the
+sender is given; an RSS or blog address must lead to a feed; a file or
+folder takes an absolute path. New feed takes a name and instructions and
+opens the feed on its tab.
 
 ### Ideas
 
@@ -548,8 +569,8 @@ here. The snapshot's `jobs` key, `public/jobs.js`, and
 panel), `public/agents.js`,
 `public/thread-view.js` (one thread's column, mounted by the Agents view
 and quick chat), `public/quick-chat.js`, `public/markdown.js`, `public/jobs.js`, `public/goals.js`,
-`public/feed.js`, `public/instructions.js` (the instructions panel the
-Feed and the brief share), `public/notifications.js` (the header's count
+`public/feed.js`, `public/feed-settings.js` (the Feed's settings sheet),
+`public/instructions.js` (the instructions panel Ideas and the brief share), `public/notifications.js` (the header's count
 and list), `public/brief-overlay.js` (the brief), and `public/styles.css`
 make up the page served at `/`, `/agents`, `/brief`, `/feed`, `/focus`,
 `/goals`, and `/health`. The Agents view is the page at `/`; `/agents`
