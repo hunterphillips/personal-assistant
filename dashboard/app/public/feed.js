@@ -68,10 +68,16 @@
   }
 
   // "LS" for "Latent Space": the first letter of each of the first two
-  // words, upper case.
+  // words, upper case. Punctuation is ignored and a bracketed aside is
+  // dropped entirely, so "AINews (Latent Space)" gives "A".
   function initials(name) {
-    var words = String(name).split(/[\s-]+/).filter(Boolean).slice(0, 2);
-    return words.map(function (word) { return Array.from(word)[0]; }).join('').toUpperCase();
+    var text = String(name).replace(/[(\[{][^)\]}]*[)\]}]/g, ' ');
+    var words = text.split(/[\s-]+/).filter(function (word) {
+      return /[A-Za-z0-9]/.test(word);
+    }).slice(0, 2);
+    return words.map(function (word) {
+      return /[A-Za-z0-9]/.exec(word)[0];
+    }).join('').toUpperCase();
   }
 
   // One of the badge colours, the same for a source every time.

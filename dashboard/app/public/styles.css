@@ -634,6 +634,7 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
   cursor: pointer;
 }
 .button:hover { border-color: var(--rule); }
+.feed-new-icon { display: none; }
 .button:disabled {
   color: var(--muted);
   cursor: default;
@@ -2905,6 +2906,16 @@ textarea.form-input {
   .header-actions,
   .header-action-group { gap: 2px; }
   .header-action-group .button:not(.icon-button) { padding: 0 10px; }
+  /* New feed becomes an icon button, same as the settings gear beside it. */
+  #feed-new {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    padding: 0;
+  }
+  .feed-new-icon { display: inline-flex; }
+  .feed-new-label { display: none; }
   .header-right > .header-entry { display: none; }
   .header-menu-toggle { padding: 0 10px; }
   .app-menu {

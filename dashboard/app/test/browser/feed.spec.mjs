@@ -435,6 +435,16 @@ test.describe('the side panel', () => {
     await expect(row(page, 'all').locator('.feed-badge')).toHaveCount(0);
   });
 
+  test('a bracketed aside in a source name is ignored for its initials', async ({ page, hub }) => {
+    await writeRun(hub, '2026-10-06', [
+      { id: 'news/2026-10-06/1', title: 'Story one', source: 'AINews (Latent Space)', url: 'https://example.com/1', summary: 'Summary one.' },
+    ]);
+    await openFeed(page, hub, 3);
+    await openSide(page);
+    await expect(sourceRow(page, 'AINews (Latent Space)').locator('.feed-badge')).toHaveText('A');
+    await expect(item(page, 'news/2026-10-06/1').locator('.feed-badge')).toHaveText('A');
+  });
+
   test('a source named with another in one old post is split into its own row', async ({ page, hub }) => {
     await writeRun(hub, '2026-10-05', [
       { id: 'news/2026-10-05/1', title: 'Story one', source: 'A / B', url: 'https://example.com/1', summary: 'Summary one.' },
