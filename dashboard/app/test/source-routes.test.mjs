@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import http from 'node:http';
 import path from 'node:path';
 import { test } from 'node:test';
 
+import { discoverFeed } from '../lib/discover.mjs';
 import { request, startApp, tempDir } from './support/harness.mjs';
 
 const AT = '2026-10-08T12:00:00.000Z';
@@ -107,4 +109,87 @@ test('the source routes need their methods, JSON, an exact Origin, and a bodyles
   app.handler.closeStreams();
   assert.deepEqual((await send(app, 'POST', '/api/sources', body)).json, { error: 'shutting_down' });
   assert.equal((await request(app, 'GET', '/api/sources')).status, 200);
+});
+
+// A local site for discovery: each path answers its [content type, body]; a
+// path missing from `pages` is 404, and /slow never answers.
+async function fixtureSite(t, pages) {
+  const held = [];
+  const server = http.createServer((req, res) => {
+    if (req.url === '/slow') {
+      held.push(res);
+      return;
+    }
+    if (req.url === '/moved') {
+      res.writeHead(302, { location: '/feed.xml' }).end();
+      return;
+    }
+    const page = pages[req.url];
+    if (!page) {
+      res.writeHead(404).end();
+      return;
+    }
+    res.writeHead(200, { 'content-type': page[0] }).end(page[1]);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => {
+    for (const res of held) res.destroy();
+    server.close(resolve);
+  }));
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+const RSS = '<?xml version="1.0"?>\n<rss version="2.0"><channel><title>Invented</title></channel></rss>';
+const ATOM = '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Invented</title></feed>';
+const page = (head) => `<!doctype html><html><head><title>Invented</title>${head}</head><body><p>Hello.</p></body></html>`;
+
+test('POST /api/sources/discover finds an RSS or Atom alternate link, a direct feed, or nothing', async (t) => {
+  const site = await fixtureSite(t, {
+    '/': ['text/html; charset=utf-8', page('<link rel="stylesheet" href="/s.css"><link rel="alternate" type="application/rss+xml" title="RSS" href="/feed.xml">')],
+    '/atom': ['text/html', page("<link type='application/atom+xml' href='https://example.com/atom.xml?a=1&amp;b=2' rel='alternate'>")],
+    '/plain': ['text/html', page('<link rel="alternate" hreflang="fr" href="/fr/">')],
+    '/feed.xml': ['application/rss+xml', RSS],
+    '/atom.xml': ['text/plain', ATOM],
+  });
+  const app = await startSources(t);
+  const discover = (url) => send(app, 'POST', '/api/sources/discover', { url });
+  assert.deepEqual([(await discover(`${site}/`)).status, (await discover(`${site}/`)).json], [200, { feed: `${site}/feed.xml` }]);
+  assert.deepEqual((await discover(`${site}/atom`)).json, { feed: 'https://example.com/atom.xml?a=1&b=2' });
+  assert.deepEqual((await discover(`${site}/feed.xml`)).json, { feed: `${site}/feed.xml` });
+  // A feed served as text is still a feed; a redirect answers where it led.
+  assert.deepEqual((await discover(`${site}/atom.xml`)).json, { feed: `${site}/atom.xml` });
+  assert.deepEqual((await discover(`${site}/moved`)).json, { feed: `${site}/feed.xml` });
+  assert.deepEqual((await discover(`${site}/plain`)).json, { feed: null });
+  assert.deepEqual((await discover(`${site}/gone`)).json, { feed: null });
+  // Nothing was written.
+  assert.deepEqual(await readdir(app.sourcesDir).catch(() => []), []);
+});
+
+test('discover refuses an address that is not http or https, and a body with other keys', async (t) => {
+  const app = await startSources(t);
+  const detail = 'url must be an http or https address';
+  for (const body of [{ url: 'ftp://example.com/feed' }, { url: 'file:///etc/passwd' }, { url: 'example.com' }, { url: 7 }, {}, { url: 'https://example.com', name: 'X' }]) {
+    const response = await send(app, 'POST', '/api/sources/discover', body);
+    assert.deepEqual([response.status, response.json], [400, { error: 'invalid_body', detail }], JSON.stringify(body));
+  }
+  assert.equal((await request(app, 'GET', '/api/sources/discover')).headers.allow, 'POST');
+  assert.equal(await discoverFeed('javascript:alert(1)'), null);
+});
+
+test('discover gives up on a site that does not answer in time, and reads no further than the cap', async (t) => {
+  const filler = '<meta name="x" content="' + 'x'.repeat(2048) + '">';
+  const site = await fixtureSite(t, {
+    '/long': ['text/html', page(filler + '<link rel="alternate" type="application/rss+xml" href="/feed.xml">')],
+  });
+  const started = Date.now();
+  assert.equal(await discoverFeed(`${site}/slow`, { timeoutMs: 200 }), null);
+  assert.ok(Date.now() - started < 2000);
+  assert.equal(await discoverFeed(`${site}/long`, { maxBytes: 1024 }), null);
+  assert.equal(await discoverFeed(`${site}/long`), `${site}/feed.xml`);
+});
+
+test('a source named Discover takes another id, since discover is the route', async (t) => {
+  const app = await startSources(t);
+  const created = await send(app, 'POST', '/api/sources', { name: 'Discover', kind: 'rss', url: 'https://example.com/feed' });
+  assert.equal(created.json.source.id, 'discover-2');
 });

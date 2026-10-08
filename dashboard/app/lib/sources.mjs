@@ -149,7 +149,8 @@ export function createSources({ dir, limits, log: rawLog = () => {}, now = () =>
       if (!isRecord(fields)) throw invalid('the body must be an object');
       const problem = checkFields(fields, { kind: fields.kind, partial: false });
       if (problem) throw invalid(problem);
-      const taken = new Set((await names()).map((name) => FILE_NAME.exec(name)[1]));
+      // `discover` is the path of POST /api/sources/discover, never an id.
+      const taken = new Set(['discover', ...(await names()).map((name) => FILE_NAME.exec(name)[1])]);
       const stem = slug(fields.name.trim(), 'source');
       let id = stem;
       for (let suffix = 2; taken.has(id); suffix += 1) id = `${stem.slice(0, 63 - String(suffix).length)}-${suffix}`;
