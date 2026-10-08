@@ -65,6 +65,9 @@ if [ "$dry_run" = 1 ]; then
         printf '  feed %s (%s) since=%s\n' "$feed" "$($jq -r '.name // .id' "$data/feeds/$feed/feed.json")" "$since"
         prepare describe --data "$data" --feed "$feed"
         printf '    note %s/feeds/%s/note.md\n' "$data" "$feed"
+        if [ -f "$data/feeds/$feed/items/$date.json" ]; then
+            printf '    skipped: %s/feeds/%s/items/%s.json is already written\n' "$data" "$feed" "$date"; continue
+        fi
         query=$(prepare query --data "$data" --feed "$feed" --since "$since")
         if [ -n "$query" ]; then
             printf '    list: %s -p --model %s --allowedTools mcp__claude_ai_Gmail__search_threads --json-schema schemas/threads.json < prompts/list.md, query=%s\n' "$claude" "$list_model" "$query"
@@ -75,7 +78,7 @@ if [ "$dry_run" = 1 ]; then
         fi
         printf '    extract: %s at a time, %ss each, one retry\n' "$parallel" "$stage_seconds"
         printf '    triage: %s, no tools, prompts/triage.md with system-rules.md, the note, the context, %s/seen.jsonl (this feed, 14d), the stories; schemas/triage.json\n' "$triage_model" "$run_dir"
-        printf '    render: %s render.py feed -> %s/feeds/%s/items/%s.json (kept if present), %s/overflow/%s-%s.json, %s/work/%s/%s.json, seen.jsonl, state.json\n' "$python3" "$data" "$feed" "$date" "$run_dir" "$date" "$feed" "$run_dir" "$date" "$feed"
+        printf '    render: %s render.py feed -> %s/feeds/%s/items/%s.json %s/overflow/%s-%s.json, %s/work/%s/%s.json, seen.jsonl, state.json\n' "$python3" "$data" "$feed" "$date" "$run_dir" "$date" "$feed" "$run_dir" "$date" "$feed"
         printf '    enrich: %s feeds/bin/enrich %s/feeds/%s/items/%s.json (%ss in all)\n' "$python3" "$data" "$feed" "$date" "$enrich_seconds"
     done
     printf '  packet: %s render.py packet --date %s -> %s/packets/%s.yaml, once after every feed\n' "$python3" "$date" "$run_dir" "$date"
@@ -86,11 +89,12 @@ fi
 /bin/mkdir -p "$transcripts" && /bin/chmod 700 "$transcripts"
 (umask 077 && /bin/mkdir -p "$run_dir/packets" "$run_dir/overflow" "$run_dir/work") || exit 1
 if ! /bin/mkdir "$lock_dir" 2>/dev/null; then
-    if [ -n "$(/usr/bin/find "$lock_dir" -maxdepth 0 -mmin +90 2>/dev/null)" ]; then /bin/rm -rf "$lock_dir"; /bin/mkdir "$lock_dir" || exit 0
+    if [ -n "$(/usr/bin/find "$lock_dir" -maxdepth 0 -mmin +240 2>/dev/null)" ]; then /bin/rm -rf "$lock_dir"; /bin/mkdir "$lock_dir" || exit 0
     else log "exit=0 date=$date reason=locked"; exit 0; fi
 fi
 work=$(/usr/bin/mktemp -d "$transcripts/feeds-$date.XXXX")
-trap '/bin/rm -rf "$lock_dir"' EXIT INT TERM
+trap '/bin/rm -rf "$lock_dir"' EXIT
+trap 'exit 130' INT TERM
 cd "$root" || exit 1
 
 # Woken from sleep: the network may not be up yet. As in run-brief, only
@@ -151,6 +155,10 @@ run_feed() {
     since=$(since_for "$feed")
     note_file=$data/feeds/$feed/note.md
     [ -f "$note_file" ] || { log "exit=1 feed=$feed date=$date reason=no-note $note_file"; return 1; }
+    # The items store is append-only. A feed that already ran today is left
+    # as it is, so a re-run for a failed feed keeps this one's posts in the
+    # packet.
+    [ -f "$data/feeds/$feed/items/$date.json" ] && { log "exit=0 feed=$feed date=$date reason=already-written"; return 0; }
     i=0; n_issues=0; read_ids=
 
     # --- email: list the threads, then extract each with get_thread --------
@@ -223,7 +231,8 @@ run_feed() {
 
     # --- triage ---------------------------------------------------------------
     prepare triage --data "$data" --feed "$feed" --date "$date" --since "$since" --template "$run_code/prompts/triage.md" \
-        --rules "$run_code/system-rules.md" --stories "$w/stories.txt" --out "$w/triage.md" --notes "$w/context-notes" || return 1
+        --rules "$run_code/system-rules.md" --stories "$w/stories.txt" --out "$w/triage.md" --notes "$w/context-notes" 2>"$w/prepare.err" \
+        || { log "exit=1 feed=$feed date=$date reason=prompt-failed $(/usr/bin/tail -n 1 "$w/prepare.err" | /usr/bin/head -c 160)"; return 1; }
     if ! run_session "$triage_seconds" '.structured_output.items' "$w/triage.json" "\"$claude\" -p --model \"$triage_model\" \
         --tools \"\" --strict-mcp-config \
         --output-format json --json-schema \"\$(cat \"$run_code/schemas/triage.json\")\" \

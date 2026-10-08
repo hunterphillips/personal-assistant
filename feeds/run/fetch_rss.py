@@ -5,7 +5,7 @@
 
 Writes DIR/entry-<n>.json for each kept entry, newest first: {title, link,
 date, content}, with links made absolute and the content's HTML stripped
-and cut at 80 KB. Prints {"entries": n, "newest": <date or null>} on
+(each link's URL kept after its text) and cut at 80 KB. Prints {"entries": n, "newest": <date or null>} on
 stdout, where newest is the newest entry date in the feed, kept or not, so
 the run's log shows a stale feed. An entry with no date is skipped: there
 is no telling whether it is new. Exits 1 when the feed cannot be fetched
@@ -35,24 +35,35 @@ BLOCKS = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "blo
 
 
 class Text(html.parser.HTMLParser):
-    """An HTML fragment's text, with block elements on their own lines."""
+    """An HTML fragment's text, with block elements on their own lines and
+    each link's absolute URL after its text, so a digest keeps the link of
+    every story it carries."""
 
-    def __init__(self):
+    def __init__(self, base=""):
         super().__init__(convert_charrefs=True)
+        self.base = base
         self.parts = []
         self.skip = 0
+        self.links = []
 
     def handle_starttag(self, tag, attrs):
         if tag in ("script", "style"):
             self.skip += 1
         elif tag in BLOCKS:
             self.parts.append("\n")
+        elif tag == "a":
+            href = urllib.parse.urljoin(self.base, (dict(attrs).get("href") or "").strip())
+            self.links.append(href if href.lower().startswith(("http://", "https://")) else "")
 
     def handle_endtag(self, tag):
         if tag in ("script", "style"):
             self.skip = max(0, self.skip - 1)
         elif tag in BLOCKS:
             self.parts.append("\n")
+        elif tag == "a" and self.links:
+            href = self.links.pop()
+            if href and not self.skip:
+                self.parts.append(f" ({href})")
 
     def handle_data(self, data):
         if not self.skip:
@@ -71,8 +82,8 @@ class Text(html.parser.HTMLParser):
         return "\n".join(out).strip()
 
 
-def strip_html(s):
-    p = Text()
+def strip_html(s, base=""):
+    p = Text(base)
     p.feed(s or "")
     p.close()
     return p.text()
@@ -148,7 +159,7 @@ def parse(data, url, since):
         if date.date() < cutoff:
             continue
         kept.append((date, {"title": strip_html(title), "link": link, "date": date.isoformat(),
-                            "content": cap(strip_html(body))}))
+                            "content": cap(strip_html(body, link))}))
     kept.sort(key=lambda p: p[0], reverse=True)
     return [e for _, e in kept], newest.isoformat() if newest else None
 

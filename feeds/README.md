@@ -115,6 +115,7 @@ feeds/run/run-feeds --since 2026-09-14     # every feed from one date
 `FEEDS_TRIAGE_MODEL`, `FEEDS_EXTRACT_MODEL`, `FEEDS_LIST_MODEL` override
 the models. Log lines start with `feeds` and carry `feed=<id>`. The run
 exits 0 when every feed ran and 1 when any failed; each feed runs on its
-own.
+own. A feed whose items file for the date is already written is skipped,
+so re-running after a failure redoes only the feeds that failed.
 
 Tests: `python3 -m pytest feeds/test`.

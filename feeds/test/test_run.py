@@ -137,6 +137,14 @@ class DryRunTest(Root):
         self.assertNotIn("Gmail__", local)
         self.assertNotIn("query=", local)
 
+    def test_a_feed_already_written_for_the_date_is_skipped(self):
+        write(os.path.join(self.root, "feeds", "local", "items", f"{DATE}.json"), "{}\n")
+        out = self.dry_run()
+        local = self.block(out, "local")
+        self.assertIn(f"    skipped: {self.root}/feeds/local/items/{DATE}.json is already written", local)
+        self.assertNotIn("triage:", local)
+        self.assertIn("triage:", self.block(out, "news"))
+
     def test_no_active_feed_is_a_quiet_dry_run(self):
         for fid in ("news", "local"):
             os.remove(os.path.join(self.root, "feeds", fid, "feed.json"))

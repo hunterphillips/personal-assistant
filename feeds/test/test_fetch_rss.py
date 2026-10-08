@@ -86,9 +86,15 @@ class ParseTest(unittest.TestCase):
     def test_rss_content_prefers_the_full_body_with_html_stripped(self):
         entries, _ = fetch_rss.parse(RSS.encode(), "https://letter.example.com/feed", "2001-01-08")
         self.assertIn("Story one", entries[0]["content"])
-        self.assertIn("Body link.", entries[0]["content"].replace("\n", " ").replace("  ", " "))
+        self.assertIn("Body link (https://a.example.com/1).", entries[0]["content"])
         self.assertNotIn("<", entries[0]["content"])
         self.assertNotIn("var x", entries[0]["content"])
+
+    def test_a_digest_keeps_each_story_link_made_absolute(self):
+        doc = RSS.replace('<a href="https://a.example.com/1">link</a>', '<a href="https://a.example.com/1">link</a> and <a href="/p/two">two</a>')
+        entries, _ = fetch_rss.parse(doc.encode(), "https://letter.example.com/feed", "2001-01-08")
+        self.assertIn("link (https://a.example.com/1)", entries[0]["content"])
+        self.assertIn("two (https://letter.example.com/p/two)", entries[0]["content"])
 
     def test_rss_entry_without_a_description_has_empty_content(self):
         entries, _ = fetch_rss.parse(RSS.encode(), "https://letter.example.com/feed", "2001-01-08")
