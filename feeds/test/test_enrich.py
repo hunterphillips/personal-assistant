@@ -1,6 +1,6 @@
-"""feed/bin/enrich against a local http.server fixture.
+"""feeds/bin/enrich against a local http.server fixture.
 
-Run from the repo root: python3 -m unittest discover -s feed
+Run from the repo root: python3 -m unittest discover -s feeds/test
 """
 
 import http.server

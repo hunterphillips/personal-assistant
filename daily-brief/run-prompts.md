@@ -21,5 +21,5 @@ where <domain> is cfo, focus, or second-brain.
 Calendar: the scheduled run writes `calendar.yaml` from `bin/prompts/calendar.md`;
 in a hand run the curator reads the calendars directly.
 
-Watch needs no prompt: `watch/contribute` runs daily (or by hand any time)
+Watch needs no prompt: `feeds/run/run-feeds` runs daily (or by hand any time)
 and leaves a packet the next brief run picks up when there is something new.

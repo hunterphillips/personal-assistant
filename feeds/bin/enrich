@@ -6,7 +6,7 @@
 For every item with no `image`, fetch its `url` and take the first absolute
 http(s) URL from the head's og:image, then twitter:image, then image_src.
 An item with none, or whose fetch fails, is left exactly as it was. See
-feed/README.md for the store. Standard library only.
+feeds/README.md for the store. Standard library only.
 """
 
 import concurrent.futures
