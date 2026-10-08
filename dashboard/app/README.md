@@ -66,10 +66,18 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/sessions/refresh` | Re-reads the cmux inventory and the Codex catalogue now and answers `{"ok": true, "revision": N}`. |
 | `GET /api/goals` | Priorities and goal notes read from the vault (below). |
 | `POST /api/goals/propose` | Sends a new goal or a change to one to the second-brain persona; 202 `{"ok": true, "agentId": "second-brain"}` once the turn has started (below). |
-| `GET /api/feed` | The feed store's runs, newest first (below). |
-| `POST /api/feed/discuss` | Sends one feed item to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
-| `GET /api/feed/instructions` | The feed's criteria file, read as prose (below). |
-| `POST /api/feed/instructions/propose` | Sends a change to the criteria to the watch persona; 202 `{"ok": true, "agentId": "watch"}` once the turn has started (below). |
+| `GET /api/feeds` | The feeds, newest first: `{"feeds", "problems"}` (below). |
+| `POST /api/feeds` | Creates a feed from `{"name", "note"}`; 201 `{"ok": true, "feed"}`. |
+| `GET /api/feeds/<id>` | The feed's runs and posts, newest first (below). |
+| `PUT /api/feeds/<id>` | Changes any of `name`, `sources`, and `active`; `{"ok": true, "feed"}`. |
+| `GET /api/feeds/<id>/note` | The feed's instructions: `{"text", "updated"}`. |
+| `PUT /api/feeds/<id>/note` | Writes the instructions from `{"text"}`; `{"ok": true, "text", "updated"}`. |
+| `POST /api/feeds/<id>/save`, `/unsave`, `/dismiss` | Marks one post from `{"id"}` and answers the fresh read. |
+| `POST /api/feeds/<id>/discuss` | Sends one post to the feed's producer; 202 `{"ok": true, "agentId"}` once the turn has started (below). |
+| `GET /api/sources` | The sources, by name: `{"sources", "problems"}` (below). |
+| `POST /api/sources` | Adds a source; 201 `{"ok": true, "source"}`. |
+| `PUT /api/sources/<id>` | Changes any of `name`, `active`, `default`, and the kind's field; `{"ok": true, "source"}`. |
+| `DELETE /api/sources/<id>` | Removes a source no feed lists; 409 `in_use` with `feeds` otherwise. |
 | `GET /api/ideas` | The Ideas runs, marks, and producing agent, newest first, with `routine`: the id of the producer's ideas routine (its first routine whose instruction or name contains "ideas"), or null. The New ideas action runs it through `POST /api/routines/:id/run`. |
 | `POST /api/ideas` | Adds a manual idea and returns the fresh Ideas store. |
 | `POST /api/ideas/dismiss` | Dismisses an idea and returns the fresh Ideas store. |
@@ -103,9 +111,9 @@ what `lib/app.mjs` expects from it.
 - `lib/goals-routes.mjs` serves the Goals routes over `lib/goals.mjs`, which reads the vault.
 - `lib/routine-routes.mjs` serves the routine routes over `lib/routines.mjs`, the routine files and their runs logs, and `lib/schedule.mjs`, the cron subset and its occurrences in Chicago time; `lib/scheduler.mjs` runs them.
 - `lib/notification-routes.mjs` serves the notification routes over `lib/notifications.mjs`, the notifications file.
-- `lib/feed-routes.mjs` serves the Feed routes over `lib/feed.mjs`, which reads the feed store, and `lib/feed-instructions.mjs`, which reads the criteria file.
+- `lib/feed-routes.mjs` serves the feed routes over `lib/feeds.mjs`, the feed folders, and `lib/source-routes.mjs` the source routes over `lib/sources.mjs`, the source files.
 - `lib/ideas-routes.mjs` serves Ideas over `lib/ideas.mjs` and `ideas/criteria.md`; `ideasRoutine()` finds the producer's ideas routine.
-- `lib/brief-instructions.mjs` reads the brief's rules file and serves the two routes under `/api/brief/instructions`; `lib/instructions.mjs` is the prose reader both instructions files share, and `lib/instructions-routes.mjs` their two routes.
+- `lib/brief-instructions.mjs` reads the brief's rules file and serves the two routes under `/api/brief/instructions`; `lib/instructions.mjs` is the prose reader the brief's rules and the Ideas criteria share, and `lib/instructions-routes.mjs` their two routes.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
 - `lib/focus-proxy.mjs` forwards the Focus routes.
@@ -373,10 +381,21 @@ reads "The brief for <date> could not be opened." or "No brief has been
 generated yet." The viewer pages stay on disk; nothing serves them.
 
 `GET /api/brief/instructions` reads the rules the curator follows,
-`daily-brief/curator.md` (`DASHBOARD_BRIEF_INSTRUCTIONS`), and answers the
-same shape as `GET /api/feed/instructions` below, with `path`
-`daily-brief/curator.md` and the problem sentences naming the brief
-instructions file.
+`daily-brief/curator.md` (`DASHBOARD_BRIEF_INSTRUCTIONS`), and answers
+
+```json
+{ "path": "daily-brief/curator.md", "updated": "<ISO or null>", "problem": null,
+  "blocks": [{ "type": "h", "text": "..." }, { "type": "p", "text": "..." },
+             { "type": "list", "ordered": true, "items": ["..."] },
+             { "type": "table", "head": ["..."], "rows": [["..."]] }] }
+```
+
+`updated` is the file's modification time. The blocks come from the Goals
+markdown reader, with inline markup flattened; a paragraph of `|` rows under
+a delimiter row becomes a table. A file that is missing, not a regular
+file, or over 64 KiB gives no blocks and one `problem` sentence naming the
+brief instructions file. Reads are cached by the file's lstat and happen
+only on request.
 
 `POST /api/brief/instructions/propose` takes `{"text": "..."}` and sends the
 agent Settings names under "Brief goes to" one message asking it to change
@@ -405,65 +424,60 @@ to the second-brain persona as a new message, and the shell opens that
 persona's thread. The dashboard never writes the vault; the persona does, in its own
 turn.
 
-### Feed
+### Feeds and sources
 
-`GET /api/feed` reads the feed store, `feed/items/` in the data root
-(`DASHBOARD_FEED_DIR`; `feed/README.md` describes the files), and answers
+A feed is a folder under `feeds/` in the data root (`DASHBOARD_FEEDS_DIR`):
+`feed.json` (its name, the agent that produces it, its sources, and whether
+it runs), `note.md` (Hunter's instructions), `items/` (one file per run),
+and `marks.json`. A source is one file under `sources/`
+(`DASHBOARD_SOURCES_DIR`): an RSS feed (`url`), a newsletter's sender
+(`sender`), a file, or a folder (`path`). RSS and email sources are
+incoming; files and folders are context. The dashboard writes `feed.json`,
+`note.md`, `marks.json`, and the sources; the producer only adds item
+files.
 
-```json
-{ "agentId": "watch", "readAt": "<ISO>", "problems": [],
-  "runs": [{ "id": "2026-09-28-watch", "producer": "watch", "date": "2026-09-28", "since": "2026-09-14",
-             "generatedAt": "<ISO>",
-             "items": [{ "id": "watch/2026-09-28/1", "title": "...", "source": "...", "url": "https://...",
-                         "summary": "...", "test": 5, "kept": true, "image": "https://..." }] }] }
-```
-
-Runs are the newest 30 files by name, regular files only. A file that is
-over 256 KiB, not JSON, or not a run is left out with one problem sentence;
-an item without its five text fields, with a URL that is not `http` or
-`https`, or with an id already used is left out and counted in one sentence
-per run. `image` is the story's picture when it is an `http` or `https`
-URL and null otherwise; it never gets an item left out. The Feed shows it
-under the summary, loaded from the story's own host with no referrer, which
-is why the shell CSP allows `http:` and `https:` images. A missing directory
-is one problem and no runs. Reads are cached by
-the files' lstat and happen only on request.
-
-`POST /api/feed/discuss` takes `{"id": "watch/2026-09-28/1"}`, sends the
-item's title, source, link, and summary to the watch persona as a new
-message asking it to read the link and say what it found, and the shell
-opens that persona's thread. It refuses with 400 `invalid_body`, 503
-`shutting_down`, 404 `no_such_agent` (no `watch` persona in the registry),
-409 `persona_unavailable`, 404 `no_such_item`, then the persona send
-refusals (409 `busy` and the rest). The dashboard never writes the store;
-the producers do.
-
-`GET /api/feed/instructions` reads the criteria the watch job applies,
-`feed/relevance.md` in the data root (`DASHBOARD_FEED_INSTRUCTIONS`), and answers
+`GET /api/feeds/<id>` answers
 
 ```json
-{ "path": "feed/relevance.md", "updated": "<ISO or null>", "problem": null,
-  "blocks": [{ "type": "h", "text": "..." }, { "type": "p", "text": "..." },
-             { "type": "list", "ordered": true, "items": ["..."] },
-             { "type": "table", "head": ["..."], "rows": [["..."]] }] }
+{ "feed": { "id": "news", "name": "News", "producer": "scout", "sources": [], "active": true, "...": "..." },
+  "readAt": "<ISO>", "problems": [],
+  "runs": [{ "id": "2026-10-09", "producer": "scout", "date": "2026-10-09", "since": "2026-10-08",
+             "generatedAt": "<ISO>", "read": ["latent-space"],
+             "items": [{ "id": "news/2026-10-09/1", "title": "...", "sources": ["latent-space"], "url": "https://...",
+                         "summary": "...", "takeaway": "...", "insights": "...", "kept": true,
+                         "image": "https://...", "status": "new" }] }] }
 ```
 
-`updated` is the file's modification time. The blocks come from the Goals
-markdown reader, with inline markup flattened; a paragraph of `|` rows under
-a delimiter row, such as the sources table, becomes a table. A file that is missing, not
-a regular file, or over 64 KiB gives no blocks and one `problem` sentence.
-Reads are cached by the file's lstat and happen only on request.
+Runs are the newest 30 files named `<date>.json`, or `<date>-<producer>.json`
+from before feeds, regular files only. A file over 256 KiB, not JSON, or not
+a run is left out with one problem sentence; an item without its id, title,
+`http` or `https` URL, summary, and sources, or with an id already used, is
+left out and counted in one sentence per run. An older item's `source`
+string is split on "/" and ","; each name becomes the id of the source with
+that name, or stays as written. A takeaway over 240 characters or insights
+over 2,000 are dropped and the item kept. A dismissed post is left out;
+`status` is `saved` or `new`. `image` is the story's picture when it is an
+`http` or `https` URL, shown under the summary from the story's own host
+with no referrer, which is why the shell CSP allows `http:` and `https:`
+images.
 
-`POST /api/feed/instructions/propose` takes `{"text": "..."}` and sends the
-watch persona one message asking it to change the criteria, keep the sender
-list in `daily-brief/watch/contribute` in step with the sources table, and
-say what changed; the shell then opens its thread. It refuses with 400
-`invalid_body`, 400 `invalid_text` (blank), 413 `payload_too_large` (over
-the send limit), then as Discuss does from 503 `shutting_down` on. The
-dashboard never writes the file; the persona does.
+`POST /api/feeds` starts a feed with the sources marked `default` and the
+producer the oldest feed names. `PUT /api/feeds/<id>` refuses a source id
+that is not registered with 400 `unknown_source` and the ids. The note is
+written directly, up to 64 KiB (413 `note_too_large`), with no agent turn.
 
-On the Feed tab, the Feed instructions button at the end of the tab row
-opens these criteria above the posts with a box for the change.
+`POST /api/feeds/<id>/discuss` takes `{"id": "news/2026-10-09/1"}`, sends
+the post's title, sources by name, link, summary, takeaway, and insights to
+the feed's producer as a new message asking it to read the link and say
+what it says and why it was picked, and the shell opens that agent's
+thread. It refuses with 400 `invalid_body`, 503 `shutting_down`, 404
+`no_such_feed`, 404 `no_such_agent`, 409 `persona_unavailable`, 404
+`no_such_item`, then the persona send refusals (409 `busy` and the rest).
+
+`GET /api/sources` lists every source with its `role` (`incoming` or
+`context`) and, for a file or folder, `missing` when the path is not there.
+A source's id is its name as a slug, with `-2` on a collision. A refused
+body is 400 `invalid_body` with `detail` naming the field.
 
 ### Ideas
 
@@ -1940,8 +1954,8 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_PORT` | `4243` | Startup fails if the port is taken. |
 | `DASHBOARD_PUBLIC_ORIGIN` | unset | The tailnet `https://` origin. When set, its host is accepted as a Host header and it is accepted as an Origin. When unset, only `127.0.0.1:<port>` and `localhost:<port>` are accepted. |
 | `DASHBOARD_BRIEFS_DIR` | `<root>/briefs` | The briefs. A relative override resolves from this directory, not the working directory, as for every path below. |
-| `DASHBOARD_FEED_DIR` | `<root>/feed/items` | The feed store the producers write; does not need to exist at startup. |
-| `DASHBOARD_FEED_INSTRUCTIONS` | `<root>/feed/relevance.md` | The criteria file the watch job reads, shown on the Feed tab; seeded from `defaults/feed-relevance.md` when missing. |
+| `DASHBOARD_FEEDS_DIR` | `<root>/feeds` | The feeds, one folder each; does not need to exist at startup. |
+| `DASHBOARD_SOURCES_DIR` | `<root>/sources` | The sources the feeds read; does not need to exist at startup. |
 | `DASHBOARD_IDEAS_DIR` | `<root>/ideas/items` | The Ideas runs the producers write; does not need to exist at startup. |
 | `DASHBOARD_IDEAS_MARKS` | `<root>/ideas/marks.json` | The marks the Ideas view writes. |
 | `DASHBOARD_IDEAS_INSTRUCTIONS` | `<root>/ideas/criteria.md` | The criteria the ideas producer reads; seeded from `defaults/ideas-criteria.md` when missing. |
