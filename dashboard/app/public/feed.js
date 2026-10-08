@@ -636,7 +636,11 @@
         pending = null;
         button.disabled = false;
         if (result && result.status === 200 && result.body && Array.isArray(result.body.runs)) {
-          if (feed === feedId) apply(result.body);
+          // A read already out predates the mark; its answer is dropped.
+          if (feed === feedId) {
+            sequence += 1;
+            apply(result.body);
+          }
           // The render replaced the bookmark; a keyboard toggle keeps its place.
           if (focused) {
             var row = itemNode(id);

@@ -1195,6 +1195,7 @@ div.panel-row.now-row:hover { background: none; }
 }
 .feed-settings { flex-basis: 340px; }
 .feed-settings[hidden] { display: none; }
+.feed-settings .card-name:focus { outline: none; }
 .feed-settings-section + .feed-settings-section { margin-top: 24px; }
 .feed-settings-heading {
   margin: 0 0 8px;

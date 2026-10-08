@@ -61,6 +61,7 @@ test.describe('feed settings', () => {
   test('the gear opens the feed\'s instructions; Save is on once they change and writes the note', async ({ page, hub }) => {
     await openSettings(page, hub);
     await expect(gear(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(sheet(page).getByRole('heading', { name: 'Settings' })).toBeFocused();
     await expect(sheet(page).locator('.details-name')).toHaveText('News');
     const note = sheet(page).getByRole('textbox', { name: 'Instructions' });
     const original = await readFile(hub.instructionsFile, 'utf8');
@@ -218,6 +219,10 @@ test.describe('feed settings', () => {
     expect((await readdir(hub.sourcesDir)).sort()).toEqual(['latent-space.json']);
     await sheet(page).getByRole('button', { name: 'Back to settings' }).click();
     await expect(sheet(page).getByRole('heading', { name: 'Instructions' })).toBeVisible();
+    await expect(sheet(page).getByRole('heading', { name: 'Settings' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(sheet(page)).toBeHidden();
+    await expect(gear(page)).toBeFocused();
   });
 
   test('on a phone the sheet covers the posts without horizontal scroll', async ({ page, hub }) => {

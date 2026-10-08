@@ -137,11 +137,6 @@
       if (restore && opener && !opener.hidden) opener.focus();
     }
 
-    function focusFirst() {
-      var first = body.querySelector('input:not([type="hidden"]), textarea, select, button');
-      if (first) first.focus();
-    }
-
     function sourcesPath(id) {
       return '/api/sources' + (id ? '/' + encodeURIComponent(id) : '');
     }
@@ -239,7 +234,8 @@
         }
         renderChoices(list, result.body.sources, sourcesStatus, turn);
       });
-      focusFirst();
+      // The note is still loading, so the heading takes focus into the sheet.
+      heading.focus();
     }
 
     // The active sources as checkboxes, incoming then context.
@@ -306,7 +302,7 @@
       body.appendChild(add);
       add.addEventListener('click', function () {
         add.hidden = true;
-        body.appendChild(addForm(function () { openSources(); }, function () {
+        body.appendChild(addForm(turn, function () { openSources(); }, function () {
           add.hidden = false;
           add.focus();
         }));
@@ -389,7 +385,7 @@
     }
 
     // Add source: a type, then only its fields.
-    function addForm(done, cancel) {
+    function addForm(turn, done, cancel) {
       var form = element('form', 'details-form feed-source-form');
       form.noValidate = true;
       form.setAttribute('aria-label', 'Add source');
@@ -443,6 +439,11 @@
         sender.value = '';
         say(line, '');
       });
+      // A changed address is looked up again rather than saved as a sender's.
+      address.addEventListener('input', function () {
+        senderField.hidden = true;
+        sender.value = '';
+      });
       cancelButton.addEventListener('click', function () {
         form.remove();
         cancel();
@@ -450,6 +451,7 @@
 
       function createSource(fields) {
         return api.postJson(sourcesPath(), fields).then(function (result) {
+          if (turn !== sequence) return;
           if (result && result.status === 201) {
             done();
             return;
@@ -478,6 +480,7 @@
         }
         say(line, 'Looking for a feed.');
         api.postJson(sourcesPath() + '/discover', { url: where }).then(function (result) {
+          if (turn !== sequence) return;
           if (!result || result.status !== 200 || !result.body) {
             submit.disabled = false;
             say(line, refusal(result));
