@@ -40,9 +40,10 @@ from here.
   reply kept under Last runs in its settings, are listed
   under its settings with a picker form and under the groups in the
   list; Myos is the built-in guide agent, seeded by the daemon, and any
-  other agent can be deleted from its gear panel), Feed holds what the
-  producers found (with images, and Discuss opening the Watch agent; its
-  instructions send a change to Watch), the Daily Brief opens as an
+  other agent can be deleted from its gear panel), Feed holds the
+  feeds as tabs, each a set of posts Scout found in the feed's sources
+  (with images, and Discuss opening Scout; a gear opens the feed's
+  instructions, its sources, and the Sources list), the Daily Brief opens as an
   overlay from the header on any view (rendered from the run's brief
   JSON, with Approve, Dismiss, notes, and its own instructions), Focus is
   embedded through a proxy and takes the dashboard's theme, Goals reads
@@ -75,13 +76,14 @@ from here.
   dashboard writes it (an agent's settings, New agent) as 2-space JSON in
   the schema's key order; hand edits still load.
 - **Use cases**: `daily-brief/`, running every morning since 2026-09-27
-  (gather one packet per domain, curate, build, verify), with the newsletter
-  `watch` domain daily; the Feed's store under the data root, which
-  watch writes and the dashboard reads, with `feeds/README.md` in the
-  repo documenting its schema. A later weekly review or decision
+  (gather one packet per domain, curate, build, verify), with the feeds run
+  (`feeds/run/run-feeds`, the `com.personal-assistant.feeds` job at 05:40)
+  daily, which leaves the brief its `watch` packet; the feeds and sources
+  live under the data root, which the run and the dashboard write, with
+  `feeds/README.md` in the repo documenting their shapes. A later weekly review or decision
   prep sits beside them with its own contract.
 - **The agents' repos**, each its own repo with its own CLAUDE.md, launchd
-  jobs, and state (CFO, Focus, Second brain, personal-context; Watch lives
+  jobs, and state (CFO, Focus, Second brain, personal-context; Scout lives
   here). Working under the link loads that repo's instructions, and git
   commands run there act on that repo.
   - `systems/cfo` (`~/workspace/work/investing/cfo`): money. Drift against
@@ -157,15 +159,15 @@ picks one up and ends by updating it.
   a week later); each build writes the viewer and `brief-<date>.json`;
   `build.py` and `check-viewer.mjs` beside the briefs are code.
 - `feeds/`: the feeds run (`run/run-feeds`, every active feed daily, the
-  brief's `watch` packet), `bin/enrich`, and the README with the feed and
-  source shapes; the feeds, sources, posts, and the run's state
-  (`feeds/.run/`) live under the data root.
+  brief's `watch` packet), its job in `launchd/`, `bin/enrich`, and the
+  README with the feed and source shapes; the feeds, sources, posts, and
+  the run's state (`feeds/.run/`) live under the data root.
 - `ideas/`: the store's README; `items/`, `marks.json`, and `criteria.md`
   are outputs, under the data root since 2026-10-06 (the repo's copies
   renamed `.migrated`, deleted a week later), with `defaults/ideas-criteria.md`
   seeding the root's copy when it is missing.
 - `agents/`: one folder per agent that lives in this repo (Assistant,
-  Watch, Myos), its CLAUDE.md and skills; the folder is the agent's `cwd`.
+  Scout, Myos), its CLAUDE.md and skills; the folder is the agent's `cwd`.
 - `systems/`: symlinks to the agents' repos.
 - `thoughts/shared/`: lanes, plans, research, tickets.
 

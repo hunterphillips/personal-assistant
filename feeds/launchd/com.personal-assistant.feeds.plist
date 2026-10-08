@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.personal-assistant.watch</string>
+  <string>com.personal-assistant.feeds</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/caffeinate</string>
     <string>-is</string>
     <string>/bin/sh</string>
-    <string>/Users/hunterphillips/workspace/personal-assistant/daily-brief/watch/contribute</string>
+    <string>/Users/hunterphillips/workspace/personal-assistant/feeds/run/run-feeds</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/hunterphillips/workspace/personal-assistant</string>

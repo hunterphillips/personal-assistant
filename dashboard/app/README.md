@@ -1021,7 +1021,7 @@ it and the Agents view (above) drives them.
 
 ### Agent folders
 
-An agent that lives in this repo (the Assistant, Watch, Myos) has its own
+An agent that lives in this repo (the Assistant, Scout, Myos) has its own
 folder under `agents/<id>/` as its registry `cwd`, with a `CLAUDE.md` that
 says what it does. A turn there loads that file, every `CLAUDE.md` above
 it up to the repo root, and skills from the folder's `.claude/skills/` and

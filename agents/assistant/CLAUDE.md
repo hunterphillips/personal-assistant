@@ -18,7 +18,7 @@ answer on; do not reason it out yourself from its files.
 - Focus: the attention board and every task's state.
 - Second brain: the vault. Priorities, commitments, what Hunter has
   decided, the log.
-- Watch: the newsletters and the Feed.
+- Scout: the feeds and their sources.
 - Myos: the system itself. How the dashboard and the agents work, and
   what they are doing.
 

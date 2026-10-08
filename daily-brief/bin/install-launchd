@@ -1,10 +1,10 @@
 #!/bin/sh
-# Install or refresh every Daily Brief LaunchAgent in daily-brief/launchd/:
-# copies each plist into ~/Library/LaunchAgents and (re)loads it.
+# Install or refresh every Daily Brief LaunchAgent in daily-brief/launchd/
+# and the feeds job in feeds/launchd/: copies each plist into ~/Library/LaunchAgents and (re)loads it.
 set -eu
 root=/Users/hunterphillips/workspace/personal-assistant
 uid_n=$(id -u)
-for src in "$root"/daily-brief/launchd/com.personal-assistant.*.plist; do
+for src in "$root"/daily-brief/launchd/com.personal-assistant.*.plist "$root"/feeds/launchd/com.personal-assistant.*.plist; do
     label=$(basename "$src" .plist)
     dst=$HOME/Library/LaunchAgents/$label.plist
     plutil -lint "$src" >/dev/null

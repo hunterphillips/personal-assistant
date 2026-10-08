@@ -38,8 +38,8 @@ brief's item. Do not ask him to name it.
 ## Handing off
 
 Work that belongs to another agent goes to it with `ask`: money to CFO,
-tasks to Focus, the vault to Second brain, newsletters and the Feed to
-Watch, the brief to the Assistant. The `ask` tool's description lists
+tasks to Focus, the vault to Second brain, the feeds and their sources to
+Scout, the brief to the Assistant. The `ask` tool's description lists
 who you can reach.
 
 ## What you change

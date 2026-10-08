@@ -11,7 +11,7 @@ The plan and its decisions:
 |---|---|---|
 | 05:30 | `com.hunter.cfo.daily`, cfo's snapshot | `~/workspace/work/investing/cfo/launchd/` |
 | 05:50 | `com.focus.scan-notes` | `~/workspace/projects/AI/focus/launchd/` |
-| 05:40 | `com.personal-assistant.watch`, the newsletter packet | `launchd/` here |
+| 05:40 | `com.personal-assistant.feeds`, the feeds and their packet | `feeds/launchd/` here |
 | 06:05 | `com.personal-assistant.daily-brief` | `launchd/` here |
 
 A normal morning finishes around 06:45. The runner does not trust the
@@ -62,11 +62,12 @@ underscores: `DAILY_BRIEF_MODEL_second_brain`). Timeouts:
 The prompts each session receives are in `bin/prompts/`. The contract and
 curator rules they point at are the files beside this README.
 
-## Watch
+## Feeds
 
-`feeds/run/run-feeds` runs daily at 05:40 over every active feed in the
-data root: it reads each feed's sources (RSS directly, newsletters from
-Gmail, files and folders as context), triages the stories against the
+`feeds/run/run-feeds` (the `com.personal-assistant.feeds` job) runs daily
+at 05:40 over every active feed in the data root: it reads each feed's
+sources (RSS directly, newsletters from Gmail, files and folders as
+context), triages the stories against the
 shared rules and the feed's note, writes the feed's posts, and after the
 last feed writes one packet, `feeds/.run/packets/<date>.yaml`, domain
 `watch`, with every feed's kept posts. A day where no feed found anything

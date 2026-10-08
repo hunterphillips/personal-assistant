@@ -11,7 +11,7 @@ built.
 Something Hunter can talk to that has a name, a description, a folder it
 works in, and a thread. Its instructions are the CLAUDE.md in its folder:
 its own repo's, or `agents/<id>/` for one that lives in this repo. CFO,
-Focus, Second brain, Watch, and the Assistant are agents.
+Focus, Second brain, Scout, and the Assistant are agents.
 _Avoid_: persona, domain, domain persona, domain system, bot
 
 **Assistant**:
@@ -59,9 +59,21 @@ the Assistant's thread.
 _Avoid_: digest, newsletter, report
 
 **Feed**:
-What Watch and later producers found, as posts with Discuss. Its own view,
-named Feed in the rail; it was Reading while the brief was a tab there.
-_Avoid_: news, digest, stream
+A named set of posts an agent finds each morning from the feed's sources,
+kept or dropped by the feed's instructions, each with Discuss. The Feed
+view shows each feed as a tab.
+_Avoid_: digest, stream
+
+**Source**:
+Something a feed reads: an RSS feed, a newsletter's sender, a file, or a
+folder. Incoming sources bring posts; files and folders are context.
+Kept once and shared by any feed that lists it.
+_Avoid_: input, channel, subscription
+
+**Scout**:
+The built-in agent that produces the feeds and answers Discuss on a post.
+It replaced Watch, which read newsletters for the one Feed and is retired.
+_Avoid_: Watch, newsletter agent
 
 **Ideas**:
 Suggestions about the system as a whole, in their own view, that Hunter

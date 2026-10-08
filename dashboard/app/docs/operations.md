@@ -95,7 +95,14 @@ Everything the daemon writes while it is used lives in one folder outside the re
 
 At each start the daemon claims `daemon.lock` in the root and refuses, logging `root_locked` with the holder's pid, while another daemon holds it. It then prepares the root: on the first start, with no `layout.json` yet, it moves the data the checkout at `DASHBOARD_MIGRATE_FROM` holds (default this repository; empty for none) and renames each source `<source>.migrated`; a root at layout version 1 is upgraded to version 2, which moves the Feed into the feed `news` under `feeds/` and Watch's run state into `feeds/.run/`, renames `feed/` and `watch/` to `.migrated`, and takes Watch out of the registry (the root's `README.md` lists each step); on every start it seeds `ideas/criteria.md` from the repository's `defaults/` when it is missing. It logs `root` with the path, `migrateFrom`, and the layout version, and sets `PERSONAL_ASSISTANT_HOME` for every agent turn. A worktree or throwaway daemon sets `PERSONAL_ASSISTANT_HOME` to a folder of its own and `DASHBOARD_MIGRATE_FROM` to an empty value.
 
-The brief run (`daily-brief/bin/run-brief`) and Watch (`daily-brief/watch/contribute`) read the same variable, default `~/.personal-assistant` under `HOME`, and write their briefs, contributions, Watch state, and Feed files there; each prints the root first on `--dry-run`. Their launchd plists set only `HOME`, so a root elsewhere goes into each plist's `EnvironmentVariables` by hand. Watch exits with `reason=no-criteria` until a daemon has seeded `feed/relevance.md`. `bin/codex-serve` and `bin/codex-new` keep their files under `codex/` in the root (`DASHBOARD_CODEX_DIR` overrides).
+The brief run (`daily-brief/bin/run-brief`) and the feeds run (`feeds/run/run-feeds`) read the same variable, default `~/.personal-assistant` under `HOME`, and write their briefs, contributions, the feeds run's state, and the feeds' item files there; each prints the root first on `--dry-run`. Their launchd plists set only `HOME`, so a root elsewhere goes into each plist's `EnvironmentVariables` by hand. The feeds run exits with `reason=no-active-feeds` until a feed is active, and a feed without `note.md` fails with `reason=no-note`. `bin/codex-serve` and `bin/codex-new` keep their files under `codex/` in the root (`DASHBOARD_CODEX_DIR` overrides).
+
+The feeds job is `com.personal-assistant.feeds` (`feeds/launchd/`, daily at 05:40). `daily-brief/bin/install-launchd` installs or refreshes it with the brief's jobs. To remove it:
+
+```sh
+launchctl bootout "gui/$(id -u)/com.personal-assistant.feeds"
+rm ~/Library/LaunchAgents/com.personal-assistant.feeds.plist
+```
 
 ## Persona threads
 
