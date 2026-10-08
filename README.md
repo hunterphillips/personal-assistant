@@ -69,8 +69,7 @@ decision prep would sit beside it with its own contract and its own inputs.
 - `daily-brief/contribution-schema.md` — the YAML shape, derived from the first three runs
 - `daily-brief/run-prompts.md` — the one-line prompt pasted into each domain repo
 - `daily-brief/curator.md` — the curator's seven content rules; headings and shape are the model's
-- `daily-brief/watch/` — the newsletter domain: `contribute` runs daily, `relevance.md` holds its sources and survival criteria
-- `feed/` — the feed store the dashboard's Feed reads; `items/` holds one JSON file per producer run, gitignored
+- `feeds/` — the feeds and sources the dashboard's Feed reads: `run/run-feeds` runs every active feed daily and leaves the brief's `watch` packet; the data lives in the data root
 - `daily-brief/bin/run-brief` — the scheduled morning run; `daily-brief/README.md` has the schedule and flags
 - `daily-brief/contributions/YYYY-MM-DD/<domain>.yaml` — a day's raw contributions
 - `daily-brief/briefs/` — `memo-<date>.md` written by the curator, `build.py` that turns it into `<date>.md`, `viewer-<date>.html`, `brief-<date>.json`, and `notice-<date>.json`, plus the feedback files saved beside them

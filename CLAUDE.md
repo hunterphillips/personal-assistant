@@ -77,7 +77,7 @@ from here.
 - **Use cases**: `daily-brief/`, running every morning since 2026-09-27
   (gather one packet per domain, curate, build, verify), with the newsletter
   `watch` domain daily; the Feed's store under the data root, which
-  watch writes and the dashboard reads, with `feed/README.md` in the
+  watch writes and the dashboard reads, with `feeds/README.md` in the
   repo documenting its schema. A later weekly review or decision
   prep sits beside them with its own contract.
 - **The agents' repos**, each its own repo with its own CLAUDE.md, launchd
@@ -152,15 +152,14 @@ picks one up and ends by updating it.
 - `notifications/`: the notifications store, under the data root since
   2026-10-06.
 - `daily-brief/`: contract, schema, curator rules, `bin/run-brief` and its
-  prompts, `launchd/`, `watch/` (the code; Watch's state lives under the
-  data root's `watch/`). `contributions/` and `briefs/` moved under the
+  prompts, `launchd/`. `contributions/` and `briefs/` moved under the
   data root on 2026-10-06 (the repo's copies renamed `.migrated`, deleted
   a week later); each build writes the viewer and `brief-<date>.json`;
   `build.py` and `check-viewer.mjs` beside the briefs are code.
-- `feed/`: the feed store's README; `items/` and `relevance.md` are
-  outputs, under the data root since 2026-10-06 (the repo's copies
-  renamed `.migrated`, deleted a week later), with `defaults/feed-relevance.md`
-  seeding the root's copy when it is missing.
+- `feeds/`: the feeds run (`run/run-feeds`, every active feed daily, the
+  brief's `watch` packet), `bin/enrich`, and the README with the feed and
+  source shapes; the feeds, sources, posts, and the run's state
+  (`feeds/.run/`) live under the data root.
 - `ideas/`: the store's README; `items/`, `marks.json`, and `criteria.md`
   are outputs, under the data root since 2026-10-06 (the repo's copies
   renamed `.migrated`, deleted a week later), with `defaults/ideas-criteria.md`

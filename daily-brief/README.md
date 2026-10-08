@@ -64,28 +64,16 @@ curator rules they point at are the files beside this README.
 
 ## Watch
 
-`watch/contribute` runs daily at 05:40. It reads the five newsletters in
-the data root's `feed/relevance.md` from Gmail (haiku lists the issues and
-extracts each one's stories, one session per issue; opus triages them
-against the criteria with no tools), then `watch/render.py --out
-<root>/watch --feed <root>/feed/items` writes `watch/packets/<date>.yaml`,
-`watch/overflow/<date>.json`, and the day's Feed file, appends
-`watch/seen.jsonl`, and sets `last_run` in `watch/state.json`, all under
-the root. The
-sources are weekly, so most days there is nothing new: the Gmail listing
-comes back empty and the run exits clean without writing a packet, a feed
-file, or touching `seen.jsonl` or `state.json`. The
-next brief run copies the newest packet not in `state.json.reported` in as
-`watch.yaml` and marks it after a successful build. Hand run:
-
-```
-daily-brief/watch/contribute --dry-run
-daily-brief/watch/contribute                 # since last_run
-daily-brief/watch/contribute --since 2026-09-14
-```
-
-`WATCH_TRIAGE_MODEL`, `WATCH_EXTRACT_MODEL`, `WATCH_LIST_MODEL` override the
-models. Log lines start with `watch`.
+`feeds/run/run-feeds` runs daily at 05:40 over every active feed in the
+data root: it reads each feed's sources (RSS directly, newsletters from
+Gmail, files and folders as context), triages the stories against the
+shared rules and the feed's note, writes the feed's posts, and after the
+last feed writes one packet, `feeds/.run/packets/<date>.yaml`, domain
+`watch`, with every feed's kept posts. A day where no feed found anything
+new writes no packet. The next brief run copies the newest packet not in
+`feeds/.run/state.json`'s `reported` in as `watch.yaml` and marks it after
+a successful build. `feeds/README.md` has the run, the shapes, and the
+hand-run flags.
 
 ## Where things land
 
