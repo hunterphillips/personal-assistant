@@ -105,6 +105,8 @@
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
   var ideas = window.DashboardIdeas ? window.DashboardIdeas.create(shellApi) : null;
   var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
+  // The Feed's settings sheet (feed-settings.js), closed whenever the Feed is left.
+  var feedSettings = feed && window.DashboardFeedSettings ? window.DashboardFeedSettings.create(feed, shellApi) : null;
   var notifications = window.DashboardNotifications ? window.DashboardNotifications.create(shellApi) : null;
   // The pane over every view (quick-chat.js), with its own thread view.
   var quickChat = window.DashboardQuickChat ? window.DashboardQuickChat.create(shellApi) : null;
@@ -485,6 +487,7 @@
       if (view === 'feed') feed.show();
       else feed.hide();
     }
+    if (feedSettings && view !== 'feed') feedSettings.hide();
     if (ideas) {
       if (view === 'ideas') ideas.show();
       else ideas.hide();

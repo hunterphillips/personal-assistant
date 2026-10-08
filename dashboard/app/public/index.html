@@ -51,6 +51,10 @@
               <p class="thread-terminal-reason header-action-reason" id="agent-terminal-reason" role="status" hidden></p>
             </div>
             <div class="header-action-group" data-actions-for="feed" hidden>
+              <button type="button" class="button" id="feed-new" aria-controls="feed-settings" aria-expanded="false">New feed</button>
+              <button type="button" class="button icon-button" id="feed-settings-toggle" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="feed-settings" hidden>
+                <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
             </div>
             <div class="header-action-group" data-actions-for="focus" hidden></div>
             <div class="header-action-group" data-actions-for="goals" hidden>
@@ -176,11 +180,27 @@
           </section>
 
           <section class="view" id="view-feed" data-view="feed" aria-label="Feed" hidden>
-            <div class="feed-tabs" id="feed-tabs" role="tablist" aria-label="Feeds" hidden></div>
-            <div class="feed-page" id="feed-page">
-              <p class="routines-message" id="feed-message" role="status" hidden></p>
-              <p class="feed-filter" id="feed-filter" hidden><span id="feed-filter-text"></span> <button type="button" class="link-button" data-feed-action="show-all">Show all</button></p>
-              <div id="feed-runs"></div>
+            <div class="feed-layout">
+              <div class="feed-main">
+                <div class="feed-tabs" id="feed-tabs" role="tablist" aria-label="Feeds" hidden></div>
+                <div class="feed-page" id="feed-page">
+                  <p class="routines-message" id="feed-message" role="status" hidden></p>
+                  <p class="feed-filter" id="feed-filter" hidden><span id="feed-filter-text"></span> <button type="button" class="link-button" data-feed-action="show-all">Show all</button></p>
+                  <div id="feed-runs"></div>
+                </div>
+              </div>
+              <!-- The Feed's settings sheet (feed-settings.js): the open feed's
+                   instructions and sources, the Sources list with Add source,
+                   or New feed, one at a time. -->
+              <aside class="thread-details feed-settings" id="feed-settings" aria-labelledby="feed-settings-heading" hidden>
+                <div class="details-top">
+                  <h2 class="card-name" id="feed-settings-heading">Settings</h2>
+                  <button type="button" class="button icon-button" data-feed-settings="close" aria-label="Close settings" title="Close settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
+                  </button>
+                </div>
+                <div id="feed-settings-body"></div>
+              </aside>
             </div>
           </section>
 
@@ -381,6 +401,7 @@
   <script src="/assets/instructions.js"></script>
   <script src="/assets/ideas.js"></script>
   <script src="/assets/feed.js"></script>
+  <script src="/assets/feed-settings.js"></script>
   <script src="/assets/notifications.js"></script>
   <script src="/assets/quick-chat.js"></script>
   <script src="/assets/brief-overlay.js"></script>

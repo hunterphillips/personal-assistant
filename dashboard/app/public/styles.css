@@ -1178,6 +1178,73 @@ div.panel-row.now-row:hover { background: none; }
 .instructions-toggle[aria-expanded="true"] { color: var(--ink); }
 .instructions-toggle svg { flex: none; }
 .instructions-toggle circle { fill: var(--paper); }
+/* The Feed: its tabs and posts in one column, the settings sheet beside it
+   (over it on a phone, as the agent's settings cover the thread). */
+.feed-layout {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.feed-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.feed-settings { flex-basis: 340px; }
+.feed-settings[hidden] { display: none; }
+.feed-settings-section + .feed-settings-section { margin-top: 24px; }
+.feed-settings-heading {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.feed-settings-section textarea.form-input { min-height: 160px; }
+.feed-settings-section .form-actions { margin-top: 8px; }
+.feed-settings-sources {
+  display: grid;
+  gap: 12px;
+}
+.feed-settings-status { margin-top: 8px; }
+.feed-settings-manage { margin: 12px 0 0; }
+.feed-settings-missing,
+.feed-source-missing { color: var(--muted); }
+.feed-settings-back { margin-bottom: 12px; }
+.feed-sources-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.feed-source {
+  display: grid;
+  gap: 2px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.feed-source:first-child { padding-top: 0; }
+.feed-source-name {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.feed-source-meta,
+.feed-source-missing {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.feed-source-kind {
+  margin-right: 8px;
+  color: var(--muted);
+}
+.feed-source .button-small {
+  justify-self: start;
+  margin-top: 6px;
+}
+.feed-source-form { margin-top: 16px; }
+
 .feed-page {
   flex: 1;
   min-height: 0;

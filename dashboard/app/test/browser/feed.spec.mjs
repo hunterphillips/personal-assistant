@@ -3,7 +3,7 @@
 // the real feeds and sources routes, with Scout, the feed's producer, on the
 // fake Claude adapter of test/support/browser-server.mjs.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -564,5 +564,36 @@ test.describe('with no feeds', () => {
     await expect(page).toHaveURL(`${hub.origin}/feed`);
     await expectView(page, 'feed', 'Feed');
     await expect(nav(page, 'Feed')).toHaveAttribute('title', 'Feed');
+  });
+});
+
+test.describe('the settings gear', () => {
+  test.use({ hubOptions: { feed: FEED, agents: [SCOUT] } });
+
+  test('is only on the Feed view, as the agent settings gear, and the sheet closes when the Feed is left', async ({ page, hub }) => {
+    const gear = page.locator('#feed-settings-toggle');
+    await page.goto(`${hub.origin}/goals`);
+    await expect(gear).toBeHidden();
+    await nav(page, 'Feed').click();
+    await expect(gear).toBeVisible();
+    await expect(gear).toHaveAttribute('aria-label', 'Settings');
+    await expect(gear).toHaveAttribute('aria-controls', 'feed-settings');
+    const agentGear = await page.locator('#thread-template').evaluate((node) => node.content.querySelector('[data-part="details-toggle"] svg').outerHTML);
+    expect(await gear.locator('svg').evaluate((node) => node.outerHTML)).toBe(agentGear);
+    await expect(page.getByRole('button', { name: 'Instructions' })).toHaveCount(0);
+    await gear.click();
+    await expect(page.locator('#feed-settings')).toBeVisible();
+    await nav(page, 'Goals').click();
+    await expect(gear).toBeHidden();
+    await nav(page, 'Feed').click();
+    await expect(page.locator('#feed-settings')).toBeHidden();
+  });
+
+  test('is not there without a feed, while New feed is', async ({ page, hub }) => {
+    await rm(path.join(hub.feedsDir, 'news'), { recursive: true });
+    await page.goto(`${hub.origin}/feed`);
+    await expect(page.locator('#feed-message')).toHaveText('There are no feeds yet.');
+    await expect(page.locator('#feed-settings-toggle')).toBeHidden();
+    await expect(page.locator('#feed-new')).toBeVisible();
   });
 });

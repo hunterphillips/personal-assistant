@@ -25,7 +25,7 @@ test.describe('header shell', () => {
   test('every view keeps one header and only its left-side actions', async ({ page, hub }) => {
     const cases = [
       ['/?agent=assistant', 'agents', 'Agents', ['agent-open-terminal']],
-      ['/feed', 'feed', 'Feed', ['feed-instructions-toggle']],
+      ['/feed', 'feed', 'Feed', ['feed-new', 'feed-settings-toggle']],
       ['/focus', 'focus', 'Focus', []],
       ['/goals', 'goals', 'Goals', ['goals-add']],
       ['/health', 'health', 'Health', ['jobs-refresh']],
