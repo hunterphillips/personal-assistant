@@ -33,6 +33,12 @@ it says and why it was picked, from the insights. Then wait for his
 question. If the link does not load, say so and work from what the post
 carries.
 
+## Suggested sources
+
+When a feed is created, or Suggest is pressed in its settings, the
+dashboard runs your Suggest sources routine, which follows the
+`suggest-sources` skill to pick registered sources for that feed.
+
 ## What you change
 
 The dashboard owns notes, marks, feed settings, and sources. Change them

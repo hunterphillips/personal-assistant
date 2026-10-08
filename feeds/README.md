@@ -76,6 +76,14 @@ it is.
 { "version": 1, "marks": { "<item id>": { "status": "saved|dismissed", "at": "<ISO>" } } }
 ```
 
+`feeds/<id>/suggestions.json` holds the sources Scout suggests for the
+feed, at most eight, written once by its `suggest-sources` run; the daemon
+removes it before the next one:
+
+```jsonc
+{ "version": 1, "at": "<ISO>", "sources": [{ "id": "<source id>", "why": "one sentence" }] }
+```
+
 ## The run
 
 `run/run-feeds` runs every active feed once a day. Per feed, it splits the

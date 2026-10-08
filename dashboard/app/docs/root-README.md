@@ -25,6 +25,7 @@ lives in its repository; the data lives here, as plain files you can read.
 | `feeds/<id>/note.md` | Hunter's instructions for the feed. |
 | `feeds/<id>/items/` | One `<date>.json` per run of the feed's producer; older runs are `<date>-<producer>.json`. |
 | `feeds/<id>/marks.json` | The marks on the feed's posts: saved, dismissed. |
+| `feeds/<id>/suggestions.json` | The sources the producer suggests for the feed, each with a reason. |
 | `feeds/.run/` | The feeds producer's state: `packets/`, `overflow/`, `seen.jsonl`, `state.json`, and its run lock. |
 | `sources/` | One `<id>.json` per source a feed can read: an RSS feed, a newsletter's sender, a file, or a folder. |
 | `ideas/items/` | One `<date>-<producer>.json` per run of an Ideas producer. |
@@ -41,7 +42,8 @@ The daemon owns every file that is edited after it is created: a feed's
 `feed.json`, `note.md`, and `marks.json`, and every file in `sources/`. A
 producer, a scheduled run that adds something, only creates its own run
 files, such as a new file under `feeds/<id>/items/` or `ideas/items/`, and
-never edits one that exists. The feeds run writes `feeds/.run/` and its
+never edits one that exists. A suggestion run writes a feed's
+`suggestions.json` once; the daemon removes it before the next run. The feeds run writes `feeds/.run/` and its
 feeds' item files; the brief run writes `briefs/` and marks a packet
 reported in `feeds/.run/state.json`.
 

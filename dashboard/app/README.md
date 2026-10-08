@@ -67,12 +67,14 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/goals` | Priorities and goal notes read from the vault (below). |
 | `POST /api/goals/propose` | Sends a new goal or a change to one to the second-brain persona; 202 `{"ok": true, "agentId": "second-brain"}` once the turn has started (below). |
 | `GET /api/feeds` | The feeds, newest first: `{"feeds", "problems"}` (below). |
-| `POST /api/feeds` | Creates a feed from `{"name", "note"}`; 201 `{"ok": true, "feed"}`. |
+| `POST /api/feeds` | Creates a feed from `{"name", "note"}` and starts a suggestion run; 201 `{"ok": true, "feed", "suggesting"}`. |
 | `GET /api/feeds/<id>` | The feed's runs and posts, newest first (below). |
 | `PUT /api/feeds/<id>` | Changes any of `name`, `sources`, and `active`; `{"ok": true, "feed"}`. |
 | `GET /api/feeds/<id>/note` | The feed's instructions: `{"text", "updated"}`. |
 | `PUT /api/feeds/<id>/note` | Writes the instructions from `{"text"}`; `{"ok": true, "text", "updated"}`. |
 | `POST /api/feeds/<id>/save`, `/unsave`, `/dismiss` | Marks one post from `{"id"}` and answers the fresh read. |
+| `GET /api/feeds/<id>/suggestions` | The producer's suggested sources: `{"suggesting", "suggestions"}` (below). |
+| `POST /api/feeds/<id>/suggest` | Starts a suggestion run; 202 `{"ok": true, "suggesting": true}` (below). |
 | `POST /api/feeds/<id>/discuss` | Sends one post to the feed's producer; 202 `{"ok": true, "agentId"}` once the turn has started (below). |
 | `GET /api/sources` | The sources, by name: `{"sources", "problems"}` (below). |
 | `POST /api/sources` | Adds a source; 201 `{"ok": true, "source"}`. |
@@ -475,6 +477,20 @@ thread. It refuses with 400 `invalid_body`, 503 `shutting_down`, 404
 `no_such_feed`, 404 `no_such_agent`, 409 `persona_unavailable`, 404
 `no_such_item`, then the persona send refusals (409 `busy` and the rest).
 
+A suggestion run is a test run of the producer's Suggest sources routine,
+which follows Scout's `suggest-sources` skill: a session of its own in the
+producer's folder, its reply kept under the routine's Last runs. The
+daemon creates the routine, inactive, the first time it needs one. Before
+each run it removes the feed's `suggestions.json`, which the run writes
+once. `suggestions` is `null` when there is no file or the file is not
+valid (logged as `feed_suggestions_invalid`); otherwise `{ "at", "sources" }`
+with each suggested source that is registered, active, and not on the
+feed, as `{ "id", "name", "kind", "role", "why" }`. `suggesting` is true
+from the run's start until its end line is in the routine's log. Suggest
+refuses with 503 `shutting_down`, 404 `no_such_feed`, 503 `not_yet`, 409
+`busy` (a run for the feed is out, or the producer has a turn open), 409
+`agent_unavailable`, then the scheduler's refusals.
+
 `GET /api/sources` lists every source with its `role` (`incoming` or
 `context`) and, for a file or folder, `missing` when the path is not there.
 A source's id is its name as a slug, with `-2` on a collision (`discover`
@@ -497,8 +513,10 @@ once. Manage sources lists every source with Active, "Default for new
 feeds", and Delete, and Add source: a newsletter's site is looked up with
 discover and saved as RSS when it has a feed, else as email once the
 sender is given; an RSS or blog address must lead to a feed; a file or
-folder takes an absolute path. New feed takes a name and instructions and
-opens the feed on its tab.
+folder takes an absolute path. Under the sources, Suggested lists the
+producer's picks with their reasons and an Add button each, and Suggest
+runs it again. New feed takes a name and instructions and opens the feed
+on its tab with its settings, where its suggestions appear.
 
 ### Ideas
 
