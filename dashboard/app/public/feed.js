@@ -356,7 +356,10 @@
       return group;
     }
 
+    // A tab that had focus has it again once the strip is redrawn.
     function renderTabs() {
+      var active = document.activeElement;
+      var focused = active && tabs.contains(active) ? active.getAttribute('data-feed-tab') : null;
       tabs.textContent = '';
       var list = objectsIn(feeds);
       tabs.hidden = list.length < 2;
@@ -370,6 +373,7 @@
         tab.setAttribute('aria-controls', 'feed-runs');
         tab.tabIndex = feed.id === feedId ? 0 : -1;
         tabs.appendChild(tab);
+        if (feed.id === focused) tab.focus();
       });
     }
 

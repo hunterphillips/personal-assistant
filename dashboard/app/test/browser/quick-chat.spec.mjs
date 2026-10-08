@@ -3,6 +3,7 @@
 // the first message after it opens carries. Every agent, job, feed item,
 // and message here is invented; the servers are the isolated test hub.
 
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -312,8 +313,14 @@ test.describe('quick chat', () => {
 test.describe('quick chat over the Feed', () => {
   test.use({ withFocus: false, hubOptions: hubOptions({ feed: path.join(FIXTURES, 'feed') }) });
 
-  // Phase 2 rewrites the Feed view
-  test.skip('the context is the topmost item in view', async ({ page, hub }) => {
+  test('the context is the topmost post in view, with its takeaway', async ({ page, hub }) => {
+    const story = (n) => ({
+      id: `news/2026-10-05/${n}`, title: `Invented story ${n}`, sources: ['invented-gazette'],
+      url: `https://example.com/story-${n}`, summary: `Summary of story ${n}.`, takeaway: `Takeaway of story ${n}.`,
+    });
+    await writeFile(path.join(hub.feedDir, '2026-10-05.json'), JSON.stringify({
+      feed: 'news', producer: 'scout', date: '2026-10-05', items: [story(1), story(2), story(3)],
+    }));
     await page.goto(`${hub.origin}/feed`);
     const items = page.locator('#feed-runs .feed-item');
     await expect(items.first()).toBeVisible();
@@ -325,7 +332,7 @@ test.describe('quick chat over the Feed', () => {
     const context = hub.personas.sent[0].context.context;
     expect(context.view).toBe('feed');
     expect(context.label).toBe(second.trim());
-    expect(context.detail).toMatch(/^Source: .+\nURL: https:\/\/example\.com\/.+\nSummary: /);
+    expect(context.detail).toBe('Source: invented-gazette\nURL: https://example.com/story-2\nSummary: Summary of story 2.\nTakeaway: Takeaway of story 2.');
   });
 });
 
