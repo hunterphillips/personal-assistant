@@ -1,6 +1,6 @@
 """The brief run and Watch write under PERSONAL_ASSISTANT_HOME.
 
-Run from the repo root: python3 -m unittest discover -s daily-brief
+Run from the repo root: python3 -m unittest discover -s daily-brief/test
 Every case points PERSONAL_ASSISTANT_HOME at a temporary root with a
 fixture layout, never at ~/.personal-assistant, and checks that nothing
 lands in the repository.

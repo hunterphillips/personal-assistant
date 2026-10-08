@@ -1,6 +1,6 @@
 """daily-brief/briefs/build.py on a scratch directory.
 
-Run from the repo root: python3 -m unittest discover -s daily-brief
+Run from the repo root: python3 -m unittest discover -s daily-brief/test
 Never points at daily-brief/briefs/ itself.
 """
 
