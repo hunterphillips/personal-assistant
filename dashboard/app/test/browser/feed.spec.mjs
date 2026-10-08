@@ -110,15 +110,22 @@ test.describe('with the fixture store', () => {
     await expect(robots.locator('.feed-summary')).toHaveText('The Invented Gazette reports the town adopted a rule for delivery robots on sidewalks.');
     await expect(robots.locator('.feed-takeaway')).toHaveCount(0);
     await expect(robots.locator('.feed-insights-toggle')).toHaveCount(0);
-    const discuss = robots.getByRole('button', { name: 'Discuss Town council adopts a rule for delivery robots' });
+    const discuss = robots.getByRole('button', { name: 'Discuss', exact: true });
     await expect(discuss).toBeVisible();
-    await expect(discuss).toHaveText('Discuss');
     await expect(discuss.locator('svg')).toHaveCount(1);
     await expect(discuss).toHaveCSS('border-top-width', '0px');
     await expect(discuss).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(robots.getByRole('button', { name: 'Save', exact: true })).toHaveAttribute('aria-pressed', 'false');
-    await expect(robots.getByRole('button', { name: 'More' })).toBeVisible();
-    await expect(robots.getByRole('menuitem', { name: 'Dismiss' })).toBeHidden();
+    await expect(robots.getByRole('button', { name: 'More' })).toHaveCount(0);
+    await expect(robots.getByRole('button', { name: 'Dismiss' })).toBeVisible();
+    // Left-aligned, icon-only, in order: bookmark, Discuss, Dismiss.
+    const iconButtons = robots.locator('.feed-icon-actions > button');
+    await expect(iconButtons).toHaveCount(3);
+    await expect(iconButtons.nth(0)).toHaveAttribute('aria-label', 'Save');
+    await expect(iconButtons.nth(1)).toHaveAttribute('aria-label', 'Discuss');
+    await expect(iconButtons.nth(2)).toHaveAttribute('aria-label', 'Dismiss');
+    await expect(iconButtons.nth(1)).toHaveText('');
+    await expect(iconButtons.nth(2)).toHaveText('');
     await expect(page.locator('#view-feed [data-action]')).toHaveCount(0);
   });
 
@@ -230,6 +237,15 @@ test.describe('with the fixture store', () => {
     await expect(panel.locator('strong')).toHaveText('Cost');
     await expect(first.locator('.feed-actions + .feed-insights')).toHaveCount(1);
     expect(await toggle.getAttribute('aria-controls')).toBe(await panel.getAttribute('id'));
+
+    // The icon actions sit left, right after Insights, not at the far
+    // right of the card.
+    const toggleBox = await toggle.boundingBox();
+    const iconsBox = await first.locator('.feed-icon-actions').boundingBox();
+    const bodyBox = await first.locator('.feed-body').boundingBox();
+    expect(iconsBox.x).toBeLessThan(toggleBox.x + toggleBox.width + 40);
+    expect(iconsBox.x + iconsBox.width).toBeLessThan(bodyBox.x + bodyBox.width - 40);
+
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(panel).toBeHidden();
@@ -262,19 +278,11 @@ test.describe('with the fixture store', () => {
     expect(hub.requests('/api/feeds/news/unsave')).toEqual([{ method: 'POST', status: 200 }]);
   });
 
-  test('Dismiss in the More menu hides the post, and it stays hidden after the refetch', async ({ page, hub }) => {
+  test('Dismiss hides the post directly, and it stays hidden after the refetch', async ({ page, hub }) => {
     await page.clock.install();
     await openFeed(page, hub);
     const robots = item(page, 'watch/2026-09-28/1');
-    const more = robots.getByRole('button', { name: 'More' });
-    await more.click();
-    await expect(more).toHaveAttribute('aria-expanded', 'true');
-    const dismiss = robots.getByRole('menuitem', { name: 'Dismiss' });
-    await expect(dismiss).toBeFocused();
-    await page.keyboard.press('Escape');
-    await expect(dismiss).toBeHidden();
-    await expect(more).toBeFocused();
-    await more.click();
+    const dismiss = robots.getByRole('button', { name: 'Dismiss' });
     await dismiss.click();
     await expect(robots).toHaveCount(0);
     await expect(runs(page).first().locator('.feed-item')).toHaveCount(7);
@@ -289,7 +297,7 @@ test.describe('with the fixture store', () => {
   test('Discuss sends the post to Scout and opens its thread', async ({ page, hub }) => {
     await openFeed(page, hub);
     const posted = page.waitForRequest('**/api/feeds/news/discuss');
-    await item(page, 'watch/2026-09-21/2').getByRole('button', { name: /^Discuss/ }).click();
+    await item(page, 'watch/2026-09-21/2').getByRole('button', { name: 'Discuss', exact: true }).click();
     expect((await posted).postDataJSON()).toEqual({ id: 'watch/2026-09-21/2' });
 
     await expectView(page, 'agents', 'Agents');
@@ -303,11 +311,11 @@ test.describe('with the fixture store', () => {
   test('Discuss while Scout is busy says so under the post', async ({ page, hub }) => {
     hub.personas.hold('scout');
     await openFeed(page, hub);
-    await item(page, 'watch/2026-09-28/3').getByRole('button', { name: /^Discuss/ }).click();
+    await item(page, 'watch/2026-09-28/3').getByRole('button', { name: 'Discuss', exact: true }).click();
     await expectView(page, 'agents', 'Agents');
     await nav(page, 'Feed').click();
     await expect(page).toHaveURL(`${hub.origin}/feed`);
-    await item(page, 'watch/2026-09-28/4').getByRole('button', { name: /^Discuss/ }).click();
+    await item(page, 'watch/2026-09-28/4').getByRole('button', { name: 'Discuss', exact: true }).click();
     await expect(item(page, 'watch/2026-09-28/4').locator('.feed-reason')).toHaveText(BUSY);
     await expect(page).toHaveURL(`${hub.origin}/feed`);
     expect(hub.requests('/api/feeds/news/discuss').map((entry) => entry.status)).toEqual([202, 409]);

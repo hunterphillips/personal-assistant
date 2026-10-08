@@ -1507,12 +1507,11 @@ div.panel-row.now-row:hover { background: none; }
 .feed-insights-toggle[aria-expanded="true"] { color: var(--ink); }
 .feed-insights-toggle[aria-expanded="true"] .feed-icon { transform: rotate(180deg); }
 
-/* The bookmark and the More menu, at the row's end. */
-.feed-mark-buttons {
-  position: relative;
+/* The bookmark, Discuss, and Dismiss icons, left-aligned after Insights. */
+.feed-icon-actions {
   display: flex;
-  margin-left: auto;
-  margin-right: -8px;
+  align-items: center;
+  gap: 2px;
 }
 .feed-icon-button {
   display: inline-flex;
@@ -1531,15 +1530,6 @@ div.panel-row.now-row:hover { background: none; }
 .feed-icon-button:hover { background: var(--hover-tint); color: var(--ink); }
 .feed-icon-button:disabled { cursor: default; }
 .feed-save-toggle[aria-pressed="true"] { color: var(--green); }
-.feed-menu-toggle svg { fill: currentColor; stroke: none; }
-.feed-menu {
-  top: 40px;
-  right: 0;
-  width: 176px;
-  z-index: 7;
-}
-.feed-menu-entry { text-align: left; }
-.feed-menu-entry:disabled { cursor: default; opacity: 0.5; }
 
 /* Insights open under the action row. */
 .feed-insights {
@@ -2977,7 +2967,6 @@ textarea.form-input {
   .feed-page { padding: 16px 16px 24px; }
   .feed-tabs { padding: 0 16px; }
   .feed-icon-button { width: 44px; height: 44px; }
-  .feed-menu { top: 48px; max-width: calc(100vw - 32px); }
   .ideas-page { padding: 16px 16px 120px; }
   .ideas-item { margin-right: -8px; margin-left: -8px; padding-right: 8px; padding-left: 8px; }
   .ideas-save-toggle,

@@ -4,10 +4,11 @@
 // is gone. Each post shows its sources' badge, its title as a link, the
 // summary, the takeaway on its own muted line under it, and the story's
 // image; then an action row: Insights (when the post has them) expanding
-// the explanation under the row through markdown.js, Discuss (a turn to the
-// feed's producer, /api/feeds/:id/discuss, whose thread then opens), the
-// bookmark (Save and Unsave), and a More menu holding Dismiss. Marks post to
-// /api/feeds/:id/{save,unsave,dismiss}, which answer the fresh read.
+// the explanation under the row through markdown.js, then three icons left
+// of it: the bookmark (Save and Unsave), Discuss (a turn to the feed's
+// producer, /api/feeds/:id/discuss, whose thread then opens), and Dismiss.
+// Marks post to /api/feeds/:id/{save,unsave,dismiss}, which answer the
+// fresh read.
 //
 // The side panel's Feed section, drawn on the same render as the posts and
 // cleared on hide, lists All, Saved while any post is saved, then each
@@ -31,12 +32,12 @@
   var NO_FEEDS = 'There are no feeds yet.';
   var GONE = 'That post is no longer in the feed.';
   var TOO_LONG = 'That is too long for one message.';
-  var LABEL_MAX = 60;
-  var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var DAYS =['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   var BADGE_COLOURS = 6;
   var SVG_NS = 'http://www.w3.org/2000/svg';
   var BOOKMARK = '<path d="M7 4.5h10a1 1 0 0 1 1 1v14l-6-4-6 4v-14a1 1 0 0 1 1-1Z"/>';
+  var DISMISS = '<path d="M7 7l10 10M17 7 7 17"/>';
 
   function element(tag, className, text) {
     var node = document.createElement(tag);
@@ -186,7 +187,6 @@
     var target = null; // { feed, run, index } to scroll to once it is drawn
     var filter = null; // null for all, 'saved', or a source id
     var expanded = {}; // post id -> true while its Insights are open
-    var openMenu = null; // the post whose More menu is open
     var listeners = []; // called with the feeds after each load
 
     function agentName(id) {
@@ -227,22 +227,30 @@
       return itemSources(item).indexOf(filter.slice('source:'.length)) !== -1;
     }
 
-    function textButton(action, item, label) {
-      var button = element('button', 'feed-action');
+    function discussButton(item) {
+      var button = element('button', 'feed-icon-button feed-discuss');
       button.type = 'button';
-      button.setAttribute('data-feed-action', action);
+      button.setAttribute('data-feed-action', 'discuss');
       button.setAttribute('data-feed-id', item.id);
-      if (label.length > LABEL_MAX) label = label.slice(0, LABEL_MAX - 1) + '…';
-      button.setAttribute('aria-label', label);
+      button.setAttribute('aria-label', 'Discuss');
+      button.setAttribute('title', 'Discuss');
       button.disabled = pending === item.id;
+      button.appendChild(icon('feed-icon', 16, '<path d="M2.5 3.5h11v7.5h-6.5l-3 2.5v-2.5h-1.5z"/>'));
       return button;
     }
 
-    function discussButton(item) {
-      var button = textButton('discuss', item, 'Discuss ' + item.title);
-      button.classList.add('feed-discuss');
-      button.appendChild(icon('feed-icon', 16, '<path d="M2.5 3.5h11v7.5h-6.5l-3 2.5v-2.5h-1.5z"/>'));
-      button.appendChild(document.createTextNode('Discuss'));
+    // The post's dismiss: acts directly, no confirmation menu.
+    function dismissButton(item) {
+      var button = element('button', 'feed-icon-button feed-dismiss');
+      button.type = 'button';
+      button.setAttribute('data-feed-action', 'dismiss');
+      button.setAttribute('data-feed-id', item.id);
+      button.setAttribute('aria-label', 'Dismiss');
+      button.setAttribute('title', 'Dismiss');
+      button.disabled = pending === item.id;
+      button.appendChild(icon('', 24, DISMISS, false));
+      button.firstChild.setAttribute('width', '20');
+      button.firstChild.setAttribute('height', '20');
       return button;
     }
 
@@ -277,17 +285,6 @@
       return button;
     }
 
-    function menuToggle() {
-      var toggle = element('button', 'feed-icon-button feed-menu-toggle');
-      toggle.type = 'button';
-      toggle.setAttribute('aria-label', 'More');
-      toggle.setAttribute('title', 'More');
-      toggle.setAttribute('aria-expanded', 'false');
-      toggle.setAttribute('aria-haspopup', 'menu');
-      toggle.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
-      return toggle;
-    }
-
     function renderItem(item, n) {
       var names = itemSources(item).map(sourceName);
       var first = names[0] || '';
@@ -313,21 +310,10 @@
       var panelId = 'feed-insights-' + n;
       var hasInsights = typeof item.insights === 'string' && item.insights !== '';
       if (hasInsights) actions.appendChild(insightsButton(item, panelId));
-      actions.appendChild(discussButton(item));
-      var marks = element('div', 'feed-mark-buttons');
+      var marks = element('div', 'feed-icon-actions');
       marks.appendChild(saveToggle(item));
-      marks.appendChild(menuToggle());
-      var menu = element('div', 'app-menu feed-menu');
-      menu.setAttribute('role', 'menu');
-      menu.hidden = true;
-      var dismiss = element('button', 'menu-entry feed-menu-entry', 'Dismiss');
-      dismiss.type = 'button';
-      dismiss.setAttribute('role', 'menuitem');
-      dismiss.setAttribute('data-feed-action', 'dismiss');
-      dismiss.setAttribute('data-feed-id', item.id);
-      dismiss.disabled = pending === item.id;
-      menu.appendChild(dismiss);
-      marks.appendChild(menu);
+      marks.appendChild(discussButton(item));
+      marks.appendChild(dismissButton(item));
       actions.appendChild(marks);
       body.appendChild(actions);
       if (hasInsights) {
@@ -477,7 +463,6 @@
         .filter(function (text) { return typeof text === 'string'; });
       var lines = objectsIn(feeds).length === 0 ? [NO_FEEDS] : all.length === 0 ? [emptySentence()] : [];
       setMessage(lines.concat(problems));
-      closeMenu(false);
       runs.textContent = '';
       built.forEach(function (group) { runs.appendChild(group); });
       renderPanel(all);
@@ -669,27 +654,6 @@
       else delete expanded[id];
     }
 
-    function closeMenu(restore) {
-      if (!openMenu) return;
-      var menu = openMenu.querySelector('.feed-menu');
-      var toggle = openMenu.querySelector('.feed-menu-toggle');
-      if (menu) menu.hidden = true;
-      if (toggle) {
-        toggle.setAttribute('aria-expanded', 'false');
-        if (restore) toggle.focus();
-      }
-      openMenu = null;
-    }
-
-    function openItemMenu(node) {
-      if (openMenu && openMenu !== node) closeMenu(false);
-      node.querySelector('.feed-menu').hidden = false;
-      node.querySelector('.feed-menu-toggle').setAttribute('aria-expanded', 'true');
-      openMenu = node;
-      var first = node.querySelector('.feed-menu .menu-entry');
-      if (first) first.focus();
-    }
-
     function choose(key) {
       filter = key === 'all' ? null : key;
       rendered = null;
@@ -747,32 +711,13 @@
     });
 
     runs.addEventListener('click', function (event) {
-      var toggle = event.target.closest && event.target.closest('.feed-menu-toggle');
-      if (toggle) {
-        var post = toggle.closest('.feed-item');
-        if (openMenu === post) closeMenu(true);
-        else openItemMenu(post);
-        return;
-      }
       var button = event.target.closest && event.target.closest('button[data-feed-action]');
       if (!button) return;
       var action = button.getAttribute('data-feed-action');
       var id = button.getAttribute('data-feed-id');
       if (action === 'insights') toggleInsights(button);
       else if (action === 'discuss') discuss(id, button);
-      else {
-        closeMenu(false);
-        mark(action, id, button);
-      }
-    });
-    runs.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape' && openMenu) {
-        event.preventDefault();
-        closeMenu(true);
-      }
-    });
-    document.addEventListener('click', function (event) {
-      if (openMenu && !openMenu.contains(event.target)) closeMenu(false);
+      else mark(action, id, button);
     });
 
     return {
@@ -839,7 +784,6 @@
       hide: function () {
         visible = false;
         filter = null;
-        closeMenu(false);
         if (side) side.textContent = '';
         filterLine.hidden = true;
         rendered = null;
