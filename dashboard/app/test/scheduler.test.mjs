@@ -434,7 +434,7 @@ test('a test run leaves the marker alone, is refused busy with no line while the
   const { routines, runtime, scheduler, set, runs, hub } = await setup(t);
   await routines.create(FIELDS);
   set('2026-10-05T11:10:00.000Z');
-  assert.deepEqual(await scheduler.testRun('daily-drift'), { ok: true });
+  assert.deepEqual(await scheduler.testRun('daily-drift'), { ok: true, run: 'run-1' });
   await settle(() => runs().length === 1);
   assert.deepEqual(runs(), [{ run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-05T11:10:00.000Z' }]);
   assert.equal(routines.marker('daily-drift'), null);
@@ -494,7 +494,7 @@ test('promptFor puts a context between the instruction and the standing paragrap
   const { routines, runtime, scheduler, set, runs } = await setup(t);
   await routines.create(FIELDS);
   set('2026-10-05T11:10:00.000Z');
-  assert.deepEqual(await scheduler.testRun('daily-drift', { context: 'For the week of October 5.' }), { ok: true });
+  assert.deepEqual(await scheduler.testRun('daily-drift', { context: 'For the week of October 5.' }), { ok: true, run: 'run-1' });
   await settle(() => runs().length === 1);
   assert.deepEqual(runs(), [{ run: 'run-1', occurrence: null, trigger: 'test', startedAt: '2026-10-05T11:10:00.000Z', context: 'For the week of October 5.' }]);
   assert.match(runtime.sent[0].context.prompt, /\n\nFor the week of October 5\.\n\nYou may ask/);

@@ -4,8 +4,11 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { discussMessage } from '../lib/feed-routes.mjs';
+import { LIMITS } from '../lib/config.mjs';
+import { SUGGEST_ROUTINE, discussMessage, suggestContext, suggestRoutine } from '../lib/feed-routes.mjs';
+import { createRoutines } from '../lib/routines.mjs';
 import { RuntimeError } from '../lib/runtime/adapter.mjs';
+import { createScheduler } from '../lib/scheduler.mjs';
 import { fakeRegistry, request, startApp, tempDir } from './support/harness.mjs';
 
 // Old-shape runs (<date>-watch.json, one `source` string per item).
@@ -30,14 +33,16 @@ function fakeAdapter() {
   let release;
   const adapter = {
     calls: [],
+    options: [],
     behavior: {},
     turn: new Promise((resolve) => { release = resolve; }),
     release: () => release(),
     start: async () => ({}),
     state: () => ({ state: 'idle', pending: null, lastError: null, sessionId: null, costUsd: null }),
     subscribe: () => () => {},
-    send(agentValue, text) {
+    send(agentValue, text, options = {}) {
       adapter.calls.push([agentValue.id, text]);
+      adapter.options.push(options);
       if (adapter.behavior.send) return Promise.reject(new RuntimeError(adapter.behavior.send));
       return adapter.turn;
     },
@@ -49,7 +54,9 @@ function fakeAdapter() {
 // the fixture runs. `persona` sets scout's provider (claude runs on the
 // fake adapter; codex has no adapter, so it is listed but never started),
 // or false to leave it out.
-async function startFeeds(t, { persona = 'claude', kind = 'persona', feeds } = {}) {
+// `suggest` adds a routines store and a scheduler over the hub: true for
+// the real scheduler on the fake adapter, or a scheduler stand-in.
+async function startFeeds(t, { persona = 'claude', kind = 'persona', feeds, suggest = false } = {}) {
   const root = await tempDir(t);
   const feedsDir = path.join(root, 'feeds');
   const sourcesDir = path.join(root, 'sources');
@@ -60,12 +67,20 @@ async function startFeeds(t, { persona = 'claude', kind = 'persona', feeds } = {
   }));
   const agents = persona ? [agent('scout', { provider: persona, kind })] : [agent('cfo')];
   const adapter = fakeAdapter();
+  let routines = null;
+  if (suggest) {
+    routines = createRoutines({ dir: path.join(root, 'routines'), limits: LIMITS });
+    await routines.load();
+  }
+  let uuid = 0;
   const app = await startApp(t, {
     ...status,
     env: { DASHBOARD_FEEDS_DIR: feedsDir, DASHBOARD_SOURCES_DIR: sourcesDir },
     registry: fakeRegistry(agents),
     adapters: { claude: adapter },
     feeds,
+    routines,
+    scheduler: suggest === true ? (hub) => createScheduler({ routines, hub, randomUUID: () => `run-${++uuid}` }) : suggest || null,
   });
   t.after(() => adapter.release());
   return { ...app, adapter, feedsDir, sourcesDir };
@@ -279,4 +294,94 @@ test('without feeds every feed and source route is 404', async (t) => {
     const response = await request(app, 'GET', pathname);
     assert.deepEqual([response.status, response.json], [404, { error: 'not_found' }], pathname);
   }
+});
+
+const suggestPost = (app, pathname, headers = {}) => request(app, 'POST', pathname, { headers: { origin: app.origin, ...headers } });
+const settled = async (check) => {
+  for (let i = 0; i < 100 && !(await check()); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+};
+
+test('suggestContext names the feed; suggestRoutine finds the producer\'s routine that names the skill', () => {
+  assert.equal(suggestContext('garden'), 'The feed id is "garden".');
+  const items = [
+    { id: 'a', agent: 'myos', instruction: 'Run the suggest-sources skill.' },
+    { id: 'b', agent: 'scout', instruction: 'Run the feeds.' },
+    { id: 'c', agent: 'scout', instruction: SUGGEST_ROUTINE.instruction },
+  ];
+  assert.equal(suggestRoutine(items, 'scout').id, 'c');
+  assert.equal(suggestRoutine(items, 'cfo'), null);
+  assert.equal(suggestRoutine(null, 'scout'), null);
+});
+
+test('creating a feed starts a suggestion run on the producer\'s inactive Suggest sources routine; suggestions read once it ends', async (t) => {
+  const app = await startFeeds(t, { suggest: true });
+  await post(app, '/api/sources', { name: 'Latent Space', kind: 'rss', url: 'https://www.latent.space/feed' });
+  await post(app, '/api/sources', { name: 'Priorities', kind: 'file', path: '/invented/priorities.md', default: true });
+  const created = await post(app, '/api/feeds', { name: 'Garden', note: 'Stories about the garden.\n' });
+  assert.deepEqual([created.status, created.json.feed.id, created.json.suggesting], [201, 'garden', true]);
+
+  const [routine] = app.routines.current();
+  assert.deepEqual([app.routines.current().length, routine.name, routine.agent, routine.instruction, routine.active],
+    [1, 'Suggest sources', 'scout', SUGGEST_ROUTINE.instruction, false]);
+  assert.deepEqual(app.adapter.calls, [['scout', SUGGEST_ROUTINE.instruction]]);
+  assert.deepEqual(app.adapter.options[0].routine, { id: routine.id, name: 'Suggest sources' });
+  assert.match(app.adapter.options[0].prompt, /Run the suggest-sources skill for the feed the context names\.\n\nThe feed id is "garden"\./);
+
+  const during = await request(app, 'GET', '/api/feeds/garden/suggestions');
+  assert.deepEqual([during.status, during.json], [200, { suggesting: true, suggestions: null }]);
+  const again = await suggestPost(app, '/api/feeds/garden/suggest');
+  assert.deepEqual([again.status, again.json], [409, { error: 'busy' }]);
+  assert.equal(app.adapter.calls.length, 1);
+
+  const file = path.join(app.feedsDir, 'garden', 'suggestions.json');
+  await writeFile(file, JSON.stringify({
+    version: 1, at: AT,
+    sources: [{ id: 'latent-space', why: 'It covers the field.' }, { id: 'priorities', why: 'Already on the feed.' }],
+  }));
+  app.adapter.release();
+  await settled(async () => (await request(app, 'GET', '/api/feeds/garden/suggestions')).json.suggesting === false);
+  const after = await request(app, 'GET', '/api/feeds/garden/suggestions');
+  assert.deepEqual(after.json, {
+    suggesting: false,
+    suggestions: { at: AT, sources: [{ id: 'latent-space', name: 'Latent Space', kind: 'rss', role: 'incoming', why: 'It covers the field.' }] },
+  });
+  assert.equal(app.routines.runs(routine.id, 5)[0].outcome, 'finished');
+
+  // Suggest again: the old file is removed first and the same routine runs.
+  const rerun = await suggestPost(app, '/api/feeds/garden/suggest');
+  assert.deepEqual([rerun.status, rerun.json], [202, { ok: true, suggesting: true }]);
+  await assert.rejects(readFile(file, 'utf8'), { code: 'ENOENT' });
+  assert.equal(app.routines.current().length, 1);
+  assert.equal(app.adapter.calls.length, 2);
+  await settled(async () => (await request(app, 'GET', '/api/feeds/garden/suggestions')).json.suggesting === false);
+  assert.deepEqual((await request(app, 'GET', '/api/feeds/garden/suggestions')).json, { suggesting: false, suggestions: null });
+});
+
+test('suggest refuses in order: shutdown, feed, no scheduler, producer, then the scheduler\'s refusal', async (t) => {
+  const plain = await startFeeds(t);
+  const created = await post(plain, '/api/feeds', { name: 'Garden', note: '' });
+  assert.deepEqual([created.status, created.json.suggesting], [201, false]);
+  assert.ok(plain.logs.some((line) => line.event === 'feed_suggest_refused' && line.feed === 'garden' && line.reason === 'not_yet'));
+  assert.deepEqual((await suggestPost(plain, '/api/feeds/nope/suggest')).json, { error: 'no_such_feed' });
+  assert.deepEqual((await request(plain, 'GET', '/api/feeds/nope/suggestions')).json, { error: 'no_such_feed' });
+  const noScheduler = await suggestPost(plain, '/api/feeds/garden/suggest');
+  assert.deepEqual([noScheduler.status, noScheduler.json], [503, { error: 'not_yet' }]);
+
+  const missing = await startFeeds(t, { persona: false, suggest: true });
+  const unavailable = await suggestPost(missing, '/api/feeds/news/suggest');
+  assert.deepEqual([unavailable.status, unavailable.json], [409, { error: 'agent_unavailable' }]);
+  assert.deepEqual(missing.routines.current(), []);
+
+  const refusing = await startFeeds(t, { suggest: { testRun: async () => ({ ok: false, reason: 'busy' }), stop() {} } });
+  await writeFile(path.join(refusing.feedsDir, 'news', 'suggestions.json'), '{}');
+  const busy = await suggestPost(refusing, '/api/feeds/news/suggest');
+  assert.deepEqual([busy.status, busy.json], [409, { error: 'busy' }]);
+  assert.deepEqual((await request(refusing, 'GET', '/api/feeds/news/suggestions')).json.suggesting, false);
+
+  refusing.handler.closeStreams();
+  const closing = await suggestPost(refusing, '/api/feeds/news/suggest');
+  assert.deepEqual([closing.status, closing.json], [503, { error: 'shutting_down' }]);
+  assert.equal((await suggestPost(refusing, '/api/feeds/news/suggest', { 'content-type': 'application/json' })).status, 503);
+  const get = await request(refusing, 'GET', '/api/feeds/news/suggest');
+  assert.deepEqual([get.status, get.headers.allow], [405, 'POST']);
 });

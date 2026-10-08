@@ -546,7 +546,7 @@ test('a routine run on A asks B, B raises, the card is forwarded to A and record
     routines, now: () => new Date('2026-10-03T12:00:00.000Z'),
   });
   await routines.create({ name: 'Ledger check', agent: 'assistant', instruction: 'Ask CFO to check the ledger.', schedule: { cron: '0 9 * * *' }, active: true });
-  assert.deepEqual(await scheduler.testRun('ledger-check'), { ok: true });
+  assert.deepEqual(await scheduler.testRun('ledger-check'), { ok: true, run: 'run-1' });
   await settle(200);
   const view = (id) => hub.snapshot().agents.find((a) => a.id === id);
   assert.deepEqual([view('assistant').state, view('cfo').state], ['busy', 'waiting']);

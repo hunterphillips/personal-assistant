@@ -40,9 +40,9 @@
 //     busy or failed fire still moves the marker; an inactive routine is
 //     skipped without a line; an edit or a reactivation bumps `updated`,
 //     so nothing from before it is due.
-//   run(id, occurrence, trigger, { context }?) -> Promise<{ ok: true } | { ok: false, reason }>
+//   run(id, occurrence, trigger, { context }?) -> Promise<{ ok: true, run } | { ok: false, reason }>
 //     Resolves once the turn has started or been refused, never when it
-//     ends. With no started persona for the agent (hub.persona null) the
+//     ends; `run` is the id its log lines share. With no started persona for the agent (hub.persona null) the
 //     reason is 'agent_unavailable'; with the agent busy or waiting, or the
 //     send refused, 'busy'; an unknown id is 'no_such_routine'. A
 //     scheduled or catch-up refusal writes its line ({ occurrence,
@@ -68,7 +68,7 @@
 //     [{ agent, kind, toolName, summary, resolved }]. Each run is logged
 //     routine_run { routineId, agentId, trigger, outcome, ms }, and
 //     hub.runEnded(id) follows every line.
-//   testRun(id, { context }?) -> Promise<{ ok: true } | { ok: false, reason }>
+//   testRun(id, { context }?) -> Promise<{ ok: true, run } | { ok: false, reason }>
 //     run(id, null, 'test', { context }): a run outside the schedule whose line has
 //     occurrence null, so it never moves the marker.
 //
@@ -260,7 +260,7 @@ export function createScheduler({
     }
     context.started = append(id, { run: context.run, ...base, startedAt: context.startedAt.toISOString(), ...(extra ? { context: extra } : {}) });
     turn.then((ended) => settle(context, false, ended), () => settle(context, true));
-    return { ok: true };
+    return { ok: true, run: context.run };
   }
 
   return {

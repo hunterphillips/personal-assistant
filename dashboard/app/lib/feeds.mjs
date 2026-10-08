@@ -10,6 +10,10 @@
 //                          before version 2), append-only; feeds/README.md
 //   feeds/<id>/marks.json  { "version": 1, "marks": { "<item id>":
 //                            { "status": "saved" | "dismissed", "at": "<ISO>" } } }
+//   feeds/<id>/suggestions.json  { "version": 1, "at": "<ISO>",
+//                            "sources": [{ "id": "<source id>", "why": "..." }] }
+//                          written once by the producer's suggest-sources run;
+//                          the daemon removes it before the next run
 //
 // Folders whose names start with a dot (the producer's .run/) are not feeds.
 //
@@ -57,12 +61,20 @@
 //   mark(feedId, itemId, status) / unmark(feedId, itemId) -> Promise<result>
 //     status 'saved' or 'dismissed'; answers the fresh read.
 //   usedBy(sourceId) -> Promise<[feed id]>   the feeds that list the source
+//   readSuggestions(id) -> Promise<{ at, sources } | null>
+//     Rejects FeedsError no_such_feed. null when suggestions.json is missing,
+//     and when it is not the shape above (at most SUGGESTIONS_MAX sources,
+//     each `why` 1 to WHY_MAX characters, no id twice), which is logged as
+//     feed_suggestions_invalid { feed, reason }. Otherwise the suggested
+//     sources that are registered, active, and not already on the feed, in
+//     the file's order, each { id, name, kind, role, why }.
+//   clearSuggestions(id) -> Promise<void>     removes suggestions.json if there
 //
 // Writes share one serialized queue and replace a file atomically (0600).
 // Refusals are FeedsError: invalid_body ({ detail }), unknown_source
 // ({ sources }), no_such_feed, no_such_item, note_too_large, marks_invalid.
 
-import { lstat, mkdir, readdir } from 'node:fs/promises';
+import { lstat, mkdir, readdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 import { atomicJson, readCapped, slug } from './sources.mjs';
@@ -70,6 +82,8 @@ import { atomicJson, readCapped, slug } from './sources.mjs';
 export const FEED_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const TAKEAWAY_MAX = 240;
 export const INSIGHTS_MAX = 2000;
+export const SUGGESTIONS_MAX = 8;
+export const WHY_MAX = 300;
 // The producer a feed names when no feed exists to take it from: the
 // built-in agent registry/builtin.json seeds for feeds.
 export const DEFAULT_PRODUCER = 'scout';
@@ -106,6 +120,7 @@ export function createFeeds({ dir, sources, limits, log: rawLog = () => {}, now 
   const noteFile = (id) => path.join(dir, id, 'note.md');
   const itemsDir = (id) => path.join(dir, id, 'items');
   const marksFile = (id) => path.join(dir, id, 'marks.json');
+  const suggestionsFile = (id) => path.join(dir, id, 'suggestions.json');
 
   async function folders() {
     try {
@@ -317,7 +332,70 @@ export function createFeeds({ dir, sources, limits, log: rawLog = () => {}, now 
     return feeds.filter((feed) => feed.sources.includes(sourceId)).map((feed) => feed.id);
   }
 
-  return { list, get, read, find, create, update, readNote, writeNote, mark, unmark, usedBy };
+  async function readSuggestions(id) {
+    const feed = await requireFeed(id);
+    const problems = [];
+    const name = `${id}/suggestions.json`;
+    const missing = (await statOf(suggestionsFile(id))).kind === 'missing';
+    if (missing) return null;
+    const text = await readCapped(suggestionsFile(id), limits.sourceFileBytes, name, problems, (error) => {
+      log({ event: 'feeds_read_error', path: name, error: error?.message ?? String(error) });
+    });
+    const bad = (reason) => {
+      log({ event: 'feed_suggestions_invalid', feed: id, reason });
+      return null;
+    };
+    if (text === null) return bad(problems[0] ?? 'unreadable');
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return bad('not JSON');
+    }
+    const reason = suggestionsProblem(body);
+    if (reason) return bad(reason);
+    const known = new Map((await sources.list().catch(() => [])).map((source) => [source.id, source]));
+    const listed = [];
+    for (const entry of body.sources) {
+      const source = known.get(entry.id);
+      if (!source || source.active !== true || feed.sources.includes(entry.id)) continue;
+      listed.push({ id: source.id, name: source.name, kind: source.kind, role: source.role, why: entry.why.trim() });
+    }
+    return deepFreeze({ at: body.at, sources: listed });
+  }
+
+  function clearSuggestions(id) {
+    return serialized(async () => {
+      await requireFeed(id);
+      try {
+        await unlink(suggestionsFile(id));
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+    });
+  }
+
+  return { list, get, read, find, create, update, readNote, writeNote, mark, unmark, usedBy, readSuggestions, clearSuggestions };
+}
+
+// Why a parsed suggestions.json is not one, or null.
+function suggestionsProblem(body) {
+  if (!isRecord(body)) return 'not an object';
+  for (const key of Object.keys(body)) if (!['version', 'at', 'sources'].includes(key)) return `unknown key "${key}"`;
+  if (body.version !== 1) return 'version is not 1';
+  if (!nonEmpty(body.at) || Number.isNaN(Date.parse(body.at))) return 'at is not a time';
+  if (!Array.isArray(body.sources)) return 'sources is not a list';
+  if (body.sources.length > SUGGESTIONS_MAX) return `more than ${SUGGESTIONS_MAX} sources`;
+  const seen = new Set();
+  for (const entry of body.sources) {
+    if (!isRecord(entry) || Object.keys(entry).sort().join() !== 'id,why') return 'a source is not { id, why }';
+    if (!nonEmpty(entry.id) || entry.id.length > 64) return 'a source id is not an id';
+    if (seen.has(entry.id)) return `${entry.id} is listed twice`;
+    seen.add(entry.id);
+    const why = typeof entry.why === 'string' ? entry.why.trim() : '';
+    if (why === '' || Array.from(why).length > WHY_MAX) return `the reason for ${entry.id} is not 1 to ${WHY_MAX} characters`;
+  }
+  return null;
 }
 
 // The items directory's matching entries, newest first by name, with each

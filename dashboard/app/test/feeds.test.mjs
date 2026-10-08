@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { LIMITS } from '../lib/config.mjs';
-import { FeedsError, INSIGHTS_MAX, TAKEAWAY_MAX, createFeeds } from '../lib/feeds.mjs';
+import { FeedsError, INSIGHTS_MAX, SUGGESTIONS_MAX, TAKEAWAY_MAX, WHY_MAX, createFeeds } from '../lib/feeds.mjs';
 import { createSources } from '../lib/sources.mjs';
 import { tempDir } from './support/harness.mjs';
 
@@ -301,4 +301,73 @@ test('the note reads and writes directly, capped at feedNoteBytes', async (t) =>
   await assert.rejects(feeds.writeNote('news', 'x'.repeat(limit + 1)), { code: 'note_too_large' });
   await assert.rejects(feeds.writeNote('nope', 'x'), { code: 'no_such_feed' });
   await assert.rejects(feeds.readNote('nope'), { code: 'no_such_feed' });
+});
+
+function writeSuggestions(dir, body) {
+  return writeFile(path.join(dir, 'news', 'suggestions.json'), typeof body === 'string' ? body : JSON.stringify(body));
+}
+
+test('suggestions read the registered, active sources not on the feed, in the file\'s order', async (t) => {
+  const logs = [];
+  const { feeds, sources, dir } = await stores(t, { log: (entry) => logs.push(entry) });
+  assert.equal(await feeds.readSuggestions('news'), null);
+  await sources.create({ name: 'Latent Space', kind: 'rss', url: 'https://example.com/feed' });
+  await sources.create({ name: 'Priorities', kind: 'file', path: '/invented/priorities.md' });
+  await sources.create({ name: 'Old letter', kind: 'email', sender: 'old@example.com', active: false });
+  await sources.create({ name: 'Garden', kind: 'rss', url: 'https://example.com/garden' });
+  await feeds.update('news', { sources: ['garden'] });
+  await writeSuggestions(dir, {
+    version: 1, at: AT,
+    sources: [
+      { id: 'priorities', why: ' It names what the feed should weigh. ' },
+      { id: 'gone', why: 'Deleted since.' },
+      { id: 'old-letter', why: 'Inactive.' },
+      { id: 'garden', why: 'Already on the feed.' },
+      { id: 'latent-space', why: 'It covers the field.' },
+    ],
+  });
+  assert.deepEqual(await feeds.readSuggestions('news'), {
+    at: AT,
+    sources: [
+      { id: 'priorities', name: 'Priorities', kind: 'file', role: 'context', why: 'It names what the feed should weigh.' },
+      { id: 'latent-space', name: 'Latent Space', kind: 'rss', role: 'incoming', why: 'It covers the field.' },
+    ],
+  });
+  assert.deepEqual(logs, []);
+  await writeSuggestions(dir, { version: 1, at: AT, sources: [] });
+  assert.deepEqual(await feeds.readSuggestions('news'), { at: AT, sources: [] });
+  await feeds.clearSuggestions('news');
+  assert.equal(await feeds.readSuggestions('news'), null);
+  await feeds.clearSuggestions('news');
+  await assert.rejects(feeds.readSuggestions('nope'), { code: 'no_such_feed' });
+  await assert.rejects(feeds.clearSuggestions('nope'), { code: 'no_such_feed' });
+});
+
+test('a suggestions file that is not the shape reads as none, with the reason logged', async (t) => {
+  const logs = [];
+  const { feeds, dir } = await stores(t, { log: (entry) => logs.push(entry) });
+  const entry = (id) => ({ id, why: 'A reason.' });
+  const bad = [
+    'not json',
+    [],
+    { version: 2, at: AT, sources: [] },
+    { version: 1, at: 'yesterday', sources: [] },
+    { version: 1, at: AT },
+    { version: 1, at: AT, sources: [], extra: true },
+    { version: 1, at: AT, sources: Array.from({ length: SUGGESTIONS_MAX + 1 }, (_, i) => entry(`s${i}`)) },
+    { version: 1, at: AT, sources: [entry('a'), entry('a')] },
+    { version: 1, at: AT, sources: [{ id: 'a' }] },
+    { version: 1, at: AT, sources: [{ id: 'a', why: '  ' }] },
+    { version: 1, at: AT, sources: [{ id: 'a', why: 'x'.repeat(WHY_MAX + 1) }] },
+    { version: 1, at: AT, sources: [{ id: 'a', why: 'Fine.', score: 3 }] },
+    { version: 1, at: AT, sources: [{ id: '', why: 'Fine.' }] },
+  ];
+  for (const body of bad) {
+    await writeSuggestions(dir, body);
+    assert.equal(await feeds.readSuggestions('news'), null, JSON.stringify(body));
+  }
+  assert.equal(logs.length, bad.length);
+  assert.ok(logs.every((line) => line.event === 'feed_suggestions_invalid' && line.feed === 'news' && typeof line.reason === 'string'));
+  await writeSuggestions(dir, 'x'.repeat(LIMITS.sourceFileBytes + 1));
+  assert.equal(await feeds.readSuggestions('news'), null);
 });

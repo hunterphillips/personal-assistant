@@ -151,7 +151,7 @@ export function createApp({
     ? createSettingsRoutes({ settings, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
     : null;
   const feedRoutes = feeds && sources
-    ? createFeedRoutes({ feeds, sources, hub, log, limits: config.limits, shuttingDown: isShuttingDown })
+    ? createFeedRoutes({ feeds, sources, hub, routines, scheduler, log, limits: config.limits, shuttingDown: isShuttingDown })
     : null;
   const sourceRoutes = feeds && sources
     ? createSourceRoutes({ sources, limits: config.limits, shuttingDown: isShuttingDown })
