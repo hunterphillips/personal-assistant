@@ -205,8 +205,9 @@
           if (turn !== sequence) return;
           if (result && result.status === 200 && result.body && typeof result.body.text === 'string') {
             saved = result.body.text;
-            // Disabling Save drops its focus; the text box keeps the sheet's.
-            if (document.activeElement === save || document.activeElement === document.body) text.focus();
+            // Disabling Save drops its focus, and WebKit never gave it focus
+            // (a click there focuses the page); the text box keeps the sheet's.
+            if (document.activeElement === save || !sheet.contains(document.activeElement)) text.focus();
             save.disabled = text.value === saved;
             say(noteStatus, 'Saved.');
             return;
