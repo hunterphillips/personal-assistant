@@ -805,6 +805,7 @@
       },
       reload: function () { return load(); },
       current: function () { return openFeed(); },
+      producerName: function () { return producerName(); },
       feeds: function () { return objectsIn(feeds); },
       onFeeds: function (listener) { listeners.push(listener); },
       // Scrolls to the index-th post of the run once it is drawn (a

@@ -25,6 +25,10 @@ async function writeSource(hub, fields) {
   }));
 }
 
+async function writeSuggestions(hub, feed, sources) {
+  await writeFile(path.join(hub.feedsDir, feed, 'suggestions.json'), JSON.stringify({ version: 1, at: AT, sources }));
+}
+
 async function openSettings(page, hub) {
   await page.goto(`${hub.origin}/feed`);
   await expectView(page, 'feed', 'Feed');
@@ -173,7 +177,7 @@ test.describe('feed settings', () => {
     }
   });
 
-  test('the Default switch puts a source in the next new feed, which opens on its tab and says when it first runs', async ({ page, hub }) => {
+  test('the Default switch puts a source in the next new feed, which opens on its tab with its settings and says when it first runs', async ({ page, hub }) => {
     await writeSource(hub, { id: 'latent-space', name: 'Latent Space', kind: 'rss', url: 'https://example.com/feed' });
     await writeSource(hub, { id: 'axios', name: 'Axios', kind: 'email', sender: 'news@axios.com' });
     await openSources(page, hub);
@@ -189,7 +193,9 @@ test.describe('feed settings', () => {
     await form.getByLabel('Name').fill('Research');
     await form.getByLabel('Instructions').fill('Papers on retrieval.');
     await form.getByRole('button', { name: 'Create' }).click();
-    await expect(sheet(page)).toBeHidden();
+    await expect(sheet(page).getByRole('heading', { name: 'Settings' })).toBeFocused();
+    await expect(sheet(page).locator('.details-name')).toHaveText('Research');
+    await expect(gear(page)).toHaveAttribute('aria-expanded', 'true');
     const tabs = page.getByRole('tablist', { name: 'Feeds' });
     await expect(tabs.getByRole('tab', { name: 'Research' })).toHaveAttribute('aria-selected', 'true');
     await expect(page).toHaveURL(`${hub.origin}/feed?f=research`);
@@ -198,9 +204,6 @@ test.describe('feed settings', () => {
     expect([created.name, created.producer, created.sources]).toEqual(['Research', 'scout', ['latent-space']]);
     expect(await readFile(path.join(hub.feedsDir, 'research', 'note.md'), 'utf8')).toBe('Papers on retrieval.');
 
-    // Settings follow the open feed.
-    await gear(page).click();
-    await expect(sheet(page).locator('.details-name')).toHaveText('Research');
     await expect(sheet(page).getByRole('checkbox', { name: 'Latent Space' })).toBeChecked();
     await expect(sheet(page).getByRole('checkbox', { name: 'Axios' })).not.toBeChecked();
   });
@@ -234,5 +237,82 @@ test.describe('feed settings', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
     await sheet(page).getByRole('button', { name: 'Close settings' }).click();
     await expect(sheet(page)).toBeHidden();
+  });
+
+  test('Suggested lists the picks not on the feed with their reasons; Add puts one on the feed and it leaves the list', async ({ page, hub }) => {
+    await writeSource(hub, { id: 'latent-space', name: 'Latent Space', kind: 'rss', url: 'https://example.com/feed' });
+    await writeSource(hub, { id: 'priorities', name: 'Priorities', kind: 'file', path: hub.instructionsFile });
+    await writeSource(hub, { id: 'garden', name: 'Garden', kind: 'rss', url: 'https://example.com/garden' });
+    const feedFile = path.join(hub.feedsDir, 'news', 'feed.json');
+    await writeFile(feedFile, JSON.stringify({ ...(await readJson(feedFile)), sources: ['garden'] }));
+    await writeSuggestions(hub, 'news', [
+      { id: 'latent-space', why: 'It covers the field the instructions name.' },
+      { id: 'garden', why: 'Already on the feed.' },
+      { id: 'priorities', why: 'It says what matters this year.' },
+    ]);
+    await openSettings(page, hub);
+    const suggested = sheet(page).getByRole('list', { name: 'Suggested' });
+    const rows = suggested.locator('.feed-suggested-source');
+    await expect(rows.locator('.feed-source-name')).toHaveText(['Latent Space', 'Priorities']);
+    await expect(rows.locator('.feed-source-kind')).toHaveText(['RSS', 'File']);
+    await expect(rows.locator('.feed-suggested-why')).toHaveText(['It covers the field the instructions name.', 'It says what matters this year.']);
+
+    await suggested.getByRole('button', { name: 'Add Latent Space' }).click();
+    await expect(rows.locator('.feed-source-name')).toHaveText(['Priorities']);
+    await expect(suggested.getByRole('button', { name: 'Add Priorities' })).toBeFocused();
+    await expect.poll(async () => (await readJson(feedFile)).sources).toEqual(['garden', 'latent-space']);
+    await expect(sheet(page).locator('.feed-settings-sources').getByRole('checkbox', { name: 'Latent Space' })).toBeChecked();
+
+    // A checkbox does the same as Add.
+    await sheet(page).locator('.feed-settings-sources').getByRole('checkbox', { name: 'Priorities' }).check();
+    await expect(rows).toHaveCount(0);
+    await expect(sheet(page).locator('.feed-suggested-status')).toHaveText('No other sources fit this feed.');
+    await expect.poll(async () => (await readJson(feedFile)).sources).toEqual(['garden', 'latent-space', 'priorities']);
+  });
+
+  test('Suggest runs Scout again: the old picks go, a sentence says it is looking, and the new picks appear when it ends', async ({ page, hub }) => {
+    await writeSource(hub, { id: 'latent-space', name: 'Latent Space', kind: 'rss', url: 'https://example.com/feed' });
+    await writeSource(hub, { id: 'garden', name: 'Garden', kind: 'rss', url: 'https://example.com/garden' });
+    await writeSuggestions(hub, 'news', [{ id: 'garden', why: 'An old pick.' }]);
+    await openSettings(page, hub);
+    const block = sheet(page).locator('.feed-suggested');
+    await expect(block.locator('.feed-source-name')).toHaveText(['Garden']);
+
+    hub.personas.hold('scout');
+    await block.getByRole('button', { name: 'Suggest' }).click();
+    await expect(block.locator('.feed-suggested-status')).toHaveText('Scout is looking for sources that fit this feed.');
+    await expect(block.getByRole('button', { name: 'Suggest' })).toBeDisabled();
+    await expect(block.locator('.feed-suggested-source')).toHaveCount(0);
+    await expect.poll(() => hub.personas.sent.length).toBe(1);
+    expect(hub.personas.sent[0]).toMatchObject({ id: 'scout', context: { routine: { name: 'Suggest sources' } } });
+    await expect(readFile(path.join(hub.feedsDir, 'news', 'suggestions.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    // Reopened while the run is out, the sheet still says so.
+    await page.keyboard.press('Escape');
+    await gear(page).click();
+    await expect(block.locator('.feed-suggested-status')).toHaveText('Scout is looking for sources that fit this feed.');
+
+    await writeSuggestions(hub, 'news', [{ id: 'latent-space', why: 'A new pick.' }]);
+    await hub.personas.reply('scout', 'Suggested one source.');
+    await expect(block.locator('.feed-source-name')).toHaveText(['Latent Space']);
+    await expect(block.locator('.feed-suggested-status')).toBeHidden();
+    await expect(block.getByRole('button', { name: 'Suggest' })).toBeEnabled();
+  });
+
+  test('a new feed opens its settings while Scout looks, and the picks appear there', async ({ page, hub }) => {
+    await writeSource(hub, { id: 'latent-space', name: 'Latent Space', kind: 'rss', url: 'https://example.com/feed' });
+    await page.goto(`${hub.origin}/feed`);
+    await expectView(page, 'feed', 'Feed');
+    hub.personas.hold('scout');
+    await page.locator('#feed-new').click();
+    const form = sheet(page).getByRole('form', { name: 'New feed' });
+    await form.getByLabel('Name').fill('Garden');
+    await form.getByLabel('Instructions').fill('Stories about the garden.');
+    await form.getByRole('button', { name: 'Create' }).click();
+    await expect(sheet(page).locator('.details-name')).toHaveText('Garden');
+    const block = sheet(page).locator('.feed-suggested');
+    await expect(block.locator('.feed-suggested-status')).toHaveText('Scout is looking for sources that fit this feed.');
+    await writeSuggestions(hub, 'garden', [{ id: 'latent-space', why: 'It writes about gardens.' }]);
+    await hub.personas.reply('scout', 'Suggested one source.');
+    await expect(block.locator('.feed-suggested-why')).toHaveText(['It writes about gardens.']);
   });
 });

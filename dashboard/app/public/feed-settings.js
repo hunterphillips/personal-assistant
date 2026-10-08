@@ -6,7 +6,12 @@
 //   /api/feeds/:id/note) and its Sources (the active sources, incoming
 //   first, then context, each a checkbox; a change is PUT /api/feeds/:id
 //   { sources } at once, keeping the sources it lists that are not shown).
-//   Manage sources opens the Sources mode.
+//   Manage sources opens the Sources mode. Under the sources, Suggested
+//   lists what the producer's suggestion run picked (GET
+//   /api/feeds/:id/suggestions), each with its kind, the reason, and Add,
+//   which puts it on the feed as a checkbox would; Suggest starts a new run
+//   (POST /api/feeds/:id/suggest), and the list is read again every
+//   SUGGEST_POLL_MS while one is in flight.
 // - Sources: every source with its kind and address or path (a path that
 //   is not there says so), Active and "Default for new feeds" switches (PUT
 //   /api/sources/:id), and Delete (a refusal names the feeds using it). Add
@@ -15,15 +20,17 @@
 //   found is saved as an RSS source; a newsletter with none asks for the
 //   sender's address and is saved as an email source.
 // - New feed, from the header's New feed: name and instructions, POST
-//   /api/feeds; the feed then opens on its tab.
+//   /api/feeds; the feed then opens on its tab with its settings, where the
+//   suggestions the create started appear.
 //
 // create(feed, shellApi) takes feed.js's view (open, reload, current, feeds,
-// onFeeds) and returns { hide }. Every text node is set with textContent.
+// onFeeds, producerName) and returns { hide }. Every text node is set with textContent.
 (function () {
   'use strict';
 
   var NO_ANSWER = 'The dashboard did not respond.';
   var TOO_LONG = 'That is too long to save.';
+  var SUGGEST_POLL_MS = 1500;
   var KIND_NAMES = { rss: 'RSS', email: 'Newsletter', file: 'File', folder: 'Folder' };
   var TYPES = [
     { value: 'newsletter', label: 'Newsletter', field: 'url', fieldLabel: 'Site' },
@@ -187,6 +194,10 @@
       sourcesSection.appendChild(list);
       var sourcesStatus = status();
       sourcesSection.appendChild(sourcesStatus);
+      var current = feed.current();
+      var picked = { ids: current && Array.isArray(current.sources) ? current.sources.slice() : [] };
+      var suggested = suggestedBlock(picked, list, turn);
+      sourcesSection.appendChild(suggested.node);
       var manage = button('Manage sources', 'link-button', 'manage');
       var line = element('p', 'feed-settings-manage');
       line.appendChild(manage);
@@ -233,17 +244,18 @@
           say(sourcesStatus, NO_ANSWER);
           return;
         }
-        renderChoices(list, result.body.sources, sourcesStatus, turn);
+        renderChoices(list, result.body.sources, sourcesStatus, turn, picked, suggested.refresh);
       });
+      suggested.load();
       // The note is still loading, so the heading takes focus into the sheet.
       heading.focus();
     }
 
     // The active sources as checkboxes, incoming then context.
-    function renderChoices(list, sources, line, turn) {
+    // `picked.ids` is the feed's sources, shared with Suggested; `changed`
+    // runs after each saved change.
+    function renderChoices(list, sources, line, turn, picked, changed) {
       list.textContent = '';
-      var current = feed.current();
-      var chosen = current && current.id === feedId && Array.isArray(current.sources) ? current.sources.slice() : [];
       var active = sources.filter(function (source) { return source && source.active === true; });
       if (active.length === 0) {
         list.appendChild(element('p', 'form-note', 'There are no active sources.'));
@@ -255,7 +267,7 @@
         var set = element('fieldset', 'form-fieldset');
         set.appendChild(element('legend', 'form-legend', group[1]));
         members.forEach(function (source) {
-          var choice = check(source.name, chosen.indexOf(source.id) !== -1);
+          var choice = check(source.name, picked.ids.indexOf(source.id) !== -1);
           choice.box.value = source.id;
           choice.box.setAttribute('data-source-id', source.id);
           if (source.missing) choice.wrap.appendChild(element('span', 'feed-settings-missing', ' (not there)'));
@@ -267,24 +279,162 @@
         var box = event.target;
         if (!box || box.type !== 'checkbox') return;
         var id = box.value;
-        if (box.checked && chosen.indexOf(id) === -1) chosen.push(id);
-        if (!box.checked) chosen = chosen.filter(function (entry) { return entry !== id; });
+        var next = box.checked
+          ? (picked.ids.indexOf(id) === -1 ? picked.ids.concat([id]) : picked.ids.slice())
+          : picked.ids.filter(function (entry) { return entry !== id; });
         var boxes = list.querySelectorAll('input[type="checkbox"]');
         Array.prototype.forEach.call(boxes, function (node) { node.disabled = true; });
         say(line, '');
-        api.postJson(feedPath(feedId), { sources: chosen.slice() }, 'PUT').then(function (result) {
+        saveSources(next).then(function (result) {
           if (turn !== sequence) return;
           Array.prototype.forEach.call(boxes, function (node) { node.disabled = false; });
           if (result && result.status === 200 && result.body && result.body.feed) {
-            chosen = Array.isArray(result.body.feed.sources) ? result.body.feed.sources.slice() : chosen;
+            picked.ids = Array.isArray(result.body.feed.sources) ? result.body.feed.sources.slice() : next;
             feed.reload();
+            changed();
             return;
           }
           box.checked = !box.checked;
-          chosen = box.checked ? chosen.concat([id]) : chosen.filter(function (entry) { return entry !== id; });
           say(line, refusal(result));
         });
       });
+    }
+
+    function saveSources(ids) {
+      return api.postJson(feedPath(feedId), { sources: ids.slice() }, 'PUT');
+    }
+
+    // Suggested: the producer's picks not on the feed, Add, and Suggest.
+    // load() reads them; refresh() draws them again after a change to
+    // `picked`.
+    function suggestedBlock(picked, list, turn) {
+      var node = element('div', 'feed-suggested');
+      var heading = element('h4', 'feed-suggested-heading', 'Suggested');
+      heading.id = 'feed-suggested-heading';
+      heading.tabIndex = -1;
+      node.appendChild(heading);
+      var rows = element('ul', 'feed-suggested-list');
+      rows.setAttribute('aria-labelledby', heading.id);
+      node.appendChild(rows);
+      var line = status();
+      line.classList.add('feed-suggested-status');
+      node.appendChild(line);
+      var suggest = button('Suggest', 'button button-small', 'suggest');
+      node.appendChild(suggest);
+      var data = null; // the last answer's suggestions
+      var timer = null;
+      var looking = false; // a run is in flight
+
+      function who() {
+        return typeof feed.producerName === 'function' ? feed.producerName() : 'The agent';
+      }
+
+      function draw(next) {
+        looking = next;
+        rows.textContent = '';
+        if (looking) {
+          suggest.disabled = true;
+          say(line, who() + ' is looking for sources that fit this feed.');
+          return;
+        }
+        suggest.disabled = false;
+        if (!data) {
+          say(line, '');
+          return;
+        }
+        var shown = data.sources.filter(function (source) { return picked.ids.indexOf(source.id) === -1; });
+        say(line, shown.length === 0 ? 'No other sources fit this feed.' : '');
+        shown.forEach(function (source) { rows.appendChild(row(source)); });
+      }
+
+      function row(source) {
+        var item = element('li', 'feed-source feed-suggested-source');
+        item.setAttribute('data-suggested', source.id);
+        item.appendChild(element('p', 'feed-source-name', source.name));
+        var meta = element('p', 'feed-source-meta');
+        meta.appendChild(element('span', 'feed-source-kind', KIND_NAMES[source.kind] || source.kind));
+        item.appendChild(meta);
+        item.appendChild(element('p', 'feed-suggested-why', source.why));
+        var add = button('Add', 'button button-small', 'add-suggested');
+        add.setAttribute('aria-label', 'Add ' + source.name);
+        item.appendChild(add);
+        var rowLine = status();
+        item.appendChild(rowLine);
+        add.addEventListener('click', function () {
+          add.disabled = true;
+          say(rowLine, '');
+          var next = picked.ids.indexOf(source.id) === -1 ? picked.ids.concat([source.id]) : picked.ids.slice();
+          saveSources(next).then(function (result) {
+            if (turn !== sequence) return;
+            if (result && result.status === 200 && result.body && result.body.feed) {
+              picked.ids = Array.isArray(result.body.feed.sources) ? result.body.feed.sources.slice() : next;
+              var box = list.querySelector('input[data-source-id="' + CSS.escape(source.id) + '"]');
+              if (box) box.checked = true;
+              var after = item.nextElementSibling || item.previousElementSibling;
+              feed.reload();
+              draw(false);
+              var focusable = after && after.getAttribute('data-suggested')
+                ? rows.querySelector('[data-suggested="' + CSS.escape(after.getAttribute('data-suggested')) + '"] button')
+                : null;
+              (focusable || suggest).focus();
+              return;
+            }
+            add.disabled = false;
+            say(rowLine, refusal(result));
+          });
+        });
+        return item;
+      }
+
+      function load() {
+        if (timer !== null) clearTimeout(timer);
+        timer = null;
+        return api.request(feedPath(feedId, 'suggestions')).then(function (result) {
+          if (turn !== sequence) return;
+          if (!result || result.status !== 200 || !result.body) {
+            suggest.disabled = false;
+            say(line, NO_ANSWER);
+            return;
+          }
+          data = result.body.suggestions && Array.isArray(result.body.suggestions.sources) ? result.body.suggestions : null;
+          draw(result.body.suggesting === true);
+          if (looking) timer = setTimeout(function () { if (turn === sequence) load(); }, SUGGEST_POLL_MS);
+        });
+      }
+
+      suggest.addEventListener('click', function () {
+        suggest.disabled = true;
+        say(line, '');
+        api.request(feedPath(feedId, 'suggest'), { method: 'POST' }).then(function (result) {
+          if (turn !== sequence) return;
+          if (result && result.status === 202) {
+            data = null;
+            draw(true);
+            // Suggest is off while Scout looks, which drops its focus (WebKit
+            // never gave it any); the heading keeps the sheet's, so Escape works.
+            if (document.activeElement === suggest || !sheet.contains(document.activeElement)) heading.focus();
+            load();
+            return;
+          }
+          var code = result && result.body ? result.body.error : null;
+          if (result && result.status === 409 && code === 'busy') {
+            // A run for this feed, or the producer's turn: the read tells which.
+            load().then(function () {
+              if (turn !== sequence || looking) return;
+              say(line, who() + ' is in the middle of a turn. Try again when it is idle.');
+            });
+            return;
+          }
+          suggest.disabled = false;
+          if (result && (result.status === 503 || (result.status === 409 && code === 'agent_unavailable'))) {
+            say(line, who() + ' is not running.');
+            return;
+          }
+          say(line, refusal(result));
+        });
+      });
+
+      return { node: node, load: load, refresh: function () { draw(looking); } };
     }
 
     // ---- Sources -----------------------------------------------------------
@@ -535,8 +685,15 @@
         api.postJson('/api/feeds', { name: name.value, note: note.value }).then(function (result) {
           if (turn !== sequence) return;
           if (result && result.status === 201 && result.body && result.body.feed) {
+            var id = result.body.feed.id;
             close(false);
-            feed.open(result.body.feed.id);
+            var opened = sequence;
+            feed.open(id).then(function () {
+              var current = feed.current();
+              if (opened !== sequence || mode !== null || !current || current.id !== id) return;
+              opener = gear;
+              openSettings();
+            });
             return;
           }
           submit.disabled = false;

@@ -1246,6 +1246,23 @@ div.panel-row.now-row:hover { background: none; }
   margin-top: 6px;
 }
 .feed-source-form { margin-top: 16px; }
+.feed-suggested { margin-top: 16px; }
+.feed-suggested-heading {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.feed-suggested-heading:focus { outline: none; }
+.feed-suggested-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.feed-suggested-why {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
 
 .feed-page {
   flex: 1;
