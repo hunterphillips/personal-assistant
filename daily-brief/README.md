@@ -30,7 +30,9 @@ wake is a dark wake and lasts seconds on its own, so
 runs `caffeinate -uis -t 10800`: a full wake with network, held until
 08:00, with the lid open or closed. On battery the hold is not honored and
 the morning plays out as before: jobs fire at whatever wake comes next, and
-a run that finds no network exits with `reason=no-network` in the log.
+a run waits for the network through dark wakes and gives up only after five
+minutes awake with none (`reason=no-network` in the log). Opening the lid
+usually lets it finish.
 Before 2026-10-02 nothing held the wake, and the brief only ran on mornings
 Hunter opened the lid. To check or change the wake:
 

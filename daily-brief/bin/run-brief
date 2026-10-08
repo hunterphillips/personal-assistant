@@ -241,12 +241,18 @@ ROSTER
     exit 0
 fi
 
-# Woken from sleep: the network may not be up yet.
-attempt=0
+# Woken from sleep: the network may not be up yet. On battery the Mac drops
+# in and out of dark wakes, and a sleep between checks can last minutes, so
+# only time spent awake and offline counts toward giving up: a gap longer
+# than 60 s between checks means the Mac slept through it.
+net_awake_limit=${DAILY_BRIEF_NET_WAIT_SECONDS:-300}
+offline=0
+last=$(/bin/date +%s)
 until /usr/bin/curl -sS --max-time 5 -o /dev/null https://api.anthropic.com 2>/dev/null; do
-    attempt=$((attempt + 1))
-    [ "$attempt" -ge 6 ] && { log "exit=1 date=$date reason=no-network"; exit 1; }
-    /bin/sleep 10
+    now=$(/bin/date +%s); gap=$((now - last)); last=$now
+    [ "$gap" -le 60 ] && offline=$((offline + gap))
+    [ "$offline" -ge "$net_awake_limit" ] && { log "exit=1 date=$date reason=no-network offline=${offline}s"; exit 1; }
+    /bin/sleep 15
 done
 
 # --- single-run lock ----------------------------------------------------------
