@@ -1,152 +1,178 @@
 #!/usr/bin/env python3
-"""Turn a triage envelope into the watch packet, the overflow file, the
-feed file the dashboard reads, the seen-store lines, and the state update.
-Standard library only.
+"""Write what a feeds run produced. Standard library only.
 
-    render.py --date D --since S --envelope triage.json --threads N
-              [--out DIR] [--feed DIR]
+    render.py feed   --data D --feed F --date d --since S --envelope triage.json
+                     --read id,id [--status ok|degraded] [--note TEXT]
+    render.py packet --data D --date d [--failed id,id]
 
---out is Watch's state directory (packets/, overflow/, seen.jsonl,
-state.json), the data root's watch/ when contribute runs it; --feed is the
-feed store's items directory, the data root's feed/items/. Without them
-the script writes beside itself and to ../../feed/items, for a run by hand.
+`feed` turns one feed's triage envelope into its items file,
+feeds/<F>/items/<d>.json, every post the run judged worth keeping,
+survivors first (shape in feeds/README.md), and, under the run's
+directory feeds/.run/: overflow/<d>-<F>.json, the feed's lines in
+seen.jsonl, its last_run in state.json, and work/<d>/<F>.json, the kept
+posts the packet reads. The items store is append-only and its ids are
+positional, so an items file that already exists is left as it is.
 
-The feed file, <feed>/<date>-watch.json, holds every item the run judged
-worth keeping, survivors first: see feed/README.md at the repo root for
-the shape. The feed store is append-only and its ids are
-positional, so a file that already exists for the date is left as it is.
+`packet` runs once after every feed: it reads the day's work files and
+writes one packets/<d>.yaml, domain `watch`, holding every feed's kept
+posts, for the next Daily Brief run. A day with no work file writes no
+packet.
 """
-import argparse, datetime as dt, json, os, sys
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-FEED_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "feed", "items"))
+import argparse, datetime as dt, glob, json, os, sys
 
 
 def q(s):
     return json.dumps(str(s), ensure_ascii=False)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True)
-    ap.add_argument("--since", required=True)
-    ap.add_argument("--envelope", required=True)
-    ap.add_argument("--threads", type=int, default=0)
-    ap.add_argument("--status", default="ok")
-    ap.add_argument("--note", default="")
-    ap.add_argument("--out", default=HERE)
-    ap.add_argument("--feed", default=FEED_DIR)
-    a = ap.parse_args()
+def write_json(path, doc, mode=None):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    if mode:
+        os.chmod(tmp, mode)
+    os.replace(tmp, path)
 
-    with open(a.envelope, encoding="utf-8") as f:
-        env = json.load(f)
+
+def read_json(path, default=None):
+    if not os.path.exists(path):
+        return default
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def source_names(data):
+    names = {}
+    for path in glob.glob(os.path.join(data, "sources", "*.json")):
+        try:
+            s = read_json(path)
+            names[s["id"]] = s.get("name") or s["id"]
+        except (ValueError, KeyError, TypeError):
+            continue
+    return names
+
+
+def render_feed(a):
+    env = read_json(a.envelope)
     if env.get("is_error"):
-        print(f"render.py: triage returned an error envelope: {env.get('result','')[:300]}", file=sys.stderr)
+        print(f"render.py: triage returned an error envelope: {env.get('result', '')[:300]}", file=sys.stderr)
         return 1
     out = env.get("structured_output") or {}
-    items = out.get("items", [])
-    overflow = out.get("overflow", [])
-    considered = out.get("considered", 0)
-    dupes = out.get("duplicates_collapsed", 0)
-
+    items, overflow = out.get("items", []), out.get("overflow", [])
+    considered, dupes = out.get("considered", 0), out.get("duplicates_collapsed", 0)
+    feed = read_json(os.path.join(a.data, "feeds", a.feed, "feed.json"))
+    run = os.path.join(a.data, "feeds", ".run")
     now = dt.datetime.now().astimezone().replace(microsecond=0).isoformat()
-    note = a.note or (
-        f"{a.threads} issues since {a.since}; {considered} distinct stories judged, "
-        f"{dupes} duplicates collapsed; {len(items)} survived, {len(overflow)} kept for the feed."
-    )
+    read = [s for s in a.read.split(",") if s]
+    note = (a.note + " " if a.note else "") + (
+        f"{considered} distinct stories since {a.since} judged, {dupes} duplicates collapsed; "
+        f"{len(items)} survived, {len(overflow)} kept for the feed.")
 
-    lines = [
-        "domain: watch",
-        f"generated_at: {now}",
-        f"data_as_of: {now}",
-        f"since: {a.since}",
-        f"status: {a.status}",
-        f"notes: {q(note)}",
-    ]
-    if items:
-        lines.append("items:")
-        for i, it in enumerate(items, 1):
-            lines += [
-                f"  - id: watch/{a.date}/{i}",
+    items_path = os.path.join(a.data, "feeds", a.feed, "items", f"{a.date}.json")
+    written = not os.path.exists(items_path)
+    if written:
+        posts = []
+        for it in items + overflow:
+            n = len(posts) + 1
+            post = {"id": f"{a.feed}/{a.date}/{n}", "title": it["title"], "url": it["url"], "sources": it["sources"],
+                    "summary": it["headline"] if n <= len(items) else it["summary"]}
+            for key in ("takeaway", "insights"):
+                if it.get(key):
+                    post[key] = it[key]
+            post["kept"] = n <= len(items)
+            posts.append(post)
+        write_json(items_path, {"feed": a.feed, "producer": feed.get("producer", "scout"), "date": a.date,
+                                "since": a.since, "generated_at": now, "read": read, "items": posts}, 0o600)
+
+    write_json(os.path.join(run, "overflow", f"{a.date}-{a.feed}.json"),
+               {"feed": a.feed, "date": a.date, "since": a.since, "overflow": overflow})
+    with open(os.path.join(run, "seen.jsonl"), "a", encoding="utf-8") as f:
+        for verdict, group in (("kept", items), ("overflow", overflow)):
+            for it in group:
+                f.write(json.dumps({"feed": a.feed, "date": a.date, "verdict": verdict, "sources": it["sources"],
+                                    "title": it["title"], "url": it["url"]}, ensure_ascii=False) + "\n")
+    state_path = os.path.join(run, "state.json")
+    state = read_json(state_path, {})
+    state.setdefault("feeds", {}).setdefault(a.feed, {})["last_run"] = a.date
+    state.setdefault("reported", [])
+    write_json(state_path, state)
+    write_json(os.path.join(run, "work", a.date, f"{a.feed}.json"),
+               {"feed": a.feed, "name": feed.get("name", a.feed), "date": a.date, "since": a.since,
+                "generated_at": now, "status": a.status, "note": note, "items": items}, 0o600)
+
+    kept = items_path if written else f"{items_path} (already there, kept)"
+    print(f"feed {a.feed} {a.date}: {len(items)} items, {len(overflow)} overflow, {considered} considered -> {kept}")
+    return 0
+
+
+def render_packet(a):
+    run = os.path.join(a.data, "feeds", ".run")
+    works = [read_json(p) for p in sorted(glob.glob(os.path.join(run, "work", a.date, "*.json")))]
+    if not works:
+        print(f"packet {a.date}: no feed ran, no packet")
+        return 0
+    failed = [f for f in (a.failed or "").split(",") if f]
+    names = source_names(a.data)
+    now = dt.datetime.now().astimezone().replace(microsecond=0).isoformat()
+    since = min(w["since"] for w in works)
+    status = "degraded" if failed or any(w.get("status") != "ok" for w in works) else "ok"
+    notes = [f"{w['name']}: {w['note']}" for w in works]
+    for fid in failed:
+        feed = read_json(os.path.join(a.data, "feeds", fid, "feed.json"), {}) or {}
+        notes.append(f"{feed.get('name', fid)} could not run.")
+
+    lines = ["domain: watch", f"generated_at: {now}", f"data_as_of: {now}", f"since: {since}",
+             f"status: {status}", f"notes: {q(' '.join(notes))}"]
+    entries = []
+    for w in works:
+        for i, it in enumerate(w["items"], 1):
+            receipt = " / ".join(names.get(s, s) for s in it["sources"]) + ": " + it["url"]
+            entries += [
+                f"  - id: watch/{w['feed']}/{a.date}/{i}",
                 "    kind: context",
                 f"    headline: {q(it['headline'])}",
-                f"    why: {q(it['why'])}",
-                f"    as_of: {now}",
+                f"    why: {q(it.get('takeaway') or it['headline'])}",
+                f"    as_of: {w['generated_at']}",
                 "    origin: external",
                 "    basis: summarized",
-                f"    about: watch/{a.date}",
+                f"    about: watch/{w['feed']}/{a.date}",
                 "    receipt:",
-                f"      - {q(it['source'] + ': ' + it['url'])}",
+                f"      - {q(receipt)}",
             ]
-    else:
-        lines.append("items: []")
+    lines += ["items:"] + entries if entries else ["items: []"]
     lines.append("")
 
-    packets = os.path.join(a.out, "packets")
-    os.makedirs(packets, exist_ok=True)
-    packet = os.path.join(packets, f"{a.date}.yaml")
+    packet = os.path.join(run, "packets", f"{a.date}.yaml")
+    os.makedirs(os.path.dirname(packet), exist_ok=True)
     tmp = packet + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     os.chmod(tmp, 0o600)
     os.replace(tmp, packet)
-
-    ov_dir = os.path.join(a.out, "overflow")
-    os.makedirs(ov_dir, exist_ok=True)
-    with open(os.path.join(ov_dir, f"{a.date}.json"), "w", encoding="utf-8") as f:
-        json.dump({"date": a.date, "since": a.since, "overflow": overflow}, f, ensure_ascii=False, indent=1)
-
-    feed_path, feed_written = write_feed(a.feed, a.date, a.since, now, items, overflow)
-
-    with open(os.path.join(a.out, "seen.jsonl"), "a", encoding="utf-8") as f:
-        for it in items:
-            f.write(json.dumps({"date": a.date, "verdict": "kept", "source": it["source"], "title": it["title"], "url": it["url"]}, ensure_ascii=False) + "\n")
-        for it in overflow:
-            f.write(json.dumps({"date": a.date, "verdict": "overflow", "source": it["source"], "title": it["title"], "url": it["url"]}, ensure_ascii=False) + "\n")
-
-    state_path = os.path.join(a.out, "state.json")
-    state = {}
-    if os.path.exists(state_path):
-        with open(state_path, encoding="utf-8") as f:
-            state = json.load(f)
-    state["last_run"] = a.date
-    state.setdefault("reported", [])
-    with open(state_path, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=1)
-
-    feed_note = f"{feed_path}" if feed_written else f"{feed_path} (already there, kept)"
-    print(f"watch {a.date}: {len(items)} items, {len(overflow)} overflow, {considered} considered -> {packet}, {feed_note}")
+    print(f"packet {a.date}: {len(works)} feeds, {sum(len(w['items']) for w in works)} items -> {packet}")
     return 0
 
 
-def write_feed(feed_dir, date, since, now, items, overflow):
-    """Write the feed file for the run unless one exists. Returns (path, written)."""
-    os.makedirs(feed_dir, exist_ok=True)
-    feed_path = os.path.join(feed_dir, f"{date}-watch.json")
-    if os.path.exists(feed_path):
-        return feed_path, False
-    entries = []
-    n = 0
-    for it in items:
-        n += 1
-        entries.append({
-            "id": f"watch/{date}/{n}", "title": it["title"], "source": it["source"], "url": it["url"],
-            "test": it.get("test"), "summary": it["headline"], "kept": True,
-        })
-    for it in overflow:
-        n += 1
-        entries.append({
-            "id": f"watch/{date}/{n}", "title": it["title"], "source": it["source"], "url": it["url"],
-            "test": it.get("test"), "summary": it["summary"], "kept": False,
-        })
-    doc = {"producer": "watch", "date": date, "since": since, "generated_at": now, "items": entries}
-    tmp = feed_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(doc, f, ensure_ascii=False, indent=1)
-        f.write("\n")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, feed_path)
-    return feed_path, True
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("command", choices=("feed", "packet"))
+    ap.add_argument("--data", required=True)
+    ap.add_argument("--date", required=True)
+    ap.add_argument("--feed")
+    ap.add_argument("--since")
+    ap.add_argument("--envelope")
+    ap.add_argument("--read", default="")
+    ap.add_argument("--status", default="ok")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--failed", default="")
+    a = ap.parse_args()
+    if a.command == "feed":
+        if not (a.feed and a.since and a.envelope):
+            ap.error("feed needs --feed, --since, and --envelope")
+        return render_feed(a)
+    return render_packet(a)
 
 
 if __name__ == "__main__":

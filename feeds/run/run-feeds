@@ -1,69 +1,110 @@
 #!/bin/sh
-# Daily watch contributor. Reads the chosen newsletters from Gmail, extracts
-# their stories, triages them against the data root's feed/relevance.md, and
-# writes watch/packets/<date>.yaml under the root for the next Daily Brief
-# run to pick up. Most days find nothing new, since the five sources are
-# weekly.
+# Daily feeds run. For every active feed in the data root it reads the
+# feed's sources (RSS feeds directly, newsletters from Gmail, files and
+# folders as context), extracts the stories, triages them against the
+# shared rules and the feed's note, and writes the feed's posts. After the
+# last feed it writes one packet for the next Daily Brief run to pick up.
 #
-#   contribute [--date YYYY-MM-DD] [--since YYYY-MM-DD] [--dry-run]
+#   run-feeds [--date YYYY-MM-DD] [--since YYYY-MM-DD] [--dry-run]
 #
-# Read-only toward Gmail. Writes only under the data root
-# (PERSONAL_ASSISTANT_HOME, default ~/.personal-assistant): its watch/, the
-# run's feed file (feed/items/<date>-watch.json, filled in by
-# feed/bin/enrich); and the logs. The prompts, schemas, and render.py stay
-# in the repository.
+# Read-only toward Gmail and the sources. Writes only under the data root
+# (PERSONAL_ASSISTANT_HOME, default ~/.personal-assistant): each feed's
+# items/<date>.json (filled in by feeds/bin/enrich) and the run's state in
+# feeds/.run/; and the logs. The feeds and sources come from the root's
+# feeds/*/feed.json and sources/*.json, never from this file. The prompts,
+# schemas, and scripts stay in the repository.
 set -u
 unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 
-root=/Users/hunterphillips/workspace/personal-assistant
-watch_code=$root/daily-brief/watch
+run_code=$(cd "$(/usr/bin/dirname "$0")" && pwd)
+root=$(cd "$run_code/../.." && pwd)
 data=${PERSONAL_ASSISTANT_HOME:-$HOME/.personal-assistant}
-case $data in /*) ;; *) printf 'contribute: PERSONAL_ASSISTANT_HOME must be an absolute path: %s\n' "$data" >&2; exit 2 ;; esac
-watch_data=$data/watch
-relevance=$data/feed/relevance.md
-feed_dir=$data/feed/items
-vault=/Users/hunterphillips/workspace/second-brain/notes
+case $data in /*) ;; *) printf 'run-feeds: PERSONAL_ASSISTANT_HOME must be an absolute path: %s\n' "$data" >&2; exit 2 ;; esac
+run_dir=$data/feeds/.run
 claude=/Users/hunterphillips/.local/bin/claude
 python3=/usr/bin/python3
 jq=/usr/bin/jq
 tz=America/Chicago
 log_file=/Users/hunterphillips/Library/Logs/daily-brief.log
 transcripts=/Users/hunterphillips/Library/Logs/daily-brief
-lock_dir=$watch_data/.run.lock
+lock_dir=$run_dir/.run.lock
 
-list_model=${WATCH_LIST_MODEL:-haiku}
-extract_model=${WATCH_EXTRACT_MODEL:-haiku}
-triage_model=${WATCH_TRIAGE_MODEL:-opus}
-stage_seconds=${WATCH_STAGE_SECONDS:-480}
-parallel=${WATCH_PARALLEL:-4}
-triage_seconds=${WATCH_TRIAGE_SECONDS:-600}
-enrich_seconds=${WATCH_ENRICH_SECONDS:-180}
+list_model=${FEEDS_LIST_MODEL:-haiku}
+extract_model=${FEEDS_EXTRACT_MODEL:-haiku}
+triage_model=${FEEDS_TRIAGE_MODEL:-opus}
+stage_seconds=${FEEDS_STAGE_SECONDS:-480}
+parallel=${FEEDS_PARALLEL:-4}
+triage_seconds=${FEEDS_TRIAGE_SECONDS:-600}
+enrich_seconds=${FEEDS_ENRICH_SECONDS:-180}
+rss_seconds=${FEEDS_RSS_SECONDS:-60}
 
-# The five senders. The root's feed/relevance.md is the human-readable list;
-# this is the query.
-senders="swyx@substack.com swyx+ainews@substack.com nashville@axios.com kale@hackernewsletter.com simonw@substack.com"
-
-date=; since=; dry_run=0
+date=; since_arg=; dry_run=0
 while [ $# -gt 0 ]; do
     case $1 in
         --date) date=$2; shift 2 ;;
-        --since) since=$2; shift 2 ;;
+        --since) since_arg=$2; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
-        *) printf 'contribute: unknown argument %s\n' "$1" >&2; exit 2 ;;
+        *) printf 'run-feeds: unknown argument %s\n' "$1" >&2; exit 2 ;;
     esac
 done
 [ -n "$date" ] || date=$(TZ=$tz /bin/date +%F)
-if [ -z "$since" ]; then
-    since=$([ -f "$watch_data/state.json" ] && $jq -r '.last_run // empty' "$watch_data/state.json")
-    [ -n "$since" ] || since=$(TZ=$tz /bin/date -j -v-14d -f %Y-%m-%d "$date" +%F)
+case $date in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) printf 'run-feeds: not a date: %s\n' "$date" >&2; exit 2 ;; esac
+
+prepare() { "$python3" "$run_code/prepare.py" "$@"; }
+now_iso() { TZ=$tz /bin/date '+%Y-%m-%dT%H:%M:%S%z' | /usr/bin/sed 's/\([0-9][0-9]\)$/:\1/'; }
+log() { printf '%s %s\n' "$(now_iso)" "feeds $1" >>"$log_file"; }
+since_for() { if [ -n "$since_arg" ]; then printf '%s\n' "$since_arg"; else prepare since --data "$data" --feed "$1" --date "$date"; fi; }
+
+feeds=$(prepare feeds --data "$data")
+
+if [ "$dry_run" = 1 ]; then
+    printf 'feeds dry run for %s\n  data root %s\n  run dir %s\n' "$date" "$data" "$run_dir"
+    [ -n "$feeds" ] || printf '  no active feeds\n'
+    for feed in $feeds; do
+        since=$(since_for "$feed")
+        printf '  feed %s (%s) since=%s\n' "$feed" "$($jq -r '.name // .id' "$data/feeds/$feed/feed.json")" "$since"
+        prepare describe --data "$data" --feed "$feed"
+        printf '    note %s/feeds/%s/note.md\n' "$data" "$feed"
+        query=$(prepare query --data "$data" --feed "$feed" --since "$since")
+        if [ -n "$query" ]; then
+            printf '    list: %s -p --model %s --allowedTools mcp__claude_ai_Gmail__search_threads --json-schema schemas/threads.json < prompts/list.md, query=%s\n' "$claude" "$list_model" "$query"
+            printf '    extract (email): one %s session per thread with mcp__claude_ai_Gmail__get_thread, schemas/stories.json\n' "$extract_model"
+        fi
+        if [ -n "$(prepare sources --data "$data" --feed "$feed" --kind rss)" ]; then
+            printf '    fetch: %s fetch_rss.py --since %s per rss source; extract (rss): one %s session per entry, no tools, the entry inline, schemas/stories.json\n' "$python3" "$since" "$extract_model"
+        fi
+        printf '    extract: %s at a time, %ss each, one retry\n' "$parallel" "$stage_seconds"
+        printf '    triage: %s, no tools, prompts/triage.md with system-rules.md, the note, the context, %s/seen.jsonl (this feed, 14d), the stories; schemas/triage.json\n' "$triage_model" "$run_dir"
+        printf '    render: %s render.py feed -> %s/feeds/%s/items/%s.json (kept if present), %s/overflow/%s-%s.json, %s/work/%s/%s.json, seen.jsonl, state.json\n' "$python3" "$data" "$feed" "$date" "$run_dir" "$date" "$feed" "$run_dir" "$date" "$feed"
+        printf '    enrich: %s feeds/bin/enrich %s/feeds/%s/items/%s.json (%ss in all)\n' "$python3" "$data" "$feed" "$date" "$enrich_seconds"
+    done
+    printf '  packet: %s render.py packet --date %s -> %s/packets/%s.yaml, once after every feed\n' "$python3" "$date" "$run_dir" "$date"
+    exit 0
 fi
 
-now_iso() { TZ=$tz /bin/date '+%Y-%m-%dT%H:%M:%S%z' | /usr/bin/sed 's/\([0-9][0-9]\)$/:\1/'; }
-log() { printf '%s %s\n' "$(now_iso)" "watch $1" >>"$log_file"; }
+[ -n "$feeds" ] || { log "exit=0 date=$date reason=no-active-feeds"; exit 0; }
+/bin/mkdir -p "$transcripts" && /bin/chmod 700 "$transcripts"
+(umask 077 && /bin/mkdir -p "$run_dir/packets" "$run_dir/overflow" "$run_dir/work") || exit 1
+if ! /bin/mkdir "$lock_dir" 2>/dev/null; then
+    if [ -n "$(/usr/bin/find "$lock_dir" -maxdepth 0 -mmin +90 2>/dev/null)" ]; then /bin/rm -rf "$lock_dir"; /bin/mkdir "$lock_dir" || exit 0
+    else log "exit=0 date=$date reason=locked"; exit 0; fi
+fi
+work=$(/usr/bin/mktemp -d "$transcripts/feeds-$date.XXXX")
+trap '/bin/rm -rf "$lock_dir"' EXIT INT TERM
+cd "$root" || exit 1
 
-query="("
-for s in $senders; do query="$query from:$s OR"; done
-query="${query% OR} ) after:$(printf '%s' "$since" | /usr/bin/tr '-' '/')"
+# Woken from sleep: the network may not be up yet. As in run-brief, only
+# time spent awake and offline counts toward giving up: a gap longer than
+# 60 s between checks means the Mac slept through it.
+net_awake_limit=${FEEDS_NET_WAIT_SECONDS:-300}
+offline=0
+last=$(/bin/date +%s)
+until /usr/bin/curl -sS --max-time 5 -o /dev/null https://api.anthropic.com 2>/dev/null; do
+    now=$(/bin/date +%s); gap=$((now - last)); last=$now
+    [ "$gap" -le 60 ] && offline=$((offline + gap))
+    [ "$offline" -ge "$net_awake_limit" ] && { log "exit=1 date=$date reason=no-network offline=${offline}s"; exit 1; }
+    /bin/sleep 15
+done
 
 run_limited() {
     limit=$1; shift
@@ -95,115 +136,132 @@ run_session() {
     return 1
 }
 
-if [ "$dry_run" = 1 ]; then
-    printf 'watch dry run for %s\n  data root %s\n  since=%s\n  query=%s\n' "$date" "$data" "$since" "$query"
-    printf '  list: %s -p --model %s --allowedTools mcp__claude_ai_Gmail__search_threads --output-format json --json-schema schemas/threads.json < prompts/list.md\n' "$claude" "$list_model"
-    printf '  extract: one %s session per thread with mcp__claude_ai_Gmail__get_thread, schemas/stories.json, %s at a time, %ss each, one retry\n' "$extract_model" "$parallel" "$stage_seconds"
-    printf '  triage: %s, no tools, prompts/triage.md with %s, the two vault priority notes, %s/seen.jsonl (14d), the stories; schemas/triage.json\n' "$triage_model" "$relevance" "$watch_data"
-    printf '  render: %s render.py --date %s --since %s --out %s --feed %s -> packets/%s.yaml, overflow/%s.json, seen.jsonl, state.json under --out; %s-watch.json under --feed (kept if present)\n' "$python3" "$date" "$since" "$watch_data" "$feed_dir" "$date" "$date" "$date"
-    printf '  enrich: %s feed/bin/enrich %s/%s-watch.json (image from each story page, 4 at a time, 6s each, %ss in all)\n' "$python3" "$feed_dir" "$date" "$enrich_seconds"
-    exit 0
-fi
+# extract N TOOLS: one extract session on $w/extract-N.md, in the background.
+extract() {
+    run_session "$stage_seconds" '.structured_output.stories | length > 0' "$w/stories-$1.json" "\"$claude\" -p --model \"$extract_model\" \
+        $2 --output-format json --json-schema \"\$(cat \"$run_code/schemas/stories.json\")\" \
+        <\"$w/extract-$1.md\" >\"$w/stories-$1.json\" 2>\"$w/extract-$1.err\"" &
+    [ $(($1 % parallel)) -eq 0 ] && wait
+}
 
-# The daemon seeds the criteria into the root from the repo's defaults/ at
-# start; a root it has never started on has none.
-[ -f "$relevance" ] || { log "exit=1 date=$date reason=no-criteria $relevance"; printf 'contribute: no criteria at %s; start the dashboard once to seed it\n' "$relevance" >&2; exit 1; }
-/bin/mkdir -p "$transcripts" && /bin/chmod 700 "$transcripts"
-(umask 077 && /bin/mkdir -p "$watch_data/packets" "$watch_data/overflow" "$feed_dir") || exit 1
-if ! /bin/mkdir "$lock_dir" 2>/dev/null; then
-    if [ -n "$(/usr/bin/find "$lock_dir" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then /bin/rm -rf "$lock_dir"; /bin/mkdir "$lock_dir" || exit 0
-    else log "exit=0 date=$date reason=locked"; exit 0; fi
-fi
-work=$(/usr/bin/mktemp -d "$transcripts/watch-$date.XXXX")
-trap '/bin/rm -rf "$lock_dir"' EXIT INT TERM
-cd "$root" || exit 1
+# run_feed FEED: one feed, start to finish. Returns 1 when the feed failed;
+# a feed with nothing new since its last run returns 0 and writes nothing.
+run_feed() {
+    feed=$1; w=$work/$feed; /bin/mkdir -p "$w"
+    since=$(since_for "$feed")
+    note_file=$data/feeds/$feed/note.md
+    [ -f "$note_file" ] || { log "exit=1 feed=$feed date=$date reason=no-note $note_file"; return 1; }
+    i=0; n_issues=0; read_ids=
 
-attempt=0
-until /usr/bin/curl -sS --max-time 5 -o /dev/null https://api.anthropic.com 2>/dev/null; do
-    attempt=$((attempt + 1)); [ "$attempt" -ge 6 ] && { log "exit=1 date=$date reason=no-network"; exit 1; }; /bin/sleep 10
+    # --- email: list the threads, then extract each with get_thread --------
+    query=$(prepare query --data "$data" --feed "$feed" --since "$since")
+    if [ -n "$query" ]; then
+        prepare sources --data "$data" --feed "$feed" --kind email | while IFS="$(printf '\t')" read -r sid _; do printf '%s,' "$sid"; done >"$w/email-ids"
+        read_ids=$read_ids$(/bin/cat "$w/email-ids")
+        /usr/bin/sed -e "s|{{QUERY}}|$query|g" "$run_code/prompts/list.md" >"$w/list.md"
+        if ! run_session "$stage_seconds" '.structured_output.threads | length > 0' "$w/list.json" "\"$claude\" -p --model \"$list_model\" \
+            --allowedTools mcp__claude_ai_Gmail__search_threads \
+            --output-format json --json-schema \"\$(cat \"$run_code/schemas/threads.json\")\" \
+            <\"$w/list.md\" >\"$w/list.json\" 2>\"$w/list.err\""; then
+            # An empty listing with no error is a quiet day for email. Only
+            # the list's error field or a missing structured_output fails.
+            if ! $jq -e '.structured_output.threads == [] and .structured_output.error == null' "$w/list.json" >/dev/null 2>&1; then
+                err=$($jq -r '.structured_output.error // .result // ""' "$w/list.json" 2>/dev/null | /usr/bin/head -c 160)
+                log "exit=1 feed=$feed date=$date since=$since reason=list-empty-or-failed error=${err:-none}"; return 1
+            fi
+        fi
+        $jq -c '.structured_output.threads[]?' "$w/list.json" 2>/dev/null >"$w/threads.jsonl"
+        while read -r t; do
+            [ -n "$t" ] || continue
+            i=$((i + 1)); n_issues=$((n_issues + 1))
+            prepare extract --data "$data" --feed "$feed" --template "$run_code/prompts/extract.md" --out "$w/extract-$i.md" --thread "$t" >"$w/source-$i"
+            extract "$i" "--allowedTools mcp__claude_ai_Gmail__get_thread"
+        done <"$w/threads.jsonl"
+    fi
+
+    # --- rss: fetch each source, then extract each entry, no tools ----------
+    prepare sources --data "$data" --feed "$feed" --kind rss >"$w/rss.tsv"
+    while IFS="$(printf '\t')" read -r sid url; do
+        [ -n "$sid" ] || continue
+        read_ids=$read_ids$sid,
+        if ! fetched=$(run_limited "$rss_seconds" "$python3" "$run_code/fetch_rss.py" --since "$since" --out "$w/rss-$sid" "$url" 2>>"$w/rss.err"); then
+            log "feed=$feed source=$sid reason=rss-failed $(/usr/bin/tail -n 1 "$w/rss.err" | /usr/bin/head -c 160)"
+            rss_failed=$((rss_failed + 1)); continue
+        fi
+        log "feed=$feed source=$sid entries=$(printf '%s' "$fetched" | $jq -r .entries) newest=$(printf '%s' "$fetched" | $jq -r '.newest // "none"')"
+        for e in "$w/rss-$sid"/entry-*.json; do
+            [ -f "$e" ] || continue
+            i=$((i + 1)); n_issues=$((n_issues + 1))
+            prepare extract --data "$data" --feed "$feed" --template "$run_code/prompts/extract.md" --out "$w/extract-$i.md" --entry "$e" --source "$sid" >"$w/source-$i"
+            extract "$i" "--tools \"\" --strict-mcp-config"
+        done
+    done <"$w/rss.tsv"
+    wait
+    prepare sources --data "$data" --feed "$feed" --kind file >"$w/context.tsv"
+    prepare sources --data "$data" --feed "$feed" --kind folder >>"$w/context.tsv"
+    read_ids=$read_ids$(/usr/bin/cut -f1 "$w/context.tsv" | /usr/bin/tr '\n' ',')
+
+    ok=0; failed=0
+    : >"$w/stories.txt"
+    n=0
+    while [ "$n" -lt "$i" ]; do
+        n=$((n + 1)); f=$w/stories-$n.json
+        if $jq -e '.structured_output.stories' "$f" >/dev/null 2>&1; then
+            ok=$((ok + 1))
+            $jq -r --arg s "$(/bin/cat "$w/source-$n")" '.structured_output as $o | $o.stories[] | "- [\($s), \($o.issue_date)] \(.title) — \(.summary) <\(.url)>"' "$f" >>"$w/stories.txt"
+        else
+            failed=$((failed + 1))
+        fi
+    done
+    n_stories=$(/usr/bin/grep -c '^- ' "$w/stories.txt" || true)
+    if [ "$n_stories" = 0 ]; then
+        if [ "$failed" -gt 0 ] || [ "$rss_failed" -gt 0 ]; then
+            log "exit=1 feed=$feed date=$date since=$since reason=nothing-read issues=$n_issues failed=$failed rss_failed=$rss_failed"; return 1
+        fi
+        log "exit=0 feed=$feed date=$date since=$since reason=nothing-new"; return 0
+    fi
+
+    # --- triage ---------------------------------------------------------------
+    prepare triage --data "$data" --feed "$feed" --date "$date" --since "$since" --template "$run_code/prompts/triage.md" \
+        --rules "$run_code/system-rules.md" --stories "$w/stories.txt" --out "$w/triage.md" --notes "$w/context-notes" || return 1
+    if ! run_session "$triage_seconds" '.structured_output.items' "$w/triage.json" "\"$claude\" -p --model \"$triage_model\" \
+        --tools \"\" --strict-mcp-config \
+        --output-format json --json-schema \"\$(cat \"$run_code/schemas/triage.json\")\" \
+        <\"$w/triage.md\" >\"$w/triage.json\" 2>\"$w/triage.err\""; then
+        log "exit=1 feed=$feed date=$date reason=triage-failed issues=$n_issues stories=$n_stories result=$($jq -r '.result // ""' "$w/triage.json" 2>/dev/null | /usr/bin/head -c 120)"; return 1
+    fi
+
+    status=ok; note=
+    if [ "$failed" -gt 0 ] || [ "$rss_failed" -gt 0 ]; then
+        status=degraded; note="$ok of $n_issues issues since $since were read; $failed could not be extracted and $rss_failed RSS sources could not be fetched."
+    fi
+    context_notes=$(/bin/cat "$w/context-notes" 2>/dev/null)
+    note="$note${note:+${context_notes:+ }}$context_notes"
+    "$python3" "$run_code/render.py" feed --data "$data" --feed "$feed" --date "$date" --since "$since" \
+        --envelope "$w/triage.json" --read "${read_ids%,}" --status "$status" ${note:+--note "$note"} >"$w/render.out" 2>"$w/render.err"
+    rc=$?
+    # Pictures for the feed: fills each post's image from its story page.
+    # Its failures stay in the transcript and never change the run's exit.
+    items_file=$data/feeds/$feed/items/$date.json
+    enrich=skipped
+    if [ "$rc" = 0 ] && [ -f "$items_file" ]; then
+        run_limited "$enrich_seconds" "$python3" "$root/feeds/bin/enrich" "$items_file" 2>"$w/enrich.err"; enrich=$?
+    fi
+    n_items=$($jq '.structured_output.items | length' "$w/triage.json")
+    log "exit=$rc feed=$feed date=$date since=$since issues=$n_issues extracted=$ok failed=$failed rss_failed=$rss_failed stories=$n_stories items=$n_items enrich=$enrich"
+    return "$rc"
+}
+
+failed_feeds=
+for feed in $feeds; do
+    rss_failed=0
+    run_feed "$feed" || failed_feeds=$failed_feeds$feed,
 done
 
-# --- stage 1: list threads --------------------------------------------------
-/usr/bin/sed -e "s|{{QUERY}}|$query|g" "$watch_code/prompts/list.md" >"$work/list.md"
-if ! run_session "$stage_seconds" '.structured_output.threads | length > 0' "$work/list.json" "\"$claude\" -p --model \"$list_model\" \
-    --allowedTools mcp__claude_ai_Gmail__search_threads \
-    --output-format json --json-schema \"\$(cat \"$watch_code/schemas/threads.json\")\" \
-    <\"$work/list.md\" >\"$work/list.json\" 2>\"$work/list.err\""; then
-    # A daily run mostly finds nothing: the five sources are weekly, so an
-    # empty listing with no error is a quiet day, not a failure. Only
-    # list.md's error field (set when the tool call itself failed, was
-    # denied, or was unavailable) or a malformed/missing structured_output
-    # counts as a real failure.
-    if $jq -e '.structured_output.threads == [] and .structured_output.error == null' "$work/list.json" >/dev/null 2>&1; then
-        log "exit=0 date=$date since=$since reason=nothing-new"; exit 0
-    fi
-    err=$($jq -r '.structured_output.error // .result // ""' "$work/list.json" 2>/dev/null | /usr/bin/head -c 160)
-    log "exit=1 date=$date since=$since reason=list-empty-or-failed error=${err:-none}"; /bin/cat "$work/list.err" >&2; exit 1
-fi
-n_threads=$($jq '.structured_output.threads | length' "$work/list.json")
-
-# --- stage 2: extract stories, one session per thread, in parallel ------------
-i=0
-$jq -c '.structured_output.threads[]' "$work/list.json" >"$work/threads.jsonl"
-while read -r t; do
-    [ -n "$t" ] || continue
-    i=$((i + 1))
-    tid=$(printf '%s' "$t" | $jq -r .id); subj=$(printf '%s' "$t" | $jq -r .subject | /usr/bin/tr '|' '/'); snd=$(printf '%s' "$t" | $jq -r .sender)
-    /usr/bin/sed -e "s|{{THREAD_ID}}|$tid|g" -e "s|{{SUBJECT}}|$subj|g" -e "s|{{SENDER}}|$snd|g" "$watch_code/prompts/extract.md" >"$work/extract-$i.md"
-    run_session "$stage_seconds" '.structured_output.stories | length > 0' "$work/stories-$i.json" "\"$claude\" -p --model \"$extract_model\" \
-        --allowedTools mcp__claude_ai_Gmail__get_thread \
-        --output-format json --json-schema \"\$(cat \"$watch_code/schemas/stories.json\")\" \
-        <\"$work/extract-$i.md\" >\"$work/stories-$i.json\" 2>\"$work/extract-$i.err\"" &
-    [ $((i % parallel)) -eq 0 ] && wait
-done <"$work/threads.jsonl"
-wait
-
-ok=0; failed=0
-: >"$work/stories.txt"
-for f in "$work"/stories-*.json; do
-    [ -f "$f" ] || continue
-    if $jq -e '.structured_output.stories' "$f" >/dev/null 2>&1; then
-        ok=$((ok + 1))
-        $jq -r '.structured_output as $o | $o.stories[] | "- [\($o.source), \($o.issue_date)] \(.title) — \(.summary) <\(.url)>"' "$f" >>"$work/stories.txt"
-    else
-        failed=$((failed + 1))
-    fi
-done
-n_stories=$(/usr/bin/grep -c '^- ' "$work/stories.txt" || true)
-
-# --- stage 3: triage ----------------------------------------------------------
-cutoff=$(TZ=$tz /bin/date -j -v-14d -f %Y-%m-%d "$date" +%F)
-seen_txt=$([ -f "$watch_data/seen.jsonl" ] && $jq -r --arg c "$cutoff" 'select(.date >= $c) | "- [\(.source)] \(.title) <\(.url)>"' "$watch_data/seen.jsonl")
-[ -n "$seen_txt" ] || seen_txt="(nothing)"
-"$python3" - "$watch_code/prompts/triage.md" "$relevance" "$vault/longterm-priorities.md" "$vault/current-priorities.md" "$work/stories.txt" "$since" "$work/triage.md" "$seen_txt" <<'PY'
-import sys
-tmpl, rel, lt, cur, stories, since, out, seen = sys.argv[1:9]
-r = lambda p: open(p, encoding="utf-8").read()
-t = r(tmpl)
-for k, v in {"{{RELEVANCE}}": r(rel), "{{LONGTERM}}": r(lt), "{{CURRENT}}": r(cur),
-             "{{STORIES}}": r(stories) or "(none)", "{{SINCE}}": since, "{{SEEN}}": seen}.items():
-    t = t.replace(k, v)
-open(out, "w", encoding="utf-8").write(t)
-PY
-if ! run_session "$triage_seconds" '.structured_output.items' "$work/triage.json" "\"$claude\" -p --model \"$triage_model\" \
-    --tools \"\" --strict-mcp-config \
-    --output-format json --json-schema \"\$(cat \"$watch_code/schemas/triage.json\")\" \
-    <\"$work/triage.md\" >\"$work/triage.json\" 2>\"$work/triage.err\""; then
-    log "exit=1 date=$date reason=triage-failed threads=$n_threads stories=$n_stories result=$($jq -r '.result // ""' "$work/triage.json" 2>/dev/null | /usr/bin/head -c 120)"; exit 1
-fi
-
-status=ok; note=
-[ "$failed" -gt 0 ] && { status=degraded; note="$ok of $n_threads issues since $since were read; $failed could not be extracted. "; }
-"$python3" "$watch_code/render.py" --date "$date" --since "$since" --out "$watch_data" --feed "$feed_dir" --envelope "$work/triage.json" --threads "$n_threads" --status "$status" ${note:+--note "$note$($jq -r '.structured_output | "\(.considered) distinct stories judged; \(.items|length) survived, \(.overflow|length) kept for the feed."' "$work/triage.json")"}
-rc=$?
-# Pictures for the feed: fills each item's image from its story page. Its
-# failures stay in the transcript and never change the run's exit.
-feed_file=$feed_dir/$date-watch.json
-enrich=skipped
-if [ "$rc" = 0 ] && [ -f "$feed_file" ]; then
-    run_limited "$enrich_seconds" "$python3" "$root/feed/bin/enrich" "$feed_file" 2>"$work/enrich.err"; enrich=$?
-fi
+"$python3" "$run_code/render.py" packet --data "$data" --date "$date" --failed "${failed_feeds%,}" >"$work/packet.out" 2>"$work/packet.err"
+packet_rc=$?
 /bin/chmod -R go-rwx "$work"
-n_items=$($jq '.structured_output.items | length' "$work/triage.json")
-log "exit=$rc date=$date since=$since threads=$n_threads extracted=$ok failed=$failed stories=$n_stories items=$n_items enrich=$enrich"
+rc=0
+if [ -n "$failed_feeds" ] || [ "$packet_rc" != 0 ]; then rc=1; fi
+log "exit=$rc date=$date feeds=$(printf '%s' "$feeds" | /usr/bin/tr '\n' ',' | /usr/bin/sed 's/,$//') failed=${failed_feeds%,} packet=$packet_rc"
 exit "$rc"
