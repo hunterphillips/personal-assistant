@@ -13,8 +13,9 @@ import {
 import { tempDir } from './support/harness.mjs';
 
 // Every source in the pairs table, relative to the fixture checkout, with
-// distinct bytes, a mode, and where it lands under the root once the move
-// and the version 2 upgrade are done.
+// distinct bytes, a mode, where it lands under the root once the move and
+// the version 2 upgrade are done, and, when the upgrade converts it, the
+// bytes it lands with.
 const FIXTURE = [
   ['dashboard/app/var/settings.json', '{"settings":1}\n', 0o600, 'settings.json'],
   ['dashboard/app/var/thread-reads.json', '{"reads":1}\n', 0o600, 'thread-reads.json'],
@@ -43,8 +44,9 @@ const FIXTURE = [
   ['daily-brief/contributions/2026-10-01/cfo.yaml', 'cfo: 1\n', 0o644, 'briefs/contributions/2026-10-01/cfo.yaml'],
   ['daily-brief/watch/packets/p1.json', '{"packet":1}\n', 0o644, 'feeds/.run/packets/p1.json'],
   ['daily-brief/watch/overflow/o1.json', '{"overflow":1}\n', 0o644, 'feeds/.run/overflow/o1.json'],
-  ['daily-brief/watch/seen.jsonl', '{"seen":1}\n', 0o644, 'feeds/.run/seen.jsonl'],
-  ['daily-brief/watch/state.json', '{"state":1}\n', 0o644, 'feeds/.run/state.json'],
+  ['daily-brief/watch/seen.jsonl', '{"seen":1}\n', 0o644, 'feeds/.run/seen.jsonl', '{"feed":"news","seen":1}\n'],
+  ['daily-brief/watch/state.json', '{"last_run":"2026-10-01","reported":[]}\n', 0o644, 'feeds/.run/state.json',
+    '{\n "reported": [],\n "feeds": {\n  "news": {\n   "last_run": "2026-10-01"\n  }\n }\n}\n'],
   ['dashboard/app/var/log/dashboard.log', 'log line\n', 0o644, 'log/checkout/dashboard.log'],
   ['dashboard/app/var/launchd/backup-1.plist', '<plist/>\n', 0o644, 'cache/launchd/checkout/backup-1.plist'],
   ['dashboard/app/var/ops/state.json', '{"ops":1}\n', 0o600, 'cache/ops/state.json'],
@@ -163,9 +165,9 @@ test('prepareRoot moves every source of a full checkout into an empty root', asy
   // The criteria files came from the checkout, so only the README is seeded.
   assert.deepEqual(result.seeded, ['readme']);
 
-  for (const [, body, mode, target] of FIXTURE) {
+  for (const [, body, mode, target, landed = body] of FIXTURE) {
     const file = path.join(root, target);
-    assert.equal(await readFile(file, 'utf8'), body, target);
+    assert.equal(await readFile(file, 'utf8'), landed, target);
     assert.equal(await modeOf(file), mode, target);
   }
   for (const rel of MIGRATED) assert.ok(existsSync(path.join(repo, rel)), rel);
@@ -376,6 +378,14 @@ test('a file missing on one side of an existing target is a conflict', async (t)
   assert.ok(existsSync(path.join(repo, 'routines/runs/r1.jsonl')));
 });
 
+// The retired producer's seen lines, and the same lines as the feeds run
+// reads them: each names its feed, the rest kept as it was.
+const SEEN_V1 = [
+  { date: '2026-10-01', verdict: 'kept', source: 'Invented Letter', title: 'Invented story', url: 'https://example.com/a' },
+  { date: '2026-10-02', verdict: 'overflow', source: 'Invented Letter', title: 'Another story', url: 'https://example.com/b' },
+].map((line) => `${JSON.stringify(line)}\n`).join('');
+const SEEN_V2 = SEEN_V1.split('\n').filter(Boolean).map((line) => `${JSON.stringify({ feed: 'news', ...JSON.parse(line) })}\n`).join('');
+
 // A version 1 root holding every path the upgrade moves, the retired
 // agent in the registry and the read times, its thread files, and an
 // agent that accepts messages from it. All invented.
@@ -385,8 +395,9 @@ const V1_ROOT = [
   ['feed/relevance.md', 'Invented criteria.\n', 0o600, 'feeds/news/note.md'],
   ['watch/packets/2026-10-02.yaml', 'packet: 1\n', 0o600, 'feeds/.run/packets/2026-10-02.yaml'],
   ['watch/overflow/2026-10-02.json', '{"overflow":1}\n', 0o600, 'feeds/.run/overflow/2026-10-02.json'],
-  ['watch/seen.jsonl', '{"seen":1}\n', 0o600, 'feeds/.run/seen.jsonl'],
-  ['watch/state.json', '{"reported":[]}\n', 0o600, 'feeds/.run/state.json'],
+  ['watch/seen.jsonl', SEEN_V1, 0o600, 'feeds/.run/seen.jsonl', SEEN_V2],
+  ['watch/state.json', '{"last_run": "2026-10-02", "reported": ["2026-10-01"]}\n', 0o600, 'feeds/.run/state.json',
+    `${JSON.stringify({ reported: ['2026-10-01'], feeds: { news: { last_run: '2026-10-02' } } }, null, 1)}\n`],
 ];
 
 const v1Registry = {
@@ -435,8 +446,8 @@ test('a version 1 root upgrades to version 2: the feed, its note, and the run st
   const result = await prepareRoot(root, { migrateFrom: '/nowhere', defaultsDir, readmeFile, log: (entry) => logs.push(entry) });
 
   assert.deepEqual(result, { created: false, moved: [], skipped: [], upgraded: UPGRADE_KEYS, seeded: ['readme', 'ideasInstructions'] });
-  for (const [rel, body, mode, target] of V1_ROOT) {
-    assert.equal(await readFile(path.join(root, target), 'utf8'), body, target);
+  for (const [rel, body, mode, target, landed = body] of V1_ROOT) {
+    assert.equal(await readFile(path.join(root, target), 'utf8'), landed, target);
     assert.equal(await modeOf(path.join(root, target)), mode, target);
     assert.equal(await readFile(path.join(root, rel.replace(/^(feed|watch)\//, '$1.migrated/')), 'utf8'), body, rel);
   }
@@ -475,6 +486,30 @@ test('a version 1 root upgrades to version 2: the feed, its note, and the run st
   assert.deepEqual(again, { created: false, moved: [], skipped: [], upgraded: [], seeded: [] });
   assert.deepEqual(await snapshot(root), before);
   assert.equal(logs.filter((entry) => entry.event === 'upgrade_done').length, 1);
+});
+
+test('the feeds run reads the converted state: each seen line names news, and the last run is the feed\'s', async (t) => {
+  const dir = await tempDir(t);
+  const root = await fixtureV1Root(dir);
+  await upgradeV1(root, { log: () => {} });
+  const seen = (await readFile(path.join(root, 'feeds/.run/seen.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(seen.map((line) => line.feed), ['news', 'news']);
+  assert.deepEqual(seen.map((line) => line.source), ['Invented Letter', 'Invented Letter']);
+  assert.deepEqual(Object.keys(seen[0]), ['feed', 'date', 'verdict', 'source', 'title', 'url']);
+  const state = JSON.parse(await readFile(path.join(root, 'feeds/.run/state.json'), 'utf8'));
+  assert.deepEqual(state, { reported: ['2026-10-01'], feeds: { news: { last_run: '2026-10-02' } } });
+  // The originals are kept as they were.
+  assert.equal(await readFile(path.join(root, 'watch.migrated/seen.jsonl'), 'utf8'), SEEN_V1);
+});
+
+test('the run state is copied as it is when feeds/news was there before the upgrade', async (t) => {
+  const dir = await tempDir(t);
+  const root = await fixtureV1Root(dir);
+  const feed = { version: 1, id: 'news', name: 'News', producer: 'scout', sources: [], active: true, created: '2026-10-01T00:00:00.000Z', updated: '2026-10-01T00:00:00.000Z' };
+  await put(path.join(root, 'feeds/news/feed.json'), `${JSON.stringify(feed)}\n`, 0o600);
+  await upgradeV1(root, { log: () => {} });
+  assert.equal(await readFile(path.join(root, 'feeds/.run/seen.jsonl'), 'utf8'), SEEN_V1);
+  assert.equal(await readFile(path.join(root, 'feeds/.run/state.json'), 'utf8'), '{"last_run": "2026-10-02", "reported": ["2026-10-01"]}\n');
 });
 
 test('an upgrade target with different bytes is a conflict that names both, renames nothing, and keeps version 1', async (t) => {
@@ -516,6 +551,7 @@ test('an upgrade cut off before its renames runs again to the same result', asyn
   assert.equal((await readLayout(root)).version, 2);
   assert.ok(existsSync(path.join(root, 'feed.migrated/items/2026-10-01-watch.json')));
   assert.equal(await readFile(path.join(root, 'feeds/news/feed.json'), 'utf8'), feed, 'feed.json is written once');
+  assert.equal(await readFile(path.join(root, 'feeds/.run/seen.jsonl'), 'utf8'), SEEN_V2, 'the converted copy counts as moved');
   assert.deepEqual(JSON.parse(await readFile(path.join(root, 'registry/agents.json'), 'utf8')).agents.map((agent) => agent.id), ['assistant', 'myos']);
 });
 

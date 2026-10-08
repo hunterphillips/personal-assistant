@@ -85,7 +85,9 @@ A daemon that finds version 1 in `layout.json` moves the one Feed into the
 feed `news`: `feed/items/` to `feeds/news/items/`, `feed/relevance.md` to
 `feeds/news/note.md`, and Watch's `packets/`, `overflow/`, `seen.jsonl`,
 and `state.json` to `feeds/.run/`. It copies and checks each one as the
-move from the checkout does, writes `feeds/news/feed.json`, and renames
+move from the checkout does, giving each seen line `"feed": "news"` and
+moving `state.json`'s `last_run` to `feeds.news.last_run` when it creates
+the feed, writes `feeds/news/feed.json`, and renames
 `feed/` and `watch/` to `feed.migrated/` and `watch.migrated/`. Watch leaves
 the registry, which is kept as it was in `registry/agents.json.migrated`;
 its thread files are renamed `threads/watch.json.migrated` and

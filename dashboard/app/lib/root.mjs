@@ -54,7 +54,11 @@
 //   The version 1 to 2 move, copy, verify, then rename, as migrateFromRepo:
 //   feed/items/ becomes feeds/news/items/ and feed/relevance.md
 //   feeds/news/note.md; watch/'s packets/, overflow/, seen.jsonl, and
-//   state.json go to feeds/.run/. A conflict rejects with
+//   state.json go to feeds/.run/. When the upgrade creates feeds/news, the
+//   last two are converted for the feeds run as they are copied: each seen
+//   line gains "feed": "news", and state.json's last_run moves to
+//   feeds.news.last_run; a target holding either the source's bytes or
+//   their conversion counts as moved. A conflict rejects with
 //   migration_conflict before anything is copied or renamed. When the root
 //   had a feed/ folder, feeds/news/feed.json is written if missing (News,
 //   produced by scout, no sources, active). Then feed/ and watch/ are
@@ -77,7 +81,7 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  chmod, copyFile, lstat, mkdir, readFile, readdir, readlink, rename as fsRename, rm, symlink, unlink,
+  chmod, copyFile, lstat, mkdir, readFile, readdir, readlink, rename as fsRename, rm, symlink, unlink, writeFile,
 } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
@@ -133,12 +137,40 @@ const SEEDS = [['ideasInstructions', 'ideas-criteria.md']];
 // built-in Scout (seeded from registry/builtin.json at start).
 const NEWS = { id: 'news', name: 'News', producer: 'scout' };
 const RETIRED_AGENT = 'watch';
+
+// The retired producer's run state in the shapes feeds/run reads: seen lines
+// name their feed, and the last run is per feed. A line or file that does not
+// parse is kept as it is.
+const RUN_STATE = {
+  'seen.jsonl': (bytes) => Buffer.from(bytes.toString('utf8').split('\n').map((line) => {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      return line;
+    }
+    return isRecord(entry) && !Object.hasOwn(entry, 'feed') ? JSON.stringify({ feed: NEWS.id, ...entry }) : line;
+  }).join('\n')),
+  'state.json': (bytes) => {
+    let state;
+    try {
+      state = JSON.parse(bytes.toString('utf8'));
+    } catch {
+      return bytes;
+    }
+    if (!isRecord(state) || !Object.hasOwn(state, 'last_run')) return bytes;
+    const { last_run: lastRun, ...rest } = state;
+    const feeds = isRecord(rest.feeds) ? rest.feeds : {};
+    const news = isRecord(feeds[NEWS.id]) ? feeds[NEWS.id] : {};
+    return Buffer.from(`${JSON.stringify({ ...rest, feeds: { ...feeds, [NEWS.id]: { ...news, last_run: lastRun } } }, null, 1)}\n`);
+  },
+};
 const UPGRADE_PAIRS = [
   ['feedDir', (v1) => v1.feedDir, (p) => path.join(p.feedsDir, NEWS.id, 'items')],
   ['feedInstructions', (v1) => v1.feedInstructions, (p) => path.join(p.feedsDir, NEWS.id, 'note.md')],
   ...['packets', 'overflow', 'seen.jsonl', 'state.json'].map((name) => [
-    `watchDir/${name}`, (v1) => path.join(v1.watchDir, name), (p) => path.join(p.feedsRunDir, name)]),
-].map(([key, source, target]) => ({ key, source, target }));
+    `watchDir/${name}`, (v1) => path.join(v1.watchDir, name), (p) => path.join(p.feedsRunDir, name), RUN_STATE[name]]),
+].map(([key, source, target, convert = null]) => ({ key, source, target, convert }));
 
 export class RootError extends Error {
   constructor(code, message, details = {}) {
@@ -329,12 +361,20 @@ export async function upgradeV1(root, { log = () => {}, rename = fsRename, now =
   const paths = layoutPaths(root);
   const v1 = v1Paths(root);
 
+  // feeds/news is the upgrade's own when the root had a feed and no feed.json.
+  const feedFile = path.join(paths.feedsDir, NEWS.id, 'feed.json');
+  const creating = await exists(v1.feedRoot) && !(await exists(feedFile));
+
   const plan = [];
   const conflicts = [];
   for (const pair of UPGRADE_PAIRS) {
     const [unit] = await entryUnits(pair.source(v1), pair.target(paths));
     if (!unit) continue;
-    const found = await compareUnit(unit);
+    if (pair.convert && (await lstat(unit.source)).isFile()) {
+      unit.convert = pair.convert;
+      unit.converting = creating;
+    }
+    const found = unit.convert ? await compareConverted(unit) : await compareUnit(unit);
     if (found.conflict) conflicts.push({ source: unit.source, target: unit.target, file: found.file });
     unit.copy = found.copy;
     plan.push({ key: pair.key, unit });
@@ -344,9 +384,13 @@ export async function upgradeV1(root, { log = () => {}, rename = fsRename, now =
       `The root at ${path.dirname(paths.readme)} already holds ${joinFile(target, file)} with different contents than ${joinFile(source, file)}.`));
     throw new RootError('migration_conflict', sentences.join(' '), { pairs: conflicts });
   }
-  for (const { unit } of plan) if (unit.copy) await copyIntoPlace(unit.source, unit.target, rename);
   for (const { unit } of plan) {
-    const found = await compareUnit(unit);
+    if (!unit.copy) continue;
+    if (unit.converting) await copyConverted(unit, rename);
+    else await copyIntoPlace(unit.source, unit.target, rename);
+  }
+  for (const { unit } of plan) {
+    const found = unit.convert ? await compareConverted(unit) : await compareUnit(unit);
     if (found.conflict || found.copy) {
       const pair = { source: unit.source, target: unit.target, file: found.file };
       throw new RootError('migration_conflict', `The copy of ${joinFile(pair.source, pair.file)} at ${joinFile(pair.target, pair.file)} does not match its source.`, { pairs: [pair] });
@@ -355,8 +399,7 @@ export async function upgradeV1(root, { log = () => {}, rename = fsRename, now =
   }
 
   // The feed's settings, once, when the root had a feed.
-  const feedFile = path.join(paths.feedsDir, NEWS.id, 'feed.json');
-  if (await exists(v1.feedRoot) && !(await exists(feedFile))) {
+  if (creating && !(await exists(feedFile))) {
     await mkdir(path.join(paths.feedsDir, NEWS.id, 'items'), { recursive: true, mode: 0o700 });
     const at = now().toISOString();
     const feed = { version: 1, id: NEWS.id, name: NEWS.name, producer: NEWS.producer, sources: [], active: true, created: at, updated: at };
@@ -484,6 +527,42 @@ async function compareUnit(unit) {
     }
   }
   return { conflict: false, copy: false, files: countFiles(source) };
+}
+
+// compareUnit for a run state file: the target may hold the source's bytes
+// or their conversion, with the source's mode.
+async function compareConverted(unit) {
+  const name = path.basename(unit.source);
+  let target;
+  try {
+    target = await lstat(unit.target);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { conflict: false, copy: true, files: 1 };
+    throw error;
+  }
+  const source = await lstat(unit.source);
+  if (target.isFile() && (target.mode & 0o7777) === (source.mode & 0o7777)) {
+    const bytes = await readFile(unit.source);
+    const held = await readFile(unit.target);
+    if (held.equals(bytes) || held.equals(unit.convert(bytes))) return { conflict: false, copy: false, files: 1 };
+  }
+  return { conflict: true, copy: false, file: name };
+}
+
+// Writes the source's conversion beside the target with the source's mode,
+// then renames it into place.
+async function copyConverted(unit, rename) {
+  await mkdir(path.dirname(unit.target), { recursive: true, mode: 0o700 });
+  const temp = path.join(path.dirname(unit.target), `.${path.basename(unit.target)}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`);
+  try {
+    const source = await lstat(unit.source);
+    await writeFile(temp, unit.convert(await readFile(unit.source)), { flag: 'wx', mode: 0o600 });
+    await chmod(temp, source.mode & 0o7777);
+    await rename(temp, unit.target);
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 // Map<relative path, { type, mode, size, hash, link }> for a file, link, or
