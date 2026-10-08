@@ -94,8 +94,8 @@ prints the root first.
   into the Assistant's thread.
   Feedback saves beside it as `feedback-<date>.md`. The run's lock is
   `briefs/.run.lock`.
-- `watch/` — Watch's packets, overflow, seen list, and `state.json`, whose
-  `reported` list the brief run updates.
+- `feeds/.run/` — the feeds run's packets, overflow, seen list, and
+  `state.json`, whose `reported` list the brief run updates.
 - `~/Library/Logs/daily-brief.log` — one line per run:
   `exit= date= cursor= stage= packets= stubs= waited= took= viewer= notice=`.
 - `~/Library/Logs/daily-brief/<date>-<domain>.log` — each session's output,
