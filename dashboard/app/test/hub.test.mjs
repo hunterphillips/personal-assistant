@@ -81,6 +81,7 @@ function makeHub(overrides = {}) {
     adaptersDisabled: overrides.adaptersDisabled ?? null,
     settings: overrides.settings ?? null,
     reads: overrides.reads ?? null,
+    briefReads: overrides.briefReads ?? null,
     routines: overrides.routines ?? null,
     log: (entry) => logs.push(entry),
     now: () => new Date(overrides.now ?? '2026-09-25T12:00:00.000Z'),
@@ -304,6 +305,82 @@ test('status copies only non-content brief fields and reports failures as unavai
   const other = makeHub({ status: failing });
   await other.hub.refreshStatus();
   assert.deepEqual([other.hub.snapshot().focus, other.hub.snapshot().brief], [{ available: false }, { state: 'unavailable' }]);
+});
+
+// read is the briefReads.read() answer; marks records every mark() call.
+function fakeBriefReads(read = null) {
+  const marks = [];
+  return {
+    marks,
+    read: () => read,
+    async mark(date) {
+      marks.push(date);
+      read = date;
+      return date;
+    },
+  };
+}
+
+test('brief unread is true with no read mark or an older one, false once caught up, and absent for a non-ready state', async () => {
+  const { hub } = makeHub({ briefReads: fakeBriefReads(null) });
+  await hub.refreshStatus();
+  assert.deepEqual(hub.snapshot().brief, { state: 'ready', date: '2026-09-25', revision: REVISION, unread: true });
+
+  const older = makeHub({ briefReads: fakeBriefReads('2026-09-24') });
+  await older.hub.refreshStatus();
+  assert.equal(older.hub.snapshot().brief.unread, true);
+
+  const caughtUp = makeHub({ briefReads: fakeBriefReads('2026-09-25') });
+  await caughtUp.hub.refreshStatus();
+  assert.equal(caughtUp.hub.snapshot().brief.unread, false);
+
+  const empty = makeHub({ status: fakeStatus({ metadata: { state: 'empty' } }), briefReads: fakeBriefReads(null) });
+  await empty.hub.refreshStatus();
+  assert.deepEqual(empty.hub.snapshot().brief, { state: 'empty' });
+});
+
+test('without briefReads the brief carries no unread key', async () => {
+  const { hub } = makeHub();
+  await hub.refreshStatus();
+  assert.deepEqual(hub.snapshot().brief, { state: 'ready', date: '2026-09-25', revision: REVISION });
+});
+
+test('markBriefRead fetches the newest brief itself, marks it, and clears unread without a fresh refreshStatus', async () => {
+  const briefReads = fakeBriefReads(null);
+  const { hub, status, deltas } = makeHub({ briefReads });
+  await hub.refreshStatus();
+  assert.equal(hub.snapshot().brief.unread, true);
+  deltas.length = 0;
+
+  await hub.markBriefRead();
+  assert.deepEqual(briefReads.marks, ['2026-09-25']);
+  assert.equal(hub.snapshot().brief.unread, false);
+  assert.equal(status.calls.latest, 2); // refreshStatus's call, then markBriefRead's own
+  assert.deepEqual(deltas, [{ revision: 3, patch: { brief: { state: 'ready', date: '2026-09-25', revision: REVISION, unread: false } } }]);
+
+  deltas.length = 0;
+  await hub.markBriefRead();
+  assert.deepEqual(briefReads.marks, ['2026-09-25', '2026-09-25']);
+  assert.deepEqual(deltas, []); // already false; no quiet bump
+});
+
+test('markBriefRead is a no-op without briefReads, when the newest brief is not ready, and when the fetch fails', async () => {
+  const bare = makeHub();
+  await bare.hub.markBriefRead();
+  assert.equal(bare.deltas.length, 0);
+
+  const notReady = fakeBriefReads(null);
+  const empty = makeHub({ status: fakeStatus({ metadata: { state: 'empty' } }), briefReads: notReady });
+  await empty.hub.markBriefRead();
+  assert.deepEqual(notReady.marks, []);
+
+  const status = fakeStatus();
+  status.brief = { latestMetadata: () => Promise.reject(new Error('boom')) };
+  const failing = fakeBriefReads(null);
+  const { hub, logs } = makeHub({ status, briefReads: failing });
+  await hub.markBriefRead();
+  assert.deepEqual(failing.marks, []);
+  assert.deepEqual(logs, [{ event: 'brief_read_error', error: 'boom' }]);
 });
 
 test('concurrent status refreshes share one run', async () => {

@@ -139,7 +139,8 @@ test('layoutPaths answers the frozen v1 table under the root', () => {
   assert.equal(paths.feedInstructions, '/data/root/feed/relevance.md');
   assert.equal(paths.contributionsDir, '/data/root/briefs/contributions');
   assert.equal(paths.cacheDir, '/data/root/cache');
-  assert.equal(Object.keys(paths).length, 20);
+  assert.equal(paths.briefReads, '/data/root/brief-reads.json');
+  assert.equal(Object.keys(paths).length, 21);
   for (const value of Object.values(paths)) assert.ok(value.startsWith('/data/root/'));
 });
 

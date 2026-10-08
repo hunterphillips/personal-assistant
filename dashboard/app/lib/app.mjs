@@ -103,6 +103,7 @@ const EXACT_ROUTES = new Map([
   ['/api/resume', { name: 'focus-control', methods: ['POST'], bodyless: true }],
   ['/api/refresh', { name: 'focus-control', methods: ['POST'], bodyless: true }],
   ['/api/brief/latest', { name: 'brief-latest', methods: ['GET'] }],
+  ['/api/brief/read', { name: 'brief-read', methods: ['POST'], bodyless: true }],
   ['/api/brief/feedback', { name: 'brief-feedback', methods: ['POST'] }],
   ['/api/brief/instructions', { name: 'brief-instructions', methods: ['GET'] }],
   ['/api/brief/instructions/propose', { name: 'brief-instructions-propose', methods: ['POST'] }],
@@ -259,6 +260,11 @@ export function createApp({
     sendJson(res, 200, { ok: true, revision: hub.snapshot().revision });
   }
 
+  async function serveBriefRead(res) {
+    await hub.markBriefRead();
+    sendJson(res, 200, { ok: true });
+  }
+
   async function serveFocusControl(req, res, path) {
     await focus.handleControl(req, res, { path });
     if (ROUTINE_CONTROLS.has(path) && res.statusCode >= 200 && res.statusCode < 300) {
@@ -303,6 +309,8 @@ export function createApp({
         return serveFocusControl(req, res, route.label);
       case 'brief-latest':
         return brief.handleLatest(req, res);
+      case 'brief-read':
+        return serveBriefRead(res);
       case 'brief-date':
         return brief.handleBrief(req, res, { date: route.params.date });
       case 'brief-feedback-read':

@@ -8,7 +8,7 @@
 // adapters (Claude for personas, Codex for the shared app-server's threads),
 // the cmux client, the routine store (loaded before the hub, so its
 // snapshot lists them) and the scheduler that runs them, the notification
-// store (loaded before the hub too), state hub, the Goals, Feed, Ideas, and instructions
+// store and the brief read mark (both loaded before the hub too), state hub, the Goals, Feed, Ideas, and instructions
 // readers, the settings store, the brief notices, and app, add any built-in
 // agent the registry lacks (builtins.mjs), start the
 // personas, seed the settings file on first start (and add quick chat to
@@ -54,6 +54,7 @@ import { createInstructions } from './lib/instructions.mjs';
 import { createHub } from './lib/hub.mjs';
 import { createNotices } from './lib/notices.mjs';
 import { NOTIFICATIONS_FILE, createNotifications } from './lib/notifications.mjs';
+import { createBriefReads } from './lib/brief-reads.mjs';
 import { createReads } from './lib/reads.mjs';
 import { createRegistry } from './lib/registry.mjs';
 import { RootError, claimLock, prepareRoot, readLayout } from './lib/root.mjs';
@@ -147,6 +148,8 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
   // Keep the read store beside the thread directory so test and throwaway
   // instances inherit the same isolation from DASHBOARD_THREADS_DIR.
   const reads = createReads({ file: path.join(path.dirname(config.threadsDir), 'thread-reads.json'), log: logEntry });
+  const briefReads = createBriefReads({ file: config.briefReadsPath, log: logEntry });
+  await briefReads.load();
   const apiKeyInEnv = API_KEY_VARS.some((name) => typeof env[name] === 'string' && env[name] !== '');
   let adapters = {};
   // Assigned once the hub exists; the adapters are created first because
@@ -193,6 +196,7 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
     adaptersDisabled: apiKeyInEnv ? 'api_key_in_env' : null,
     settings,
     reads,
+    briefReads,
     notifications,
     log: logEntry,
   });

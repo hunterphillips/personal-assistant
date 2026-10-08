@@ -187,11 +187,11 @@ export function fakeSettings(initial = {}, { ok = true, error = null } = {}) {
 // adapters unless given.
 export function createTestHub({
   config, focus, brief, registry = fakeRegistry(), jobs = fakeJobs(), routines = null, adapters = {}, store = null, bindings = null,
-  cmux = null, settings = fakeSettings(), reads = null, notifications = null, home = '/invented', log = () => {}, now = undefined,
+  cmux = null, settings = fakeSettings(), reads = null, briefReads = null, notifications = null, home = '/invented', log = () => {}, now = undefined,
 }) {
   return createHub({
     registry, jobs, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, reads,
-    notifications, home, log,
+    briefReads, notifications, home, log,
     ...(now ? { now } : {}),
   });
 }
@@ -254,7 +254,8 @@ export function fakeCmux(inventory = null) {
 // may adjust config.
 export async function startApp(t, {
   env = {}, focus, brief, registry = fakeRegistry(), jobs, routines = null, scheduler = null, hub, adapters, store, bindings,
-  cmux = null, goals, feed, ideas = null, ideasInstructions = null, briefInstructions, notices = null, settings = fakeSettings(), reads = null, notifications = null, configure = (c) => c,
+  cmux = null, goals, feed, ideas = null, ideasInstructions = null, briefInstructions, notices = null, settings = fakeSettings(), reads = null,
+  briefReads = null, notifications = null, configure = (c) => c,
   delegation = null,
 } = {}) {
   const server = http.createServer();
@@ -285,7 +286,7 @@ export async function startApp(t, {
   const jobsModule = jobs ?? fakeJobs();
   const stateHub = hub ?? createTestHub({
     config, focus: focusRoutes, brief: briefRoutes, registry, jobs: jobsModule, routines, adapters, store, bindings, cmux, log,
-    ...(settings ? { settings } : {}), ...(reads ? { reads } : {}), notifications,
+    ...(settings ? { settings } : {}), ...(reads ? { reads } : {}), ...(briefReads ? { briefReads } : {}), notifications,
   });
   if (!hub) await stateHub.start();
   const delegationService = typeof delegation === 'function' ? delegation(stateHub) : null;

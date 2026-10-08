@@ -201,6 +201,51 @@ test.describe('the overlay', () => {
   });
 });
 
+test.describe('the unread dot', () => {
+  test.use({ hubOptions: { agents: [ASSISTANT], briefInstructions: BRIEF_INSTRUCTIONS } });
+
+  // The corner dot on a desk's Brief button, or on a phone the menu
+  // toggle's own dot (visible without opening the menu).
+  function closedDot(page) {
+    return phone(page) ? page.locator('#app-menu-dot') : page.locator('#brief-dot');
+  }
+
+  test('shows for a new brief, clears everywhere once its overlay opens, and a newer brief brings it back', async ({ page, context, hub }) => {
+    await hub.writeBrief(DATE);
+    await hub.state.refreshStatus();
+    await page.goto(hub.origin + '/');
+
+    await expect(closedDot(page)).toBeVisible();
+    if (phone(page)) {
+      await page.getByRole('button', { name: 'Menu', exact: true }).click();
+      await expect(page.locator('#brief-menu-dot')).toBeVisible();
+      await page.keyboard.press('Escape');
+    } else {
+      await expect(page.locator('#brief-open')).toHaveAttribute('aria-label', 'Brief, unread');
+    }
+
+    // A second page, sharing the same daemon, shows the same dot.
+    const page2 = await context.newPage();
+    await page2.goto(hub.origin + '/');
+    await expect(closedDot(page2)).toBeVisible();
+
+    await openFromHeader(page);
+    await expect(overlay(page)).toBeVisible();
+    await expect(closedDot(page)).toBeHidden();
+    if (!phone(page)) await expect(page.locator('#brief-open')).toHaveAttribute('aria-label', 'Brief');
+
+    // Server-side: the second page clears too, without it doing anything.
+    await expect(closedDot(page2)).toBeHidden();
+    await page2.close();
+    await page.keyboard.press('Escape');
+
+    await hub.writeBrief(NEXT_DATE);
+    await hub.state.refreshStatus();
+    await expect(closedDot(page)).toBeVisible();
+  });
+
+});
+
 test.describe('brief states', () => {
   test('no brief, a viewer without data, and malformed data each read as one sentence with the date', async ({ page, hub }) => {
     await page.goto(hub.origin + '/');

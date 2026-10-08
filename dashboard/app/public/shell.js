@@ -124,7 +124,7 @@
     })
     : null;
   var overlay = window.DashboardBriefOverlay
-    ? window.DashboardBriefOverlay.create({ instructions: briefInstructions, briefIntro: briefIntroSentence })
+    ? window.DashboardBriefOverlay.create({ instructions: briefInstructions, briefIntro: briefIntroSentence, shellApi: shellApi })
     : null;
 
   function $(id) { return document.getElementById(id); }
@@ -240,6 +240,7 @@
   function render(fresh) {
     $('shell-notice').hidden = !(failures >= 2 && !streaming);
     renderRailIndicators();
+    renderBriefDot();
 
     // Focus: mount once it answers; afterwards keep the frame and only report.
     if (fresh && current === 'focus' && !frames.focus && focusAvailable()) mountFocus();
@@ -258,6 +259,16 @@
     }));
     $('agents-indicator').hidden = !agentsNeedYou;
     $('health-indicator').hidden = !failedJob;
+  }
+
+  // The newest brief unread: a dot on the header's Brief entry, and on a
+  // phone the menu toggle and the Brief entry inside the menu.
+  function renderBriefDot() {
+    var unread = !!(state && state.brief && state.brief.unread === true);
+    $('brief-dot').hidden = !unread;
+    $('app-menu-dot').hidden = !unread;
+    $('brief-menu-dot').hidden = !unread;
+    $('brief-open').setAttribute('aria-label', unread ? 'Brief, unread' : 'Brief');
   }
 
   // Acts on Retry with the state that just arrived.

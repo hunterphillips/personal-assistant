@@ -152,6 +152,7 @@ export function loadConfig(env = process.env) {
   const migrateFrom = parseMigrateFrom(env.DASHBOARD_MIGRATE_FROM, problems);
   const root = layoutPaths(home ?? defaultHome());
   const briefsDir = parsePath(env.DASHBOARD_BRIEFS_DIR, root.briefsDir);
+  const briefReadsPath = parsePath(env.DASHBOARD_BRIEF_READS_PATH, root.briefReads);
   const feedDir = parsePath(env.DASHBOARD_FEED_DIR, root.feedDir);
   const feedInstructionsPath = parsePath(env.DASHBOARD_FEED_INSTRUCTIONS, root.feedInstructions);
   const ideasDir = parsePath(env.DASHBOARD_IDEAS_DIR, root.ideasDir);
@@ -202,6 +203,7 @@ export function loadConfig(env = process.env) {
     publicOrigin: publicOrigin ? publicOrigin.origin : null,
     focusOrigin: focusOrigin.origin,
     briefsDir,
+    briefReadsPath,
     feedDir,
     feedInstructionsPath,
     ideasDir,

@@ -10,14 +10,17 @@
 // daemon writes the Markdown the curator reads next morning and a copy this
 // module reads back on the next open (GET /api/brief/<date>/feedback).
 //
-// DashboardBriefOverlay.create({ instructions, briefIntro }) returns
+// DashboardBriefOverlay.create({ instructions, briefIntro, shellApi }) returns
 // { open(date, opener), close(restore), update(state, keys), isOpen,
 // context() }. context() is what quick chat sends along while the overlay
 // is open: the brief's date and the item whose top edge is highest inside
 // the scrolling sheet, below its sticky bar (the section's label and the
 // item's text). DashboardBriefOverlay.dayWords(date) is the date as the
 // overlay titles it, for the side panel's Now section.
-// open(null) shows the newest brief, open(date) that date's. The overlay
+// open(null) shows the newest brief, open(date) that date's, and loading it
+// that way (POST /api/brief/read, bodyless) tells the daemon it has been
+// read, which clears the Brief button's dot everywhere; open(date) never
+// does, since it is not the newest. The overlay
 // scrolls on its own, closes with its Close button or Escape, and returns
 // focus to what opened it; the page behind is inert while it is open. The
 // Brief instructions panel (instructions.js, `instructions`) opens from the
@@ -340,7 +343,17 @@
           };
           saveSentence = '';
           render(brief);
+          if (!date) markRead();
         });
+      });
+    }
+
+    // Tells the daemon the newest brief has been opened, so its dot clears
+    // on every browser (server-side; the next snapshot carries it). Only
+    // for the newest brief, never one opened by its own date.
+    function markRead() {
+      request('/api/brief/read', { method: 'POST' }).then(function () {
+        if (options.shellApi && !options.shellApi.isStreaming()) options.shellApi.requestState();
       });
     }
 

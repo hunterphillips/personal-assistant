@@ -18,6 +18,7 @@ const LAYOUT = {
   lock: 'daemon.lock',
   settings: 'settings.json',
   threadReads: 'thread-reads.json',
+  briefReads: 'brief-reads.json',
   registry: 'registry/agents.json',
   routinesDir: 'routines',
   threadsDir: 'threads',

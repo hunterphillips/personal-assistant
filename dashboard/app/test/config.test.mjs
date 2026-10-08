@@ -74,6 +74,7 @@ test('the data root defaults to ~/.personal-assistant and every store default de
     ideasMarksPath: config.ideasMarksPath,
     ideasInstructionsPath: config.ideasInstructionsPath,
     briefsDir: config.briefsDir,
+    briefReadsPath: config.briefReadsPath,
   }, {
     settingsPath: '/data/root/settings.json',
     registryPath: '/data/root/registry/agents.json',
@@ -87,6 +88,7 @@ test('the data root defaults to ~/.personal-assistant and every store default de
     ideasMarksPath: '/data/root/ideas/marks.json',
     ideasInstructionsPath: '/data/root/ideas/criteria.md',
     briefsDir: '/data/root/briefs',
+    briefReadsPath: '/data/root/brief-reads.json',
   });
   // The read times sit beside the threads directory, so at the root.
   assert.equal(path.join(path.dirname(config.threadsDir), 'thread-reads.json'), '/data/root/thread-reads.json');
@@ -112,6 +114,7 @@ test('each store override still wins over the data root', () => {
     DASHBOARD_IDEAS_MARKS: ['ideasMarksPath', '/o/marks.json'],
     DASHBOARD_IDEAS_INSTRUCTIONS: ['ideasInstructionsPath', '/o/criteria.md'],
     DASHBOARD_BRIEFS_DIR: ['briefsDir', '/o/briefs'],
+    DASHBOARD_BRIEF_READS_PATH: ['briefReadsPath', '/o/brief-reads.json'],
   };
   for (const [name, [key, value]] of Object.entries(overrides)) {
     assert.equal(loadConfig({ PERSONAL_ASSISTANT_HOME: HOME, [name]: value })[key], value, name);

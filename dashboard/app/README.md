@@ -43,6 +43,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /assets/<name>` | Shell scripts and styles. |
 | `GET /embedded/focus`, `/api/focus`, `/api/status`; `PUT /api/focus`; `POST /api/pause`, `/api/resume`, `/api/refresh` | Forwarded to Focus (below). |
 | `GET /api/brief/latest` | The newest brief as data (below). |
+| `POST /api/brief/read` | Bodyless. Marks the newest brief read, so `brief.unread` in the snapshot goes false everywhere; `{"ok": true}` even when there is no ready brief to mark (below). |
 | `GET /api/brief/<date>` | One date's brief as data. |
 | `GET /api/brief/<date>/feedback` | The feedback saved for that date, or an empty draft. |
 | `POST /api/brief/feedback` | Saves feedback for one brief. |
@@ -153,7 +154,7 @@ snapshot; concurrent requests share one check. It stays for one release.
 ```json
 { "revision": 7, "updatedAt": "<ISO>", "home": "/Users/hunter",
   "focus": { "available": true },
-  "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>" },
+  "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>", "unread": false },
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
   "groups": [{ "id": "work", "name": "Work" }, { "id": "personal", "name": "Personal" }],
   "agents": [{ "id": "cfo", "name": "CFO", "role": "Money", "description": "...", "group": "work", "kind": "persona",
@@ -189,7 +190,10 @@ snapshot; concurrent requests share one check. It stays for one release.
 `revision` goes up by one on every change. `home` is the home directory,
 which the Agents view shortens to `~` in the paths it shows. `focus` and
 `brief` hold what the status route reports (`available` is null and
-`state` is `unknown` before the first check). Every agent carries its
+`state` is `unknown` before the first check). `brief.unread` is true when
+the newest brief's date is newer than `brief-reads.json`'s `read` date (or
+nothing has been read yet), present only while `state` is `ready`; `POST
+/api/brief/read` marks the newest brief read (below). Every agent carries its
 registry `cwd` (a string, or null when the registry has none), which the
 Agents view shows as the agent's folder, and `jobs`, how many launchd
 labels its registry `jobs` name; agents leave out `jobs` itself. A
@@ -326,6 +330,14 @@ directory that cannot be read is a 503 `brief_directory_unavailable`. `GET
 /api/brief/<date>` answers the same for one date; a date with no data is
 `{ "state": "missing", "date", "error": "brief_not_found" }`, and a date
 that is not a real calendar date is 404.
+
+`POST /api/brief/read` takes no body. It reads the newest brief itself
+(never the cached snapshot, so a read right after a brief appears is never
+missed), records its date in `brief-reads.json` under the data root
+(`lib/brief-reads.mjs`), and answers `{"ok": true}`. When the newest brief
+is not ready there is nothing to mark, and it still answers `{"ok": true}`.
+The overlay (`public/brief-overlay.js`) calls it once it has rendered the
+newest brief, never for an older date opened by itself.
 
 `POST /api/brief/feedback` takes JSON with exactly these keys:
 

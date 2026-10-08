@@ -286,6 +286,32 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 }
 .menu-count { display: none; }
 
+/* The newest brief unread, as a dot (the rail's nav-indicator look, not a
+   count): on the Brief button's and the menu toggle's corner, or beside
+   the text in the phone menu's Brief entry. */
+.header-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+  vertical-align: middle;
+}
+/* The menu toggle's own dot only applies where its Brief entry lives: the
+   phone menu. On a desk the Brief button carries its own dot instead. */
+.menu-dot { display: none; }
+#brief-open,
+#app-menu-toggle { position: relative; }
+#brief-open .header-dot,
+#app-menu-toggle .header-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  margin: 0;
+  border: 2px solid var(--paper);
+}
+
 /* Quick chat: a pane under the header on the right, over the current
    view, holding one thread column (thread-view.js). */
 .quick-chat {
@@ -2729,6 +2755,7 @@ textarea.form-input {
   }
   .menu-mobile-only { display: inline-flex; }
   .menu-count { display: inline-flex; }
+  .menu-dot { display: inline-block; }
   .notifications-panel {
     position: fixed;
     top: calc(max(4px, env(safe-area-inset-top)) + 108px);

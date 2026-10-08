@@ -14,6 +14,7 @@ lives in its repository; the data lives here, as plain files you can read.
 | `daemon.lock` | The running daemon's pid and start time. |
 | `settings.json` | The dashboard's settings. |
 | `thread-reads.json` | When each agent's thread was last read. |
+| `brief-reads.json` | The date of the newest brief whose overlay has been opened. |
 | `registry/agents.json` | The agent registry. |
 | `routines/` | One `<id>.json` per routine, and `runs/<id>.jsonl` with each routine's runs. |
 | `threads/` | Each agent's thread, `<id>.json` and `<id>.jsonl`, and `brief-notices.json`. |

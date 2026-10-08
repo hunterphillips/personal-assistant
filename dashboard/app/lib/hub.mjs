@@ -8,7 +8,7 @@
 //
 // createHub({ registry, jobs, routines, schedule, timeZone, focus, brief,
 //             timeouts, limits, adapters, store, bindings, cmux,
-//             adaptersDisabled, settings, reads, notifications, models, home, log,
+//             adaptersDisabled, settings, reads, briefReads, notifications, models, home, log,
 //             now }) returns:
 //
 //   snapshot() -> frozen
@@ -17,8 +17,12 @@
 //       home,                     // the home directory, for showing paths
 //       focus: { available },     // null until the first refreshStatus
 //       brief,                    // exactly what /api/dashboard/status reports:
-//                                 // { state, date?, revision? }, or
-//                                 // { state: 'unknown' } before the first check
+//                                 // { state, date?, revision?, unread? }, or
+//                                 // { state: 'unknown' } before the first check.
+//                                 // unread is present only when briefReads is
+//                                 // given and state is 'ready': true when the
+//                                 // date is newer than briefReads.read() (or
+//                                 // nothing has been read yet).
 //       registry: { ok, error, loadedAt },
 //       groups: [{ id, name }],    // the registry's group list, in order
 //       agents: [{ id, name, role, description, group, kind, cwd, jobs, avatar,
@@ -297,7 +301,7 @@ const STATE_WORD = /^[a-z_]{1,40}$/;
 
 export function createHub({
   registry, jobs, routines = null, schedule = defaultSchedule, timeZone = TIME_ZONE, focus, brief, timeouts, limits = LIMITS,
-  adapters = {}, store = null, bindings = null, cmux = null, adaptersDisabled = null, settings = null, reads = null, notifications = null, models = MODELS,
+  adapters = {}, store = null, bindings = null, cmux = null, adaptersDisabled = null, settings = null, reads = null, briefReads = null, notifications = null, models = MODELS,
   home = os.homedir(), log = () => {}, now = () => new Date(),
 }) {
   const listeners = new Set();
@@ -611,6 +615,15 @@ export function createHub({
     if (Object.keys(patch).length > 0) commit(patch);
   }) : () => {};
 
+  // Adds `unread` to a ready brief summary when briefReads is configured:
+  // true when nothing has been read yet or the last read date is older than
+  // this one. Any other state (or no briefReads) is returned unchanged.
+  function withUnread(summary) {
+    if (!briefReads || summary.state !== 'ready' || typeof summary.date !== 'string') return summary;
+    const lastRead = briefReads.read();
+    return { ...summary, unread: lastRead === null || lastRead < summary.date };
+  }
+
   async function runStatus() {
     const budget = timeouts.statusMs;
     const [focusStatus, briefStatus] = await Promise.all([
@@ -619,7 +632,7 @@ export function createHub({
         () => ({ available: false }),
       ),
       bounded((signal) => brief.latestMetadata({ signal }), budget).then(
-        summarizeBrief,
+        (metadata) => withUnread(summarizeBrief(metadata)),
         () => ({ state: 'unavailable' }),
       ),
     ]);
@@ -742,6 +755,27 @@ export function createHub({
       if (!reads) return;
       await reads.mark(id);
       if (!closed) commitAgents();
+    },
+
+    // Marks the newest brief read, from a fresh look at brief.latestMetadata
+    // rather than the cached snapshot, so a read right after a brief
+    // appeared never misses it. A no-op without briefReads, or when the
+    // newest brief is not ready (nothing to mark).
+    async markBriefRead() {
+      if (!briefReads) return;
+      let metadata;
+      try {
+        metadata = await brief.latestMetadata();
+      } catch (error) {
+        log({ event: 'brief_read_error', error: error?.message ?? String(error) });
+        return;
+      }
+      const summary = summarizeBrief(metadata);
+      if (summary.state !== 'ready' || typeof summary.date !== 'string') return;
+      await briefReads.mark(summary.date);
+      if (closed) return;
+      const patch = withUnread(summary);
+      if (!sameJson(patch, state.brief)) commit({ brief: patch });
     },
 
     // The listed agent's picture, { type, body }, or null (avatars.mjs).

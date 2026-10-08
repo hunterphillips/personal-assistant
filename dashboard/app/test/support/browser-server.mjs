@@ -70,6 +70,7 @@ import { describe, parseCron } from '../../lib/schedule.mjs';
 import { createScheduler } from '../../lib/scheduler.mjs';
 import { createSettings } from '../../lib/settings.mjs';
 import { contextLine, parseContext } from '../../lib/send-context.mjs';
+import { createBriefReads } from '../../lib/brief-reads.mjs';
 import { createReads } from '../../lib/reads.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { fixtureBrief, writeViewer } from './brief-fixtures.mjs';
@@ -277,8 +278,10 @@ export async function startHub({
     await notifications.load();
     const reads = createReads({ file: path.join(root, 'thread-reads.json'), now: clock.now });
     await reads.load((registry.current()?.agents ?? []).filter((agent) => agent.kind === 'persona').map((agent) => agent.id));
+    const briefReads = createBriefReads({ file: config.briefReadsPath });
+    await briefReads.load();
     const hub = createTestHub({
-      config, focus: focusRoutes, brief: briefRoutes, registry, jobs, routines, adapters, store, bindings, cmux, settings, reads, home,
+      config, focus: focusRoutes, brief: briefRoutes, registry, jobs, routines, adapters, store, bindings, cmux, settings, reads, briefReads, home,
       notifications, now: clock.now,
     });
     await hub.start();
@@ -365,6 +368,17 @@ export async function startHub({
       // brief.agent must be in `agents` as a started persona for the daemon
       // to post it.
       writeNotice: (date, fields) => writeFile(path.join(briefsDir, `notice-${date}.json`), JSON.stringify({ date, state: 'ready', ...fields })),
+      // The newest brief's read mark (lib/brief-reads.mjs), as the daemon
+      // writes it; null when nothing has been marked read yet.
+      briefReadsFile: config.briefReadsPath,
+      readBriefReads: async () => {
+        try {
+          return JSON.parse(await readFile(config.briefReadsPath, 'utf8'));
+        } catch (error) {
+          if (error?.code === 'ENOENT') return null;
+          throw error;
+        }
+      },
       notices,
       settings,
       settingsPath,
