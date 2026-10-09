@@ -37,7 +37,7 @@
   var BADGE_COLOURS = 6;
   var SVG_NS = 'http://www.w3.org/2000/svg';
   var BOOKMARK = '<path d="M7 4.5h10a1 1 0 0 1 1 1v14l-6-4-6 4v-14a1 1 0 0 1 1-1Z"/>';
-  var DISMISS = '<path d="M7 7l10 10M17 7 7 17"/>';
+  var DISMISS = '<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>';
 
   function element(tag, className, text) {
     var node = document.createElement(tag);
