@@ -50,6 +50,17 @@
     approved: 'M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3',
     dismissed: 'M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3',
   };
+  // Section headings the curator uses often, shown as an icon with the word
+  // kept for screen readers and the tooltip. Any other heading stays text.
+  var SECTION_ICONS = {
+    'today': 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41',
+    'since yesterday': 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5M12 7v5l4 2',
+    'coming up': 'M8 2v4M16 2v4M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM3 10h18',
+    'reading': 'M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z',
+    'things to note': 'M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M12 11h4M12 16h4M8 11h.01M8 16h.01',
+  };
+  SECTION_ICONS['what changed'] = SECTION_ICONS['changed'] = SECTION_ICONS['since yesterday'];
+
   var NOTE_ICON = 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z';
 
   function element(tag, className, text) {
@@ -266,7 +277,16 @@
       brief.sections.forEach(function (section) {
         var node = element('section', 'brief-section');
         node.setAttribute('data-brief-section', section.id);
-        var heading = element('h2', 'brief-section-label', section.label);
+        var heading = element('h2', 'brief-section-label');
+        var sectionIcon = SECTION_ICONS[String(section.label).trim().toLowerCase()];
+        if (sectionIcon) {
+          heading.classList.add('brief-section-label-icon');
+          heading.title = section.label;
+          heading.appendChild(icon(sectionIcon));
+          heading.appendChild(element('span', 'brief-section-label-text', section.label));
+        } else {
+          heading.textContent = section.label;
+        }
         heading.id = 'brief-section-' + section.id;
         node.setAttribute('aria-labelledby', heading.id);
         node.appendChild(heading);

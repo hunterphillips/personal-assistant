@@ -56,6 +56,37 @@ test.describe('the overlay', () => {
     if (!phone(page)) await expect(page.locator('.header-right > .header-brief')).toBeFocused();
   });
 
+  test('a heading with an obvious icon shows the icon, keeps its word for screen readers, and others stay text', async ({ page, hub }) => {
+    await hub.writeBrief(DATE, { sections: [
+      { id: 'reading', label: 'Reading', items: [{ id: 'reading-1', text: 'An invented story.' }] },
+      { id: 'what-changed', label: 'What changed', items: [{ id: 'what-changed-1', text: 'An invented change.' }] },
+      { id: 'money', label: 'Money', items: [{ id: 'money-1', text: 'An invented figure.' }] },
+    ] });
+    await page.goto(hub.origin + '/');
+    await openFromHeader(page);
+    await expect(page.getByRole('heading', { name: 'Reading' }).locator('svg')).toHaveCount(1);
+    await expect(page.getByRole('heading', { name: 'Reading' })).toHaveAttribute('title', 'Reading');
+    await expect(page.getByRole('heading', { name: 'What changed' }).locator('svg')).toHaveCount(1);
+    await expect(page.getByRole('heading', { name: 'Money' }).locator('svg')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Money' })).toBeVisible();
+  });
+
+  test('an item\'s marks are hidden until hover on a desk and always shown on a phone', async ({ page, hub }) => {
+    await hub.writeBrief(DATE);
+    await page.goto(hub.origin + '/');
+    await openFromHeader(page);
+    const marks = item(page, 'money-1').locator('.brief-marks');
+    const opacity = () => marks.evaluate((node) => Number(getComputedStyle(node).opacity));
+    if (phone(page)) {
+      await expect.poll(opacity).toBeGreaterThan(0.5);
+      return;
+    }
+    await page.mouse.move(1, 1);
+    await expect.poll(opacity).toBe(0);
+    await item(page, 'money-1').locator('.brief-text').hover();
+    await expect.poll(opacity).toBeGreaterThan(0.5);
+  });
+
   test('renders the date, title, opening, and each section with its items in the dashboard\'s markup', async ({ page, hub }) => {
     await hub.writeBrief(DATE);
     await page.goto(hub.origin + '/');

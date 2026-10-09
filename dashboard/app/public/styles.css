@@ -3416,6 +3416,17 @@ textarea.form-input {
   text-transform: uppercase;
 }
 
+.brief-section-label-icon { display: flex; align-items: center; }
+.brief-section-label-icon svg { width: 18px; height: 18px; }
+.brief-section-label-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .brief-item {
   padding: 16px 0;
   border-bottom: 1px solid var(--line);
