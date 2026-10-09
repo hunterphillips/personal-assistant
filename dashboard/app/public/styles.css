@@ -3401,9 +3401,10 @@ textarea.form-input {
 }
 
 .brief-opening { margin-top: 20px; }
+.brief-opening .brief-item { border-bottom: 0; }
 .brief-opening .brief-text { font-size: 20px; }
 
-.brief-section { margin-top: 36px; }
+.brief-section { margin-top: 16px; }
 .brief-section-label {
   margin: 0 0 4px;
   padding-bottom: 6px;
@@ -3428,7 +3429,7 @@ textarea.form-input {
 }
 
 .brief-item {
-  padding: 16px 0;
+  padding: 12px 0 8px;
   border-bottom: 1px solid var(--line);
 }
 .brief-section .brief-item:last-child { border-bottom: 0; }
@@ -3440,7 +3441,7 @@ textarea.form-input {
 .brief-marks {
   display: flex;
   width: fit-content;
-  margin: 6px 0 0 auto;
+  margin: 0 0 0 auto;
   gap: 2px;
   opacity: 0;
   transition: opacity 150ms ease;
