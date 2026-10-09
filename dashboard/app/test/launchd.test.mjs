@@ -14,6 +14,9 @@ import { renderPlist, validatePlistInputs } from '../lib/launchd.mjs';
 const APP_DIR = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const LABEL = 'com.personal-assistant.dashboard';
 const PLUTIL_AVAILABLE = spawnSync('plutil', ['-help'], { stdio: 'ignore' }).error?.code !== 'ENOENT';
+// The launchd install path lints the plist with plutil, so it runs where
+// macOS has it; test/systemd.test.mjs covers the installer elsewhere.
+const LAUNCHD_INSTALL = { skip: PLUTIL_AVAILABLE ? false : 'plutil is unavailable; the launchd install path runs on macOS' };
 
 const VALID_INPUTS = {
   label: LABEL,
@@ -121,7 +124,7 @@ test('validatePlistInputs rejects relative paths, insecure origins, and invalid 
   }
 });
 
-test('dashboard-install dry run writes only the rendered plist, in the data root\'s cache', async () => {
+test('dashboard-install dry run writes only the rendered plist, in the data root\'s cache', LAUNCHD_INSTALL, async () => {
   const fixture = await makeInstallerFixture();
   try {
     const before = await listTree(fixture.appDir);
@@ -209,7 +212,7 @@ test('dashboard-install refuses to render when bin/dashboard-start is not execut
   }
 });
 
-test('dashboard-install restores and re-bootstraps the previous plist after startup failure', async () => {
+test('dashboard-install restores and re-bootstraps the previous plist after startup failure', LAUNCHD_INSTALL, async () => {
   const fixture = await makeInstallerFixture({ loaded: true, codes: { bootstrap: [1] } });
   const previousPlist = await writePreviousPlist(fixture);
   try {
@@ -237,7 +240,7 @@ test('dashboard-install restores and re-bootstraps the previous plist after star
   }
 });
 
-test('dashboard-install retries a rollback bootstrap that fails while the old job exits', async () => {
+test('dashboard-install retries a rollback bootstrap that fails while the old job exits', LAUNCHD_INSTALL, async () => {
   const fixture = await makeInstallerFixture({ loaded: true, codes: { bootstrap: [1, 5] } });
   const previousPlist = await writePreviousPlist(fixture);
   try {
@@ -253,7 +256,7 @@ test('dashboard-install retries a rollback bootstrap that fails while the old jo
   }
 });
 
-test('dashboard-install leaves a previously unloaded plist unloaded on rollback', async () => {
+test('dashboard-install leaves a previously unloaded plist unloaded on rollback', LAUNCHD_INSTALL, async () => {
   const fixture = await makeInstallerFixture({ loaded: false, codes: { bootstrap: [1] } });
   const previousPlist = await writePreviousPlist(fixture);
   try {
@@ -270,7 +273,7 @@ test('dashboard-install leaves a previously unloaded plist unloaded on rollback'
   }
 });
 
-test('dashboard-install installs when the job owns the listener, tolerating a not-loaded bootout', async () => {
+test('dashboard-install installs when the job owns the listener, tolerating a not-loaded bootout', LAUNCHD_INSTALL, async () => {
   const port = await freePort();
   const fixture = await makeInstallerFixture({
     loaded: true,
@@ -300,7 +303,7 @@ test('dashboard-install installs when the job owns the listener, tolerating a no
   }
 });
 
-test('dashboard-install carries a data root set in its environment into the job', async () => {
+test('dashboard-install carries a data root set in its environment into the job', LAUNCHD_INSTALL, async () => {
   const port = await freePort();
   const fixture = await makeInstallerFixture({ serve: true });
   const dataHome = path.join(fixture.rootDir, 'elsewhere');
@@ -318,7 +321,7 @@ test('dashboard-install carries a data root set in its environment into the job'
   }
 });
 
-test('dashboard-install rolls back when another process holds the listener', async () => {
+test('dashboard-install rolls back when another process holds the listener', LAUNCHD_INSTALL, async () => {
   const fixture = await makeInstallerFixture({ loaded: false, serve: true, reportWrongPid: true });
   try {
     const result = runInstall(fixture, await freePort());
@@ -332,7 +335,7 @@ test('dashboard-install rolls back when another process holds the listener', asy
   }
 });
 
-test('dashboard-install aborts before writing the plist when the port already answers', async () => {
+test('dashboard-install aborts before writing the plist when the port already answers', LAUNCHD_INSTALL, async () => {
   const fixture = await makeInstallerFixture({ loaded: false });
   const server = net.createServer((socket) => socket.destroy());
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -371,7 +374,7 @@ test('dashboard-install refuses to render when an API key is in its environment'
   }
 });
 
-test('dashboard-install refuses to unload a dashboard with busy personas unless forced, probing the loaded job\'s port', async () => {
+test('dashboard-install refuses to unload a dashboard with busy personas unless forced, probing the loaded job\'s port', LAUNCHD_INSTALL, async () => {
   const fixture = await makeInstallerFixture({ loaded: true });
   const agents = [
     { id: 'cfo', name: 'CFO', state: 'busy' },
@@ -415,7 +418,7 @@ test('dashboard-install refuses to unload a dashboard with busy personas unless 
   }
 });
 
-test('dashboard-install goes on when the running dashboard has no busy personas, probing the new port when the previous plist names none', async () => {
+test('dashboard-install goes on when the running dashboard has no busy personas, probing the new port when the previous plist names none', LAUNCHD_INSTALL, async () => {
   const fixture = await makeInstallerFixture({ loaded: true });
   await writePreviousPlist(fixture);
   const requests = [];
@@ -568,6 +571,7 @@ async function makeInstallerFixture(fakeState = {}) {
     fsp.mkdir(path.join(appDir, 'bin'), { recursive: true }),
     fsp.mkdir(path.join(appDir, 'lib'), { recursive: true }),
     fsp.mkdir(path.join(appDir, 'launchd'), { recursive: true }),
+    fsp.mkdir(path.join(appDir, 'systemd'), { recursive: true }),
     fsp.mkdir(homeDir),
     fsp.mkdir(fakeBinDir),
   ]);
@@ -576,12 +580,17 @@ async function makeInstallerFixture(fakeState = {}) {
     fsp.copyFile(path.join(APP_DIR, 'bin', 'dashboard-install'), installerPath),
     fsp.copyFile(path.join(APP_DIR, 'bin', 'dashboard-start'), path.join(appDir, 'bin', 'dashboard-start')),
     fsp.copyFile(path.join(APP_DIR, 'lib', 'launchd.mjs'), path.join(appDir, 'lib', 'launchd.mjs')),
+    fsp.copyFile(path.join(APP_DIR, 'lib', 'systemd.mjs'), path.join(appDir, 'lib', 'systemd.mjs')),
     fsp.copyFile(path.join(APP_DIR, 'lib', 'config.mjs'), path.join(appDir, 'lib', 'config.mjs')),
     fsp.copyFile(path.join(APP_DIR, 'lib', 'layout.mjs'), path.join(appDir, 'lib', 'layout.mjs')),
     fsp.copyFile(path.join(APP_DIR, 'package.json'), path.join(appDir, 'package.json')),
     fsp.copyFile(
       path.join(APP_DIR, 'launchd', `${LABEL}.plist.template`),
       path.join(appDir, 'launchd', `${LABEL}.plist.template`),
+    ),
+    fsp.copyFile(
+      path.join(APP_DIR, 'systemd', `${LABEL}.service.template`),
+      path.join(appDir, 'systemd', `${LABEL}.service.template`),
     ),
   ]);
   await fsp.chmod(path.join(appDir, 'bin', 'dashboard-start'), 0o755);
@@ -679,6 +688,7 @@ function fakeLaunchctlEnv(fixture) {
     ...inherited,
     HOME: fixture.homeDir,
     PATH: `${fixture.fakeBinDir}:${process.env.PATH}`,
+    DASHBOARD_JOB_RUNNER: 'launchd',
     ...fixture.fakeEnv,
   };
 }

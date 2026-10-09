@@ -325,6 +325,15 @@ export function codexDirFrom(env = process.env) {
   return parsePath(env.DASHBOARD_CODEX_DIR, layoutPaths(home).codexDir);
 }
 
+// The job runner, for the installer and uninstaller, which run outside
+// loadConfig() and must agree with it.
+export function jobRunnerFrom(env = process.env, platform = process.platform) {
+  const problems = [];
+  const jobRunner = parseJobRunner(env.DASHBOARD_JOB_RUNNER, platform, problems);
+  if (problems.length > 0) throw new ConfigError(problems);
+  return jobRunner;
+}
+
 function parsePath(value, fallback) {
   return path.resolve(APP_ROOT, isUnset(value) ? fallback : value);
 }

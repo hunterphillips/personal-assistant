@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { APP_ROOT, ConfigError, codexDirFrom, loadConfig } from '../lib/config.mjs';
+import { APP_ROOT, ConfigError, codexDirFrom, jobRunnerFrom, loadConfig } from '../lib/config.mjs';
 
 const HOME = '/data/root';
 const REPO = path.resolve(APP_ROOT, '../..');
@@ -47,6 +47,18 @@ test('the job runner follows the platform, and DASHBOARD_JOB_RUNNER overrides it
 test('an unknown job runner is a config problem', () => {
   assert.throws(() => loadConfig({ DASHBOARD_JOB_RUNNER: 'cron' }), (error) =>
     error instanceof ConfigError && error.problems.includes('DASHBOARD_JOB_RUNNER must be launchd or systemd'));
+});
+
+test('jobRunnerFrom answers the installer the way loadConfig does', () => {
+  assert.equal(jobRunnerFrom({}, 'darwin'), 'launchd');
+  assert.equal(jobRunnerFrom({}, 'linux'), 'systemd');
+  assert.equal(jobRunnerFrom({ DASHBOARD_JOB_RUNNER: '' }, 'linux'), 'systemd');
+  assert.equal(jobRunnerFrom({ DASHBOARD_JOB_RUNNER: 'launchd' }, 'linux'), 'launchd');
+  assert.equal(jobRunnerFrom({ DASHBOARD_JOB_RUNNER: 'systemd' }, 'darwin'), 'systemd');
+  assert.throws(() => jobRunnerFrom({ DASHBOARD_JOB_RUNNER: 'cron' }, 'linux'), (error) =>
+    error instanceof ConfigError && error.problems.includes('DASHBOARD_JOB_RUNNER must be launchd or systemd'));
+  assert.throws(() => loadConfig({ DASHBOARD_JOB_RUNNER: 'cron', DASHBOARD_PORT: '0' }), (error) =>
+    error instanceof ConfigError && error.problems.length === 2);
 });
 
 test('a relative registry path override resolves from APP_ROOT', () => {
