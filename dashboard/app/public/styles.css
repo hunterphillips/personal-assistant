@@ -3424,14 +3424,15 @@ textarea.form-input {
 .brief-item[data-mark="dismissed"] .brief-text { color: var(--muted); }
 .brief-text { overflow-wrap: anywhere; }
 
-/* An item's marks show while the pointer is on it, at full strength on the
-   group itself. A set mark, keyboard focus, or a touch screen keeps them shown. */
+/* An item's marks fade in while the pointer is on it, at full strength only
+   on the icons themselves (the row is as wide as the icons). A set mark, keyboard focus, or a touch screen keeps them shown. */
 .brief-marks {
   display: flex;
-  justify-content: flex-end;
+  width: fit-content;
+  margin: 6px 0 0 auto;
   gap: 2px;
-  margin-top: 6px;
   opacity: 0;
+  transition: opacity 150ms ease;
 }
 .brief-item:hover .brief-marks,
 .brief-item:focus-within .brief-marks,
@@ -3440,6 +3441,9 @@ textarea.form-input {
 .brief-item .brief-marks:focus-within { opacity: 1; }
 @media (hover: none) {
   .brief-marks { opacity: 0.7; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brief-marks { transition: none; }
 }
 .brief-mark,
 .brief-note-toggle {
