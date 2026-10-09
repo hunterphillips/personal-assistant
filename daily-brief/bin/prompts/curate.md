@@ -7,8 +7,8 @@ board, `second-brain.yaml` his personal notes, `calendar.yaml` his calendar,
 `watch.yaml` the stories that cleared the bar across all his feeds (most days
 absent), `ideas.json` the suggestions on his Ideas board he has not acted on
 (absent when none), `run.yaml` a note from the process that gathered the
-inputs. An idea earns a line only when today makes it worth his attention
-now; most days none does. His previous brief was
+inputs. Weigh the ideas each day; a brief with
+none is fine. His previous brief was
 {{CURSOR}}; the previous memos are {{PREVIOUS_MEMOS}}.
 
 He reads the brief once, in the morning, on his phone or a screen. Write
