@@ -187,7 +187,11 @@
 //     in store.read(id) that is not a bookkeeping line (below). Until then a persona is 'unavailable' with
 //     lastError null. A persona with no adapter for its provider stays
 //     'unavailable' with lastError `adaptersDisabled` when given, else
-//     'provider_unavailable'; one whose start rejects is 'unavailable' with
+//     'provider_unavailable'; one the registry marks folderMissing is never
+//     started (its lastMessage still seeds from the store) and stays
+//     'unavailable' with 'folder_missing' until a registry
+//     change clears the mark, which drops the entry and starts it afresh
+//     (as does the mark appearing on a started one); one whose start rejects is 'unavailable' with
 //     'sdk_unavailable' when the rejection carries that code,
 //     'provider_unavailable' for 'not_supported' (the adapter runs no
 //     personas, as Codex's does), else 'start_failed' (either logged as persona_start_error with the bounded
@@ -398,13 +402,14 @@ export function createHub({
   }
 
   // Brings the persona entries in line with the registry: starts new ones,
-  // drops removed ones (and any whose provider changed), and refreshes the
-  // agent object of the rest.
+  // drops removed ones (and any whose provider changed or whose folder
+  // went or came back, so it starts again), and refreshes the agent object
+  // of the rest.
   function syncPersonas(agents) {
     const listed = new Map(agents.filter((agent) => agent.kind === 'persona').map((agent) => [agent.id, agent]));
     for (const [id, entry] of personas) {
       const agent = listed.get(id);
-      if (!agent || agent.provider !== entry.agent.provider) {
+      if (!agent || agent.provider !== entry.agent.provider || agent.folderMissing !== entry.agent.folderMissing) {
         clearTimeout(entry.timer);
         personas.delete(id);
         dropRelaysWhere((relay) => relay.owner === id || relay.origin === id);
@@ -424,6 +429,16 @@ export function createHub({
     const adapter = adapterFor(agent);
     const entry = personaEntry(agent, adapter);
     personas.set(agent.id, entry);
+    if (agent.folderMissing === true) {
+      // Never started, but its chat is on disk and can still be read.
+      entry.lastError = 'folder_missing';
+      const cached = await lastCachedMessage(agent.id);
+      if (closed || personas.get(agent.id) !== entry) return;
+      entry.lastMessage = cached.lastMessage;
+      entry.lastOwnMessageAt = cached.lastOwnMessageAt;
+      entry.lastReplyAt = cached.lastReplyAt;
+      return;
+    }
     if (!adapter) {
       entry.lastError = adaptersDisabled ?? 'provider_unavailable';
       return;

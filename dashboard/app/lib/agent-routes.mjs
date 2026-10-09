@@ -18,7 +18,8 @@
 //                    persona is 409 not_supported.
 //   POST new-thread  bodyless -> 200 once both thread files are cleared
 //   POST read        bodyless -> 200 once the shared read time is recorded
-//   GET  thread      { messages } from store.read(id)
+//   GET  thread      { messages } from store.read(id); also for an
+//                    unavailable persona whose lastError is folder_missing
 //   GET  avatar      the agent's picture (avatars.mjs) with its content
 //                    type and Cache-Control: no-cache, for an agent of any
 //                    kind; 404 no_avatar when it has none (the client
@@ -261,7 +262,10 @@ export function createAgentRoutes({
   }
 
   async function serveThread(res, id) {
-    personaOf(id);
+    // A persona whose folder is missing is never started, but its chat
+    // is on disk and still reads.
+    const listed = hub.snapshot().agents.find((agent) => agent.id === id);
+    if (listed?.kind !== 'persona' || listed.lastError !== 'folder_missing') personaOf(id);
     if (!store) throw new HttpError(500, 'internal_error');
     const messages = await store.read(id);
     sendJson(res, 200, { messages });

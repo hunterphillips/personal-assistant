@@ -621,6 +621,29 @@ test('a persona whose provider has no adapter is unavailable with the reason', a
   assert.deepEqual(disabled.hub.snapshot().codex, { available: false, reason: 'api_key_in_env' });
 });
 
+test('a persona whose folder is missing is unavailable as folder_missing, never started, and starts once the folder appears (B16)', async () => {
+  const adapter = fakeAdapter();
+  const store = { read: async () => [{ role: 'assistant', text: 'Earlier reply', at: 'b' }] };
+  const registry = fakeRegistry(registryState([agent('cfo', { folderMissing: true }), agent('ops')]));
+  const { hub } = makeHub({ adapters: { claude: adapter }, store, registry });
+  await hub.start();
+  assert.deepEqual([persona(hub).state, persona(hub).lastError], ['unavailable', 'folder_missing']);
+  assert.deepEqual(persona(hub).lastMessage, { role: 'assistant', text: 'Earlier re', at: 'b' });
+  assert.equal(persona(hub, 'ops').state, 'idle');
+  assert.deepEqual(adapter.calls, [['start', 'ops']]);
+  assert.equal(hub.persona('cfo'), null);
+
+  registry.emit(registryState([agent('cfo'), agent('ops')]));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual([persona(hub).state, persona(hub).lastError], ['idle', null]);
+  assert.equal(hub.persona('cfo').agent.id, 'cfo');
+
+  registry.emit(registryState([agent('cfo', { folderMissing: true }), agent('ops')]));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual([persona(hub).state, persona(hub).lastError], ['unavailable', 'folder_missing']);
+  assert.equal(hub.persona('cfo'), null);
+});
+
 test('a persona whose adapter fails to start is unavailable and logged', async () => {
   const adapter = fakeAdapter();
   adapter.start = async () => { throw new Error('invented unreadable pointer'); };

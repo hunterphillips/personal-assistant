@@ -442,6 +442,12 @@
     return isPersona(entry) || (isSession(entry) && !isTerminal(entry));
   }
 
+  // A thread whose messages can be fetched now: an unavailable persona's
+  // cannot, except one whose folder is missing, whose chat is still on disk.
+  function threadReadable(entry) {
+    return hasThread(entry) && (entry.state !== 'unavailable' || entry.lastError === 'folder_missing');
+  }
+
   function turnOpen(agent) {
     return agent.state === 'busy' || agent.state === 'waiting';
   }
@@ -623,6 +629,8 @@
         return 'The Codex server disconnected.';
       case 'sdk_unavailable':
         return 'Claude agents could not start. Run npm ci in dashboard/app, then restart the dashboard.';
+      case 'folder_missing':
+        return displayName(agent) + "'s folder is missing.";
       case 'provider_unavailable':
         return providerName(agent) ? providerName(agent) + ' agents are not supported yet.' : 'This kind of agent is not supported yet.';
       case 'turn_timeout':
@@ -840,7 +848,9 @@
       case 'waiting': return { text: 'Waiting for you', tone: 'wait' };
       case 'busy': return { text: 'Working', tone: 'muted' };
       case 'error': return { text: 'The last turn failed', tone: 'bad' };
-      case 'unavailable': return isSession(agent) ? { text: 'Server stopped', tone: 'muted' } : { text: 'Unavailable', tone: 'muted' };
+      case 'unavailable':
+        if (isSession(agent)) return { text: 'Server stopped', tone: 'muted' };
+        return agent.lastError === 'folder_missing' ? { text: 'Folder missing', tone: 'muted' } : { text: 'Unavailable', tone: 'muted' };
       default: return closed ? { text: 'Terminal closed', tone: 'muted' } : null;
     }
   }
@@ -2784,6 +2794,7 @@
       isSession: isSession,
       isTerminal: isTerminal,
       hasThread: hasThread,
+      threadReadable: threadReadable,
       turnOpen: turnOpen,
       providerName: providerName,
       providerBadge: providerBadge,

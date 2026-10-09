@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -27,6 +27,11 @@ async function waitUntil(predicate, { timeout = 2000, interval = 10 } = {}) {
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
   throw new Error('condition not met in time');
+}
+
+// A plain file beside the registry, standing where a folder should be.
+function file0(dir) {
+  return path.join(dir, 'a-file');
 }
 
 function baseAgent(cwd, overrides = {}) {
@@ -131,19 +136,53 @@ test('a job label starting with a hyphen is rejected', async (t) => {
   assert.match(state.error, /jobs must be an array of strings matching/);
 });
 
-test('a missing cwd directory is rejected', async (t) => {
+test('an agent whose folder is missing loads marked folderMissing, and the rest load with it (B16)', async (t) => {
   const dir = await tempDir(t);
   const file = await write(dir, {
     version: 1,
-    agents: [baseAgent(dir, { cwd: path.join(dir, 'does-not-exist') })],
+    agents: [
+      baseAgent(dir, { id: 'cfo' }),
+      baseAgent(dir, { id: 'focus', cwd: path.join(dir, 'does-not-exist') }),
+      baseAgent(dir, { id: 'brain', cwd: file0(dir) }),
+    ],
   });
+  await writeFile(file0(dir), 'not a folder');
   const registry = createRegistry({ path: file, pollMs: 10_000 });
   await registry.start();
   t.after(() => registry.stop());
 
   const state = registry.current();
-  assert.equal(state.ok, false);
-  assert.match(state.error, /cwd/);
+  assert.equal(state.ok, true);
+  assert.deepEqual(state.agents.map((a) => [a.id, a.folderMissing]), [['cfo', undefined], ['focus', true], ['brain', true]]);
+});
+
+test('a relative cwd still rejects the file', async (t) => {
+  const result = validateDocument({ version: 1, agents: [baseAgent('/invented/cfo', { id: 'cfo' }), baseAgent('relative/focus', { id: 'focus' })] });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.agents, []);
+  assert.deepEqual(result.problems, ['agent 1 (focus): cwd must be an absolute path']);
+});
+
+test('a missing folder created later makes its agent available on the next poll, with or without touching the file', async (t) => {
+  const dir = await tempDir(t);
+  const folder = path.join(dir, 'later');
+  const other = path.join(dir, 'other');
+  const file = await write(dir, { version: 1, agents: [baseAgent(folder, { id: 'cfo' }), baseAgent(other, { id: 'focus' })] });
+  const registry = createRegistry({ path: file, pollMs: 20 });
+  await registry.start();
+  t.after(() => registry.stop());
+  assert.equal(registry.current().agents[0].folderMissing, true);
+
+  await mkdir(folder);
+  const now = new Date();
+  await utimes(file, now, now);
+  await waitUntil(() => registry.current().agents[0].folderMissing === undefined);
+  assert.equal(registry.current().ok, true);
+
+  await mkdir(other);
+  await waitUntil(() => registry.current().agents[1].folderMissing === undefined);
+  await rm(other, { recursive: true });
+  await waitUntil(() => registry.current().agents[1].folderMissing === true);
 });
 
 test('a system agent with a provider is rejected', async (t) => {
@@ -630,10 +669,13 @@ test('validateDocument reports problems and takes a directory check of its own',
   assert.equal(good.groups[0].name, 'Work');
 
   const invented = validateDocument({ version: 1, agents: [baseAgent('/invented/cfo')] });
-  assert.equal(invented.ok, false);
-  assert.deepEqual(invented.problems, ['agent 0 (cfo): cwd must exist and be a directory']);
+  assert.equal(invented.ok, true);
+  assert.deepEqual(invented.problems, []);
+  assert.equal(invented.agents.length, 1);
+  assert.equal(invented.agents[0].folderMissing, true);
   const overridden = validateDocument({ version: 1, agents: [baseAgent('/invented/cfo')] }, { isDirectory: () => true });
   assert.equal(overridden.ok, true);
+  assert.equal(overridden.agents[0].folderMissing, undefined);
 
   const empty = validateDocument({ version: 1, agents: [] });
   assert.deepEqual(empty.problems, ['registry: agents must be a non-empty array']);

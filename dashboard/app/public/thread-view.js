@@ -65,6 +65,7 @@
     var isSession = H.isSession;
     var isTerminal = H.isTerminal;
     var hasThread = H.hasThread;
+    var threadReadable = H.threadReadable;
     var turnOpen = H.turnOpen;
     var providerName = H.providerName;
     var providerBadge = H.providerBadge;
@@ -225,7 +226,7 @@
         messagesNode.appendChild(element('p', 'thread-line', terminalState(agent)));
         return;
       }
-      if (!hasThread(agent) || agent.state === 'unavailable') return;
+      if (!threadReadable(agent)) return;
       if (thread.error) {
         var line = element('p', 'thread-line');
         line.appendChild(document.createTextNode('The chat could not be loaded. '));
@@ -679,7 +680,7 @@
     // fetches it again regardless, for Retry.
     function syncThread(force) {
       var agent = selectedAgent();
-      if (!hasThread(agent) || agent.state === 'unavailable') return;
+      if (!threadReadable(agent)) return;
       var key = agent.id + '|' + JSON.stringify(agent.lastMessage) + '|' + JSON.stringify(agent.model || null) + '|' + (agent.lastLineAt || '') + '|' + (turnOpen(agent) ? 'open' : 'closed');
       if (key === threadKey && !force) return;
       threadKey = key;

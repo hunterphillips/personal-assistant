@@ -162,6 +162,7 @@ test('errorSentence turns each code into a sentence and passes adapter sentences
   assert.equal(view.errorSentence(persona({ lastError: 'sdk_unavailable' })),
     'Claude agents could not start. Run npm ci in dashboard/app, then restart the dashboard.');
   assert.equal(view.errorSentence(persona({ lastError: 'provider_unavailable', provider: 'codex' })), 'Codex agents are not supported yet.');
+  assert.equal(view.errorSentence(persona({ lastError: 'folder_missing' })), "CFO's folder is missing.");
   assert.equal(view.errorSentence(persona({ lastError: 'turn_timeout' })), 'The last turn ran too long and was stopped.');
   assert.equal(view.errorSentence(persona({ lastError: 'error' })), 'The last turn failed.');
   assert.equal(view.errorSentence(persona({ lastError: null })), 'The last turn failed.');
@@ -185,6 +186,7 @@ test('composerReason says why a message cannot be sent', () => {
   assert.equal(view.composerReason(persona({ state: 'waiting', pending: { kind: 'approval' } })), 'Allow or deny the request first.');
   assert.equal(view.composerReason(persona({ state: 'unavailable', lastError: 'provider_unavailable' })), 'Claude agents are not supported yet.');
   assert.equal(view.composerReason(persona({ state: 'unavailable', lastError: null })), 'CFO has not started yet.');
+  assert.equal(view.composerReason(persona({ state: 'unavailable', lastError: 'folder_missing' })), "CFO's folder is missing.");
   assert.equal(view.composerReason(persona({ state: 'error', lastError: 'x' })), '');
 });
 
@@ -227,6 +229,7 @@ test('stateLine marks waiting, busy, error, and unavailable personas only', () =
   assert.deepEqual(line('busy'), { text: 'Working', tone: 'muted' });
   assert.deepEqual(line('error'), { text: 'The last turn failed', tone: 'bad' });
   assert.deepEqual(line('unavailable'), { text: 'Unavailable', tone: 'muted' });
+  assert.deepEqual(plain(view.stateLine(persona({ state: 'unavailable', lastError: 'folder_missing' }))), { text: 'Folder missing', tone: 'muted' });
   assert.equal(view.stateLine(persona()), null);
   assert.equal(view.stateLine({ kind: 'system', state: null }), null);
 });
