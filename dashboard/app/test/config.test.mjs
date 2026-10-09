@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { APP_ROOT, ConfigError, codexDirFrom, loadConfig } from '../lib/config.mjs';
+import { APP_ROOT, ConfigError, codexDirFrom, jobRunnerFrom, loadConfig } from '../lib/config.mjs';
 
 const HOME = '/data/root';
 const REPO = path.resolve(APP_ROOT, '../..');
@@ -33,6 +33,20 @@ test('registry path and launch agents dir overrides are honored', () => {
   });
   assert.equal(config.registryPath, '/etc/personal-assistant/agents.json');
   assert.equal(config.launchAgentsDir, '/etc/launchd-agents');
+});
+
+test('jobRunner follows the platform, DASHBOARD_JOB_RUNNER overrides it, and another value is a problem', () => {
+  assert.equal(jobRunnerFrom({}, 'darwin'), 'launchd');
+  assert.equal(jobRunnerFrom({}, 'linux'), 'systemd');
+  assert.equal(jobRunnerFrom({ DASHBOARD_JOB_RUNNER: '' }, 'linux'), 'systemd');
+  assert.equal(jobRunnerFrom({ DASHBOARD_JOB_RUNNER: 'launchd' }, 'linux'), 'launchd');
+  assert.equal(jobRunnerFrom({ DASHBOARD_JOB_RUNNER: 'systemd' }, 'darwin'), 'systemd');
+  assert.equal(loadConfig({}).jobRunner, process.platform === 'darwin' ? 'launchd' : 'systemd');
+  assert.equal(loadConfig({ DASHBOARD_JOB_RUNNER: 'launchd' }).jobRunner, 'launchd');
+  assert.throws(() => jobRunnerFrom({ DASHBOARD_JOB_RUNNER: 'cron' }, 'linux'), (error) =>
+    error instanceof ConfigError && /DASHBOARD_JOB_RUNNER must be launchd or systemd/.test(error.message));
+  assert.throws(() => loadConfig({ DASHBOARD_JOB_RUNNER: 'cron', DASHBOARD_PORT: '0' }), (error) =>
+    error instanceof ConfigError && error.problems.length === 2);
 });
 
 test('a relative registry path override resolves from APP_ROOT', () => {

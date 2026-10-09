@@ -9,9 +9,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { TIMEOUTS } from '../lib/config.mjs';
+import { TIMEOUTS, jobRunnerFrom } from '../lib/config.mjs';
 import { layoutPaths } from '../lib/layout.mjs';
 import { renderPlist, validatePlistInputs } from '../lib/launchd.mjs';
+import { renderUnit, validateUnitInputs } from '../lib/systemd.mjs';
 
 const LABEL = 'com.personal-assistant.dashboard';
 const APP_DIR = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -31,12 +32,13 @@ const BOOTSTRAP_RETRY_DELAY_MS = 1_000;
 // in progress) while a just-booted-out instance is still exiting.
 const RETRYABLE_BOOTSTRAP_CODES = new Set([5, 37]);
 // Tests run the real install path against a temporary HOME and a fake
-// launchctl; nothing else should set this.
+// launchctl or systemctl; nothing else should set this.
 const ALLOW_HOME_OVERRIDE = process.env.DASHBOARD_INSTALL_ALLOW_HOME_OVERRIDE === '1';
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   refuseApiKeys();
+  const jobRunner = jobRunnerFrom();
   const nodePath = options.nodePath ?? process.execPath;
 
   if (!options.dryRun && !options.publicOrigin) {
@@ -45,7 +47,8 @@ async function main() {
 
   const dataHome = resolveDataHome();
   const root = layoutPaths(dataHome);
-  const inputs = validatePlistInputs({
+  const validateInputs = jobRunner === 'systemd' ? validateUnitInputs : validatePlistInputs;
+  const inputs = validateInputs({
     label: LABEL,
     nodePath,
     appDir: APP_DIR,
@@ -56,6 +59,12 @@ async function main() {
   });
   verifyNode(inputs.nodePath);
   verifyStartScript(START_PATH);
+
+  if (jobRunner === 'systemd') {
+    reportLinger();
+    await installUnit(options, inputs, dataHome, root);
+    return;
+  }
 
   let homeDir;
   if (!options.dryRun) homeDir = resolveHome();
@@ -264,7 +273,7 @@ function resolveHome() {
   if (!ALLOW_HOME_OVERRIDE && path.resolve(homeDir) !== path.resolve(accountHome)) {
     throw new Error(
       `HOME (${homeDir}) differs from this account's home directory (${accountHome}); ` +
-      'refusing to install a LaunchAgent there',
+      'refusing to install the dashboard job there',
     );
   }
   return homeDir;
@@ -414,6 +423,214 @@ function describeRollback(problems, { hadExistingPlist, wasLoaded, installedPath
     return `The previous job was loaded without a plist at ${installedPath}, so it could not be restored.`;
   }
   return 'No previous job was installed; nothing was left loaded.';
+}
+
+// A user service stops at logout unless the account lingers. The installer
+// says which, and leaves the setting alone.
+function reportLinger() {
+  const user = os.userInfo().username;
+  const result = spawnSync('loginctl', ['show-user', user, '-p', 'Linger'], { encoding: 'utf8' });
+  if (!result.error && result.status === 0 && /^Linger=yes$/m.test(result.stdout)) {
+    console.log(`Lingering is enabled for ${user}, so the dashboard keeps running after logout.`);
+    return;
+  }
+  const detail = result.error ? ` (could not run loginctl: ${result.error.message})` : '';
+  console.error(
+    `dashboard-install: warning: lingering is not enabled for ${user}${detail}, so the dashboard stops at logout. ` +
+    `Enable it with: sudo loginctl enable-linger ${user}`,
+  );
+}
+
+// The systemd path: the same steps as the plist's, with a user unit in
+// ~/.config/systemd/user driven by systemctl --user.
+async function installUnit(options, inputs, dataHome, root) {
+  const stagingDir = path.join(root.cacheDir, 'systemd');
+  const renderedPath = path.join(stagingDir, `${LABEL}.service`);
+  const unit = renderUnit(inputs);
+  await fsp.mkdir(dataHome, { recursive: true, mode: 0o700 });
+  await fsp.mkdir(stagingDir, { recursive: true, mode: 0o700 });
+  await fsp.writeFile(renderedPath, unit, { mode: 0o600 });
+  await fsp.chmod(renderedPath, 0o600);
+
+  if (options.dryRun) {
+    const homeDir = process.env.HOME || os.homedir();
+    console.log(renderedPath);
+    console.log('');
+    process.stdout.write(unit);
+    console.log('');
+    console.log(`An install copies it to ${unitPath(homeDir)} and runs:`);
+    console.log('  systemctl --user daemon-reload');
+    console.log(`  systemctl --user enable --now ${LABEL}`);
+    return;
+  }
+
+  const homeDir = resolveHome();
+  const installedPath = unitPath(homeDir);
+  const logDir = root.logDir;
+  const backupPath = path.join(stagingDir, `backup-${new Date().toISOString().replaceAll(/[:.]/g, '-')}.service`);
+  const hadExistingUnit = fs.existsSync(installedPath);
+
+  await fsp.mkdir(logDir, { recursive: true, mode: 0o700 });
+  await fsp.chmod(logDir, 0o700);
+  await fsp.mkdir(path.dirname(installedPath), { recursive: true, mode: 0o700 });
+  if (hadExistingUnit) {
+    await fsp.copyFile(installedPath, backupPath);
+    await fsp.chmod(backupPath, 0o600);
+  }
+
+  const wasEnabled = systemctl(['is-enabled', LABEL]).status === 0;
+  const wasActive = isActive();
+  if (wasActive && !hadExistingUnit) {
+    console.error(
+      `dashboard-install: warning: ${LABEL} is running but ${installedPath} does not exist; ` +
+      'if this install fails, the previous service cannot be restored automatically.',
+    );
+  }
+
+  if (wasActive && !options.force) await refuseActivePersonas(previousUnitPort(installedPath, inputs.port));
+
+  // A failed stop leaves the existing service and unit untouched, so there is
+  // nothing to roll back until this succeeds.
+  if (wasActive) await stopAndWait();
+
+  const rollbackState = { installedPath, backupPath, hadExistingUnit, wasEnabled, wasActive };
+
+  if (await portAnswers(inputs.port)) {
+    const problems = await rollbackUnit(rollbackState);
+    throw new Error(
+      `another process is already listening on 127.0.0.1:${inputs.port}. ` +
+      'Stop it (for example a manual npm start) and run the installer again. ' +
+      `No new unit was written. ${describeUnitRollback(problems, rollbackState)}`,
+    );
+  }
+
+  try {
+    await replaceFile(renderedPath, installedPath);
+    runSystemctl(['daemon-reload']);
+    runSystemctl(['enable', '--now', LABEL]);
+    await waitForHealth(inputs.port, HEALTH_TIMEOUT_MS);
+    confirmUnitOwnsListener(inputs.port);
+  } catch (error) {
+    const problems = await rollbackUnit(rollbackState);
+    throw new Error(
+      `the new dashboard service did not start: ${error.message}. ${describeUnitRollback(problems, rollbackState)}`,
+    );
+  }
+
+  console.log(`Installed ${LABEL} from ${installedPath}`);
+  console.log(`Health check passed at http://127.0.0.1:${inputs.port}/healthz`);
+  console.log(`The dashboard runs from the data root ${dataHome}; its log is ${path.join(logDir, 'dashboard.log')}.`);
+  if (hadExistingUnit) console.log(`Previous unit saved at ${backupPath}`);
+}
+
+function unitPath(homeDir) {
+  return path.join(homeDir, '.config', 'systemd', 'user', `${LABEL}.service`);
+}
+
+// The port the running service listens on, read from the installed unit as
+// previousPort reads it from the plist.
+function previousUnitPort(installedPath, fallback) {
+  let unit;
+  try {
+    unit = fs.readFileSync(installedPath, 'utf8');
+  } catch {
+    return fallback;
+  }
+  const match = /^Environment="DASHBOARD_PORT=(\d{1,5})"$/m.exec(unit);
+  const port = match ? Number(match[1]) : Number.NaN;
+  return port >= 1 && port <= 65535 ? port : fallback;
+}
+
+function systemctl(args) {
+  const result = spawnSync('systemctl', ['--user', ...args], { encoding: 'utf8' });
+  if (result.error) throw new Error(`could not run systemctl: ${result.error.message}`);
+  return result;
+}
+
+function runSystemctl(args) {
+  const result = systemctl(args);
+  if (result.status !== 0) throw new Error(`systemctl ${args[0]} failed: ${describeFailure(result)}`);
+  return result;
+}
+
+function isActive() {
+  return systemctl(['is-active', LABEL]).status === 0;
+}
+
+async function stopAndWait() {
+  runSystemctl(['stop', LABEL]);
+  const deadline = Date.now() + UNLOAD_TIMEOUT_MS;
+  while (isActive()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`${LABEL} was still active ${UNLOAD_TIMEOUT_MS / 1_000} seconds after stop`);
+    }
+    await delay(250);
+  }
+}
+
+function confirmUnitOwnsListener(port) {
+  const mainPid = runSystemctl(['show', '-p', 'MainPID', '--value', LABEL]).stdout.trim();
+  if (!/^\d+$/.test(mainPid) || mainPid === '0') {
+    throw new Error(`systemctl did not report a main pid for ${LABEL}`);
+  }
+  const listenerPids = listenerPidsOn(port);
+  if (listenerPids.length !== 1 || listenerPids[0] !== mainPid) {
+    throw new Error(
+      `port ${port} is held by pid ${listenerPids.join(', ') || 'none'}, not by the service's pid ${mainPid}`,
+    );
+  }
+}
+
+// The pids listening on the port, from ss, or from lsof where ss is missing.
+function listenerPidsOn(port) {
+  const ss = spawnSync('ss', ['-Hltnp'], { encoding: 'utf8' });
+  if (!ss.error) {
+    const pids = ss.stdout.split('\n')
+      .filter((line) => line.trim().split(/\s+/)[3]?.endsWith(`:${port}`))
+      .flatMap((line) => [...line.matchAll(/pid=(\d+)/g)].map((match) => match[1]));
+    return [...new Set(pids)];
+  }
+  const lsof = spawnSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' });
+  if (lsof.error) throw new Error(`could not run ss or lsof: ${lsof.error.message}`);
+  return [...new Set(lsof.stdout.split('\n').map((line) => line.trim()).filter(Boolean))];
+}
+
+// Returns the problems met while putting back the unit file and the
+// enabled and running state recorded before the installer's first stop.
+async function rollbackUnit({ installedPath, backupPath, hadExistingUnit, wasEnabled, wasActive }) {
+  const problems = [];
+  try {
+    if (isActive()) await stopAndWait();
+  } catch (error) {
+    problems.push(error.message);
+    return problems;
+  }
+
+  try {
+    if (hadExistingUnit) {
+      await replaceFile(backupPath, installedPath);
+      runSystemctl(['daemon-reload']);
+      if (!wasEnabled) runSystemctl(['disable', LABEL]);
+      if (wasActive) runSystemctl(['start', LABEL]);
+    } else {
+      if (fs.existsSync(installedPath)) runSystemctl(['disable', LABEL]);
+      await fsp.rm(installedPath, { force: true });
+      runSystemctl(['daemon-reload']);
+    }
+  } catch (error) {
+    problems.push(`could not restore the previous service: ${error.message}`);
+  }
+  return problems;
+}
+
+function describeUnitRollback(problems, { hadExistingUnit, wasActive, installedPath }) {
+  if (problems.length > 0) return `Rollback also reported: ${problems.join('; ')}`;
+  if (hadExistingUnit && wasActive) return 'The previous unit was restored and its service started again.';
+  if (hadExistingUnit) return 'The previous unit was restored; it was not running before, so it was left stopped.';
+  if (wasActive) {
+    return `The previous service was running without a unit at ${installedPath}, so it could not be restored.`;
+  }
+  return 'No previous service was installed; nothing was left running.';
 }
 
 function portAnswers(port) {

@@ -1,6 +1,8 @@
 # Operations
 
-Run all commands from the repository root. This runbook covers the dashboard user LaunchAgent and the manual Tailscale cutover; the installer itself never changes Tailscale.
+Run all commands from the repository root. This runbook covers the dashboard user LaunchAgent on macOS, the systemd user unit on Linux (see Linux below), and the manual Tailscale cutover; the installer itself never changes Tailscale.
+
+The installer and uninstaller pick their path from `DASHBOARD_JOB_RUNNER`: `launchd` on macOS and `systemd` elsewhere unless it names the other. The sections up to Linux describe the launchd path.
 
 ## Install
 
@@ -88,6 +90,55 @@ If the new job cannot be bootstrapped, kicked off, or made healthy within about 
 ```
 
 Uninstall unloads only `com.personal-assistant.dashboard` and removes only `~/Library/LaunchAgents/com.personal-assistant.dashboard.plist`. It preserves the source tree, the data root, Focus jobs, and all Tailscale settings.
+
+## Linux
+
+On Linux the dashboard runs as the systemd user service `com.personal-assistant.dashboard`. The same two scripts install and remove it, with the same flags, refusals (an API key in the environment, a Focus origin off loopback), busy-persona check, and health wait.
+
+### Install
+
+```sh
+./bin/dashboard-install --dry-run --public-origin https://your-machine.your-tailnet.ts.net
+./bin/dashboard-install --public-origin https://your-machine.your-tailnet.ts.net
+```
+
+The dry run renders the unit to `~/.personal-assistant/cache/systemd/com.personal-assistant.dashboard.service`, prints it, and prints the commands an install would run; it changes nothing else. The install copies it to `~/.config/systemd/user/com.personal-assistant.dashboard.service` and runs `systemctl --user daemon-reload` and `systemctl --user enable --now com.personal-assistant.dashboard`. It then waits for `/healthz` and checks that the process listening on the port is the unit's `MainPID` (from `ss -ltnp`, or `lsof` where `ss` is missing).
+
+The unit runs `bin/dashboard-start` with the same environment the plist sets, restarts on failure, and starts with the user's session (`WantedBy=default.target`). With the default data root it names the log through `%h`, systemd's home folder.
+
+### Lingering
+
+A user service stops when its user's last session ends unless the account lingers. Before it changes anything, the installer reads `loginctl show-user $USER -p Linger` and says whether lingering is on, with a warning when it is off. It never changes the setting; turn it on once with:
+
+```sh
+sudo loginctl enable-linger "$USER"
+```
+
+### Verify and logs
+
+```sh
+systemctl --user status com.personal-assistant.dashboard
+ss -ltnp 'sport = :4243'
+tail -f ~/.personal-assistant/log/dashboard.log
+```
+
+The listener should read `127.0.0.1:4243`, and its pid should match the status's Main PID. The log is the same file as on macOS, rotated the same way by `bin/dashboard-start`.
+
+### Reinstall and rollback
+
+Run the install again to reinstall. A previous unit is saved first as `~/.personal-assistant/cache/systemd/backup-<timestamp>.service`. If the service is running, the installer asks it whether any persona is busy (at the port in the installed unit), then stops it with `systemctl --user stop` and waits for it to go inactive. If the new service does not start, pass the health wait, or own the listener, the installer stops it, puts the saved unit back, reloads systemd, and starts the restored service only if it was running before; a unit that was not enabled before is disabled again. With no previous unit, it disables and removes the new one.
+
+### Uninstall
+
+```sh
+./bin/dashboard-uninstall
+```
+
+It runs `systemctl --user disable --now com.personal-assistant.dashboard`, removes only that unit file, and reloads systemd. The data root, the source tree, and Tailscale are left alone.
+
+### Tailscale
+
+Tailscale Serve is set by hand, as on macOS: point it at `http://127.0.0.1:4243` and pass the resulting HTTPS origin as `--public-origin`.
 
 ## Data root
 

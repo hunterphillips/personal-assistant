@@ -30,6 +30,8 @@
 //   DASHBOARD_NOTIFICATIONS_DIR the notifications file agents raise into (default
 //                               <home>/notifications; need not exist)
 //   DASHBOARD_LAUNCH_AGENTS_DIR directory holding launchd plists (default ~/Library/LaunchAgents)
+//   DASHBOARD_JOB_RUNNER        what runs the jobs: launchd or systemd (default launchd on
+//                               macOS, systemd elsewhere); config.jobRunner
 //   DASHBOARD_THREADS_DIR       persona session pointers and message caches (default
 //                               <home>/threads); the read times sit beside it
 //   DASHBOARD_SETTINGS_PATH     the settings file the interface writes (default
@@ -167,6 +169,7 @@ export function loadConfig(env = process.env) {
   // The default is already absolute, so path.resolve keeps it as-is; only a
   // relative override is resolved from APP_ROOT.
   const launchAgentsDir = parsePath(env.DASHBOARD_LAUNCH_AGENTS_DIR, path.join(os.homedir(), 'Library', 'LaunchAgents'));
+  const jobRunner = parseJobRunner(env.DASHBOARD_JOB_RUNNER, process.platform, problems);
   const threadsDir = parsePath(env.DASHBOARD_THREADS_DIR, root.threadsDir);
   const settingsPath = parsePath(env.DASHBOARD_SETTINGS_PATH, root.settings);
   const codexDir = parsePath(env.DASHBOARD_CODEX_DIR, root.codexDir);
@@ -218,6 +221,7 @@ export function loadConfig(env = process.env) {
     notificationsDir,
     timeZone: TIME_ZONE,
     launchAgentsDir,
+    jobRunner,
     threadsDir,
     settingsPath,
     codexDir,
@@ -309,6 +313,22 @@ export function codexDirFrom(env = process.env) {
   const home = parseHome(env, problems);
   if (problems.length > 0) throw new ConfigError(problems);
   return parsePath(env.DASHBOARD_CODEX_DIR, layoutPaths(home).codexDir);
+}
+
+// The job runner, for the installer and uninstaller, which run outside
+// loadConfig() and must agree with it.
+export function jobRunnerFrom(env = process.env, platform = process.platform) {
+  const problems = [];
+  const jobRunner = parseJobRunner(env.DASHBOARD_JOB_RUNNER, platform, problems);
+  if (problems.length > 0) throw new ConfigError(problems);
+  return jobRunner;
+}
+
+function parseJobRunner(value, platform, problems) {
+  if (isUnset(value)) return platform === 'darwin' ? 'launchd' : 'systemd';
+  if (value === 'launchd' || value === 'systemd') return value;
+  problems.push('DASHBOARD_JOB_RUNNER must be launchd or systemd');
+  return null;
 }
 
 function parsePath(value, fallback) {
