@@ -99,12 +99,12 @@ own interface and state, embedded through an internal proxy; the dashboard
 serves the Daily Brief and saves its feedback directly; the port 8765 viewer
 is retired. Operations, cmux setup, and the remaining live checks are in
 `dashboard/app/docs/operations.md` and the
-[assistant handoff](thoughts/shared/lanes/assistant/handoff.md). On
-2026-09-29 Reading gained a Feed tab: the items the Watch agent found,
-survivors and overflow, read from `feed/items/`, each with Discuss opening
-the Watch agent's thread. Since 2026-09-30: story images, an instructions
-panel that proposes edits to Watch, the Health view, agent settings behind
-a gear, and Focus's theme. Next: the Assistant agent, per the design.
+[assistant handoff](thoughts/shared/lanes/assistant/handoff.md). The Feed
+shows feeds as tabs, each the posts Scout found in that feed's sources
+(RSS, newsletter email, and context files), with a takeaway line,
+Insights, Save, Discuss, and Dismiss; a gear holds the feed's
+instructions and sources. Plans and their status are in the assistant
+handoff.
 
 The September 18 Control Tower research (Codex, Claude, and cmux runtime
 evidence) fed the daemon plan; its Electron/TypeScript

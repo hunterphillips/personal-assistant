@@ -13,7 +13,8 @@ from here.
 - **Interface**: `dashboard/app/`, a Node 24 daemon on 127.0.0.1:4243 behind
   Tailscale Serve, in Focus's theme since 2026-09-30. Every view sits under
   one header: the view's name and its actions on the left, and on the
-  right Brief, Quick chat, a bell with the open notification count, and a
+  right Brief (with a dot while the newest brief is unread; the brief
+  goes to no agent's thread), Quick chat, a bell with the open notification count, and a
   menu with the theme (Light, Dark, or System) and Settings (one menu on a
   phone); the rail's chat icon carries a dot when an agent is waiting or
   has an unread reply, Health a mark when a job's last run failed; Quick
@@ -25,9 +26,8 @@ from here.
   of six views: Home is the Agents view (the Assistant pinned above the
   groups the registry lists, agents on the Claude Agent SDK, Codex
   threads on a shared app-server, Claude Code terminals in cmux; a gear
-  opens each agent's settings beside its thread; on a desk the
-  Assistant's thread opens by default, and each morning's brief lands in
-  it as one collapsed line; messages render Markdown; a button under the
+  beside New chat opens each agent's settings beside its thread; on a
+  desk the Assistant's thread opens by default; messages render Markdown; a button under the
   composer picks the thread's model and effort; `@` mentions an agent;
   every Claude agent's turn carries two tools, `ask` (that messages
   another agent in its own thread, with the exchange shown in both and a
