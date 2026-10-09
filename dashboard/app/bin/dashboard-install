@@ -507,6 +507,7 @@ async function installUnit(options, inputs, dataHome, root) {
   try {
     await replaceFile(renderedPath, installedPath);
     runSystemctl(['daemon-reload']);
+    resetFailed();
     runSystemctl(['enable', '--now', LABEL]);
     await waitForHealth(inputs.port, HEALTH_TIMEOUT_MS);
     confirmUnitOwnsListener(inputs.port);
@@ -553,12 +554,20 @@ function runSystemctl(args) {
   return result;
 }
 
+// Running or about to: a unit that crashes on start sits in activating
+// (auto-restart) between attempts, which is-active exits non-zero for.
+const RUNNING_STATES = new Set(['active', 'activating', 'deactivating', 'reloading']);
+
 function isActive() {
-  return systemctl(['is-active', LABEL]).status === 0;
+  return RUNNING_STATES.has(systemctl(['is-active', LABEL]).stdout.trim());
 }
 
+// Stopping a unit systemd has not loaded is already stopped.
 async function stopAndWait() {
-  runSystemctl(['stop', LABEL]);
+  const result = systemctl(['stop', LABEL]);
+  if (result.status !== 0 && !/not loaded|does not exist|not found/i.test(`${result.stderr}\n${result.stdout}`)) {
+    throw new Error(`systemctl stop failed: ${describeFailure(result)}`);
+  }
   const deadline = Date.now() + UNLOAD_TIMEOUT_MS;
   while (isActive()) {
     if (Date.now() >= deadline) {
@@ -566,6 +575,12 @@ async function stopAndWait() {
     }
     await delay(250);
   }
+}
+
+// A new unit that crashed on start may have hit systemd's start limit, which
+// would refuse the next start of the same name until it is reset.
+function resetFailed() {
+  systemctl(['reset-failed', LABEL]);
 }
 
 function confirmUnitOwnsListener(port) {
@@ -581,10 +596,11 @@ function confirmUnitOwnsListener(port) {
   }
 }
 
-// The pids listening on the port, from ss, or from lsof where ss is missing.
+// The pids listening on the port, from ss, or from lsof where ss is missing
+// or fails.
 function listenerPidsOn(port) {
   const ss = spawnSync('ss', ['-Hltnp'], { encoding: 'utf8' });
-  if (!ss.error) {
+  if (!ss.error && ss.status === 0) {
     const pids = ss.stdout.split('\n')
       .filter((line) => line.trim().split(/\s+/)[3]?.endsWith(`:${port}`))
       .flatMap((line) => [...line.matchAll(/pid=(\d+)/g)].map((match) => match[1]));
@@ -600,7 +616,7 @@ function listenerPidsOn(port) {
 async function rollbackUnit({ installedPath, backupPath, hadExistingUnit, wasEnabled, wasActive }) {
   const problems = [];
   try {
-    if (isActive()) await stopAndWait();
+    await stopAndWait();
   } catch (error) {
     problems.push(error.message);
     return problems;
@@ -611,6 +627,7 @@ async function rollbackUnit({ installedPath, backupPath, hadExistingUnit, wasEna
       await replaceFile(backupPath, installedPath);
       runSystemctl(['daemon-reload']);
       if (!wasEnabled) runSystemctl(['disable', LABEL]);
+      resetFailed();
       if (wasActive) runSystemctl(['start', LABEL]);
     } else {
       if (fs.existsSync(installedPath)) runSystemctl(['disable', LABEL]);

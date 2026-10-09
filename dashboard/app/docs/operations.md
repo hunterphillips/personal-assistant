@@ -126,7 +126,7 @@ The listener should read `127.0.0.1:4243`, and its pid should match the status's
 
 ### Reinstall and rollback
 
-Run the install again to reinstall. A previous unit is saved first as `~/.personal-assistant/cache/systemd/backup-<timestamp>.service`. If the service is running, the installer asks it whether any persona is busy (at the port in the installed unit), then stops it with `systemctl --user stop` and waits for it to go inactive. If the new service does not start, pass the health wait, or own the listener, the installer stops it, puts the saved unit back, reloads systemd, and starts the restored service only if it was running before; a unit that was not enabled before is disabled again. With no previous unit, it disables and removes the new one.
+Run the install again to reinstall. A previous unit is saved first as `~/.personal-assistant/cache/systemd/backup-<timestamp>.service`. If the service is running, the installer asks it whether any persona is busy (at the port in the installed unit), then stops it with `systemctl --user stop` and waits for it to go inactive. If the new service does not start, pass the health wait, or own the listener, the installer stops it (including one stuck restarting after a crash), puts the saved unit back, reloads systemd, clears the start limit a crash loop leaves behind (`systemctl --user reset-failed`), and starts the restored service only if it was running before; a unit that was not enabled before is disabled again. With no previous unit, it disables and removes the new one.
 
 ### Uninstall
 

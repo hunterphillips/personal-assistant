@@ -89,11 +89,19 @@ function systemctl(args) {
   }
 }
 
+// Without a unit file disable has nothing to act on, but a service loaded
+// before the file went away may still run, so it is stopped by name.
 function disableIfInstalled() {
+  const notInstalled = /does not exist|not loaded|not found/i;
   try {
     systemctl(['disable', '--now', LABEL]);
   } catch (error) {
-    if (!/does not exist|not loaded|not found/i.test(error.message)) throw error;
+    if (!notInstalled.test(error.message)) throw error;
+    try {
+      systemctl(['stop', LABEL]);
+    } catch (stopError) {
+      if (!notInstalled.test(stopError.message)) throw stopError;
+    }
   }
 }
 

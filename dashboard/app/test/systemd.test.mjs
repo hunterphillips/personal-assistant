@@ -145,6 +145,7 @@ test('dashboard-install on systemd installs, enables, and starts a fresh unit th
       `--user is-enabled ${LABEL}`,
       `--user is-active ${LABEL}`,
       '--user daemon-reload',
+      `--user reset-failed ${LABEL}`,
       `--user enable --now ${LABEL}`,
       `--user show -p MainPID --value ${LABEL}`,
     ]);
@@ -209,6 +210,24 @@ test('dashboard-install on systemd restores and restarts the previous unit when 
   }
 });
 
+test('dashboard-install on systemd stops a new unit stuck restarting and resets its start limit before restarting the previous one', async () => {
+  const fixture = await makeInstallerFixture({ serve: true, crashNew: true, active: true, enabled: true });
+  const previousUnit = await writePreviousUnit(fixture);
+  try {
+    const result = runInstall(fixture, await freePort());
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /health check timed out/);
+    assert.match(result.stderr, /previous unit was restored and its service started again/);
+    assert.equal(await fsp.readFile(fixture.installedPath, 'utf8'), previousUnit);
+    const state = readFakeState(fixture);
+    assert.equal(state.activating, false);
+    assert.equal(state.active, true);
+    assert.equal(state.startLimit, false);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
 test('dashboard-install on systemd removes and disables a new unit whose service does not own the listener', async () => {
   const fixture = await makeInstallerFixture({ serve: true, reportWrongPid: true });
   try {
@@ -249,12 +268,16 @@ test('dashboard-uninstall on systemd goes on when no unit is installed and refus
   try {
     const result = runUninstall(fixture);
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(readFakeState(fixture).calls, [`--user disable --now ${LABEL}`, '--user daemon-reload']);
+    assert.deepEqual(readFakeState(fixture).calls, [
+      `--user disable --now ${LABEL}`,
+      `--user stop ${LABEL}`,
+      '--user daemon-reload',
+    ]);
 
     const refused = runUninstall(fixture, ['--label', 'com.focus.server']);
     assert.notEqual(refused.status, 0);
     assert.match(refused.stderr, /refusing to operate on label/);
-    assert.equal(readFakeState(fixture).calls.length, 2);
+    assert.equal(readFakeState(fixture).calls.length, 3);
   } finally {
     await cleanupFixture(fixture);
   }
@@ -321,7 +344,9 @@ async function makeInstallerFixture(fakeState = {}) {
 // state in a JSON file. `codes.<subcommand>` lists exit codes consumed one per
 // call (then 0). With `serve`, starting the unit starts a loopback HTTP server
 // on the installed unit's DASHBOARD_PORT that plays the service;
-// `reportWrongPid` makes `show` report a different MainPID for it.
+// `reportWrongPid` makes `show` report a different MainPID for it. With
+// `crashNew`, a rendered unit crashes on start: it sits in activating
+// (auto-restart) and hits the start limit until reset-failed.
 const FAKE_SYSTEMCTL = `#!${process.execPath}
 const fs = require('node:fs');
 const path = require('node:path');
@@ -341,32 +366,54 @@ const stop = () => {
   if (state.pid) { try { process.kill(state.pid); } catch {} }
   state.pid = null;
   state.active = false;
+  state.activating = false;
 };
 const start = () => {
+  if (state.startLimit) {
+    process.stderr.write('Job for ' + label + '.service failed. Start request repeated too quickly.\\n');
+    return 1;
+  }
+  if (state.crashNew && fs.readFileSync(unitPath, 'utf8').includes('dashboard-start')) {
+    state.activating = true;
+    state.startLimit = true;
+    return 0;
+  }
   state.active = true;
-  if (!state.serve) return;
-  const port = Number(fs.readFileSync(unitPath, 'utf8').match(/^Environment="DASHBOARD_PORT=(\\d+)"$/m)[1]);
+  if (!state.serve) return 0;
+  const portMatch = fs.readFileSync(unitPath, 'utf8').match(/^Environment="DASHBOARD_PORT=(\\d+)"$/m);
+  if (!portMatch) return 0;
+  const port = Number(portMatch[1]);
   const child = spawn(process.execPath, ['-e',
     "require('node:http').createServer((q, r) => r.end('ok')).listen(" + port + ", '127.0.0.1')"],
     { detached: true, stdio: 'ignore' });
   child.unref();
   state.pid = child.pid;
   state.port = port;
+  return 0;
 };
 let code = nextCode();
 if (code === 0) {
   if (command === 'is-enabled') code = state.enabled ? 0 : 1;
-  else if (command === 'is-active') { process.stdout.write(state.active ? 'active\\n' : 'inactive\\n'); code = state.active ? 0 : 3; }
+  else if (command === 'is-active') {
+    process.stdout.write(state.active ? 'active\\n' : state.activating ? 'activating\\n' : 'inactive\\n');
+    code = state.active ? 0 : 3;
+  }
   else if (command === 'enable') {
     if (!fs.existsSync(unitPath)) { process.stderr.write('Failed to enable unit: Unit file ' + label + '.service does not exist.\\n'); code = 1; }
-    else { state.enabled = true; if (args.includes('--now')) start(); }
+    else { state.enabled = true; if (args.includes('--now')) code = start(); }
   }
   else if (command === 'disable') {
     if (!fs.existsSync(unitPath)) { process.stderr.write('Failed to disable unit: Unit file ' + label + '.service does not exist.\\n'); code = 1; }
     else { state.enabled = false; if (args.includes('--now')) stop(); }
   }
-  else if (command === 'start') start();
-  else if (command === 'stop') stop();
+  else if (command === 'start') code = start();
+  else if (command === 'stop') {
+    if (!fs.existsSync(unitPath) && !state.active && !state.activating) {
+      process.stderr.write('Failed to stop ' + label + '.service: Unit ' + label + '.service not loaded.\\n');
+      code = 5;
+    } else stop();
+  }
+  else if (command === 'reset-failed') state.startLimit = false;
   else if (command === 'show') process.stdout.write((state.active ? (state.reportWrongPid ? 1 : state.pid ?? 4321) : 0) + '\\n');
 }
 save();
