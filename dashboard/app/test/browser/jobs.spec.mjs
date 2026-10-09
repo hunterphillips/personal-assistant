@@ -607,9 +607,9 @@ test.describe('with jobs never refreshed', () => {
 test.describe('with Focus unreachable during the refresh', () => {
   test.use({ hubOptions: seeded({ focusAvailable: false }) });
 
-  test('the Focus card says its states come from macOS', async ({ page, hub }) => {
+  test('the Focus card says its states come from the job runner', async ({ page, hub }) => {
     await openHealth(page, hub);
-    await expect(card(page, 'Focus').locator('.card-note')).toHaveText('Focus is not responding; these states come from macOS.');
+    await expect(card(page, 'Focus').locator('.card-note')).toHaveText('Focus is not responding; these states come from the job runner.');
     await expect(card(page, 'Second brain').locator('.card-note')).toHaveCount(0);
   });
 });

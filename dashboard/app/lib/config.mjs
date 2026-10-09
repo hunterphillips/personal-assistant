@@ -30,6 +30,8 @@
 //   DASHBOARD_NOTIFICATIONS_DIR the notifications file agents raise into (default
 //                               <home>/notifications; need not exist)
 //   DASHBOARD_LAUNCH_AGENTS_DIR directory holding launchd plists (default ~/Library/LaunchAgents)
+//   DASHBOARD_JOB_RUNNER        what runs the registry's jobs, launchd or systemd (default
+//                               launchd on macOS, systemd elsewhere); config.jobRunner
 //   DASHBOARD_THREADS_DIR       persona session pointers and message caches (default
 //                               <home>/threads); the read times sit beside it
 //   DASHBOARD_SETTINGS_PATH     the settings file the interface writes (default
@@ -62,6 +64,7 @@ const REPO_ROOT = path.resolve(APP_ROOT, '../..');
 export const TIME_ZONE = 'America/Chicago';
 const DEFAULT_CMUX_CLI = '/Applications/cmux.app/Contents/Resources/bin/cmux';
 const BIND_HOST = '127.0.0.1';
+const JOB_RUNNERS = new Set(['launchd', 'systemd']);
 const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 export const LIMITS = Object.freeze({
@@ -144,8 +147,9 @@ export class ConfigError extends Error {
   }
 }
 
-export function loadConfig(env = process.env) {
+export function loadConfig(env = process.env, { platform = process.platform } = {}) {
   const problems = [];
+  const jobRunner = parseJobRunner(env.DASHBOARD_JOB_RUNNER, platform, problems);
   const port = parsePort(env.DASHBOARD_PORT, problems);
   const publicOrigin = parsePublicOrigin(env.DASHBOARD_PUBLIC_ORIGIN, problems);
   const focusOrigin = parseFocusOrigin(env.DASHBOARD_FOCUS_ORIGIN, problems);
@@ -218,6 +222,7 @@ export function loadConfig(env = process.env) {
     notificationsDir,
     timeZone: TIME_ZONE,
     launchAgentsDir,
+    jobRunner,
     threadsDir,
     settingsPath,
     codexDir,
@@ -275,6 +280,15 @@ function parseFocusOrigin(value, problems) {
     return null;
   }
   return { origin: url.origin, host: `${url.hostname}:${url.port || 80}` };
+}
+
+function parseJobRunner(value, platform, problems) {
+  if (isUnset(value)) return platform === 'darwin' ? 'launchd' : 'systemd';
+  if (!JOB_RUNNERS.has(value)) {
+    problems.push('DASHBOARD_JOB_RUNNER must be launchd or systemd');
+    return null;
+  }
+  return value;
 }
 
 // PERSONAL_ASSISTANT_HOME: unset or empty is the default root; anything

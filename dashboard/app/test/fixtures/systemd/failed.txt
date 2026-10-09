@@ -1,0 +1,14 @@
+MainPID=0
+Result=exit-code
+ExecMainStartTimestamp=@1791610800
+ExecMainStatus=2
+StandardOutput=inherit
+StandardError=inherit
+FragmentPath=/nonexistent/com.example.sample.service
+LoadState=loaded
+ActiveState=failed
+
+TimersCalendar={ OnCalendar=*-*-* 05:40:00 ; next_elapse=@1791697200 }
+Result=success
+LoadState=loaded
+ActiveState=active

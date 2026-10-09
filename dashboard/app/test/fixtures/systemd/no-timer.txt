@@ -1,0 +1,11 @@
+MainPID=0
+Result=success
+ExecMainStartTimestamp=
+ExecMainStatus=0
+StandardOutput=inherit
+StandardError=inherit
+FragmentPath=/nonexistent/com.example.sample.service
+LoadState=loaded
+ActiveState=inactive
+
+LoadState=not-found

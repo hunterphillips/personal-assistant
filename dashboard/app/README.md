@@ -576,9 +576,17 @@ they skip when the Focus checkout is missing.
 ### Jobs
 
 `lib/jobs.mjs` lists every job named in the agent registry's `jobs`.
-For each label it reads the plist from `DASHBOARD_LAUNCH_AGENTS_DIR` with
+`DASHBOARD_JOB_RUNNER` picks how it reads them: `launchd` (the default on
+macOS) or `systemd` (the default elsewhere). Under launchd, for each label
+it reads the plist from `DASHBOARD_LAUNCH_AGENTS_DIR` with
 `plutil`, asks `launchctl list` for the last exit status and PID, and takes
-the log file's modification time as the last run. Focus scans
+the log file's modification time as the last run. Under systemd each label
+is a pair of user units, `<label>.service` and `<label>.timer`, read with
+`systemctl --user show --timestamp=unix` (systemd 251 or later): a service systemd does not know reads as
+unavailable, `Result` and `ExecMainStatus` give the outcome,
+`ExecMainStartTimestamp` the last run, the unit file's
+`StandardOutput=append:` path the log, and the timer's `OnCalendar` values
+the schedule, in the same words as a plist's. Focus scans
 (`com.focus.scan-*`) use Focus's `/api/status` instead when Focus answers. The
 module only reads: it never loads, starts, or stops a job, and it runs only
 when asked.
@@ -1030,7 +1038,7 @@ registry that cannot be read ("The registry could not be read." followed
 by the registry's error), a failed refresh ("Jobs could not be
 refreshed."), and an empty list ("No jobs are registered.") each get one
 plain sentence, and when Focus did not answer during the refresh the Focus
-card says its rows come from launchd. While the view is off screen its
+card says its rows come from the job runner. While the view is off screen its
 cards are not rebuilt; opening it renders the latest state.
 
 ## Personas
@@ -2010,6 +2018,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
 | `DASHBOARD_REGISTRY_PATH` | `<root>/registry/agents.json` | Agent registry JSON file; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
+| `DASHBOARD_JOB_RUNNER` | `launchd` on macOS, `systemd` elsewhere | What runs the registry's jobs, and so where Health reads them: launchd plists or systemd user units. Any other value refuses to start. |
 | `DASHBOARD_THREADS_DIR` | `<root>/threads` | Persona session pointers and message caches; the read times are `thread-reads.json` beside the directory. |
 | `DASHBOARD_SETTINGS_PATH` | `<root>/settings.json` | The settings file the interface writes (below); written on first start. |
 | `DASHBOARD_ROUTINES_DIR` | `<root>/routines` | The routine files and, under `runs/`, their logs. |

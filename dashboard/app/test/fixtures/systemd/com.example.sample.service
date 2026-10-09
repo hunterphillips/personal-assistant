@@ -1,0 +1,8 @@
+[Unit]
+Description=Invented sample job
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+StandardOutput=append:/nonexistent/logs/sample.out.log
+StandardError=append:/nonexistent/logs/sample.err.log
