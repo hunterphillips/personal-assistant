@@ -174,6 +174,15 @@ test('a turn rejected after it was accepted is logged, since the 202 has gone ou
   assert.equal(app.logs.filter((entry) => entry.event === 'persona_turn_rejected').length, 1);
 });
 
+test('a persona whose folder is missing reads its thread and refuses a send as unavailable (B16)', async (t) => {
+  const app = await startAgents(t, { agents: [agent('cfo', { folderMissing: true })] });
+  const thread = await request(app, 'GET', '/api/agents/cfo/thread');
+  assert.deepEqual([thread.status, thread.json], [200, { messages: MESSAGES }]);
+  const send = await post(app, '/api/agents/cfo/send', { text: 'x' });
+  assert.deepEqual([send.status, send.json], [409, { error: 'persona_unavailable' }]);
+  assert.deepEqual(app.adapter.calls, []);
+});
+
 test('mutations need an exact Origin and the right content type', async (t) => {
   const app = await startAgents(t);
   assert.equal((await post(app, '/api/agents/cfo/send', { text: 'x' }, { origin: 'http://evil.example' })).status, 403);

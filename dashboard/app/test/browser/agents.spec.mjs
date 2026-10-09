@@ -724,6 +724,29 @@ test.describe('with a persona whose last turn the clock stopped', () => {
   });
 });
 
+// B16: the registry marks Second brain's folder missing; the rest of the
+// list loads as before.
+test.describe('with a persona whose folder is missing', () => {
+  test.use({ hubOptions: { build: () => {
+    const base = seeded({ brain: { messages: [{ role: 'assistant', text: 'Notes are filed.', at: ago(30 * MINUTE) }] } }).build();
+    return { ...base, agents: base.agents.map((agent) => (agent.id === 'brain' ? { ...agent, folderMissing: true } : agent)) };
+  } } });
+
+  test('the row and the composer say the folder is missing, and the chat still reads', async ({ page, hub }) => {
+    await page.goto(`${hub.origin}/`);
+    await expect(page.locator('#agents-groups .agent-row .agent-row-name')).toHaveText(['CFO', 'Catchup', 'Second brain', 'Dev', 'Focus']);
+    await expect(row(page, 'Second brain').locator('.agent-row-state')).toHaveText('Folder missing');
+    await expect(row(page, 'Second brain').locator('.agent-row-preview')).toHaveText('Notes are filed.');
+
+    await page.goto(`${hub.origin}/?agent=brain`);
+    await expect(page.locator('#agent-composer-reason')).toHaveText("Second brain's folder is missing.");
+    await expect(page.locator('#agent-input')).toBeDisabled();
+    await expect(page.locator('#agent-send')).toBeDisabled();
+    await expect(messages(page)).toContainText(['Notes are filed.']);
+    expect(hub.personas.calls.filter((call) => call[1] === 'brain')).toEqual([]);
+  });
+});
+
 // The registry's groups list, a pinned persona above it, and a group the
 // list leaves out. Seeded only here, so the other tests keep an empty pane.
 const PINNED_AGENTS = [

@@ -22,7 +22,11 @@
 //         "group": "work",           // /^[a-z][a-z0-9-]{1,31}$/; the
 //                                    // heading it sits under (see groups)
 //         "kind": "persona",         // "persona" | "project" | "system"
-//         "cwd": "/absolute/path",   // must exist and be a directory
+//         "cwd": "/absolute/path",   // absolute; a folder that does not
+//                                    // exist (or is not a directory) is
+//                                    // no problem: the entry loads with
+//                                    // folderMissing: true, which the hub
+//                                    // shows as unavailable
 //         "provider": "claude",      // "claude" | "codex"; required for
 //                                    // persona/project, absent for system
 //         "model": "sonnet",         // optional, non-empty, <= 64 chars;
@@ -106,6 +110,9 @@
 //     size}, and a missing file is its own signature, so a file that stays
 //     missing does not re-trigger load() or onChange on every tick, while a
 //     file that appears after being missing is picked up on the next poll.
+//     Each poll also re-checks every loaded agent's cwd, and reloads when
+//     one has appeared or gone since the last load, so a folder created
+//     later makes its agent available without touching the file.
 //     A poll still in flight when the interval fires is not joined by a
 //     second one; that tick is skipped. Calling start() again while already
 //     started is a no-op that returns the original first-load promise.
@@ -142,8 +149,8 @@
 // validateDocument(parsed, { isDirectory } = {}) -> { ok, agents, groups, problems, error }
 //   The validation load() applies, for a caller that holds a parsed
 //   document (the writer, and test fakes); `isDirectory(path)` replaces the
-//   file system check on cwd, so a fake registry can validate invented
-//   folders while the real one keeps the rule.
+//   file system check on cwd that sets folderMissing, so a fake registry
+//   can list invented folders as present.
 //
 // RegistryError: code ('registry_invalid', 'registry_invalid_json',
 //   'invalid_registry') and problems (strings).
@@ -247,7 +254,7 @@ export function createRegistry({ path: registryPath, pollMs = 5_000, log = () =>
     } catch {
       seen = { missing: true };
     }
-    if (seenEqual(lastSeen, seen)) return;
+    if (seenEqual(lastSeen, seen) && !foldersChanged(state)) return;
     lastSeen = seen;
     await load();
   }
@@ -336,6 +343,11 @@ export function createRegistry({ path: registryPath, pollMs = 5_000, log = () =>
       return () => listeners.delete(fn);
     },
   };
+}
+
+// Whether any agent of a good load has had its folder appear or go since.
+function foldersChanged(current) {
+  return current.ok && current.agents.some((agent) => (agent.folderMissing === true) === isDirectory(agent.cwd));
 }
 
 function seenEqual(a, b) {
@@ -520,8 +532,6 @@ function validateAgent(entry, index, problems, checkDirectory = isDirectory) {
   }
   if (typeof entry.cwd !== 'string' || !path.isAbsolute(entry.cwd)) {
     fail('cwd must be an absolute path');
-  } else if (!checkDirectory(entry.cwd)) {
-    fail('cwd must exist and be a directory');
   }
 
   if (entry.kind === 'system') {
@@ -611,6 +621,7 @@ function validateAgent(entry, index, problems, checkDirectory = isDirectory) {
     group: entry.group,
     kind: entry.kind,
     cwd: entry.cwd,
+    ...(checkDirectory(entry.cwd) ? {} : { folderMissing: true }),
     ...(entry.kind === 'system' ? {} : { provider: entry.provider }),
     ...(entry.model !== undefined ? { model: entry.model } : {}),
     ...(entry.effort !== undefined ? { effort: entry.effort } : {}),

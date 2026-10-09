@@ -1063,6 +1063,17 @@ the root's. `.claude/settings.json` and `.mcp.json` are read from the
 folder only and are not inherited from the root. A built-in agent names
 its folder in `registry/builtin.json` as `folder`, relative to the repo.
 
+A registry entry whose `cwd` does not exist, or is not a directory, still
+loads; only a `cwd` that is not an absolute path is a problem that rejects
+the file. `lib/registry.mjs` marks the entry `folderMissing: true`, and the
+hub never starts such a persona: it is `unavailable` with `lastError`
+`folder_missing`, the row says "Folder missing", and the composer says
+"CFO's folder is missing." Its chat still opens and reads from the thread
+cache; a send is 409 `persona_unavailable`, and a routine's run fails with
+`agent_unavailable`, as for any persona that is not started. Every poll
+re-checks the loaded entries' folders, so a folder created later (or one
+that goes away) takes effect within a few seconds without touching the file.
+
 ### Avatars
 
 Each agent has a round picture beside its name in the agents list (the
@@ -1124,8 +1135,9 @@ events. Each persona in `agents` carries:
   unavailable: `provider_unavailable` (its provider runs no personas; a
   `codex` persona stays unavailable, since Codex threads are followed as
   sessions instead), `api_key_in_env`, `sdk_unavailable` (the SDK package
-  could not be loaded; run `npm ci`), or `start_failed` (its session pointer
-  could not be read).
+  could not be loaded; run `npm ci`), `start_failed` (its session pointer
+  could not be read), or `folder_missing` (its registry `cwd` is not a
+  directory; Agent folders, above).
 - `costUsd`: null, or the session's running total.
 - `lastLineAt`: null, or when the daemon last wrote a line into the thread
   outside the agent's own turn that is not its last message: a
@@ -1176,7 +1188,9 @@ never resumed in a new folder.
 Each route names the agent by its registry id. An id not in the registry is
 404 `no_such_agent`; an agent of another kind is 409 `not_a_persona`; a
 persona that is unavailable (`provider_unavailable`, `api_key_in_env`,
-`sdk_unavailable`, or `start_failed`) is 409 `persona_unavailable`. POSTs follow the usual rules:
+`sdk_unavailable`, `start_failed`, or `folder_missing`) is 409
+`persona_unavailable`, except that `thread` still reads for
+`folder_missing`. POSTs follow the usual rules:
 exact `Origin`, JSON for `send` and `answer`, no body for `interrupt` and
 `new-thread`.
 
