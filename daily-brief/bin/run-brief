@@ -377,9 +377,13 @@ ROSTER
         /bin/cp "$watch_data/packets/$watch_packet.yaml" "$contributions/$date/watch.yaml" && /bin/chmod 600 "$contributions/$date/watch.yaml"
     fi
 
+    # Ideas: the suggestions still open, for the curator to surface one only
+    # when the day makes it worth his attention.
+    "$python3" "$brief_dir/bin/open-ideas.py" "$data" "$date" "$contributions/$date/ideas.json" 2>/dev/null || true
+
     write_run_packet
     /bin/chmod 600 "$contributions/$date/run.yaml"
-    packets=$(cd "$contributions/$date" && ls *.yaml *.md 2>/dev/null | /usr/bin/tr '\n' ',' | /usr/bin/sed 's/,$//')
+    packets=$(cd "$contributions/$date" && ls *.yaml *.json *.md 2>/dev/null | /usr/bin/tr '\n' ',' | /usr/bin/sed 's/,$//')
 fi
 
 # --- curate -------------------------------------------------------------------
