@@ -236,7 +236,9 @@
       button.setAttribute('aria-label', 'Discuss');
       button.setAttribute('title', 'Discuss');
       button.disabled = pending === item.id;
-      button.appendChild(icon('feed-icon', 16, '<path d="M2.5 3.5h11v7.5h-6.5l-3 2.5v-2.5h-1.5z"/>'));
+      button.appendChild(icon('feed-icon', 24, '<path d="M10.7 19.4 A8 8 0 1 0 5.1 15.4 C3.5 16.4 2.9 18.6 5.5 20 C6.9 19.3 8.7 19 10.7 19.4 Z"/>'));
+      button.firstChild.setAttribute('width', '20');
+      button.firstChild.setAttribute('height', '20');
       return button;
     }
 
