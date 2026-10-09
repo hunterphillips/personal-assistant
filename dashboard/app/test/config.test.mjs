@@ -35,6 +35,20 @@ test('registry path and launch agents dir overrides are honored', () => {
   assert.equal(config.launchAgentsDir, '/etc/launchd-agents');
 });
 
+test('the job runner follows the platform, and DASHBOARD_JOB_RUNNER overrides it', () => {
+  assert.equal(loadConfig({}, { platform: 'darwin' }).jobRunner, 'launchd');
+  assert.equal(loadConfig({}, { platform: 'linux' }).jobRunner, 'systemd');
+  assert.equal(loadConfig({ DASHBOARD_JOB_RUNNER: '' }, { platform: 'linux' }).jobRunner, 'systemd');
+  assert.equal(loadConfig({ DASHBOARD_JOB_RUNNER: 'systemd' }, { platform: 'darwin' }).jobRunner, 'systemd');
+  assert.equal(loadConfig({ DASHBOARD_JOB_RUNNER: 'launchd' }, { platform: 'linux' }).jobRunner, 'launchd');
+  assert.equal(loadConfig({}).jobRunner, process.platform === 'darwin' ? 'launchd' : 'systemd');
+});
+
+test('an unknown job runner is a config problem', () => {
+  assert.throws(() => loadConfig({ DASHBOARD_JOB_RUNNER: 'cron' }), (error) =>
+    error instanceof ConfigError && error.problems.includes('DASHBOARD_JOB_RUNNER must be launchd or systemd'));
+});
+
 test('a relative registry path override resolves from APP_ROOT', () => {
   const config = loadConfig({ DASHBOARD_REGISTRY_PATH: '../registry/other.json' });
   assert.equal(config.registryPath, path.resolve(APP_ROOT, '../registry/other.json'));

@@ -55,9 +55,33 @@
 // maxBuffer, and are passed refresh()'s `signal`, so aborting a refresh also
 // aborts them. Injected readPlist/launchctlList receive the same second
 // argument; tests' fakes may ignore it.
+//
+// jobRunner (config.jobRunner, default 'launchd') picks the source. Under
+// 'systemd' each label is a pair of user units, <label>.service and
+// <label>.timer, and readPlist and launchctlList are never called. Each job
+// then has source "systemd" (Focus scans still "focus"):
+//   - available: the service's LoadState is "loaded"; otherwise the job
+//     reads as an unreadable plist does (available: false, "unknown").
+//   - outcome: "running" when the service is activating, or active with a
+//     MainPID other than 0; "ok" when Result is "success"; "failed" for any
+//     other Result. exitStatus is ExecMainStatus.
+//   - lastRun: ExecMainStartTimestamp, else the log file's mtime.
+//   - logPath: the path of StandardOutput=append:<path>, else of
+//     StandardError=append:<path>, else null.
+//   - schedule: from the timer's OnCalendar values; see describeTimer below.
+//     No timer is "Schedule unavailable".
+//   - failures24h and paused are null.
+// Its default dependency:
+//   systemctlShow(label, { signal }) -> Promise<{ service, timer } | null>
+//     `systemctl --user show --timestamp=unix <label>.service <label>.timer
+//     --property=...`, each unit's properties as strings (TimersCalendar a
+//     list), or null for a unit systemd does not know. `show` prints a file
+//     output as a bare "append", so the path is read from the unit file
+//     (FragmentPath). null when the call fails or aborts; failures are logged
+//     as { event: 'systemctl_error', label, error } once per distinct message.
 
 import { execFile } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 export const CONCURRENCY = 4;
@@ -66,27 +90,40 @@ const FOCUS_OUTCOMES = new Set(['running', 'skipped', 'no change', 'wrote', 'fai
 const PLIST_MAX_BUFFER = 256 * 1024;
 const LAUNCHCTL_MAX_BUFFER = 64 * 1024;
 const LAUNCHCTL_NOT_FOUND = 113;
+const SYSTEMCTL_MAX_BUFFER = 64 * 1024;
+const UNIT_FILE_MAX_BYTES = 64 * 1024;
+const SYSTEMCTL_PROPERTIES = [
+  'LoadState', 'ActiveState', 'MainPID', 'Result', 'ExecMainStatus', 'ExecMainStartTimestamp',
+  'StandardOutput', 'StandardError', 'FragmentPath', 'TimersCalendar',
+];
 const CALENDAR_KEYS = new Set(['Minute', 'Hour', 'Weekday', 'Day', 'Month']);
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function createJobs({
   registry,
   launchAgentsDir,
+  jobRunner = 'launchd',
   focus,
   timeouts,
   log = () => {},
   readPlist = (file, { signal } = {}) => defaultReadPlist(file, { timeoutMs: timeouts.launchctlMs, signal }),
   launchctlList,
+  systemctlShow,
 }) {
   const loggedErrors = new Set();
-  const reportLaunchctlError = (label, error) => {
+  const reporter = (event) => (label, error) => {
     const message = error?.message ?? String(error);
     if (loggedErrors.has(message)) return;
     loggedErrors.add(message);
-    log({ event: 'launchctl_error', label, error: message });
+    log({ event, label, error: message });
   };
+  const reportLaunchctlError = reporter('launchctl_error');
+  const reportSystemctlError = reporter('systemctl_error');
   const listLabel = launchctlList
     ?? ((label, { signal } = {}) => defaultLaunchctlList(label, { timeoutMs: timeouts.launchctlMs, onError: reportLaunchctlError, signal }));
+  const showLabel = systemctlShow
+    ?? ((label, { signal } = {}) => defaultSystemctlShow(label, { timeoutMs: timeouts.launchctlMs, onError: reportSystemctlError, signal }));
+  const source = jobRunner === 'systemd' ? 'systemd' : 'launchctl';
 
   async function launchctlFor(label, signal) {
     try {
@@ -105,10 +142,48 @@ export function createJobs({
     } catch {
       plist = null;
     }
-    if (!isRecord(plist)) return { plist: null };
+    if (!isRecord(plist)) return null;
     const logPath = stringOrNull(plist.StandardOutPath) ?? stringOrNull(plist.StandardErrorPath);
     const [logMtime, launchctl] = await Promise.all([mtimeOf(logPath), launchctlFor(label, signal)]);
-    return { plist, logPath, logMtime, launchctl };
+    let outcome = 'unknown';
+    if (!launchctl) outcome = 'not loaded';
+    else if (launchctl.pid !== null && launchctl.pid !== undefined) outcome = 'running';
+    else if (launchctl.lastExitStatus === 0) outcome = 'ok';
+    else if (Number.isFinite(launchctl.lastExitStatus)) outcome = 'failed';
+    return {
+      schedule: describeSchedule(plist),
+      logPath,
+      lastRun: logMtime,
+      outcome,
+      exitStatus: launchctl?.lastExitStatus ?? null,
+    };
+  }
+
+  // The same for one label under systemd: its service and timer units.
+  async function inspectUnits(label, signal) {
+    let units = null;
+    try {
+      units = await showLabel(label, { signal });
+    } catch (error) {
+      reportSystemctlError(label, error);
+    }
+    const service = units?.service;
+    if (service?.LoadState !== 'loaded') return null;
+    const logPath = appendPath(service.StandardOutput) ?? appendPath(service.StandardError);
+    const startedAt = unixTimestamp(service.ExecMainStartTimestamp);
+    let outcome = 'unknown';
+    if (service.ActiveState === 'activating' || (service.ActiveState === 'active' && /^[1-9]\d*$/.test(service.MainPID ?? ''))) outcome = 'running';
+    else if (service.Result === 'success') outcome = 'ok';
+    else if (stringOrNull(service.Result)) outcome = 'failed';
+    return {
+      schedule: units.timer?.LoadState === 'loaded'
+        ? describeTimer(units.timer.TimersCalendar ?? [])
+        : { kind: 'unknown', text: 'Schedule unavailable' },
+      logPath,
+      lastRun: startedAt ?? await mtimeOf(logPath),
+      outcome,
+      exitStatus: /^-?\d+$/.test(service.ExecMainStatus ?? '') ? Number(service.ExecMainStatus) : null,
+    };
   }
 
   return {
@@ -124,19 +199,20 @@ export function createJobs({
 
       const needsFocus = focus && jobs.some((job) => job.label.startsWith(FOCUS_SCAN_PREFIX));
       const statusPromise = needsFocus ? fetchFocusStatus(focus, timeouts.statusMs, signal) : Promise.resolve(null);
-      const results = await runLimited(jobs.map((job) => () => inspect(job.label, signal)), CONCURRENCY, signal);
+      const inspectOne = source === 'systemd' ? inspectUnits : inspect;
+      const results = await runLimited(jobs.map((job) => () => inspectOne(job.label, signal)), CONCURRENCY, signal);
       const status = await statusPromise;
 
       return {
         refreshedAt: new Date().toISOString(),
         focusAvailable: status !== null,
-        jobs: jobs.map((job, index) => buildRoutine(job, results[index], status)),
+        jobs: jobs.map((job, index) => buildRoutine(job, results[index], status, source)),
       };
     },
   };
 }
 
-function buildRoutine({ agent, label, name }, result, status) {
+function buildRoutine({ agent, label, name }, result, status, source) {
   const job = {
     label,
     agentId: agent.id,
@@ -149,16 +225,15 @@ function buildRoutine({ agent, label, name }, result, status) {
     exitStatus: null,
     failures24h: null,
     paused: null,
-    source: 'launchctl',
+    source,
     available: false,
   };
-  if (!result?.plist) return job;
+  if (!result) return job;
 
-  const { plist, logPath, logMtime, launchctl } = result;
   job.available = true;
-  job.schedule = describeSchedule(plist);
-  job.logPath = logPath;
-  job.exitStatus = launchctl?.lastExitStatus ?? null;
+  job.schedule = result.schedule;
+  job.logPath = result.logPath;
+  job.exitStatus = result.exitStatus;
 
   const focusSource = focusSourceOf(label, status);
   if (focusSource) {
@@ -170,11 +245,8 @@ function buildRoutine({ agent, label, name }, result, status) {
     return job;
   }
 
-  job.lastRun = logMtime;
-  if (!launchctl) job.outcome = 'not loaded';
-  else if (launchctl.pid !== null && launchctl.pid !== undefined) job.outcome = 'running';
-  else if (launchctl.lastExitStatus === 0) job.outcome = 'ok';
-  else if (Number.isFinite(launchctl.lastExitStatus)) job.outcome = 'failed';
+  job.lastRun = result.lastRun;
+  job.outcome = result.outcome;
   return job;
 }
 
@@ -324,6 +396,54 @@ function describeCalendar(value) {
   return CUSTOM;
 }
 
+// Plain-words schedule from a systemd timer's OnCalendar values, in the
+// same English as a plist's StartCalendarInterval: each value, as systemd
+// normalizes it, becomes the plist entries it means and describeCalendar
+// words them.
+//   *-*-* 05:40:00             Daily at 05:40 (several values: several times)
+//   Mon..Fri *-*-* 05:15:00    Weekdays at 05:15 (also Sat,Sun and Mon,Wed)
+//   *-*-* *:05:00              Hourly at :05
+//   *-*-01 03:00:00            Monthly on the 1st at 03:00
+// Anything else, or no calendar at all, is "Custom schedule".
+export function describeTimer(calendars) {
+  const entries = [];
+  for (const calendar of calendars) {
+    const spec = /^\{ OnCalendar=(.+?) ; /.exec(calendar)?.[1];
+    const parsed = spec ? calendarEntries(spec) : null;
+    if (!parsed) return { kind: 'custom', text: CUSTOM };
+    entries.push(...parsed);
+  }
+  const text = entries.length > 0 ? describeCalendar(entries) : CUSTOM;
+  return text === CUSTOM ? { kind: 'custom', text } : { kind: 'calendar', text };
+}
+
+const SYSTEMD_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function calendarEntries(spec) {
+  const match = /^(?:([A-Za-z.,]+) )?\*-\*-(\*|\d{1,2}) (\*|\d{1,2}):(\d{1,2}):00$/.exec(spec);
+  if (!match) return null;
+  const [, dayList, day, hour, minute] = match;
+  if (hour === '*') return dayList || day !== '*' ? null : [{ Minute: Number(minute) }];
+  const base = { Hour: Number(hour), Minute: Number(minute) };
+  if (day !== '*') base.Day = Number(day);
+  if (!dayList) return [base];
+  const days = weekdays(dayList);
+  return days ? days.map((Weekday) => ({ ...base, Weekday })) : null;
+}
+
+// "Mon..Fri" or "Sat,Sun" as plist weekdays (Mon 1 .. Sun 7).
+function weekdays(list) {
+  const days = [];
+  for (const part of list.split(',')) {
+    const [from, to = from, ...rest] = part.split('..');
+    const start = SYSTEMD_DAYS.indexOf(from);
+    const end = SYSTEMD_DAYS.indexOf(to);
+    if (rest.length > 0 || start < 0 || end < start) return null;
+    for (let day = start; day <= end; day += 1) days.push(day + 1);
+  }
+  return days;
+}
+
 const CALENDAR_RANGES = { Minute: [0, 59], Hour: [0, 23], Weekday: [0, 7], Day: [1, 31], Month: [1, 12] };
 
 function isCalendarEntry(entry) {
@@ -391,6 +511,74 @@ export async function defaultLaunchctlList(label, { timeoutMs, run = execFile, o
     pid: pid ? Number(pid[1]) : null,
     lastExitStatus: exit ? Number(exit[1]) : null,
   };
+}
+
+export async function defaultSystemctlShow(label, { timeoutMs, run = execFile, onError = () => {}, signal } = {}) {
+  let stdout;
+  try {
+    ({ stdout } = await runFile(run, 'systemctl', [
+      '--user', 'show', '--timestamp=unix', `${label}.service`, `${label}.timer`, `--property=${SYSTEMCTL_PROPERTIES.join(',')}`,
+    ], { timeout: timeoutMs, maxBuffer: SYSTEMCTL_MAX_BUFFER, signal }));
+  } catch (error) {
+    if (error?.name !== 'AbortError') onError(label, error);
+    return null;
+  }
+  const units = unitsFromShow(stdout);
+  const { service } = units;
+  if (service) {
+    for (const key of ['StandardOutput', 'StandardError']) {
+      if (service[key] === 'append') service[key] = (await unitFileOutput(service.FragmentPath, key)) ?? service[key];
+    }
+  }
+  return units;
+}
+
+// `systemctl show` output for a service and its timer, in that order, as
+// { service, timer }: each unit's properties, null when systemd does not
+// know it. TimersCalendar, which repeats, is a list.
+export function unitsFromShow(stdout) {
+  const blocks = stdout.split(/\n\s*\n/).map((block) => {
+    const properties = { TimersCalendar: [] };
+    for (const line of block.split('\n')) {
+      const at = line.indexOf('=');
+      if (at <= 0) continue;
+      const key = line.slice(0, at);
+      const value = line.slice(at + 1);
+      if (key === 'TimersCalendar') properties.TimersCalendar.push(value);
+      else properties[key] = value;
+    }
+    return properties.LoadState && properties.LoadState !== 'not-found' ? properties : null;
+  });
+  return { service: blocks[0] ?? null, timer: blocks[1] ?? null };
+}
+
+// The last `<key>=append:<path>` the unit file sets, as "append:<path>".
+async function unitFileOutput(file, key) {
+  if (!stringOrNull(file) || !path.isAbsolute(file)) return null;
+  let text;
+  try {
+    const stats = await stat(file);
+    if (!stats.isFile() || stats.size > UNIT_FILE_MAX_BYTES) return null;
+    text = await readFile(file, 'utf8');
+  } catch {
+    return null;
+  }
+  let value = null;
+  for (const line of text.split('\n')) {
+    const match = new RegExp(`^\\s*${key}\\s*=\\s*(append:.+?)\\s*$`).exec(line);
+    if (match) value = match[1];
+  }
+  return value;
+}
+
+function appendPath(value) {
+  return typeof value === 'string' && value.startsWith('append:') ? stringOrNull(value.slice('append:'.length)) : null;
+}
+
+// ExecMainStartTimestamp under --timestamp=unix ("@<seconds>") as ISO.
+function unixTimestamp(value) {
+  const match = /^@(\d+)$/.exec(value ?? '');
+  return match && Number(match[1]) > 0 ? new Date(Number(match[1]) * 1000).toISOString() : null;
 }
 
 // execFile as a promise that keeps stdout/stderr on the error, with the

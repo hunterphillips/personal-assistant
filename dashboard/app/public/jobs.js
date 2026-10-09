@@ -208,7 +208,7 @@
       node.appendChild(header);
 
       if (scans.length > 0 && state.jobs.focusAvailable === false) {
-        node.appendChild(element('p', 'card-note', 'Focus is not responding; these states come from macOS.'));
+        node.appendChild(element('p', 'card-note', 'Focus is not responding; these states come from the job runner.'));
       }
       if (scans.length > 0 && pauseError) {
         var failure = element('p', 'card-error', pauseError);

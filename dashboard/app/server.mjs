@@ -140,6 +140,7 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
   const jobs = createJobs({
     registry,
     launchAgentsDir: config.launchAgentsDir,
+    jobRunner: config.jobRunner,
     focus,
     timeouts: config.timeouts,
     log: logEntry,

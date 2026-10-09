@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -7,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { TIMEOUTS } from '../lib/config.mjs';
-import { createJobs, defaultLaunchctlList, defaultReadPlist } from '../lib/jobs.mjs';
+import { createJobs, defaultLaunchctlList, defaultReadPlist, defaultSystemctlShow, unitsFromShow } from '../lib/jobs.mjs';
 import { tempDir } from './support/harness.mjs';
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/launchd/', import.meta.url));
@@ -414,4 +415,164 @@ test('defaultReadPlist converts a real plist with plutil (opt-in: needs plutil)'
   assert.deepEqual(plist.StartCalendarInterval, [{ Hour: 6, Minute: 15 }, { Hour: 18, Minute: 15 }]);
   assert.equal(plist.RunAtLoad, false);
   assert.equal(await defaultReadPlist(path.join(FIXTURES, 'missing.plist'), { timeoutMs: TIMEOUTS.launchctlMs }), null);
+});
+
+// systemd: scripted `systemctl show` output from test/fixtures/systemd/,
+// fed through the default reader, so the parsing is the real one.
+const SYSTEMD_FIXTURES = fileURLToPath(new URL('./fixtures/systemd/', import.meta.url));
+
+function showFixture(name) {
+  return readFileSync(path.join(SYSTEMD_FIXTURES, name), 'utf8').replaceAll('@FIXTURES@', SYSTEMD_FIXTURES.replace(/\/$/, ''));
+}
+
+// The ok fixture's service with a timer whose OnCalendar values are `specs`.
+function withCalendars(specs) {
+  const [service] = showFixture('ok.txt').split('\n\n');
+  const calendars = specs.map((spec) => `TimersCalendar={ OnCalendar=${spec} ; next_elapse=@1791697200 }\n`).join('');
+  return `${service}\n\n${calendars}LoadState=loaded\nActiveState=active\n`;
+}
+
+function systemdJobsFor({ agents, show, log, focus = null }) {
+  const forbidden = async () => assert.fail('the launchd source must not be read under systemd');
+  return createJobs({
+    registry: fakeRegistry(agents),
+    launchAgentsDir: LAUNCH_AGENTS,
+    jobRunner: 'systemd',
+    focus,
+    timeouts: TIMEOUTS,
+    log,
+    readPlist: forbidden,
+    launchctlList: forbidden,
+    systemctlShow: show,
+  });
+}
+
+async function systemdOne(stdout) {
+  const scripted = scriptedRun(() => ({ stdout }));
+  const jobs = systemdJobsFor({
+    agents: [agent('a', ['com.x.job'])],
+    show: (label, { signal }) => defaultSystemctlShow(label, { timeoutMs: 100, run: scripted.run, signal }),
+  });
+  const { jobs: [job] } = await jobs.refresh();
+  return job;
+}
+
+test('systemd outcomes: running, ok, failed, and an unknown unit, without reading a plist or launchctl', async () => {
+  const running = await systemdOne(showFixture('running.txt'));
+  assert.deepEqual([running.source, running.available, running.outcome, running.exitStatus, running.lastRun],
+    ['systemd', true, 'running', 0, '2026-10-10T05:40:00.000Z']);
+  assert.deepEqual([running.failures24h, running.paused], [null, null]);
+
+  const activating = await systemdOne(showFixture('failed.txt').replace('ActiveState=failed', 'ActiveState=activating'));
+  assert.equal(activating.outcome, 'running');
+  const activeWithoutPid = await systemdOne(showFixture('ok.txt').replace('ActiveState=inactive', 'ActiveState=active'));
+  assert.equal(activeWithoutPid.outcome, 'ok');
+
+  const ok = await systemdOne(showFixture('ok.txt'));
+  assert.deepEqual([ok.outcome, ok.exitStatus, ok.lastRun], ['ok', 0, '2026-10-10T05:40:00.000Z']);
+
+  const failed = await systemdOne(showFixture('failed.txt'));
+  assert.deepEqual([failed.outcome, failed.exitStatus], ['failed', 2]);
+
+  const unknown = await systemdOne(showFixture('unknown.txt'));
+  assert.deepEqual(unknown, {
+    label: 'com.x.job', agentId: 'a', agentName: 'A', name: 'job',
+    schedule: { kind: 'unknown', text: 'Schedule unavailable' }, logPath: null, lastRun: null,
+    outcome: 'unknown', exitStatus: null, failures24h: null, paused: null, source: 'systemd', available: false,
+  });
+});
+
+test('systemd schedules are described from the timer in the same words as plists', async () => {
+  const forms = [
+    [['*-*-* 05:40:00'], 'calendar', 'Daily at 05:40'],
+    [['*-*-* 18:15:00', '*-*-* 06:15:00'], 'calendar', 'Daily at 06:15, 18:15'],
+    [['Mon..Fri *-*-* 05:15:00'], 'calendar', 'Weekdays at 05:15'],
+    [['Sat,Sun *-*-* 09:05:00'], 'calendar', 'Weekends at 09:05'],
+    [['Mon,Wed *-*-* 07:00:00'], 'calendar', 'Mon, Wed at 07:00'],
+    [['*-*-* *:05:00'], 'calendar', 'Hourly at :05'],
+    [['*-*-01 03:00:00'], 'calendar', 'Monthly on the 1st at 03:00'],
+    [['*-*-* 05:40:30'], 'custom', 'Custom schedule'],
+    [['*-01-01 00:00:00'], 'custom', 'Custom schedule'],
+    [['*-*-* 05:40:00', 'Mon *-*-* 06:00:00'], 'custom', 'Custom schedule'],
+    [[], 'custom', 'Custom schedule'],
+  ];
+  for (const [specs, kind, text] of forms) {
+    const job = await systemdOne(withCalendars(specs));
+    assert.deepEqual(job.schedule, { kind, text }, specs.join(' | '));
+  }
+  const noTimer = await systemdOne(showFixture('no-timer.txt'));
+  assert.deepEqual([noTimer.available, noTimer.schedule], [true, { kind: 'unknown', text: 'Schedule unavailable' }]);
+});
+
+test('a systemd job\'s logPath is the append: path from its unit file, and lastRun falls back to the log\'s mtime', async (t) => {
+  const ok = await systemdOne(showFixture('ok.txt'));
+  assert.equal(ok.logPath, '/nonexistent/logs/sample.out.log');
+  const errOnly = await systemdOne(showFixture('ok.txt').replace('StandardOutput=append', 'StandardOutput=journal'));
+  assert.equal(errOnly.logPath, '/nonexistent/logs/sample.err.log');
+  const inherit = await systemdOne(showFixture('running.txt'));
+  assert.equal(inherit.logPath, null);
+  assert.deepEqual(unitsFromShow('StandardOutput=append:/var/log/x.log\nLoadState=loaded\n').service.StandardOutput, 'append:/var/log/x.log');
+
+  const dir = await tempDir(t);
+  const log = path.join(dir, 'sample.log');
+  await writeFile(log, 'ran\n');
+  const when = new Date('2026-10-01T05:40:00.000Z');
+  await utimes(log, when, when);
+  const unit = path.join(dir, 'com.x.job.service');
+  await writeFile(unit, `[Service]\nStandardOutput=append:${log}\n`);
+  const neverStarted = await systemdOne(showFixture('no-timer.txt')
+    .replace('StandardOutput=inherit', 'StandardOutput=append')
+    .replace('FragmentPath=/nonexistent/com.example.sample.service', `FragmentPath=${unit}`));
+  assert.deepEqual([neverStarted.logPath, neverStarted.lastRun], [log, when.toISOString()]);
+});
+
+test('defaultSystemctlShow asks for the service and timer user units, and a failure is null and logged', async () => {
+  const scripted = scriptedRun(() => ({ stdout: showFixture('unknown.txt') }));
+  assert.deepEqual(await defaultSystemctlShow('com.x.job', { timeoutMs: 100, run: scripted.run }), { service: null, timer: null });
+  const { command, args, options } = scripted.calls[0];
+  assert.equal(command, 'systemctl');
+  assert.deepEqual(args.slice(0, 5), ['--user', 'show', '--timestamp=unix', 'com.x.job.service', 'com.x.job.timer']);
+  assert.match(args[5], /^--property=.*LoadState.*TimersCalendar/);
+  assert.equal(options.timeout, 100);
+
+  const errors = [];
+  const broken = scriptedRun(() => ({ error: Object.assign(new Error('Failed to connect to bus'), { code: 1 }) }));
+  assert.equal(await defaultSystemctlShow('com.x.job', { timeoutMs: 100, run: broken.run, onError: (...args) => errors.push(args) }), null);
+  assert.equal(errors.length, 1);
+  const aborted = scriptedRun(() => ({ error: Object.assign(new Error('aborted'), { name: 'AbortError' }) }));
+  assert.equal(await defaultSystemctlShow('com.x.job', { timeoutMs: 100, run: aborted.run, onError: (...args) => errors.push(args) }), null);
+  assert.equal(errors.length, 1);
+});
+
+test('under systemd a failing systemctl leaves every job unavailable and is logged once', async () => {
+  const logs = [];
+  const jobs = systemdJobsFor({
+    agents: [agent('a', ['com.x.one', 'com.x.two'])],
+    show: async () => { throw new Error('systemctl missing'); },
+    log: (entry) => logs.push(entry),
+  });
+  const { jobs: list } = await jobs.refresh();
+  assert.deepEqual(list.map((job) => [job.available, job.outcome, job.source]), [[false, 'unknown', 'systemd'], [false, 'unknown', 'systemd']]);
+  assert.deepEqual(logs, [{ event: 'systemctl_error', label: 'com.x.one', error: 'systemctl missing' }]);
+});
+
+test('under systemd a Focus scan still takes its state from Focus', async () => {
+  const jobs = systemdJobsFor({
+    agents: [agent('focus', ['com.focus.scan-gmail'])],
+    show: async () => unitsFromShow(showFixture('ok.txt')),
+    focus: { fetchStatus: async () => ({ paused: false, sources: { gmail: { lastRun: '2026-10-08T06:00:00.000Z', lastOutcome: 'wrote', failures24h: 0 } } }) },
+  });
+  const { focusAvailable, jobs: [job] } = await jobs.refresh();
+  assert.equal(focusAvailable, true);
+  assert.deepEqual([job.source, job.outcome, job.lastRun, job.failures24h, job.paused], ['focus', 'wrote', '2026-10-08T06:00:00.000Z', 0, false]);
+});
+
+test('on a host with no such units the real systemctl lists each job as unavailable (needs systemctl)', async (t) => {
+  if (spawnSync('systemctl', ['--version']).status !== 0) {
+    t.skip('systemctl is not available');
+    return;
+  }
+  const jobs = systemdJobsFor({ agents: [agent('a', ['com.personal-assistant.test-nonexistent-job'])] });
+  const { jobs: [job] } = await jobs.refresh();
+  assert.deepEqual([job.available, job.outcome, job.source], [false, 'unknown', 'systemd']);
 });
