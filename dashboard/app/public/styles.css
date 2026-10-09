@@ -3424,11 +3424,35 @@ textarea.form-input {
 .brief-item[data-mark="dismissed"] .brief-text { color: var(--muted); }
 .brief-text { overflow-wrap: anywhere; }
 
+/* The marks stay out of sight until the pointer rests on an item: they fade
+   in muted after a short delay and fade out a little slower, and come to full
+   strength only while the pointer is on the group. A mark already set, a
+   keyboard focus inside the item, or a touch screen keeps them shown. */
 .brief-marks {
   display: flex;
   justify-content: flex-end;
   gap: 2px;
   margin-top: 6px;
+  opacity: 0;
+  transition: opacity 180ms ease 220ms;
+}
+.brief-item:hover .brief-marks,
+.brief-item:focus-within .brief-marks,
+.brief-item:has([aria-pressed="true"], .brief-note-toggle-filled) .brief-marks {
+  opacity: 0.7;
+  transition-delay: 140ms;
+}
+.brief-item .brief-marks:hover,
+.brief-item .brief-marks:focus-within {
+  opacity: 1;
+  transition-delay: 0ms;
+}
+@media (hover: none) {
+  .brief-marks,
+  .brief-item:hover .brief-marks { opacity: 0.7; transition: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brief-marks { transition-duration: 0ms; }
 }
 .brief-mark,
 .brief-note-toggle {
@@ -3445,10 +3469,10 @@ textarea.form-input {
 }
 .brief-mark svg,
 .brief-note-toggle svg { display: block; }
-.brief-item:hover .brief-mark,
-.brief-item:hover .brief-note-toggle,
-.brief-item:focus-within .brief-mark,
-.brief-item:focus-within .brief-note-toggle { color: var(--ink-soft); }
+.brief-marks:hover .brief-mark,
+.brief-marks:hover .brief-note-toggle,
+.brief-marks:focus-within .brief-mark,
+.brief-marks:focus-within .brief-note-toggle { color: var(--ink-soft); }
 .brief-mark:hover,
 .brief-note-toggle:hover,
 .brief-mark:focus-visible,
