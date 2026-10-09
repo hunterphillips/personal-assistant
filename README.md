@@ -10,7 +10,7 @@ messages and answers inline, his coding sessions as Codex threads on a
 shared server and Claude Code terminals in cmux, and a settings panel per
 agent), Reading holds the Daily Brief and the Feed, Focus is its own view,
 Goals reads the vault's priorities and goal notes with add and edit going
-through the Second brain agent, and Health lists the launchd jobs. The
+through the Second brain agent, and Health lists the scheduled jobs. The
 direction took Meta Muse and GrokBot as reference; a clickable design
 study lives in `dashboard/prototype/` as visual reference. Current state
 lives in `thoughts/shared/lanes/assistant/handoff.md`; the design for the

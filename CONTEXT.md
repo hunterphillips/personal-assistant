@@ -48,7 +48,7 @@ the thread.
 _Avoid_: job, cron, scheduled task, launchd
 
 **Job**:
-A scheduled program an agent's repo runs on its own (a launchd plist).
+A scheduled program an agent's repo runs on its own (a launchd plist on the Mac, a systemd timer on the server).
 Shown in Health, never edited from the interface.
 _Avoid_: routine, scan, daemon
 

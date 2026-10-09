@@ -54,8 +54,9 @@ from here.
   his own; the ideas live in `ideas/items/` under the data root, the
   marks in `ideas/marks.json` there, Health holds Settings (the default
   model, effort, and permission level, which agent receives the brief,
-  which agent quick chat talks to) and lists the launchd jobs and their
-  state. Every turn runs with the SDK's Claude Code preset system
+  which agent quick chat talks to) and lists the jobs and their state,
+  read from launchd on the Mac or systemd user units on Linux
+  (`DASHBOARD_JOB_RUNNER`; the units are named like the launchd labels). Every turn runs with the SDK's Claude Code preset system
   prompt. The design (the
   Assistant as the pinned agent, delegation, models, routines, and what
   comes next: Ideas) is
@@ -72,7 +73,8 @@ from here.
   it), launchd labels, `pinned`, `builtin` (seeded from the repo's
   `registry/builtin.json`, no Delete); plus the `groups` list that sets
   group order and labels. Back it up when moving machines. Absolute
-  paths; the daemon keeps the last good copy on a bad edit. Since 2026-10-02 the
+  paths; an entry whose folder is missing reads as unavailable and the
+  rest loads; the daemon keeps the last good copy on a bad edit. Since 2026-10-02 the
   dashboard writes it (an agent's settings, New agent) as 2-space JSON in
   the schema's key order; hand edits still load.
 - **Use cases**: `daily-brief/`, running every morning since 2026-09-27
@@ -82,6 +84,12 @@ from here.
   live under the data root, which the run and the dashboard write, with
   `feeds/README.md` in the repo documenting their shapes. A later weekly review or decision
   prep sits beside them with its own contract.
+- **The host**: everything scheduled runs on the laptop today. The
+  always-on server `hub` (OVH, Ubuntu, Tailscale only; `ssh hub`) is set
+  up with the repos, Claude, and Codex, and runs nothing yet; the move is
+  `thoughts/shared/plans/2026-10-08-hub-to-server-implementation.md`,
+  tracked in the host lane, and waits on Focus joining the dashboard.
+  `bin/dashboard-install` installs the daemon on either host.
 - **The agents' repos**, each its own repo with its own CLAUDE.md, launchd
   jobs, and state (CFO, Focus, Second brain, personal-context; Scout lives
   here). Working under the link loads that repo's instructions, and git
@@ -115,7 +123,7 @@ contribution per domain) are code words until they are renamed.
    builds toward is `thoughts/shared/plans/2026-09-30-assistant-system-design.md`;
    its twenty decisions are settled and its behaviors B1 to B22 are what
    plans and issues cite. Routines there means scheduled prompts to an
-   agent; the launchd jobs are "jobs" and live in Health.
+   agent; the launchd or systemd jobs are "jobs" and live in Health.
 2. `thoughts/shared/lanes/daily-brief/handoff.md`: the brief. Scheduled since
    09-27 (`thoughts/shared/plans/2026-09-27-daily-brief-scheduled-run.md`),
    watch daily since 2026-10-01 (`2026-09-28-watch-domain.md`). On 2026-09-29 the writing
@@ -221,9 +229,9 @@ picks one up and ends by updating it.
   unattended. A local Codex Sol or Claude subagent in a worktree suits
   small, UI-shaped, or live-machine work. Neither is the rule; on 10-05
   Hunter moved one evening's work to the factory and later said so.
-  **Factory PRs are reviewed locally before merging**: worktree, rebase
-  on main, the three suites, screenshots on a throwaway port, then
-  squash-merge, pull, and reinstall. Two PRs that touch the same files
+  **Factory PRs are drafts reviewed locally** (the caller sets
+  `auto_merge: false`): worktree, rebase on main, the three suites,
+  screenshots on a throwaway port, then merge, push, and reinstall. Two PRs that touch the same files
   are merged through one local review branch. A run the factory cuts off
   is finished locally on its branch. Nothing watches PRs between
   sessions; pickup lists them.
