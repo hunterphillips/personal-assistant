@@ -65,10 +65,10 @@ async function writeFeed(hub, id, name) {
   }));
 }
 
-async function writeSource(hub, id, name) {
+async function writeSource(hub, id, name, extra = {}) {
   await mkdir(hub.sourcesDir, { recursive: true });
   await writeFile(path.join(hub.sourcesDir, `${id}.json`), JSON.stringify({
-    version: 1, id, name, kind: 'rss', url: `https://example.com/${id}.xml`, active: true, default: false, created: AT, updated: AT,
+    version: 1, id, name, ...extra, kind: 'rss', url: `https://example.com/${id}.xml`, active: true, default: false, created: AT, updated: AT,
   }));
 }
 
@@ -468,6 +468,27 @@ test.describe('the side panel', () => {
     await sourceRow(page, 'A').click();
     await expect(item(page, 'news/2026-10-05/1')).toBeVisible();
     await expect(item(page, 'news/2026-10-05/2')).toBeVisible();
+  });
+
+  test('an old post whose source is another source\'s alias counts under that source and filters with it', async ({ page, hub }) => {
+    await writeSource(hub, 'daily-b', 'Daily B', { aliases: ['Weekly A', 'Daily B (Weekly A)'] });
+    await writeRun(hub, '2026-10-05', [
+      { id: 'news/2026-10-05/1', title: 'Story one', source: 'Daily B (Weekly A)', url: 'https://example.com/1', summary: 'Summary one.' },
+      { id: 'news/2026-10-05/2', title: 'Story two', source: 'Weekly A / daily b', url: 'https://example.com/2', summary: 'Summary two.' },
+    ]);
+    await openFeed(page, hub, 3);
+    await openSide(page);
+    await expect(sourceRow(page, 'Daily B (Weekly A)')).toHaveCount(0);
+    await expect(sourceRow(page, 'Weekly A')).toHaveCount(0);
+    await expect(sourceRow(page, 'daily-b').locator('.panel-row-name')).toHaveText('Daily B');
+    await expect(sourceRow(page, 'daily-b').locator('.panel-row-count')).toHaveText('2');
+    await expect(item(page, 'news/2026-10-05/1').locator('.feed-badge')).toHaveAttribute('aria-label', 'Daily B');
+
+    await sourceRow(page, 'daily-b').click();
+    await expect(shownItems(page)).toHaveCount(2);
+    await expect(item(page, 'news/2026-10-05/1')).toBeVisible();
+    await expect(item(page, 'news/2026-10-05/2')).toBeVisible();
+    await expect(page.locator('#feed-filter-text')).toHaveText('Showing Daily B only.');
   });
 
   test('choosing a source shows only its posts; Show all and All restore them', async ({ page, hub }) => {

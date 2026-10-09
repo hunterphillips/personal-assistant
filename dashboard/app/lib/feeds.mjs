@@ -26,7 +26,7 @@
 //   read(id) -> Promise<result>
 //     Rejects FeedsError no_such_feed; never otherwise. Single-flight and
 //     cached per feed by signature (feed.json, the item files' lstat,
-//     marks.json's lstat, and the sources' names), as the Ideas reader.
+//     marks.json's lstat, and the sources' names and aliases), as the Ideas reader.
 //     result, deeply frozen:
 //       { feed, readAt, problems: [sentence],
 //         runs: [{ id, producer, date, since, generatedAt, read: [id],
@@ -40,8 +40,8 @@
 //       non-empty strings and an id no newer item took, and either
 //       `sources`, a non-empty list of non-empty strings, or the old
 //       `source` string, which is split on "/" and "," and each name mapped
-//       to the id of the source with that name (any case), or kept as the
-//       name. `takeaway` (at most TAKEAWAY_MAX characters) and `insights`
+//       to the id of the source with that name or alias (any case, trimmed),
+//       or kept as the name. `takeaway` (at most TAKEAWAY_MAX characters) and `insights`
 //       (at most INSIGHTS_MAX) are strings or null: an over-long or wrong
 //       value is dropped, the item kept. `kept` is false unless true;
 //       `image` an http or https URL or null.
@@ -193,7 +193,7 @@ export function createFeeds({ dir, sources, limits, log: rawLog = () => {}, now 
     const scan = await scanItems(itemsDir(id), limits, log);
     const marksStats = await statOf(marksFile(id));
     const known = await sources.list().catch(() => []);
-    const byName = new Map(known.map((source) => [source.name.toLowerCase(), source.id]));
+    const byName = sourcesByName(known);
     const signature = JSON.stringify([feed, scan.state, scan.files, marksStats, [...byName]]);
     const cached = caches.get(id);
     if (cached?.signature === signature) return cached.result;
@@ -509,6 +509,20 @@ function parseRun(text, name, { id: feedId, byName, marks, problems, index }) {
     read: Array.isArray(body.read) ? body.read.filter(nonEmpty) : [],
     items,
   };
+}
+
+// Each source's name and aliases, trimmed and lowercased, to its id; a
+// name wins over another source's alias.
+function sourcesByName(known) {
+  const byName = new Map();
+  for (const source of known) {
+    for (const alias of Array.isArray(source.aliases) ? source.aliases : []) {
+      const key = alias.trim().toLowerCase();
+      if (!byName.has(key)) byName.set(key, source.id);
+    }
+  }
+  for (const source of known) byName.set(source.name.trim().toLowerCase(), source.id);
+  return byName;
 }
 
 // An item's sources as ids: its `sources` list, or its old `source` string

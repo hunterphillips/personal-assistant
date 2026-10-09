@@ -1,9 +1,9 @@
 // Source routes over sources.mjs:
 //   GET    /api/sources       200 { sources, problems }
-//   POST   /api/sources       { name, kind, url | sender | path, active?, default? }
+//   POST   /api/sources       { name, kind, url | sender | path, aliases?, active?, default? }
 //                             -> 201 { ok: true, source }
-//   PUT    /api/sources/:id   any of name, active, default, and the kind's
-//                             field -> 200 { ok: true, source }
+//   PUT    /api/sources/:id   any of name, aliases, active, default, and the
+//                             kind's field -> 200 { ok: true, source }
 //   DELETE /api/sources/:id   bodyless -> 200 { ok: true }
 //   POST   /api/sources/discover  { url } -> 200 { feed } or { feed: null }:
 //                             the RSS or Atom feed the site or address

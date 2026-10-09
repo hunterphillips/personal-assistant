@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { LIMITS } from '../lib/config.mjs';
-import { SourcesError, createSources } from '../lib/sources.mjs';
+import { ALIASES_MAX, ALIAS_MAX, SourcesError, createSources } from '../lib/sources.mjs';
 import { tempDir } from './support/harness.mjs';
 
 const AT = '2026-10-08T12:00:00.000Z';
@@ -115,6 +115,37 @@ test('update changes the name, switches, and the kind field, never the kind or a
     await assert.rejects(sources.update('hacker-newsletter', fields), (error) => error.code === 'invalid_body' && error.detail.detail === detail, detail);
   }
   await assert.rejects(sources.update('nope', { active: true }), { code: 'no_such_source' });
+});
+
+test('aliases are stored trimmed without repeats in any case, after the name, and [] removes them', async (t) => {
+  const { dir, sources } = await store(t);
+  const created = await sources.create({ name: 'Daily B', kind: 'rss', url: 'https://example.com/b.xml', aliases: [' Weekly A / Daily B ', 'daily b (weekly a)', 'Daily B (Weekly A)'] });
+  assert.deepEqual(created.aliases, ['Weekly A / Daily B', 'daily b (weekly a)']);
+  const file = () => readFile(path.join(dir, 'daily-b.json'), 'utf8').then(JSON.parse);
+  assert.deepEqual(Object.keys(await file()), ['version', 'id', 'name', 'aliases', 'kind', 'url', 'active', 'default', 'created', 'updated']);
+  assert.deepEqual((await sources.update('daily-b', { aliases: ['Old B'] })).aliases, ['Old B']);
+  assert.deepEqual((await sources.get('daily-b')).aliases, ['Old B']);
+  const cleared = await sources.update('daily-b', { aliases: [] });
+  assert.ok(!('aliases' in cleared));
+  assert.ok(!('aliases' in (await file())));
+  assert.ok(!('aliases' in (await sources.create({ name: 'Plain', kind: 'rss', url: 'https://example.com/p.xml' }))));
+});
+
+test('aliases that are not a list of short one-line names are refused on create and update', async (t) => {
+  const { sources } = await store(t);
+  await sources.create({ name: 'Daily B', kind: 'rss', url: 'https://example.com/b.xml' });
+  const detail = `aliases must be a list of at most ${ALIASES_MAX} names, each 1 to ${ALIAS_MAX} characters on one line`;
+  for (const aliases of [
+    'Weekly A', null, [''], ['  '], [7], ['a\nb'], ['x'.repeat(ALIAS_MAX + 1)],
+    Array.from({ length: ALIASES_MAX + 1 }, (_, n) => `Name ${n}`),
+  ]) {
+    await assert.rejects(sources.create({ name: 'X', kind: 'rss', url: 'https://example.com/x.xml', aliases }),
+      (error) => error.code === 'invalid_body' && error.detail.detail === detail, JSON.stringify(aliases));
+    await assert.rejects(sources.update('daily-b', { aliases }),
+      (error) => error.code === 'invalid_body' && error.detail.detail === detail, JSON.stringify(aliases));
+  }
+  assert.deepEqual((await sources.update('daily-b', { aliases: ['x'.repeat(ALIAS_MAX), ...Array.from({ length: ALIASES_MAX - 1 }, (_, n) => `Name ${n}`)] })).aliases.length, ALIASES_MAX);
+  assert.deepEqual((await sources.list()).map((source) => source.id), ['daily-b']);
 });
 
 test('remove refuses while a feed lists the source, naming the feeds', async (t) => {

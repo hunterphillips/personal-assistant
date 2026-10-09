@@ -18,6 +18,7 @@ This folder holds the code: `run/` (the daily run), `bin/enrich`, and
 
 ```jsonc
 { "version": 1, "id": "latent-space", "name": "Latent Space",
+  "aliases": ["Latent Space Weekly"],            // optional
   "kind": "rss",                                // rss | email | file | folder
   "url": "https://www.latent.space/feed",       // rss
   "sender": "swyx@substack.com",                // email
@@ -27,7 +28,9 @@ This folder holds the code: `run/` (the daily run), `bin/enrich`, and
 ```
 
 The role follows from the kind: `rss` and `email` are incoming, read for
-stories; `file` and `folder` are context, read to judge them.
+stories; `file` and `folder` are context, read to judge them. `aliases`
+lists other names the source has gone by, at most 20, each 1 to 200
+characters.
 
 ## Feeds
 
@@ -67,8 +70,10 @@ delete its file first.
   is left without the key.
 
 Old items, with a `source` string and no `sources`, stay readable: the
-reader maps each name in it to a source id by name, or shows the name as
-it is.
+reader splits it on "/" and ",", maps each name to the id of the source
+with that name or alias, in any case, or shows the name as it is. A source
+renamed or merged keeps its old posts by listing the old name in
+`aliases`.
 
 `feeds/<id>/marks.json` holds Save and Dismiss, written by the daemon only:
 

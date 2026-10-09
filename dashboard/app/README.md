@@ -78,7 +78,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/feeds/<id>/discuss` | Sends one post to the feed's producer; 202 `{"ok": true, "agentId"}` once the turn has started (below). |
 | `GET /api/sources` | The sources, by name: `{"sources", "problems"}` (below). |
 | `POST /api/sources` | Adds a source; 201 `{"ok": true, "source"}`. |
-| `PUT /api/sources/<id>` | Changes any of `name`, `active`, `default`, and the kind's field; `{"ok": true, "source"}`. |
+| `PUT /api/sources/<id>` | Changes any of `name`, `aliases`, `active`, `default`, and the kind's field; `{"ok": true, "source"}`. |
 | `DELETE /api/sources/<id>` | Removes a source no feed lists; 409 `in_use` with `feeds` otherwise. |
 | `POST /api/sources/discover` | `{"url"}`: the RSS or Atom feed the site links, or the address itself when it is a feed; `{"feed"}` or `{"feed": null}`. Writes nothing. |
 | `GET /api/ideas` | The Ideas runs, marks, and producing agent, newest first, with `routine`: the id of the producer's ideas routine (its first routine whose instruction or name contains "ideas"), or null. The New ideas action runs it through `POST /api/routines/:id/run`. |
@@ -457,7 +457,8 @@ a run is left out with one problem sentence; an item without its id, title,
 `http` or `https` URL, summary, and sources, or with an id already used, is
 left out and counted in one sentence per run. An older item's `source`
 string is split on "/" and ","; each name becomes the id of the source with
-that name, or stays as written. A takeaway over 240 characters or insights
+that name or alias (any case, trimmed; a name wins over another source's
+alias), or stays as written. A takeaway over 240 characters or insights
 over 2,000 are dropped and the item kept. A dismissed post is left out;
 `status` is `saved` or `new`. `position` is the post's index in the run
 file's `items`, from 0, the index a `feed:<run>/<index>` notification link
@@ -496,8 +497,12 @@ refuses with 503 `shutting_down`, 404 `no_such_feed`, 503 `not_yet`, 409
 `GET /api/sources` lists every source with its `role` (`incoming` or
 `context`) and, for a file or folder, `missing` when the path is not there.
 A source's id is its name as a slug, with `-2` on a collision (`discover`
-is never an id). A refused body is 400 `invalid_body` with `detail` naming
-the field.
+is never an id). `aliases`, optional on `POST` and `PUT`, lists other names
+the source has gone by, so old posts filed under a former name count under
+it: at most 20, each 1 to 200 characters on one line, stored trimmed with
+repeats (in any case) dropped; `[]` removes them, and a source without any
+has no `aliases` key. There is no screen for them yet. A refused body is
+400 `invalid_body` with `detail` naming the field.
 
 `POST /api/sources/discover` (`lib/discover.mjs`) fetches an http or https
 address as `feed/bin/enrich` fetches a page: 6 seconds, at most 512 KB,

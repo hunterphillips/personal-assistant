@@ -64,6 +64,20 @@ test('POST /api/sources creates each kind, GET lists them by name, PUT changes o
   assert.deepEqual([updated.json.source.active, updated.json.source.default, updated.json.source.path], [true, true, '/invented/other']);
 });
 
+test('POST and PUT take aliases, deduped, and refuse ones that are not short names', async (t) => {
+  const app = await startSources(t);
+  const created = await send(app, 'POST', '/api/sources', { name: 'Daily B', kind: 'rss', url: 'https://example.com/b.xml', aliases: ['Weekly A / Daily B', ' weekly a / daily b '] });
+  assert.deepEqual([created.status, created.json.source.aliases], [201, ['Weekly A / Daily B']]);
+  const updated = await send(app, 'PUT', '/api/sources/daily-b', { aliases: ['Daily B (Weekly A)', 'Old B', 'old b'] });
+  assert.deepEqual([updated.status, updated.json.source.aliases], [200, ['Daily B (Weekly A)', 'Old B']]);
+  assert.deepEqual((await request(app, 'GET', '/api/sources')).json.sources[0].aliases, ['Daily B (Weekly A)', 'Old B']);
+  const detail = 'aliases must be a list of at most 20 names, each 1 to 200 characters on one line';
+  for (const aliases of ['Old B', [''], ['x'.repeat(201)], Array.from({ length: 21 }, (_, n) => `Name ${n}`)]) {
+    const response = await send(app, 'PUT', '/api/sources/daily-b', { aliases });
+    assert.deepEqual([response.status, response.json], [400, { error: 'invalid_body', detail }], JSON.stringify(aliases));
+  }
+});
+
 test('source refusals name the field, and a missing source is 404', async (t) => {
   const app = await startSources(t);
   for (const [body, detail] of [

@@ -81,6 +81,24 @@ test('old source names map to the ids of the sources with those names, in any ca
   assert.deepEqual((await feeds.read('news')).runs[0].items[0].sources, ['Invented Gazette']);
 });
 
+test('old source names also map by a source\'s aliases, trimmed and in any case, and a name wins over another\'s alias', async (t) => {
+  const { feeds, sources, items } = await stores(t, { items: false });
+  await run(items, '2026-10-05', [
+    { ...item('a'), sources: undefined, source: 'Weekly A / Daily B' },
+    { ...item('b'), sources: undefined, source: 'daily b (weekly a)' },
+    { ...item('c'), sources: undefined, source: 'Weekly A' },
+  ]);
+  await sources.create({ name: 'Daily B', kind: 'rss', url: 'https://example.com/b.xml', aliases: ['  Weekly A  ', 'Daily B (Weekly A)'] });
+  const ids = async () => (await feeds.read('news')).runs[0].items.map((entry) => entry.sources);
+  assert.deepEqual(await ids(), [['daily-b'], ['daily-b'], ['daily-b']]);
+  // A source named Weekly A takes that name back from the alias.
+  await sources.create({ name: 'Weekly A', kind: 'rss', url: 'https://example.com/a.xml' });
+  assert.deepEqual(await ids(), [['weekly-a', 'daily-b'], ['daily-b'], ['weekly-a']]);
+  // An alias removed later changes the mapping on the next read.
+  await sources.update('daily-b', { aliases: [] });
+  assert.deepEqual(await ids(), [['weekly-a', 'daily-b'], ['daily b (weekly a)'], ['weekly-a']]);
+});
+
 test('new-shape runs carry sources, takeaway, insights, and what the run read', async (t) => {
   const { feeds, items } = await stores(t);
   await run(items, '2026-10-09', [

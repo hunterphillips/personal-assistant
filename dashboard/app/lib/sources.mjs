@@ -3,6 +3,7 @@
 //
 //   sources/<id>.json
 //   { "version": 1, "id": "latent-space", "name": "Latent Space",
+//     "aliases": ["Latent Space Weekly"],    // optional
 //     "kind": "rss",                         // rss | email | file | folder
 //     "url": "https://www.latent.space/feed", // rss
 //     "sender": "swyx@substack.com",          // email
@@ -13,6 +14,10 @@
 // A source carries only its kind's field. Its role is derived: rss and email
 // are incoming (what a feed reads), file and folder are context (what a feed
 // judges against). `default` marks the sources a new feed starts with.
+// `aliases`, optional, are other names the source has gone by (at most
+// ALIASES_MAX, each 1 to ALIAS_MAX characters on one line, stored trimmed
+// without repeats in any case and left out when empty); an old post's
+// `source` string matches a source by its name or an alias.
 //
 // createSources({ dir, limits, log, now, usedBy }) returns:
 //
@@ -27,10 +32,11 @@
 //   get(id) -> Promise<source | null>
 //   create(fields) -> Promise<source>
 //     fields: name and kind, the kind's field, optional active (default
-//     true) and default (default false). The id is the name slugged, with
+//     true), default (default false), and aliases. The id is the name slugged, with
 //     -2, -3, ... when taken.
 //   update(id, fields) -> Promise<source>
-//     Any of name, active, default, and the source's kind field.
+//     Any of name, aliases, active, default, and the source's kind field;
+//     aliases [] removes them.
 //   remove(id) -> Promise<void>
 //     Refuses SourcesError in_use ({ feeds }) while `usedBy(id)` names any
 //     feed.
@@ -48,6 +54,8 @@ import { randomBytes } from 'node:crypto';
 
 export const SOURCE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const SOURCE_KINDS = Object.freeze(['rss', 'email', 'file', 'folder']);
+export const ALIASES_MAX = 20;
+export const ALIAS_MAX = 200;
 const KIND_FIELD = Object.freeze({ rss: 'url', email: 'sender', file: 'path', folder: 'path' });
 const KIND_FIELDS = new Set(Object.values(KIND_FIELD));
 const FILE_NAME = /^([a-z0-9][a-z0-9-]{0,63})\.json$/;
@@ -56,7 +64,7 @@ const URL_MAX = 2048;
 const PATH_MAX = 1024;
 const SENDER_MAX = 254;
 const EMAIL = /^[^\s@<>()",;:]+@[^\s@<>()",;:.]+(\.[^\s@<>()",;:.]+)+$/;
-const KEY_ORDER = ['version', 'id', 'name', 'kind', 'url', 'sender', 'path', 'active', 'default', 'created', 'updated'];
+const KEY_ORDER = ['version', 'id', 'name', 'aliases', 'kind', 'url', 'sender', 'path', 'active', 'default', 'created', 'updated'];
 
 export class SourcesError extends Error {
   constructor(code, detail = null) {
@@ -156,8 +164,10 @@ export function createSources({ dir, limits, log: rawLog = () => {}, now = () =>
       for (let suffix = 2; taken.has(id); suffix += 1) id = `${stem.slice(0, 63 - String(suffix).length)}-${suffix}`;
       const at = now().toISOString();
       const field = KIND_FIELD[fields.kind];
+      const aliases = normalAliases(fields.aliases);
       const stored = ordered({
-        version: 1, id, name: fields.name.trim(), kind: fields.kind, [field]: normalField(field, fields[field]),
+        version: 1, id, name: fields.name.trim(), ...(aliases.length > 0 ? { aliases } : {}), kind: fields.kind,
+        [field]: normalField(field, fields[field]),
         active: fields.active ?? true, default: fields.default ?? false, created: at, updated: at,
       });
       await atomicJson(path.join(dir, `${id}.json`), stored);
@@ -180,6 +190,11 @@ export function createSources({ dir, limits, log: rawLog = () => {}, now = () =>
       if (problem) throw invalid(problem);
       const next = { ...stripShown(current) };
       if ('name' in fields) next.name = fields.name.trim();
+      if ('aliases' in fields) {
+        const aliases = normalAliases(fields.aliases);
+        if (aliases.length > 0) next.aliases = aliases;
+        else delete next.aliases;
+      }
       if (field in fields) next[field] = normalField(field, fields[field]);
       if ('active' in fields) next.active = fields.active;
       if ('default' in fields) next.default = fields.default;
@@ -207,7 +222,7 @@ export function createSources({ dir, limits, log: rawLog = () => {}, now = () =>
 // `partial` allows any subset of the editable fields; `stored` checks a
 // file's whole shape.
 function checkFields(fields, { kind, partial, stored = false }) {
-  const allowed = new Set(['name', 'kind', 'active', 'default', ...KIND_FIELDS,
+  const allowed = new Set(['name', 'aliases', 'kind', 'active', 'default', ...KIND_FIELDS,
     ...(stored ? ['version', 'id', 'created', 'updated'] : [])]);
   for (const key of Object.keys(fields)) if (!allowed.has(key)) return `unknown field "${key}"`;
   if (!partial && !SOURCE_KINDS.includes(kind)) return `kind must be one of ${SOURCE_KINDS.join(', ')}`;
@@ -219,6 +234,12 @@ function checkFields(fields, { kind, partial, stored = false }) {
   if ('name' in fields) {
     if (typeof fields.name !== 'string' || fields.name.trim() === '' || /[\r\n]/.test(fields.name) || Array.from(fields.name.trim()).length > NAME_MAX) {
       return `name must be 1 to ${NAME_MAX} characters on one line`;
+    }
+  }
+  if ('aliases' in fields) {
+    const value = fields.aliases;
+    if (!Array.isArray(value) || value.length > ALIASES_MAX || !value.every(validAlias)) {
+      return `aliases must be a list of at most ${ALIASES_MAX} names, each 1 to ${ALIAS_MAX} characters on one line`;
     }
   }
   if (field in fields) {
@@ -238,6 +259,25 @@ function checkFields(fields, { kind, partial, stored = false }) {
     for (const key of ['created', 'updated']) if (typeof fields[key] !== 'string') return `${key} must be a string`;
   }
   return null;
+}
+
+function validAlias(value) {
+  return typeof value === 'string' && value.trim() !== '' && !/[\r\n]/.test(value) && Array.from(value.trim()).length <= ALIAS_MAX;
+}
+
+// Aliases trimmed, the first of each in any case kept.
+function normalAliases(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const alias of value) {
+    const trimmed = alias.trim();
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
 }
 
 function normalField(field, value) {

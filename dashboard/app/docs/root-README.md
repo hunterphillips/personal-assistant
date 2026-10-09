@@ -27,7 +27,7 @@ lives in its repository; the data lives here, as plain files you can read.
 | `feeds/<id>/marks.json` | The marks on the feed's posts: saved, dismissed. |
 | `feeds/<id>/suggestions.json` | The sources the producer suggests for the feed, each with a reason. |
 | `feeds/.run/` | The feeds producer's state: `packets/`, `overflow/`, `seen.jsonl`, `state.json`, and its run lock. |
-| `sources/` | One `<id>.json` per source a feed can read: an RSS feed, a newsletter's sender, a file, or a folder. |
+| `sources/` | One `<id>.json` per source a feed can read: an RSS feed, a newsletter's sender, a file, or a folder. Its optional `aliases` are names it went by before, which old posts still carry. |
 | `ideas/items/` | One `<date>-<producer>.json` per run of an Ideas producer. |
 | `ideas/marks.json` | The marks on ideas: taken, dismissed, saved, replaced. |
 | `ideas/criteria.md` | Hunter's criteria for Ideas. |
