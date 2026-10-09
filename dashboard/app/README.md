@@ -581,7 +581,7 @@ it reads the plist from `DASHBOARD_LAUNCH_AGENTS_DIR` with
 `plutil`, asks `launchctl list` for the last exit status and PID, and takes
 the log file's modification time as the last run. Under systemd each label
 is a pair of user units, `<label>.service` and `<label>.timer`, read with
-`systemctl --user show`: a service systemd does not know reads as
+`systemctl --user show --timestamp=unix` (systemd 251 or later): a service systemd does not know reads as
 unavailable, `Result` and `ExecMainStatus` give the outcome,
 `ExecMainStartTimestamp` the last run, the unit file's
 `StandardOutput=append:` path the log, and the timer's `OnCalendar` values

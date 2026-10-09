@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { utimes, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -524,6 +525,16 @@ test('a systemd job\'s logPath is the append: path from its unit file, and lastR
     .replace('StandardOutput=inherit', 'StandardOutput=append')
     .replace('FragmentPath=/nonexistent/com.example.sample.service', `FragmentPath=${unit}`));
   assert.deepEqual([neverStarted.logPath, neverStarted.lastRun], [log, when.toISOString()]);
+
+  const fromUnit = async (line) => {
+    await writeFile(unit, `[Service]\n${line}\n`);
+    return (await systemdOne(showFixture('no-timer.txt')
+      .replace('StandardOutput=inherit', 'StandardOutput=append')
+      .replace('FragmentPath=/nonexistent/com.example.sample.service', `FragmentPath=${unit}`))).logPath;
+  };
+  assert.equal(await fromUnit('StandardOutput=append:%h/logs/feeds.log'), path.join(os.homedir(), 'logs/feeds.log'));
+  assert.equal(await fromUnit('StandardOutput=append:%t/feeds.log'), null);
+  assert.equal(await fromUnit('StandardOutput=append:logs/feeds.log'), null);
 });
 
 test('defaultSystemctlShow asks for the service and timer user units, and a failure is null and logged', async () => {

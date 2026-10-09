@@ -77,10 +77,11 @@
 //     --property=...`, each unit's properties as strings (TimersCalendar a
 //     list), or null for a unit systemd does not know. `show` prints a file
 //     output as a bare "append", so the path is read from the unit file
-//     (FragmentPath). null when the call fails or aborts; failures are logged
+//     (FragmentPath), %h expanded. null when the call fails or aborts; failures are logged
 //     as { event: 'systemctl_error', label, error } once per distinct message.
 
 import { execFile } from 'node:child_process';
+import os from 'node:os';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -122,6 +123,7 @@ export function createJobs({
   const listLabel = launchctlList
     ?? ((label, { signal } = {}) => defaultLaunchctlList(label, { timeoutMs: timeouts.launchctlMs, onError: reportLaunchctlError, signal }));
   const showLabel = systemctlShow
+    // systemctl shares launchctl's budget: one call to the job runner.
     ?? ((label, { signal } = {}) => defaultSystemctlShow(label, { timeoutMs: timeouts.launchctlMs, onError: reportSystemctlError, signal }));
   const source = jobRunner === 'systemd' ? 'systemd' : 'launchctl';
 
@@ -552,7 +554,9 @@ export function unitsFromShow(stdout) {
   return { service: blocks[0] ?? null, timer: blocks[1] ?? null };
 }
 
-// The last `<key>=append:<path>` the unit file sets, as "append:<path>".
+// The last `<key>=append:<path>` the unit file sets, as "append:<path>",
+// with %h expanded to the home directory; a path that still holds a
+// specifier or is not absolute is null.
 async function unitFileOutput(file, key) {
   if (!stringOrNull(file) || !path.isAbsolute(file)) return null;
   let text;
@@ -568,7 +572,8 @@ async function unitFileOutput(file, key) {
     const match = new RegExp(`^\\s*${key}\\s*=\\s*(append:.+?)\\s*$`).exec(line);
     if (match) value = match[1];
   }
-  return value;
+  const logPath = value?.slice('append:'.length).replaceAll('%h', os.homedir());
+  return logPath && path.isAbsolute(logPath) && !logPath.includes('%') ? `append:${logPath}` : null;
 }
 
 function appendPath(value) {
