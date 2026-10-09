@@ -56,7 +56,7 @@ test.describe('the overlay', () => {
     if (!phone(page)) await expect(page.locator('.header-right > .header-brief')).toBeFocused();
   });
 
-  test('a heading with an obvious icon shows the icon, keeps its word for screen readers, and others stay text', async ({ page, hub }) => {
+  test('a heading with an obvious icon shows the icon beside its word, and others show the word alone', async ({ page, hub }) => {
     await hub.writeBrief(DATE, { sections: [
       { id: 'reading', label: 'Reading', items: [{ id: 'reading-1', text: 'An invented story.' }] },
       { id: 'what-changed', label: 'What changed', items: [{ id: 'what-changed-1', text: 'An invented change.' }] },
@@ -65,7 +65,7 @@ test.describe('the overlay', () => {
     await page.goto(hub.origin + '/');
     await openFromHeader(page);
     await expect(page.getByRole('heading', { name: 'Reading' }).locator('svg')).toHaveCount(1);
-    await expect(page.getByRole('heading', { name: 'Reading' })).toHaveAttribute('title', 'Reading');
+    await expect(page.getByRole('heading', { name: 'Reading' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'What changed' }).locator('svg')).toHaveCount(1);
     await expect(page.getByRole('heading', { name: 'Money' }).locator('svg')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Money' })).toBeVisible();

@@ -3406,10 +3406,8 @@ textarea.form-input {
 
 .brief-section { margin-top: 16px; }
 .brief-section-label {
-  margin: 0 0 4px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
-  color: var(--ink-soft);
+  margin: 0;
+  color: var(--muted);
   font-family: var(--sans);
   font-size: 13px;
   font-weight: 600;
@@ -3417,16 +3415,8 @@ textarea.form-input {
   text-transform: uppercase;
 }
 
-.brief-section-label-icon { display: flex; align-items: center; }
-.brief-section-label-icon svg { width: 18px; height: 18px; }
-.brief-section-label-text {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
+.brief-section-label-icon { display: flex; align-items: center; gap: 8px; }
+.brief-section-label-icon svg { width: 16px; height: 16px; flex: none; }
 
 .brief-item {
   padding: 12px 0 8px;
