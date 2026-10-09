@@ -56,6 +56,32 @@ test.describe('the overlay', () => {
     if (!phone(page)) await expect(page.locator('.header-right > .header-brief')).toBeFocused();
   });
 
+  test('a click on the backdrop outside the sheet closes the overlay, like Escape', async ({ page, hub }) => {
+    if (phone(page)) return; // the sheet fills the screen; there is no backdrop to click.
+    await hub.writeBrief(DATE);
+    await page.goto(hub.origin + '/');
+    await openFromHeader(page);
+    await overlay(page).click({ position: { x: 5, y: 5 } });
+    await expect(overlay(page)).toBeHidden();
+    await expectView(page, 'agents', 'Agents');
+  });
+
+  test('a click, or a drag starting in the sheet and ending on the backdrop, leaves the overlay open', async ({ page, hub }) => {
+    if (phone(page)) return;
+    await hub.writeBrief(DATE);
+    await page.goto(hub.origin + '/');
+    await openFromHeader(page);
+    await page.locator('.brief-title').click();
+    await expect(overlay(page)).toBeVisible();
+
+    const box = await page.locator('#brief-sheet').boundingBox();
+    await page.mouse.move(box.x + 20, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(5, 5);
+    await page.mouse.up();
+    await expect(overlay(page)).toBeVisible();
+  });
+
   test('a heading with an obvious icon shows the icon beside its word, and others show the word alone', async ({ page, hub }) => {
     await hub.writeBrief(DATE, { sections: [
       { id: 'reading', label: 'Reading', items: [{ id: 'reading-1', text: 'An invented story.' }] },

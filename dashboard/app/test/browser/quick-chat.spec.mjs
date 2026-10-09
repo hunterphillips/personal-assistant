@@ -359,12 +359,15 @@ test.describe('quick chat over the brief', () => {
     await hub.writeBrief('2026-09-15', { sections: [...sections, later] });
     await page.goto(`${hub.origin}/health`);
     await page.locator('.job-row', { hasText: 'cfo.daily' }).click();
-    if (phone(page)) {
-      await page.getByRole('button', { name: 'Menu', exact: true }).click();
-      await page.locator('#app-menu').getByRole('button', { name: 'Brief', exact: true }).click();
-    } else {
-      await page.locator('.header-right > .header-brief').click();
-    }
+    // On a phone every header entry lives in the Menu, whose dropdown an
+    // already-open pane covers (it sits above the Menu), so there is no
+    // way in to open the brief from there once quick chat is open; this
+    // scenario is desktop-only.
+    if (phone(page)) return;
+    // Quick chat opens from the header while Health is still underneath;
+    // the overlay covers the header once it is open.
+    await openPane(page);
+    await page.locator('.header-right > .header-brief').click();
     const overlay = page.getByRole('dialog', { name: 'Brief' });
     await expect(overlay.locator('[data-brief-item="money-1"]')).toBeVisible();
     // Scroll the sheet so the Money item is the topmost one under the bar.
@@ -374,8 +377,7 @@ test.describe('quick chat over the brief', () => {
       sheet.scrollTop += target.getBoundingClientRect().top - bar.getBoundingClientRect().bottom;
     });
 
-    // The overlay covers the header, so it carries its own way in.
-    await overlay.getByRole('button', { name: 'Quick chat', exact: true }).click();
+    // The pane stays open and visible above the overlay.
     await expect(pane(page)).toBeVisible();
     await send(page, 'Is the drift worth acting on?');
     await expect(page.locator('#quick-chat-messages .thread-message-context')).toHaveText(/Sent from Brief: 2026-09-15/);

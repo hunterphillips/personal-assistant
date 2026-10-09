@@ -11,12 +11,13 @@
 // default is the agent Settings names under "Quick chat talks to"; a choice
 // made in the picker is remembered for the page session (sessionStorage,
 // when the browser allows it) and wins while that agent is listed.
-// The brief's overlay has its own Quick chat button, since the overlay
-// covers the header; the pane sits above the overlay, outside the shell the
-// overlay makes inert. Escape and the close button close the pane (Escape
-// closes the pane before the overlay under it); closing keeps the thread
-// where it was. While the pane shows an agent in a visible document, the
-// thread view marks its reply read.
+// A pane already open when the brief's overlay opens stays open and usable:
+// it sits above the overlay, outside the shell the overlay makes inert, so
+// the overlay covering the header only blocks opening a new pane, not one
+// already open. Escape and the close button close the pane (Escape closes
+// the pane before the overlay under it); closing keeps the thread where it
+// was. While the pane shows an agent in a visible document, the thread view
+// marks its reply read.
 //
 // The first message sent after the pane opens, or after the view under it
 // changes, carries what Hunter is looking at as the send body's `context`
@@ -100,7 +101,6 @@
     var closeButton = document.getElementById('quick-chat-close');
     var empty = document.getElementById('quick-chat-empty');
     var mount = document.getElementById('quick-chat-thread');
-    var briefEntry = document.getElementById('brief-quick-chat');
     var header = document.querySelector('.app-header');
     if (!toggle || !pane || !window.DashboardThreadView) return null;
 
@@ -319,12 +319,6 @@
       // The menu closes itself on an entry (theme.js); the pane opens.
       menuEntry.addEventListener('click', function () {
         if (!isOpen()) open(menuToggle);
-      });
-    }
-    if (briefEntry) {
-      briefEntry.addEventListener('click', function () {
-        if (isOpen()) close(true);
-        else open(briefEntry);
       });
     }
     window.addEventListener('resize', function () { if (isOpen()) place(); });

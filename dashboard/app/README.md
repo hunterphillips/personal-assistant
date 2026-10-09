@@ -379,7 +379,8 @@ and Save at the end. Save sends every item; the saved time, unsaved
 changes, and a refused save each read as one sentence under it. The
 overlay reads back the saved feedback when it opens, keeps unsaved marks
 while the page is open, offers "Load newer brief" when the snapshot names
-a newer one, and closes with Close or Escape. A brief it cannot show
+a newer one, and closes with Close, Escape, or a click on the backdrop
+outside the sheet. A brief it cannot show
 reads "The brief for <date> could not be opened." or "No brief has been
 generated yet." The viewer pages stay on disk; nothing serves them.
 
@@ -974,8 +975,8 @@ the list, the Agents view's open agent and its state, or the view's name
 alone on Focus and Goals. While the brief's overlay is open it wins over
 the view under it: the context is the brief's date and the item at the
 top of the sheet (its section's label and text). The overlay covers the
-header, so its bar has its own Quick chat button, and the pane opens
-above the overlay; Escape closes the pane first. The adapter records it as a
+header, so a pane already open stays open and above the overlay, carrying
+the brief's context instead; Escape closes the pane first. The adapter records it as a
 system line (`kind: 'context'`) before the message, shown as a collapsed
 "Sent from Health: <job>" that opens to the detail, and the agent's prompt
 starts "Hunter sent this from the Health view, looking at: <job>" with the

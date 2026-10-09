@@ -463,6 +463,19 @@
 
     closeButton.addEventListener('click', function () { closeOverlay(true); });
 
+    // A click on the backdrop, outside the sheet, closes the overlay like
+    // Escape. Tracking where the pointer went down keeps a drag that starts
+    // in the sheet and ends on the backdrop (text selection, a dropdown)
+    // from closing it.
+    var backdropDown = false;
+    overlay.addEventListener('pointerdown', function (event) {
+      backdropDown = event.target === overlay;
+    });
+    overlay.addEventListener('click', function (event) {
+      if (backdropDown && event.target === overlay) closeOverlay(true);
+      backdropDown = false;
+    });
+
     doc.addEventListener('click', function (event) {
       var target = event.target;
       if (!target.closest) return;
