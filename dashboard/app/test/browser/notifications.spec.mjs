@@ -3,6 +3,7 @@
 // temporary file (browser-server.mjs); a persona seeded with `notify`
 // raises one through the notify tool's own path.
 
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -141,6 +142,45 @@ test.describe('feed and brief links', () => {
     await expect(page.locator('.brief-date')).toHaveText(/^Saturday, October 3(, 2026)?$/);
     await expect(page.locator('.brief-title')).toHaveText('Invented brief for tests, not a real day');
     await expect(page).toHaveURL(hub.origin + '/feed');
+  });
+});
+
+test.describe('feed links after a dismiss', () => {
+  test.use({
+    hubOptions: {
+      agents: [ASSISTANT],
+      feed: path.join(FIXTURES, 'feed'),
+      notifications: [
+        { id: 'n-second', agent: 'assistant', text: 'The second post of the run.', link: 'feed:2026-09-28-watch/1', at: minutesAgo(2) },
+        { id: 'n-first', agent: 'assistant', text: 'The first post of the run.', link: 'feed:2026-09-28-watch/0', at: minutesAgo(1) },
+      ],
+    },
+  });
+
+  test('with the first post dismissed, a link to the second opens the second, and one to the first says it is gone', async ({ page, hub }) => {
+    await writeFile(path.join(hub.feedsDir, 'news', 'marks.json'), JSON.stringify({
+      version: 1, marks: { 'watch/2026-09-28/1': { status: 'dismissed', at: minutesAgo(5) } },
+    }));
+    await page.goto(hub.origin + '/health');
+    let panel = await openList(page);
+    await expect(panel.locator('.notification-link')).toHaveText(['Feed item', 'A bakery moves its ordering app back to plain forms']);
+    await panel.getByRole('button', { name: 'A bakery moves its ordering app back to plain forms' }).click();
+    await expect(page).toHaveURL(hub.origin + '/feed');
+    const second = page.locator('[data-feed-item="watch/2026-09-28/2"]');
+    await expect(second).toHaveAttribute('data-feed-target', '');
+    await expect(page.locator('.feed-item[data-feed-target]')).toHaveCount(1);
+    await expect(page.locator('#feed-message')).toBeHidden();
+
+    panel = await openList(page);
+    await panel.getByRole('button', { name: 'Feed item' }).click();
+    await expect(page.locator('#feed-message')).toHaveText('That post is no longer in the feed.');
+    await expect(page.locator('[data-feed-item="watch/2026-09-28/1"]')).toHaveCount(0);
+    await expect(page.locator('.feed-item[data-feed-target]')).toHaveCount(0);
+
+    panel = await openList(page);
+    await panel.getByRole('button', { name: 'A bakery moves its ordering app back to plain forms' }).click();
+    await expect(page.locator('#feed-message')).toBeHidden();
+    await expect(second).toHaveAttribute('data-feed-target', '');
   });
 });
 

@@ -185,6 +185,7 @@
     var rendered = null; // the JSON text of what is on screen
     var pending = null; // the post id whose request is out
     var target = null; // { feed, run, index } to scroll to once it is drawn
+    var missed = false; // true while a link's post is not in the feed
     var filter = null; // null for all, 'saved', or a source id
     var expanded = {}; // post id -> true while its Insights are open
     var listeners = []; // called with the feeds after each load
@@ -290,6 +291,7 @@
       var first = names[0] || '';
       var node = element('article', 'feed-item');
       node.setAttribute('data-feed-item', item.id);
+      if (typeof item.position === 'number') node.setAttribute('data-feed-position', String(item.position));
       var badge = element('span', 'feed-badge feed-badge-' + colourIndex(first), initials(first));
       badge.setAttribute('role', 'img');
       badge.setAttribute('aria-label', names.join(', '));
@@ -462,23 +464,29 @@
       var problems = feedProblems.concat(arrayOf(data && data.problems))
         .filter(function (text) { return typeof text === 'string'; });
       var lines = objectsIn(feeds).length === 0 ? [NO_FEEDS] : all.length === 0 ? [emptySentence()] : [];
-      setMessage(lines.concat(problems));
+      setMessage((missed ? [GONE] : []).concat(lines, problems));
       runs.textContent = '';
       built.forEach(function (group) { runs.appendChild(group); });
       renderPanel(all);
       filterLine.hidden = filter === null;
       filterText.textContent = filter === null ? '' : filterSentence();
       shellApi.panelChanged();
-      rendered = JSON.stringify([feeds, sourceNames, data, filter, state && state.jobs ? state.jobs.items : null]);
+      rendered = renderKey();
+    }
+
+    function renderKey() {
+      return JSON.stringify([feeds, sourceNames, data, filter, state && state.jobs ? state.jobs.items : null, missed]);
     }
 
     function renderIfChanged() {
-      var text = JSON.stringify([feeds, sourceNames, data, filter, state && state.jobs ? state.jobs.items : null]);
+      var text = renderKey();
       if (visible && text !== rendered) render();
     }
 
-    // Scrolls to the target post and marks it, when it is on the page. With
-    // `last`, a target that is not there is given up.
+    // Scrolls to the target post and marks it, when it is on the page: the
+    // post at that position in the run's file, so a dismissed post before
+    // it shifts nothing. With `last`, a target that is not there is given
+    // up and the view says the post is gone.
     function revealTarget(last) {
       if (!target || !visible) return;
       if (target.feed && target.feed !== feedId) {
@@ -486,9 +494,13 @@
         return;
       }
       var group = runs.querySelector('[data-feed-run="' + CSS.escape(target.run) + '"]');
-      var node = group ? group.querySelectorAll('.feed-item')[target.index] : null;
+      var node = group ? group.querySelector('.feed-item[data-feed-position="' + Number(target.index) + '"]') : null;
       if (!node) {
-        if (last) target = null;
+        if (last) {
+          target = null;
+          missed = true;
+          render();
+        }
         return;
       }
       target = null;
@@ -571,6 +583,7 @@
       feedId = id;
       data = null;
       filter = null;
+      missed = false;
       expanded = {};
       writeAddress();
       rendered = null;
@@ -753,10 +766,15 @@
       producerName: function () { return producerName(); },
       feeds: function () { return objectsIn(feeds); },
       onFeeds: function (listener) { listeners.push(listener); },
-      // Scrolls to the index-th post of the run once it is drawn (a
-      // notification's link), in `feed` when given; show() has already run.
+      // Scrolls to the post at `index` in the run's file once it is drawn (a
+      // notification's link), in `feed` when given, or says it is gone;
+      // show() has already run.
       reveal: function (run, index, feed) {
         target = { feed: feed || null, run: run, index: index };
+        if (missed) {
+          missed = false;
+          render();
+        }
         if (feed && feed !== feedId && feeds !== null) {
           switchTo(feed);
           return;
@@ -767,6 +785,9 @@
           render();
         }
         revealTarget(false);
+        // Not on the page: read the feed again, which reveals it or says
+        // it is gone.
+        if (target) load();
       },
       // What quick chat sends along from the Feed: the topmost post whose
       // top edge is inside the scrolling list, or the view's name alone.
@@ -784,6 +805,7 @@
       hide: function () {
         visible = false;
         filter = null;
+        missed = false;
         if (side) side.textContent = '';
         filterLine.hidden = true;
         rendered = null;

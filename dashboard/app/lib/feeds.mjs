@@ -31,7 +31,8 @@
 //       { feed, readAt, problems: [sentence],
 //         runs: [{ id, producer, date, since, generatedAt, read: [id],
 //                  items: [{ id, title, sources: [id or name], url, summary,
-//                            takeaway, insights, kept, image, status }] }] }
+//                            takeaway, insights, kept, image, status,
+//                            position }] }] }
 //     - Runs are the regular files named <date>.json or <date>-<producer>.json,
 //       newest first by name, at most limits.feedFiles, each at most
 //       limits.feedFileBytes; a file that is not a run is one problem.
@@ -44,6 +45,9 @@
 //       (at most INSIGHTS_MAX) are strings or null: an over-long or wrong
 //       value is dropped, the item kept. `kept` is false unless true;
 //       `image` an http or https URL or null.
+//     - `position` is the item's index in the file's `items`, from 0, which
+//       a notification's feed:<run>/<index> link names; it does not shift
+//       when an earlier item is dismissed or left out.
 //     - Marks: a dismissed item is left out; `status` is 'saved' or 'new'.
 //       An unreadable marks.json is one problem and refuses mark writes.
 //   find(feedId, itemId) -> Promise<item | null>
@@ -471,7 +475,7 @@ function parseRun(text, name, { id: feedId, byName, marks, problems, index }) {
   const { producer, date } = body;
   const items = [];
   let skipped = 0;
-  for (const entry of body.items) {
+  for (const [position, entry] of body.items.entries()) {
     const sourceIds = isRecord(entry) ? itemSources(entry, byName) : null;
     if (!isRecord(entry) || !nonEmpty(entry.id) || entry.id.length > ITEM_ID_MAX || !nonEmpty(entry.title) ||
         !nonEmpty(entry.url) || !URL_SCHEME.test(entry.url) || !nonEmpty(entry.summary) || !sourceIds || index.has(entry.id)) {
@@ -490,6 +494,7 @@ function parseRun(text, name, { id: feedId, byName, marks, problems, index }) {
       kept: entry.kept === true,
       image: nonEmpty(entry.image) && URL_SCHEME.test(entry.image) ? entry.image : null,
       status: mark?.status === 'saved' ? 'saved' : 'new',
+      position,
     };
     index.set(item.id, Object.freeze({ ...item, status: mark?.status ?? 'new', feed: feedId, producer, date }));
     if (mark?.status !== 'dismissed') items.push(item);

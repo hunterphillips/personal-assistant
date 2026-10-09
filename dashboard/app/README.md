@@ -298,7 +298,7 @@ a figure: one JSON line per notification, `{ id, agent, text, link, at,
 acknowledgedAt }`, oldest first. `link` is null or what the header opens:
 `agent:<id>` (the agent's thread), `feed:<run>/<index>` (the Feed
 scrolled to the item at that position in the run file `<run>.json`, from
-0), `brief:<date>` (that date's brief in the overlay), or `job:<label>` (Health with
+0, or saying the post is gone when it is dismissed), `brief:<date>` (that date's brief in the overlay), or `job:<label>` (Health with
 that job selected). Raising appends a line; acknowledging rewrites the
 file atomically. Past `LIMITS.notificationsMax` (200) the oldest
 acknowledged items roll off first, then the oldest open ones. A line the
@@ -448,7 +448,7 @@ files.
              "generatedAt": "<ISO>", "read": ["latent-space"],
              "items": [{ "id": "news/2026-10-09/1", "title": "...", "sources": ["latent-space"], "url": "https://...",
                          "summary": "...", "takeaway": "...", "insights": "...", "kept": true,
-                         "image": "https://...", "status": "new" }] }] }
+                         "image": "https://...", "status": "new", "position": 0 }] }] }
 ```
 
 Runs are the newest 30 files named `<date>.json`, or `<date>-<producer>.json`
@@ -459,7 +459,9 @@ left out and counted in one sentence per run. An older item's `source`
 string is split on "/" and ","; each name becomes the id of the source with
 that name, or stays as written. A takeaway over 240 characters or insights
 over 2,000 are dropped and the item kept. A dismissed post is left out;
-`status` is `saved` or `new`. `image` is the story's picture when it is an
+`status` is `saved` or `new`. `position` is the post's index in the run
+file's `items`, from 0, the index a `feed:<run>/<index>` notification link
+names; a dismissed or left-out post before it does not shift it. `image` is the story's picture when it is an
 `http` or `https` URL, shown under the summary from the story's own host
 with no referrer, which is why the shell CSP allows `http:` and `https:`
 images.

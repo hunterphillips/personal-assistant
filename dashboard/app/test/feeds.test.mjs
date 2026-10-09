@@ -59,7 +59,7 @@ test('old-shape runs read newest first, each source string mapped to names, test
   assert.deepEqual(newest.items[0], {
     id: 'watch/2026-09-28/1', title: 'Town council adopts a rule for delivery robots', sources: ['Invented Gazette'],
     url: 'https://example.com/robots', summary: 'The Invented Gazette reports the town adopted a rule for delivery robots on sidewalks.',
-    takeaway: null, insights: null, kept: true, image: null, status: 'new',
+    takeaway: null, insights: null, kept: true, image: null, status: 'new', position: 0,
   });
   // "Invented Gazette, Invented Weekly" is two sources.
   assert.deepEqual(newest.items[4].sources, ['Invented Gazette', 'Invented Weekly']);
@@ -123,6 +123,15 @@ test('items that are not the expected shape are left out and counted once per ru
   ]);
   assert.deepEqual(result.runs[0].items.map((entry) => entry.id), ['news/2026-10-05/1', 'watch/2026-09-28/1']);
   assert.equal((await feeds.find('news', 'watch/2026-09-28/1')).date, '2026-10-05');
+});
+
+test('an item\'s position is its index in the run file, unchanged when an earlier post is dismissed or left out', async (t) => {
+  const { feeds, items } = await stores(t, { items: false });
+  await run(items, '2026-10-05', [item('a'), 'not an item', item('b'), item('c')]);
+  assert.deepEqual((await feeds.read('news')).runs[0].items.map((entry) => [entry.id, entry.position]), [['a', 0], ['b', 2], ['c', 3]]);
+  const dismissed = await feeds.mark('news', 'a', 'dismissed');
+  assert.deepEqual(dismissed.runs[0].items.map((entry) => [entry.id, entry.position]), [['b', 2], ['c', 3]]);
+  assert.equal((await feeds.find('news', 'a')).position, 0);
 });
 
 test('an item keeps an http or https image and gets null for anything else', async (t) => {

@@ -15,8 +15,10 @@
 // feed:<run>/<index> the Feed scrolled to that item, brief:<date> the
 // Brief. Escape and a click outside close it. A feed link's name is the
 // post's title, read from /api/feeds and each feed's read when the list
-// opens (the first feed holding that run wins, and it is the feed the link
-// opens); until then, or when the post is gone, it is "Feed item". Every text node is set with
+// opens, matching the index to each post's `position` in its run file (the
+// first feed holding that run wins, and it is the feed the link opens, a
+// dismissed post's too); until then, or when the post is gone, it is
+// "Feed item". Every text node is set with
 // textContent. Buttons carry data-notification-*, never data-action, which
 // the shell's own click handler owns.
 (function () {
@@ -93,7 +95,7 @@
 
     var state = null;
     var pending = {}; // ids with a request out
-    var feedTitles = {}; // 'run/index' -> { title, feed }, from /api/feeds
+    var feedTitles = {}; // 'run/position' -> { title, feed } and 'run' -> { title: null, feed }, from /api/feeds
     var opener = toggle; // what gets focus back on Escape
 
     function data() {
@@ -230,9 +232,12 @@
           if (!answer.body || !Array.isArray(answer.body.runs)) return;
           answer.body.runs.forEach(function (run) {
             if (!run || typeof run.id !== 'string' || !Array.isArray(run.items)) return;
-            run.items.forEach(function (item, index) {
-              var key = run.id + '/' + index;
-              if (item && typeof item.title === 'string' && !Object.prototype.hasOwnProperty.call(titles, key)) {
+            // The run alone names the feed of a post that is gone.
+            if (!Object.prototype.hasOwnProperty.call(titles, run.id)) titles[run.id] = { title: null, feed: answer.feed };
+            run.items.forEach(function (item) {
+              if (!item || typeof item.position !== 'number') return;
+              var key = run.id + '/' + item.position;
+              if (typeof item.title === 'string' && !Object.prototype.hasOwnProperty.call(titles, key)) {
                 titles[key] = { title: item.title, feed: answer.feed };
               }
             });
@@ -288,7 +293,8 @@
       if (link.kind === 'agent') shellApi.openAgent(link.target);
       else if (link.kind === 'job') shellApi.openJob(link.target);
       else if (link.kind === 'feed') {
-        var found = Object.prototype.hasOwnProperty.call(feedTitles, link.target) ? feedTitles[link.target] : null;
+        var found = Object.prototype.hasOwnProperty.call(feedTitles, link.target) ? feedTitles[link.target]
+          : Object.prototype.hasOwnProperty.call(feedTitles, link.run) ? feedTitles[link.run] : null;
         shellApi.openFeedItem(link.run, link.index, found ? found.feed : null);
       }
       else if (link.kind === 'brief') shellApi.openBrief(link.target);
