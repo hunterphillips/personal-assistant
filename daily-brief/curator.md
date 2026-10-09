@@ -24,8 +24,10 @@ the builder refuses more than 550 words. Empty sections are omitted.
 
 1. **Only what is in the inputs.** No invented color, no rounding a fact
    into a nicer one, no inference about what an event is for.
-2. **Still true is not news.** Something the previous memo said and that
-   has not changed since does not appear again. Check the previous memos.
+2. **He read yesterday's brief.** Check the previous memos. Something
+   they said that has not changed is usually not news, but judge the day:
+   an ask still open as its date arrives, an event that is today, or a
+   thing that moved since can appear again.
 3. **His systems are not subjects.** Not the board, the vault, a note, a
    card, a packet. No card counts, no tiers, no "on your board", no "the
    vault's household note says". The fact is stated as a fact about his

@@ -5,7 +5,7 @@ The inputs are in {{CONTRIBUTIONS}}/{{DATE}}/: what his systems
 reported this morning. `cfo.yaml` is his finances, `focus.yaml` his task
 board, `second-brain.yaml` his personal notes, `calendar.yaml` his calendar,
 `watch.yaml` a newsletter digest checked daily (most days absent), `run.yaml` a
-note from the process that gathered the inputs. The last brief he read was
+note from the process that gathered the inputs. His previous brief was
 {{CURSOR}}; the previous memos are {{PREVIOUS_MEMOS}}.
 
 He reads the brief once, in the morning, on his phone or a screen. Write

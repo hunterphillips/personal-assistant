@@ -196,7 +196,7 @@ if [ "$stage" = all ] && [ "$force" = 0 ] \
     exit 0
 fi
 
-# Cursor: the newest brief before the run date. Phase 5 adds the read marker.
+# Cursor: the newest brief before the run date. He is assumed to have read it.
 cursor=
 for f in "$briefs"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md; do
     [ -f "$f" ] || continue
