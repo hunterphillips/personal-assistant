@@ -72,6 +72,26 @@ function recordingAdapter(order) {
   };
 }
 
+function scriptedFocusRunner() {
+  const registered = [];
+  const listeners = new Set();
+  let started = 0;
+  let stopped = 0;
+  return {
+    registered, register(job) { registered.push(job); },
+    async start() { started += 1; }, async stop() { stopped += 1; },
+    rows: () => registered.map((job) => ({
+      label: job.label, name: job.name, schedule: { kind: 'cron', text: job.cron() }, lastRun: null,
+      outcome: 'never ran', detail: null, failures24h: 0, paused: job.paused(), running: false,
+      source: 'dashboard', available: true,
+    })),
+    state: () => ({ running: null }), lastRun: () => null,
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    enqueue: async () => ({ ok: true, run: 'scripted' }),
+    get started() { return started; }, get stopped() { return stopped; },
+  };
+}
+
 test('importing the handler and entry point opens no listener', () => {
   const script = `
     await import('./lib/app.mjs');
@@ -103,6 +123,32 @@ test('startDashboard binds loopback and close releases the port', async (t) => {
   await dashboard.close();
   assert.equal(dashboard.server.listening, false);
   assert.equal(await canConnect(address.port), false);
+});
+
+test('Focus jobs are registered and started only when the board exists', async (t) => {
+  const absentEnv = await testEnv(t);
+  const absentRunner = scriptedFocusRunner();
+  const absent = await startDashboard({ env: absentEnv, log: () => {}, focusRunner: absentRunner });
+  const absentState = await (await fetch(`http://127.0.0.1:${absent.config.port}/api/state`)).json();
+  assert.equal(absentRunner.registered.length, 0);
+  assert.equal(absentRunner.started, 0);
+  assert.deepEqual(absentState.jobs.items.filter((row) => row.source === 'dashboard'), []);
+  await absent.close();
+  assert.equal(absentRunner.stopped, 1);
+
+  const presentEnv = await testEnv(t);
+  const boardFile = path.join(presentEnv.PERSONAL_ASSISTANT_HOME, 'focus', 'board.json');
+  await mkdir(path.dirname(boardFile), { recursive: true });
+  await writeFile(boardFile, await readFile(path.join(APP_DIR, 'test/fixtures/focus/board.json')));
+  const presentRunner = scriptedFocusRunner();
+  const present = await startDashboard({ env: presentEnv, log: () => {}, focusRunner: presentRunner });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const presentState = await (await fetch(`http://127.0.0.1:${present.config.port}/api/state`)).json();
+  assert.equal(presentRunner.registered.length, 5);
+  assert.equal(presentRunner.started, 1);
+  assert.equal(presentState.jobs.items.filter((row) => row.source === 'dashboard').length, 5);
+  await present.close();
+  assert.equal(presentRunner.stopped, 1);
 });
 
 test('startDashboard reports a missing registry and ends event streams on close', async (t) => {

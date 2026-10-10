@@ -578,6 +578,22 @@ test('under systemd a Focus scan still takes its state from Focus', async () => 
   assert.deepEqual([job.source, job.outcome, job.lastRun, job.failures24h, job.paused], ['focus', 'wrote', '2026-10-08T06:00:00.000Z', 0, false]);
 });
 
+test('runner rows follow inspected jobs and are attributed to Focus', async () => {
+  const runner = { rows: () => [
+    { label: 'focus.scan-calendar', name: 'Calendar scan', source: 'dashboard', available: true },
+    { label: 'focus.curate', name: 'Curate', source: 'dashboard', available: true },
+  ] };
+  const jobs = createJobs({
+    registry: fakeRegistry([agent('a', [])]), runner, launchAgentsDir: LAUNCH_AGENTS,
+    timeouts: TIMEOUTS, readPlist: async () => null, launchctlList: async () => null,
+  });
+  const result = await jobs.refresh();
+  assert.deepEqual(result.jobs, [
+    { label: 'focus.scan-calendar', name: 'Calendar scan', source: 'dashboard', available: true, agentId: null, agentName: 'Focus' },
+    { label: 'focus.curate', name: 'Curate', source: 'dashboard', available: true, agentId: null, agentName: 'Focus' },
+  ]);
+});
+
 test('on a host with no such units the real systemctl lists each job as unavailable (needs systemctl)', async (t) => {
   if (spawnSync('systemctl', ['--version']).status !== 0) {
     t.skip('systemctl is not available');

@@ -25,8 +25,9 @@
 // every persona is unavailable with lastError 'api_key_in_env'. Persona
 // turns must bill the subscription, never an API key.
 //
-// Shutdown order: stop the scheduler (no new runs; in-flight runs are left
-// to the next start to close), stop the notice timer, end event streams and refuse new sends (closeStreams),
+// Shutdown order: stop and settle the Focus runner, stop the routine scheduler
+// (no new runs; in-flight routine runs are left to the next start to close),
+// stop the notice timer, end event streams and refuse new sends (closeStreams),
 // close each adapter (Claude drains running turns for up to drainMs, then
 // aborts the rest and waits abortGraceMs for them; Codex closes its socket),
 // close the cmux client's socket, close the hub, stop the registry and
@@ -48,6 +49,16 @@ import { createBriefInstructions } from './lib/brief-instructions.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
 import { createBoard } from './lib/focus/board.mjs';
+import { createCurator } from './lib/focus/curate.mjs';
+import { createGoogle } from './lib/focus/google.mjs';
+import { createFocusJobs } from './lib/focus/jobs.mjs';
+import { createProfile } from './lib/focus/profile.mjs';
+import { createFocusSettings } from './lib/focus/settings.mjs';
+import { createVault } from './lib/focus/vault.mjs';
+import { scan as scanCalendar } from './lib/focus/scans/calendar.mjs';
+import { scan as scanGmail } from './lib/focus/scans/gmail.mjs';
+import { createGh, scan as scanGithub } from './lib/focus/scans/github.mjs';
+import { scan as scanNotes } from './lib/focus/scans/notes.mjs';
 import { createGoals } from './lib/goals.mjs';
 import { createIdeas } from './lib/ideas.mjs';
 import { createInstructions } from './lib/instructions.mjs';
@@ -62,10 +73,12 @@ import { createRoutines } from './lib/routines.mjs';
 import { createScheduler } from './lib/scheduler.mjs';
 import { createSources } from './lib/sources.mjs';
 import { createJobs } from './lib/jobs.mjs';
+import { createJobRunner } from './lib/jobs-runner.mjs';
 import { createSettings } from './lib/settings.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
 import { createCmux } from './lib/runtime/cmux.mjs';
 import { createCodexAdapter } from './lib/runtime/codex.mjs';
+import { createQueryLoader } from './lib/runtime/sdk.mjs';
 import { createThreadStore } from './lib/threads.mjs';
 
 const API_KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
@@ -96,7 +109,7 @@ function defaultAdapters({ config, store, log, bindings, turnTools = null }) {
 // `createAdapters({ config, store, log, bindings, turnTools })` returns the adapters by provider;
 // tests pass fakes. It is not called when an API key is in `env`. `timeouts`
 // overrides entries of the configured timeouts; tests shorten polls with it.
-export async function startDashboard({ env = process.env, log, createAdapters = defaultAdapters, timeouts = null } = {}) {
+export async function startDashboard({ env = process.env, log, createAdapters = defaultAdapters, focusRunner: injectedFocusRunner = null, timeouts = null } = {}) {
   const loaded = loadConfig(env);
   const config = timeouts ? Object.freeze({ ...loaded, timeouts: Object.freeze({ ...loaded.timeouts, ...timeouts }) }) : loaded;
   const logEntry = log ?? defaultLog;
@@ -108,7 +121,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     throw error;
   }
   try {
-    const dashboard = await startOnRoot({ env, config, logEntry, createAdapters });
+    const dashboard = await startOnRoot({ env, config, logEntry, createAdapters, injectedFocusRunner });
     let closing;
     const close = () => (closing ??= dashboard.close().finally(() => lock.release()));
     return { server: dashboard.server, config, close };
@@ -119,7 +132,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
 }
 
 // Everything after the lock: the root, then the stores and the server.
-async function startOnRoot({ env, config, logEntry, createAdapters }) {
+async function startOnRoot({ env, config, logEntry, createAdapters, injectedFocusRunner }) {
   let prepared;
   try {
     prepared = await prepareRoot(config.home, {
@@ -142,21 +155,57 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
   const brief = createBriefRoutes(config);
   const registry = createRegistry({ path: config.registryPath, log: logEntry });
   const bindings = createBindings({ path: path.join(config.codexDir, 'bindings.json'), pollMs: config.timeouts.codexPollMs, log: logEntry });
-  const jobs = createJobs({
-    registry,
-    launchAgentsDir: config.launchAgentsDir,
-    jobRunner: config.jobRunner,
-    focus,
-    timeouts: config.timeouts,
-    log: logEntry,
-  });
   const store = createThreadStore({ dir: config.threadsDir, limits: config.limits, log: logEntry });
   // Keep the read store beside the thread directory so test and throwaway
   // instances inherit the same isolation from DASHBOARD_THREADS_DIR.
   const reads = createReads({ file: path.join(path.dirname(config.threadsDir), 'thread-reads.json'), log: logEntry });
   const briefReads = createBriefReads({ file: config.briefReadsPath, log: logEntry });
   await briefReads.load();
+  const settings = createSettings({ path: config.settingsPath, log: logEntry });
+  await settings.load();
   const apiKeyInEnv = API_KEY_VARS.some((name) => typeof env[name] === 'string' && env[name] !== '');
+  const focusSettings = createFocusSettings({ file: config.focusSettingsPath, limits: config.limits, log: logEntry });
+  await focusSettings.load();
+  const focusRunner = injectedFocusRunner ?? createJobRunner({
+    runsDir: config.focusRunsDir, zone: config.timeZone, timeouts: config.timeouts, limits: config.limits, log: logEntry,
+  });
+  const hasFocusBoard = await focusBoard.exists();
+  let focusJobs = null;
+  if (hasFocusBoard) {
+    const google = createGoogle({ dir: config.focusGoogleDir, log: logEntry });
+    const vault = createVault({ registry, agentId: 'second-brain' });
+    const profile = createProfile({ dir: config.personalContextDir, timeoutMs: config.timeouts.focusScanMs });
+    const gh = createGh({ cli: config.ghCli, timeout: config.timeouts.focusScanMs });
+    const queryLoader = createQueryLoader();
+    const query = apiKeyInEnv ? null : async function* queryFocus(input) {
+      const sdkQuery = await queryLoader.ensureQuery();
+      yield* sdkQuery(input);
+    };
+    const curator = createCurator({
+      query, board: focusBoard, rules: config.focusRulesPath, vault, profile, settings: focusSettings,
+      systemSettings: settings, zone: config.timeZone, limits: config.limits, timeouts: config.timeouts,
+      cwd: config.home, log: logEntry,
+    });
+    focusJobs = createFocusJobs({
+      runner: focusRunner, board: focusBoard, settings: focusSettings,
+      scans: {
+        calendar: (deps) => scanCalendar({ google, ...deps }),
+        gmail: (deps) => scanGmail({ google, vault, ...deps }),
+        git: (deps) => scanGithub({ gh, ...deps }),
+        notes: (deps) => scanNotes({ vault, ...deps }),
+      },
+      curator, candidatesDir: config.focusCandidatesDir, zone: config.timeZone,
+      limits: config.limits, timeouts: config.timeouts, log: logEntry,
+    });
+  }
+  const jobs = createJobs({
+    registry, runner: focusRunner,
+    launchAgentsDir: config.launchAgentsDir,
+    jobRunner: config.jobRunner,
+    focus,
+    timeouts: config.timeouts,
+    log: logEntry,
+  });
   let adapters = {};
   // Assigned once the hub exists; the adapters are created first because
   // the hub takes them, and the hook is only called from a turn.
@@ -177,8 +226,6 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
     timeouts: config.timeouts,
     limits: config.limits,
   });
-  const settings = createSettings({ path: config.settingsPath, log: logEntry });
-  await settings.load();
   const routines = createRoutines({ dir: config.routinesDir, limits: config.limits, log: logEntry });
   await routines.load();
   const notifications = createNotifications({
@@ -193,6 +240,8 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
     timeZone: config.timeZone,
     focus,
     focusBoard,
+    focusSettings,
+    focusRunner,
     brief,
     timeouts: config.timeouts,
     limits: config.limits,
@@ -238,7 +287,7 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
     log: logEntry,
   });
   const app = createApp({
-    config, focus, focusBoard, focusInstructions, brief, hub, store, cmux, goals, feeds, sources, ideas, ideasInstructions, briefInstructions, notices, settings, registry, routines,
+    config, focus, focusBoard, focusInstructions, focusSettings, focusJobs, focusRunner, brief, hub, store, cmux, goals, feeds, sources, ideas, ideasInstructions, briefInstructions, notices, settings, registry, routines,
     scheduler, notifications, log: logEntry,
   });
   const server = http.createServer(app);
@@ -247,6 +296,7 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
   server.keepAliveTimeout = config.timeouts.keepAliveMs;
 
   const shutdownState = async () => {
+    await focusRunner.stop();
     scheduler.stop();
     notices.stop();
     app.closeStreams();
@@ -267,6 +317,7 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
   // The brief notice waiting since the last run, if any; never fatal.
   await notices.reconcile();
   await scheduler.start();
+  if (hasFocusBoard) await focusRunner.start();
   try {
     await new Promise((resolve, reject) => {
       server.once('error', reject);

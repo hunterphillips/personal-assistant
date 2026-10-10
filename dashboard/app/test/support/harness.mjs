@@ -187,11 +187,11 @@ export function fakeSettings(initial = {}, { ok = true, error = null } = {}) {
 // adapters unless given.
 export function createTestHub({
   config, focus, focusBoard = null, brief, registry = fakeRegistry(), jobs = fakeJobs(), routines = null, adapters = {}, store = null, bindings = null,
-  cmux = null, settings = fakeSettings(), reads = null, briefReads = null, notifications = null, home = '/invented', log = () => {}, now = undefined,
+  cmux = null, settings = fakeSettings(), focusSettings = null, focusRunner = null, reads = null, briefReads = null, notifications = null, home = '/invented', log = () => {}, now = undefined,
 }) {
   return createHub({
     registry, jobs, routines, focus, focusBoard, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, reads,
-    briefReads, notifications, home, log,
+    briefReads, notifications, focusSettings, focusRunner, home, log,
     ...(now ? { now } : {}),
   });
 }
@@ -255,7 +255,7 @@ export function fakeCmux(inventory = null) {
 export async function startApp(t, {
   env = {}, focus, focusBoard = null, focusInstructions = null, brief, registry = fakeRegistry(), jobs, routines = null, scheduler = null, hub, adapters, store, bindings,
   cmux = null, goals, feeds, sources, ideas = null, ideasInstructions = null, briefInstructions, notices = null, settings = fakeSettings(), reads = null,
-  briefReads = null, notifications = null, configure = (c) => c,
+  briefReads = null, notifications = null, focusSettings = null, focusRunner = null, focusJobs = null, configure = (c) => c,
   delegation = null,
 } = {}) {
   const server = http.createServer();
@@ -282,7 +282,7 @@ export async function startApp(t, {
   const jobsModule = jobs ?? fakeJobs();
   const stateHub = hub ?? createTestHub({
     config, focus: focusRoutes, focusBoard, brief: briefRoutes, registry, jobs: jobsModule, routines, adapters, store, bindings, cmux, log,
-    ...(settings ? { settings } : {}), ...(reads ? { reads } : {}), ...(briefReads ? { briefReads } : {}), notifications,
+    ...(settings ? { settings } : {}), ...(reads ? { reads } : {}), ...(briefReads ? { briefReads } : {}), notifications, focusSettings, focusRunner,
   });
   if (!hub) await stateHub.start();
   const delegationService = typeof delegation === 'function' ? delegation(stateHub) : null;
@@ -302,7 +302,7 @@ export async function startApp(t, {
   const handler = createApp({
     config, focus: focusRoutes, focusBoard, focusInstructions, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feeds: feedStore,
     sources: sourceStore, ideas, ideasInstructions, briefInstructions: briefInstructionsReader, notices, settings, registry, routines,
-    scheduler: schedulerService, notifications, log,
+    scheduler: schedulerService, notifications, focusSettings, focusRunner, focusJobs, log,
   });
   server.on('request', handler);
   t.after(() => {
@@ -313,7 +313,7 @@ export async function startApp(t, {
   const authority = `127.0.0.1:${port}`;
   return {
     port, config, logs, authority, origin: `http://${authority}`, hub: stateHub, jobs: jobsModule, routines, settings, handler,
-    delegation: delegationService, scheduler: schedulerService, notifications, feeds: feedStore, sources: sourceStore,
+    delegation: delegationService, scheduler: schedulerService, notifications, focusSettings, focusRunner, focusJobs, feeds: feedStore, sources: sourceStore,
   };
 }
 

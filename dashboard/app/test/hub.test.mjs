@@ -81,6 +81,8 @@ function makeHub(overrides = {}) {
     cmux: overrides.cmux ?? null,
     adaptersDisabled: overrides.adaptersDisabled ?? null,
     settings: overrides.settings ?? null,
+    focusSettings: overrides.focusSettings ?? null,
+    focusRunner: overrides.focusRunner ?? null,
     reads: overrides.reads ?? null,
     briefReads: overrides.briefReads ?? null,
     routines: overrides.routines ?? null,
@@ -293,15 +295,15 @@ test('only the status part that changed is in the patch', async () => {
   assert.deepEqual(deltas[1], { revision: 3, patch: { focus: { available: false, native: false } } });
 });
 
-function fakeFocusBoard({ present = true, updated = '2026-10-10T12:00:00.000Z' } = {}) {
+function fakeFocusBoard({ present = true, updated = '2026-10-10T12:00:00.000Z', items = [] } = {}) {
   const listeners = new Set();
   return {
     exists: async () => present,
-    read: async () => ({ board: present ? { updated, items: [] } : null, problem: null }),
+    read: async () => ({ board: present ? { updated, items } : null, problem: null }),
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     emit(nextUpdated) {
       updated = nextUpdated;
-      for (const fn of listeners) fn({ updated, items: [] });
+      for (const fn of listeners) fn({ updated, items });
     },
   };
 }
@@ -310,7 +312,10 @@ test('a native Focus board supplies status without probing the proxy', async () 
   const focusBoard = fakeFocusBoard();
   const { hub, status } = makeHub({ focusBoard });
   await hub.refreshStatus();
-  assert.deepEqual(hub.snapshot().focus, { available: true, native: true, updated: '2026-10-10T12:00:00.000Z' });
+  assert.deepEqual(hub.snapshot().focus, {
+    available: true, native: true, updated: '2026-10-10T12:00:00.000Z', paused: false,
+    counts: { now: 0, today: 0, tomorrow: 0, later: 0 }, scanning: null,
+  });
   assert.equal(status.calls.health, 0);
 });
 
@@ -321,10 +326,48 @@ test('a Focus board change bumps the revision with its document stamp', async ()
   const before = hub.snapshot().revision;
   focusBoard.emit('2026-10-10T12:05:00.000Z');
   assert.equal(hub.snapshot().revision, before + 1);
-  assert.deepEqual(deltas.at(-1).patch, { focus: { available: true, native: true, updated: '2026-10-10T12:05:00.000Z' } });
+  assert.deepEqual(deltas.at(-1).patch, { focus: {
+    available: true, native: true, updated: '2026-10-10T12:05:00.000Z', paused: false,
+    counts: { now: 0, today: 0, tomorrow: 0, later: 0 }, scanning: null,
+  } });
   hub.close();
   focusBoard.emit('2026-10-10T12:06:00.000Z');
   assert.equal(hub.snapshot().revision, before + 1);
+});
+
+test('native Focus carries counts, pause, and running state and follows settings and runner changes', async () => {
+  const focusBoard = fakeFocusBoard({ items: [
+    { status: 'open', tier: 'today', now: true }, { status: 'open', tier: 'today', now: false },
+    { status: 'open', tier: 'tomorrow', now: false }, { status: 'open', tier: 'later', now: false },
+    { status: 'done', tier: 'today', now: true },
+  ] });
+  const settingsListeners = new Set();
+  let paused = false;
+  const focusSettings = {
+    current: () => ({ paused }),
+    onChange(fn) { settingsListeners.add(fn); return () => settingsListeners.delete(fn); },
+    set(next) { paused = next; for (const fn of settingsListeners) fn(); },
+  };
+  const runnerListeners = new Set();
+  let running = null;
+  let rows = [];
+  const focusRunner = {
+    state: () => ({ running }), rows: () => rows,
+    onChange(fn) { runnerListeners.add(fn); return () => runnerListeners.delete(fn); },
+    set(next, nextRows) { running = next; rows = nextRows; for (const fn of runnerListeners) fn(); },
+  };
+  const { hub, deltas } = makeHub({ focusBoard, focusSettings, focusRunner });
+  await hub.refreshStatus();
+  assert.deepEqual(hub.snapshot().focus.counts, { now: 1, today: 1, tomorrow: 1, later: 1 });
+  focusSettings.set(true);
+  assert.equal(hub.snapshot().focus.paused, true);
+  focusRunner.set('focus.scan-gmail', [{ label: 'focus.scan-gmail', source: 'dashboard' }]);
+  assert.equal(hub.snapshot().focus.scanning, 'focus.scan-gmail');
+  assert.deepEqual(hub.snapshot().jobs.items, [{ label: 'focus.scan-gmail', source: 'dashboard', agentId: null, agentName: 'Focus' }]);
+  assert.equal(deltas.length, 3);
+  hub.close();
+  assert.equal(settingsListeners.size, 0);
+  assert.equal(runnerListeners.size, 0);
 });
 
 test('an absent native board keeps the proxy status and marks it non-native', async () => {

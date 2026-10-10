@@ -15,7 +15,7 @@
 //     { revision,                 // integer, starts at 1, +1 on every change
 //       updatedAt,                // ISO time of the last change
 //       home,                     // the home directory, for showing paths
-//       focus: { available, native, updated }, // native selects the board;
+//       focus: { available, native, updated?, paused?, counts?, scanning? }, // native selects the board;
 //                                               // updated is its document stamp
 //       brief,                    // exactly what /api/dashboard/status reports:
 //                                 // { state, date?, revision?, unread? }, or
@@ -306,6 +306,7 @@ const STATE_WORD = /^[a-z_]{1,40}$/;
 
 export function createHub({
   registry, jobs, routines = null, schedule = defaultSchedule, timeZone = TIME_ZONE, focus, focusBoard = null, brief, timeouts, limits = LIMITS,
+  focusSettings = null, focusRunner = null,
   adapters = {}, store = null, bindings = null, cmux = null, adaptersDisabled = null, settings = null, reads = null, briefReads = null, notifications = null, models = MODELS,
   home = os.homedir(), log = () => {}, now = () => new Date(),
 }) {
@@ -332,6 +333,14 @@ export function createHub({
   const views = (current = registry.current()) => agentViews(current, personas, settingsCurrent(), routines, reads, avatars);
   const routinesCurrent = () => routinesView(registry.current(), routines, schedule, timeZone, now());
   const notificationsCurrent = () => (notifications ? notifications.view() : { open: 0, items: [] });
+  const focusView = (board = null, available = true) => ({
+    available,
+    native: true,
+    updated: board?.updated ?? null,
+    paused: focusSettings?.current?.().paused ?? false,
+    counts: focusCounts(board?.items),
+    scanning: focusRunner?.state?.().running ?? null,
+  });
   const turnMaxMs = timeouts.turnMaxMs ?? TIMEOUTS.turnMaxMs;
   // agentId -> runtime entry for each registry persona (see personaEntry).
   const personas = new Map();
@@ -633,8 +642,28 @@ export function createHub({
 
   const unsubscribeFocusBoard = focusBoard && typeof focusBoard.onChange === 'function' ? focusBoard.onChange((board) => {
     if (closed) return;
-    const next = { available: true, native: true, updated: board?.updated ?? null };
+    const next = focusView(board);
     if (!sameJson(next, state.focus)) commit({ focus: next });
+  }) : () => {};
+
+  const unsubscribeFocusSettings = focusSettings && typeof focusSettings.onChange === 'function' ? focusSettings.onChange(() => {
+    if (closed || state.focus.native !== true) return;
+    const next = { ...state.focus, paused: focusSettings.current().paused };
+    if (!sameJson(next, state.focus)) commit({ focus: next });
+  }) : () => {};
+
+  const unsubscribeFocusRunner = focusRunner && typeof focusRunner.onChange === 'function' ? focusRunner.onChange(() => {
+    if (closed) return;
+    const dashboard = focusRunner.rows().map((row) => ({ ...row, agentId: null, agentName: 'Focus' }));
+    const retained = state.jobs.items.filter((row) => row.source !== 'dashboard');
+    const patch = {};
+    const nextJobs = { ...state.jobs, items: [...retained, ...dashboard] };
+    if (!sameJson(nextJobs, state.jobs)) patch.jobs = nextJobs;
+    if (state.focus.native === true) {
+      const nextFocus = { ...state.focus, scanning: focusRunner.state().running ?? null };
+      if (!sameJson(nextFocus, state.focus)) patch.focus = nextFocus;
+    }
+    if (Object.keys(patch).length > 0) commit(patch);
   }) : () => {};
 
   // Adds `unread` to a ready brief summary when briefReads is configured:
@@ -651,7 +680,7 @@ export function createHub({
     const native = focusBoard && await focusBoard.exists();
     const [focusStatus, briefStatus] = await Promise.all([
       native
-        ? focusBoard.read().then((value) => ({ available: true, native: true, updated: value.board?.updated ?? null }))
+        ? focusBoard.read().then((value) => focusView(value.board))
         : bounded((signal) => focus.checkHealth({ signal }), budget).then(
           (result) => ({ available: result?.available === true, native: false }),
           () => ({ available: false, native: false }),
@@ -881,6 +910,8 @@ export function createHub({
       unsubscribeRoutines();
       unsubscribeNotifications();
       unsubscribeFocusBoard();
+      unsubscribeFocusSettings();
+      unsubscribeFocusRunner();
       for (const unsubscribe of adapterUnsubscribes.splice(0)) unsubscribe();
       for (const entry of personas.values()) {
         clearTimeout(entry.timer);
@@ -889,6 +920,17 @@ export function createHub({
       listeners.clear();
     },
   };
+}
+
+function focusCounts(items) {
+  const counts = { now: 0, today: 0, tomorrow: 0, later: 0 };
+  for (const item of Array.isArray(items) ? items : []) {
+    if (item?.status !== 'open') continue;
+    if (item.tier === 'today') counts[item.now === true ? 'now' : 'today'] += 1;
+    else if (item.tier === 'tomorrow') counts.tomorrow += 1;
+    else if (item.tier === 'later') counts.later += 1;
+  }
+  return counts;
 }
 
 function personaEntry(agent, adapter) {

@@ -5,7 +5,7 @@
 // status. It never loads, starts, stops, or edits a job, and it runs nothing
 // on a timer: the caller refreshes on demand.
 //
-// createJobs({ registry, launchAgentsDir, focus, timeouts, log,
+// createJobs({ registry, runner, launchAgentsDir, focus, timeouts, log,
 //             readPlist, launchctlList }) returns:
 //
 //   refresh({ signal }) -> Promise<{ refreshedAt, focusAvailable, jobs }>
@@ -39,7 +39,8 @@
 //       loaded" when launchctl does not know the label, and "unknown" when
 //       the plist could not be read (available: false; launchctl is skipped).
 //       failures24h and paused are null.
-//     Sorted by agent in registry order, then by label.
+//     Sorted by agent in registry order, then by label, followed by the
+//     in-process runner's Focus rows when a runner is supplied.
 //
 // Default dependencies (injected in tests):
 //   readPlist(file, { signal }) -> Promise<object | null>
@@ -102,6 +103,7 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function createJobs({
   registry,
+  runner = null,
   launchAgentsDir,
   jobRunner = 'launchd',
   focus,
@@ -205,10 +207,15 @@ export function createJobs({
       const results = await runLimited(jobs.map((job) => () => inspectOne(job.label, signal)), CONCURRENCY, signal);
       const status = await statusPromise;
 
+      const dashboard = runner ? runner.rows().map((row) => ({
+        ...row,
+        agentId: null,
+        agentName: 'Focus',
+      })) : [];
       return {
         refreshedAt: new Date().toISOString(),
         focusAvailable: status !== null,
-        jobs: jobs.map((job, index) => buildRoutine(job, results[index], status, source)),
+        jobs: [...jobs.map((job, index) => buildRoutine(job, results[index], status, source)), ...dashboard],
       };
     },
   };
