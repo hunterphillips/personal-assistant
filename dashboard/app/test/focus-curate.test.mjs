@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -25,7 +25,7 @@ function fakeQuery(generator) {
   return query;
 }
 
-async function setup(t, { query, body, focusModel = { id: null, effort: null }, systemModel = { default: null, effort: null } } = {}) {
+async function setup(t, { query, body, importSdk, timeouts = TIMEOUTS, focusModel = { id: null, effort: null }, systemModel = { default: null, effort: null } } = {}) {
   const dir = await tempDir(t);
   const focusDir = path.join(dir, 'focus');
   const file = path.join(focusDir, 'board.json');
@@ -39,9 +39,9 @@ async function setup(t, { query, body, focusModel = { id: null, effort: null }, 
   const settings = { current: () => ({ model: focusModel }) };
   const systemSettings = { current: () => ({ settings: { model: systemModel } }) };
   const curator = createCurator({
-    query, board, rules, vault: { readPriorities: () => 'Priority text', readProjectState: () => 'Project state' },
+    query, importSdk, board, rules, vault: { readPriorities: () => 'Priority text', readProjectState: () => 'Project state' },
     profile: { read: async () => 'Profile text' }, settings, systemSettings,
-    zone: 'America/Chicago', limits: LIMITS, timeouts: TIMEOUTS, cwd: focusDir, now: () => NOW,
+    zone: 'America/Chicago', limits: LIMITS, timeouts, cwd: focusDir, now: () => NOW,
   });
   return { board, changesFile, curator, file, focusDir, rules };
 }
@@ -67,8 +67,9 @@ test('the scan prompt carries every section in order, compact tombstones, other 
     '=== CLOSED ITEMS', '=== CANDIDATES (source: gmail)', '=== LATEST CANDIDATES FROM THE OTHER SOURCES',
     '=== RECENT USER CORRECTIONS', '=== YOUR OUTPUT ===',
   ];
-  let position = -1;
-  for (const heading of headings) {
+  assert.ok(prompt.startsWith('FRESH RULES\n'));
+  let position = 0;
+  for (const heading of headings.slice(1)) {
     const next = prompt.indexOf(heading);
     assert.ok(next > position, `${heading} follows the prior section`);
     position = next;
@@ -139,10 +140,12 @@ test('failed SDK results and API-key init messages are failed outcomes', async (
 test('rejected, written, stale, and empty op answers map to curator outcomes', async (t) => {
   const rejectedQuery = fakeQuery(async function* () { yield init(); yield result({ ops: [{ op: 'expire', id: 'done-one' }] }); });
   const rejected = await setup(t, { query: rejectedQuery });
+  const rejectedBefore = await readFile(rejected.file);
   const rejectedAnswer = await rejected.curator.run({ trigger: 'rejudge' });
   assert.equal(rejectedAnswer.outcome, 'rejected');
   assert.match(rejectedAnswer.detail, /may not touch/);
   assert.equal((await changeLines(rejected.changesFile)).length, 0);
+  assert.deepEqual(await readFile(rejected.file), rejectedBefore);
 
   const expireQuery = fakeQuery(async function* () { yield init(); yield result({ ops: [{ op: 'expire', id: 'tomorrow-one', meta: 'Shipped' }] }); });
   const expired = await setup(t, { query: expireQuery });
@@ -152,9 +155,13 @@ test('rejected, written, stale, and empty op answers map to curator outcomes', a
   assert.equal((await changeLines(expired.changesFile))[0].who, 'curator');
 
   let staleBoard;
+  let staleBefore;
+  let staleLines;
   const staleQuery = fakeQuery(async function* () {
     yield init();
     await staleBoard.change({ op: 'note', id: 'today-one', note: 'Changed while curating' });
+    staleBefore = await readFile(stale.file);
+    staleLines = await changeLines(stale.changesFile);
     yield result({ ops: [{ op: 'expire', id: 'tomorrow-one' }] });
   });
   const stale = await setup(t, { query: staleQuery });
@@ -163,26 +170,58 @@ test('rejected, written, stale, and empty op answers map to curator outcomes', a
   assert.deepEqual(staleAnswer.outcome, 'skipped');
   assert.equal(staleAnswer.detail, 'The board changed during the call.');
   assert.equal((await changeLines(stale.changesFile)).filter((line) => line.who === 'curator').length, 0);
+  assert.deepEqual(await changeLines(stale.changesFile), staleLines);
+  assert.deepEqual(await readFile(stale.file), staleBefore);
 
   const emptyQuery = fakeQuery(async function* () { yield init(); yield result({ ops: [] }); });
   const empty = await setup(t, { query: emptyQuery });
   assert.equal((await empty.curator.run({ trigger: 'rejudge' })).outcome, 'no change');
 });
 
-test('caller aborts fail the run', async (t) => {
+test('caller aborts fail the run with a sentence', async (t) => {
   const started = Promise.withResolvers();
   const query = fakeQuery(async function* ({ options }) {
     yield init();
     started.resolve();
     await new Promise((resolve) => options.abortController.signal.addEventListener('abort', resolve, { once: true }));
-    throw new Error('aborted');
+    throw new Error('Claude Code process aborted by user');
   });
   const found = await setup(t, { query });
   const controller = new AbortController();
   const running = found.curator.run({ trigger: 'rejudge', signal: controller.signal });
   await started.promise;
   controller.abort();
-  assert.equal((await running).outcome, 'failed');
+  const answer = await running;
+  assert.equal(answer.outcome, 'failed');
+  assert.equal(answer.detail, 'The run was stopped.');
+});
+
+test('a timed-out call fails with a sentence', async (t) => {
+  const query = fakeQuery(async function* ({ options }) {
+    yield init();
+    await new Promise((resolve) => options.abortController.signal.addEventListener('abort', resolve, { once: true }));
+    throw new Error('Claude Code process aborted by user');
+  });
+  const found = await setup(t, { query, timeouts: { focusCurateMs: 20 } });
+  const answer = await found.curator.run({ trigger: 'rejudge' });
+  assert.equal(answer.outcome, 'failed');
+  assert.equal(answer.detail, 'The curator timed out.');
+});
+
+test('a missing or invalid board and an unloadable SDK fail with sentences', async (t) => {
+  const query = fakeQuery(async function* () { yield init(); yield result(); });
+  const missing = await setup(t, { query });
+  await unlink(missing.file);
+  assert.equal((await missing.curator.run({ trigger: 'rejudge' })).detail, 'The board file is missing.');
+
+  const invalid = await setup(t, { query, body: '{' });
+  assert.equal((await invalid.curator.run({ trigger: 'rejudge' })).detail, 'The board file is not valid.');
+  assert.equal(query.calls.length, 0);
+
+  const unloadable = await setup(t, { importSdk: async () => { throw new Error('Cannot find package'); } });
+  const answer = await unloadable.curator.run({ trigger: 'rejudge' });
+  assert.equal(answer.outcome, 'failed');
+  assert.equal(answer.detail, 'The Claude Agent SDK could not be loaded.');
 });
 
 test('query options are isolated and model choices follow Focus then system settings', async (t) => {

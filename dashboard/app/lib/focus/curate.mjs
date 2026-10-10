@@ -7,9 +7,11 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 
 import { BoardError, deepFreeze } from './board.mjs';
+import { RuntimeError } from '../runtime/adapter.mjs';
 import { createQueryLoader, SUBSCRIPTION_SOURCES } from '../runtime/sdk.mjs';
 
 const DAY_MS = 86_400_000;
+const BOARD_PROBLEMS = { no_board: 'The board file is missing.', board_invalid: 'The board file is not valid.' };
 const SYSTEM_PROMPT = 'You curate the Focus board. Answer with the ops object the schema describes and nothing else.';
 const itemSchema = JSON.parse(await readFile(new URL('./item.schema.json', import.meta.url), 'utf8'));
 const opsSchema = JSON.parse(await readFile(new URL('./ops.schema.json', import.meta.url), 'utf8'));
@@ -20,13 +22,14 @@ export function createCurator(deps) {
     cwd, log: rawLog = () => {}, now = () => new Date(),
   } = deps;
   const disabled = deps.query === null;
-  const loader = disabled ? null : createQueryLoader({ query: deps.query });
+  const loader = disabled ? null : createQueryLoader({ query: deps.query, ...(deps.importSdk ? { importSdk: deps.importSdk } : {}) });
   const log = (entry) => { try { rawLog(entry); } catch {} };
 
   async function run({ trigger, source = null, candidates = [], others = [], signal = null }) {
     const runId = randomUUID();
     let pruned;
     let usage;
+    let abortDetail = null;
     try {
       const pruneResult = await board.prune({ run: runId });
       pruned = pruneResult.pruned;
@@ -48,9 +51,8 @@ export function createCurator(deps) {
         current: current.board, trigger, source, candidates, others, corrections,
       });
       const controller = new AbortController();
-      let abortDetail = null;
       const onAbort = () => {
-        abortDetail = signal?.reason instanceof Error ? signal.reason.message : 'The curate call was aborted.';
+        abortDetail = 'The run was stopped.';
         controller.abort(signal?.reason);
       };
       if (signal) signal.addEventListener('abort', onAbort, { once: true });
@@ -96,14 +98,11 @@ export function createCurator(deps) {
       } catch (error) {
         if (error instanceof BoardError && error.code === 'rejected') return outcome('rejected', { detail: error.detail, pruned, usage });
         if (error instanceof BoardError && error.code === 'stale') return outcome('skipped', { detail: 'The board changed during the call.', pruned, usage });
-        if (error instanceof BoardError && ['no_board', 'board_invalid'].includes(error.code)) {
-          return outcome('failed', { detail: error.code === 'no_board' ? 'The Focus board is missing.' : 'The Focus board is invalid.', pruned, usage });
-        }
         throw error;
       }
     } catch (error) {
       log({ event: 'focus_curate_error', error: error?.message ?? String(error) });
-      return outcome('failed', { detail: sentence(error), ...(pruned === undefined ? {} : { pruned }), ...(usage ? { usage } : {}) });
+      return outcome('failed', { detail: abortDetail ?? sentence(error), ...(pruned === undefined ? {} : { pruned }), ...(usage ? { usage } : {}) });
     }
   }
 
@@ -205,10 +204,12 @@ function resultProblem(result) {
 
 function boardProblem(result) {
   if (result.problem) return result.problem;
-  return 'The Focus board is missing.';
+  return BOARD_PROBLEMS.no_board;
 }
 
 function sentence(error) {
+  if (error instanceof BoardError && Object.hasOwn(BOARD_PROBLEMS, error.code)) return BOARD_PROBLEMS[error.code];
+  if (error instanceof RuntimeError && error.code === 'sdk_unavailable') return 'The Claude Agent SDK could not be loaded.';
   const message = error?.message ?? String(error);
   return /[.!?]$/.test(message) ? message : `${message}.`;
 }
