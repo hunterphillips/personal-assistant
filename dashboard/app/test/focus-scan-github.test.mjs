@@ -226,6 +226,28 @@ test('a failing gh throws ScanError gh_failed with its stderr', async () => {
   ));
 });
 
+test('a failed gh run is described by its stderr, then its stdout, then its code, never its command line', async () => {
+  const failing = (fields) => fakeGh({
+    'repo list': () => {
+      throw Object.assign(new Error(`Command failed: gh api graphql -f query=${'x'.repeat(50)}`), fields);
+    },
+  });
+  const detailOf = async (fields) => {
+    try {
+      await run(failing(fields));
+    } catch (error) {
+      assert.ok(error instanceof ScanError && error.code === 'gh_failed');
+      return error.detail;
+    }
+    assert.fail('the scan resolved');
+  };
+  assert.equal(await detailOf({ stderr: '  denied \n', stdout: 'out' }), 'denied');
+  assert.equal(await detailOf({ stderr: '', stdout: `${'y'.repeat(600)}` }), 'y'.repeat(500));
+  assert.equal(await detailOf({ stderr: '', stdout: '', code: 'ENOENT' }), 'ENOENT');
+  assert.equal(await detailOf({ code: 1 }), '1');
+  assert.doesNotMatch(await detailOf({}), /Command failed|query=/);
+});
+
 test('an aborted signal throws ScanError gh_failed before gh runs', async () => {
   const gh = fakeGh();
   const controller = new AbortController();

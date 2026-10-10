@@ -21,7 +21,7 @@
     <string>{{PATH}}</string>
     <key>DASHBOARD_PORT</key>
     <string>{{PORT}}</string>
-{{HOME_ENTRY}}{{PUBLIC_ORIGIN_ENTRY}}{{BRIEFS_DIR_ENTRY}}{{FOCUS_ORIGIN_ENTRY}}  </dict>
+{{HOME_ENTRY}}{{PUBLIC_ORIGIN_ENTRY}}{{BRIEFS_DIR_ENTRY}}{{FOCUS_ORIGIN_ENTRY}}{{GH_CLI_ENTRY}}  </dict>
   <key>StandardOutPath</key>
   <string>{{LOG_PATH}}</string>
   <key>StandardErrorPath</key>

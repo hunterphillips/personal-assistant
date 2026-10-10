@@ -6,8 +6,8 @@
 // or an aborted signal throws ScanError('gh_failed', detail). Repos under other
 // owners are never queried. It never writes anything, on GitHub or on disk.
 //
-// createGh({ timeout }) is the real `gh`, run through execFile; tests inject
-// their own.
+// createGh({ cli, timeout }) is the real `gh` (cli is config.ghCli, default
+// `gh` on PATH), run through execFile; tests inject their own.
 
 import { execFile } from 'node:child_process';
 
@@ -66,11 +66,12 @@ export const REPO_QUERY = `query($owner: String!, $name: String!) {
   }
 }`;
 
-export function createGh({ timeout }) {
+export function createGh({ cli = 'gh', timeout }) {
   return (args, { signal } = {}) => new Promise((resolve, reject) => {
-    execFile('gh', args, { timeout, signal, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' }, (error, stdout, stderr) => {
+    execFile(cli, args, { timeout, signal, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' }, (error, stdout, stderr) => {
       if (error) {
         error.stderr = stderr;
+        error.stdout = stdout;
         reject(error);
       } else {
         resolve(stdout);
@@ -191,6 +192,17 @@ export function orderAndCap(candidates) {
     .slice(0, MAX_CANDIDATES);
 }
 
+// What a failed gh run says: its stderr, else the start of its stdout, else
+// the error code. execFile's message carries the whole command line, query
+// included, so it is never used.
+export function failureDetail(error) {
+  const stderr = String(error?.stderr ?? '').trim();
+  if (stderr) return stderr;
+  const stdout = String(error?.stdout ?? '').trim();
+  if (stdout) return stdout.slice(0, 500);
+  return String(error?.code ?? error?.signal ?? 'gh failed.');
+}
+
 export async function scan({ gh, now = Date.now, limits, log = () => {}, signal } = {}) {
   const nowMs = typeof now === 'function' ? now() : Number(now);
 
@@ -200,8 +212,7 @@ export async function scan({ gh, now = Date.now, limits, log = () => {}, signal 
     try {
       stdout = await gh(args, { signal });
     } catch (error) {
-      const detail = String(error?.stderr || error?.message || error).trim();
-      throw new ScanError('gh_failed', detail || 'gh failed.');
+      throw new ScanError('gh_failed', failureDetail(error));
     }
     try {
       return JSON.parse(stdout);

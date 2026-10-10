@@ -6,7 +6,7 @@ ExecStart={{START_PATH}} {{NODE_PATH}}
 WorkingDirectory={{APP_DIR}}
 Environment={{PATH_ENTRY}}
 Environment="DASHBOARD_PORT={{PORT}}"
-{{HOME_ENTRY}}{{PUBLIC_ORIGIN_ENTRY}}{{BRIEFS_DIR_ENTRY}}{{FOCUS_ORIGIN_ENTRY}}Restart=on-failure
+{{HOME_ENTRY}}{{PUBLIC_ORIGIN_ENTRY}}{{BRIEFS_DIR_ENTRY}}{{FOCUS_ORIGIN_ENTRY}}{{GH_CLI_ENTRY}}Restart=on-failure
 StandardOutput=append:{{DATA_ROOT}}/log/dashboard.log
 StandardError=append:{{DATA_ROOT}}/log/dashboard.log
 

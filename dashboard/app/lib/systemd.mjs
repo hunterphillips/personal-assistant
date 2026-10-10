@@ -11,7 +11,7 @@ const TEMPLATE = fs.readFileSync(TEMPLATE_PATH, 'utf8');
 // A control character would end a directive and start another; a backslash
 // in an unquoted path could continue the line.
 const UNIT_INVALID = /[\u0000-\u001F\u007F]/;
-const PATH_NAMES = new Set(['nodePath', 'appDir', 'home', 'briefsDir']);
+const PATH_NAMES = new Set(['nodePath', 'appDir', 'home', 'briefsDir', 'ghCli']);
 // The data root a unit names when the installer exports none: the one
 // dashboard-start resolves from HOME, written with systemd's home specifier.
 const DEFAULT_DATA_ROOT = '%h/.personal-assistant';
@@ -41,6 +41,7 @@ export function renderUnit(input) {
     PUBLIC_ORIGIN_ENTRY: environmentEntry('DASHBOARD_PUBLIC_ORIGIN', values.publicOrigin),
     BRIEFS_DIR_ENTRY: environmentEntry('DASHBOARD_BRIEFS_DIR', values.briefsDir),
     FOCUS_ORIGIN_ENTRY: environmentEntry('DASHBOARD_FOCUS_ORIGIN', values.focusOrigin),
+    GH_CLI_ENTRY: environmentEntry('DASHBOARD_GH_CLI', values.ghCli),
     DATA_ROOT: values.exportHome ? escapeSpecifiers(values.home) : DEFAULT_DATA_ROOT,
   };
 

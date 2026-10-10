@@ -96,6 +96,13 @@ test('renderPlist names the data root in the environment only when asked', () =>
   assert.throws(() => validatePlistInputs({ ...VALID_INPUTS, home: undefined }), /home must be an absolute path/);
 });
 
+test('renderPlist names the gh command only when given one', () => {
+  assert.doesNotMatch(renderPlist(VALID_INPUTS), /DASHBOARD_GH_CLI/);
+  const xml = renderPlist({ ...VALID_INPUTS, ghCli: '/opt/homebrew/bin/gh' });
+  assert.match(xml, /<key>DASHBOARD_GH_CLI<\/key>\s*<string>\/opt\/homebrew\/bin\/gh<\/string>/);
+  assert.throws(() => validatePlistInputs({ ...VALID_INPUTS, ghCli: 'gh' }), /ghCli must be an absolute path/);
+});
+
 test('validatePlistInputs rejects relative paths, insecure origins, and invalid ports', () => {
   assert.throws(
     () => validatePlistInputs({ ...VALID_INPUTS, nodePath: 'bin/node' }),

@@ -2053,6 +2053,7 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_CMUX_SOCKET_PATH_FILE` | `~/.local/state/cmux/last-socket-path` | File cmux writes its socket path to while it runs. Missing means cmux is not running. |
 | `DASHBOARD_CMUX_PASSWORD_FILE` | `~/.local/state/cmux/socket-control-password` | The cmux socket password, where cmux keeps it. Read on each call, never logged. |
 | `DASHBOARD_CMUX_CLI` | `/Applications/cmux.app/Contents/Resources/bin/cmux` | The cmux binary for `sessions list`. The LaunchAgent's `PATH` has no `cmux`. |
+| `DASHBOARD_GH_CLI` | `gh` on `PATH` | The GitHub CLI the Focus GitHub scan runs. `bin/dashboard-install` writes the `gh` it finds on its own `PATH`, since the job's `PATH` has no Homebrew. |
 
 The server always binds `127.0.0.1`. PUT and POST requests must send an
 `Origin` that matches the request's Host, and JSON unless they are one of the

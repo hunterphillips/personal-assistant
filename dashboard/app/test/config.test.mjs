@@ -269,6 +269,13 @@ test('cmux files default under the home directory and honor absolute and relativ
   assert.equal(config.limits.cmuxFrameBytes, 1_048_576);
 });
 
+test('the gh command defaults to a bare name on PATH and honors absolute and relative overrides', () => {
+  assert.equal(loadConfig({}).ghCli, 'gh');
+  assert.equal(loadConfig({ DASHBOARD_GH_CLI: '' }).ghCli, 'gh');
+  assert.equal(loadConfig({ DASHBOARD_GH_CLI: '/opt/homebrew/bin/gh' }).ghCli, '/opt/homebrew/bin/gh');
+  assert.equal(loadConfig({ DASHBOARD_GH_CLI: 'bin/fake-gh' }).ghCli, path.resolve(APP_ROOT, 'bin/fake-gh'));
+});
+
 test('persona limits and timeouts are exposed', () => {
   const config = loadConfig({});
   assert.equal(config.timeouts.drainMs, 30_000);

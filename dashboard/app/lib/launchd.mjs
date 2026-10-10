@@ -24,10 +24,11 @@ export function validatePlistInputs({
   publicOrigin,
   briefsDir,
   focusOrigin,
+  ghCli,
 }) {
   const problems = [];
 
-  for (const [name, value] of Object.entries({ label, nodePath, appDir, home, publicOrigin, briefsDir, focusOrigin })) {
+  for (const [name, value] of Object.entries({ label, nodePath, appDir, home, publicOrigin, briefsDir, focusOrigin, ghCli })) {
     if (typeof value === 'string' && XML_INVALID.test(value)) {
       problems.push(`${name} contains characters that cannot appear in a plist`);
     }
@@ -40,6 +41,7 @@ export function validatePlistInputs({
   validateAbsolutePath(appDir, 'appDir', problems);
   validateAbsolutePath(home, 'home', problems);
   if (briefsDir !== undefined) validateAbsolutePath(briefsDir, 'briefsDir', problems);
+  if (ghCli !== undefined) validateAbsolutePath(ghCli, 'ghCli', problems);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     problems.push('port must be an integer from 1 to 65535');
   }
@@ -70,6 +72,7 @@ export function validatePlistInputs({
     publicOrigin: normalizedPublicOrigin,
     briefsDir,
     focusOrigin: normalizedFocusOrigin,
+    ghCli,
   });
 }
 
@@ -87,6 +90,7 @@ export function renderPlist(input) {
     PUBLIC_ORIGIN_ENTRY: environmentEntry('DASHBOARD_PUBLIC_ORIGIN', values.publicOrigin),
     BRIEFS_DIR_ENTRY: environmentEntry('DASHBOARD_BRIEFS_DIR', values.briefsDir),
     FOCUS_ORIGIN_ENTRY: environmentEntry('DASHBOARD_FOCUS_ORIGIN', values.focusOrigin),
+    GH_CLI_ENTRY: environmentEntry('DASHBOARD_GH_CLI', values.ghCli),
     LOG_PATH: escapeXml(logPath),
   };
 

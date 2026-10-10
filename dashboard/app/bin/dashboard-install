@@ -56,6 +56,7 @@ async function main() {
     exportHome: !isUnset(process.env.PERSONAL_ASSISTANT_HOME),
     port: options.port,
     publicOrigin: options.publicOrigin,
+    ghCli: resolveGh(),
   });
   verifyNode(inputs.nodePath);
   verifyStartScript(START_PATH);
@@ -277,6 +278,16 @@ function resolveHome() {
     );
   }
   return homeDir;
+}
+
+// The daemon's PATH is node's directory and the system's, which misses
+// Homebrew, so the job names the gh this installer finds on its own PATH.
+function resolveGh() {
+  const result = spawnSync('/bin/sh', ['-c', 'command -v gh'], { encoding: 'utf8' });
+  const found = result.status === 0 ? result.stdout.trim() : '';
+  if (found && path.isAbsolute(found)) return found;
+  console.error('dashboard-install: gh was not found; the Focus GitHub scan needs gh on the daemon\'s PATH or DASHBOARD_GH_CLI.');
+  return undefined;
 }
 
 function verifyNode(nodePath) {

@@ -64,6 +64,13 @@ test('renderUnit quotes and escapes values for systemd', () => {
   assert.match(unit, /^Environment="DASHBOARD_BRIEFS_DIR=\/home\/example\/Briefs \\"daily\\""$/m);
 });
 
+test('renderUnit names the gh command only when given one', () => {
+  assert.doesNotMatch(renderUnit(VALID_INPUTS), /DASHBOARD_GH_CLI/);
+  const unit = renderUnit({ ...VALID_INPUTS, ghCli: '/usr/bin/gh' });
+  assert.match(unit, /^Environment="DASHBOARD_GH_CLI=\/usr\/bin\/gh"$/m);
+  assert.throws(() => validateUnitInputs({ ...VALID_INPUTS, ghCli: 'gh' }), /ghCli must be an absolute path/);
+});
+
 test('validateUnitInputs rejects relative paths, insecure origins, invalid ports, and characters a unit cannot carry', () => {
   assert.throws(() => validateUnitInputs({ ...VALID_INPUTS, nodePath: 'bin/node' }), /nodePath must be an absolute path/);
   assert.throws(() => validateUnitInputs({ ...VALID_INPUTS, appDir: 'dashboard/app' }), /appDir must be an absolute path/);
@@ -123,6 +130,31 @@ test('dashboard-install dry run on systemd prints the unit and its commands and 
     ]);
     assert.deepEqual(readFakeState(fixture).calls, []);
     assert.deepEqual(await listTree(fixture.appDir), before, 'nothing is written in the app');
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test('dashboard-install writes the gh it finds on its PATH into the unit, and says so when it finds none', async () => {
+  const fixture = await makeInstallerFixture();
+  try {
+    const renderedPath = path.join(fixture.dataHome, 'cache', 'systemd', `${LABEL}.service`);
+    const dryRun = (env) => spawnSync(process.execPath, [fixture.installerPath, '--dry-run', '--node', process.execPath], {
+      env, encoding: 'utf8',
+    });
+
+    const missing = dryRun({ ...fakeSystemctlEnv(fixture), PATH: fixture.fakeBinDir });
+    assert.equal(missing.status, 0, missing.stderr || missing.stdout);
+    assert.match(missing.stderr, /the Focus GitHub scan needs gh on the daemon's PATH or DASHBOARD_GH_CLI/);
+    assert.doesNotMatch(await fsp.readFile(renderedPath, 'utf8'), /DASHBOARD_GH_CLI/);
+
+    const ghPath = path.join(fixture.fakeBinDir, 'gh');
+    await fsp.writeFile(ghPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const found = dryRun({ ...fakeSystemctlEnv(fixture), PATH: fixture.fakeBinDir });
+    assert.equal(found.status, 0, found.stderr || found.stdout);
+    assert.doesNotMatch(found.stderr, /needs gh/);
+    const unit = await fsp.readFile(renderedPath, 'utf8');
+    assert.equal(unit.split('\n').filter((line) => line === `Environment="DASHBOARD_GH_CLI=${ghPath}"`).length, 1);
   } finally {
     await cleanupFixture(fixture);
   }

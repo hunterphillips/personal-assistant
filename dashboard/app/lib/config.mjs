@@ -48,6 +48,9 @@
 //                               (default ~/.local/state/cmux/socket-control-password)
 //   DASHBOARD_CMUX_CLI          the cmux command-line binary, an absolute path
 //                               (default /Applications/cmux.app/Contents/Resources/bin/cmux)
+//   DASHBOARD_GH_CLI            the GitHub CLI the Focus GitHub scan runs, an absolute path
+//                               (default `gh`, found on the daemon's PATH; bin/dashboard-install
+//                               writes the path it resolves at install time)
 
 import os from 'node:os';
 import path from 'node:path';
@@ -67,6 +70,7 @@ const REPO_ROOT = path.resolve(APP_ROOT, '../..');
 // until someone else runs the daemon (no configurability ahead of need).
 export const TIME_ZONE = 'America/Chicago';
 const DEFAULT_CMUX_CLI = '/Applications/cmux.app/Contents/Resources/bin/cmux';
+const DEFAULT_GH_CLI = 'gh';
 const BIND_HOST = '127.0.0.1';
 const JOB_RUNNERS = new Set(['launchd', 'systemd']);
 const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
@@ -201,6 +205,8 @@ export function loadConfig(env = process.env, { platform = process.platform } = 
   const cmuxPasswordFile = parsePath(env.DASHBOARD_CMUX_PASSWORD_FILE,
     path.join(os.homedir(), '.local', 'state', 'cmux', 'socket-control-password'));
   const cmuxCli = parsePath(env.DASHBOARD_CMUX_CLI, DEFAULT_CMUX_CLI);
+  // The default stays a bare name for execFile to find on PATH.
+  const ghCli = isUnset(env.DASHBOARD_GH_CLI) ? DEFAULT_GH_CLI : parsePath(env.DASHBOARD_GH_CLI, DEFAULT_GH_CLI);
 
   // Only the exact bound authority is refused; another loopback name or a
   // different address with the same port is a different socket.
@@ -259,6 +265,7 @@ export function loadConfig(env = process.env, { platform = process.platform } = 
     cmuxSocketPathFile,
     cmuxPasswordFile,
     cmuxCli,
+    ghCli,
     allowedHosts: Object.freeze(allowedHosts),
     allowedOrigins: Object.freeze(allowedOrigins),
     limits: LIMITS,
