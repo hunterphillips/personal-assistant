@@ -3,11 +3,17 @@
 // stream client, in real
 // browsers against the in-memory registry and jobs of
 // test/support/browser-server.mjs. Pause and Resume reach the isolated
-// Focus copy, whose launchd stubs refuse.
+// Focus copy, whose launchd stubs refuse. The daemon's own Focus rows come
+// from a real job runner over test/fixtures/focus's runs.
+
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { expect, expectView, nav, needsFocus, test } from '../support/browser-test.mjs';
 
 const DATE = '2026-09-15';
+const FOCUS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'focus');
+const isLaunchdScan = (item) => item.label.startsWith('com.focus.scan-');
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const ago = (ms) => new Date(Date.now() - ms).toISOString();
@@ -450,6 +456,50 @@ test.describe('with seeded jobs', () => {
     // The schedule sits beside the name: it starts above the name's bottom.
     await expect.poll(() => gap(stacked, '.routine-name', '.routine-schedule')).toBeLessThan(0);
     await expect.poll(async () => (await page.locator('.routine-card').first().boundingBox())?.width ?? null).toBeLessThanOrEqual(720);
+  });
+});
+
+test.describe('with the daemon\'s Focus jobs', () => {
+  // The launchd scans without a failed one, so the rail's mark comes from the
+  // daemon's rows alone.
+  test.use({
+    withFocus: false,
+    hubOptions: {
+      build: () => ({
+        agents: AGENTS, focus: FOCUS,
+        jobs: { items: items().filter((item) => isLaunchdScan(item) && item.outcome !== 'failed'), focusAvailable: true, refreshedAt: ago(5_000) },
+      }),
+    },
+  });
+
+  const dashboardCard = (page) => page.locator('.routine-card').filter({ has: page.locator('[data-job-label="focus.curate"]') });
+  const launchdCard = (page) => page.locator('.routine-card').filter({ has: page.locator('[data-job-label^="com.focus.scan-"]') });
+  const label = (page, value) => page.locator(`#jobs-cards [data-job-label="${value}"]`);
+
+  test('the five rows sit on one Focus card with their badges and details, and a rejected run marks the rail', async ({ page, hub }) => {
+    await openHealth(page, hub);
+    await expect(dashboardCard(page).locator('.card-name')).toHaveText('Focus');
+    await expect(dashboardCard(page).locator('.role-chip')).toHaveCount(0);
+    await expect(dashboardCard(page).locator('.routine-name'))
+      .toHaveText(['Calendar scan', 'Gmail scan', 'GitHub scan', 'Notes scan', 'Curate']);
+    await expect(dashboardCard(page).locator('.routine-row .badge'))
+      .toHaveText(['Wrote', 'Failed', 'Never ran', 'Never ran', 'Rejected']);
+    await expect(label(page, 'focus.scan-gmail').locator('.routine-detail')).toHaveText('Sign in to Google again.');
+    await expect(label(page, 'focus.curate').locator('.routine-detail')).toHaveText('An op named an item that is done.');
+    await expect(label(page, 'focus.curate').locator('.routine-failures')).toHaveText('1 failure today');
+    await expect(label(page, 'focus.scan-calendar').locator('.routine-detail')).toHaveCount(0);
+
+    // Pause and the job-runner note belong to the launchd scans' card.
+    await expect(launchdCard(page).locator('[data-jobs-action]')).toHaveCount(1);
+    await expect(dashboardCard(page).locator('[data-jobs-action]')).toHaveCount(0);
+    await expect(dashboardCard(page).locator('.card-note')).toHaveCount(0);
+
+    await expect(page.locator('#health-indicator')).toBeVisible();
+    // Once Gmail's scan succeeds, the rejected curate alone keeps the mark.
+    await hub.focusRunner.enqueue('focus.scan-gmail', 'refresh');
+    await expect(label(page, 'focus.scan-gmail').locator('.badge')).toHaveText('Wrote');
+    await expect(label(page, 'focus.scan-gmail').locator('.routine-detail')).toHaveCount(0);
+    await expect(page.locator('#health-indicator')).toBeVisible();
   });
 });
 

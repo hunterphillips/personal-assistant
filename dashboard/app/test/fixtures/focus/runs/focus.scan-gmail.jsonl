@@ -1,0 +1,2 @@
+{"run":"fixture-gmail","occurrence":"1999-12-31T23:35:00.000Z","trigger":"schedule","startedAt":"1999-12-31T23:54:00.000Z"}
+{"run":"fixture-gmail","endedAt":"1999-12-31T23:54:01.000Z","outcome":"failed","detail":"Sign in to Google again."}

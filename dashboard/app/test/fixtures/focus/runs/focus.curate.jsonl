@@ -1,0 +1,2 @@
+{"run":"fixture-curate","occurrence":null,"trigger":"scan","source":"calendar","startedAt":"1999-12-31T23:53:00.000Z"}
+{"run":"fixture-curate","endedAt":"1999-12-31T23:53:20.000Z","outcome":"rejected","detail":"An op named an item that is done."}

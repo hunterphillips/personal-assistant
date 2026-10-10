@@ -1,0 +1,2 @@
+{"run":"fixture-calendar","occurrence":"1999-12-31T23:05:00.000Z","trigger":"schedule","startedAt":"1999-12-31T23:52:00.000Z"}
+{"run":"fixture-calendar","endedAt":"1999-12-31T23:52:02.000Z","outcome":"wrote","candidates":2}

@@ -43,7 +43,7 @@
 // directories.
 
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
 import os from 'node:os';
@@ -58,6 +58,9 @@ import { createBriefInstructions } from '../../lib/brief-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
 import { createBoard } from '../../lib/focus/board.mjs';
+import { createFocusJobs } from '../../lib/focus/jobs.mjs';
+import { createFocusSettings } from '../../lib/focus/settings.mjs';
+import { createJobRunner } from '../../lib/jobs-runner.mjs';
 import { createGoals } from '../../lib/goals.mjs';
 import { createIdeas } from '../../lib/ideas.mjs';
 import { createInstructions } from '../../lib/instructions.mjs';
@@ -66,6 +69,7 @@ import { createNotices } from '../../lib/notices.mjs';
 import { NOTIFICATIONS_FILE, createNotifications } from '../../lib/notifications.mjs';
 import { RegistryError, validateDocument } from '../../lib/registry.mjs';
 import { createRoutines } from '../../lib/routines.mjs';
+import * as scheduleModule from '../../lib/schedule.mjs';
 import { describe, parseCron } from '../../lib/schedule.mjs';
 import { createScheduler } from '../../lib/scheduler.mjs';
 import { createSources } from '../../lib/sources.mjs';
@@ -79,6 +83,8 @@ import { closeServer, createTestHub, fakeBindings, fakeCmux, freePort, listen } 
 import { focusSourceAvailable, startIsolatedFocus } from './isolated-focus.mjs';
 
 const FORBIDDEN_PORTS = new Set([4242, 4243]);
+// The moment a fixture runs log's timestamps count from (test/fixtures/focus/README.md).
+const RUNS_EPOCH = Date.parse('2000-01-01T00:00:00.000Z');
 const AVATAR_FIXTURE = new URL('../fixtures/avatar/avatar.png', import.meta.url);
 
 export { focusSourceAvailable };
@@ -120,7 +126,14 @@ export { focusSourceAvailable };
 //              data root's focus/: board.json makes the hub report
 //              focus.native and the shell show the board; rules.md is the
 //              gear's rules. `focusBoardFile`, `focusChangesFile`, and
-//              `focusRulesFile` name the copy.
+//              `focusRulesFile` name the copy. It also builds the Focus
+//              settings over the copy's settings.json (`focusSettingsFile`),
+//              a real job runner over its runs/ (timestamps moved to the
+//              test's start; see the fixture's README) whose schedule never
+//              comes due, so only Refresh and enqueues run anything, and the
+//              Focus jobs over scripted scans and a scripted curator
+//              (`focusScripts`, see focusScripts below). The runner's rows
+//              join the jobs as server.mjs's jobs module adds them.
 //   instructions  a note (such as
 //              test/fixtures/feed-instructions/relevance.md) copied in as the
 //              feed `news`'s note.md when `feed` is given.
@@ -208,6 +221,7 @@ export async function startHub({
     const focusChangesFile = path.join(focusDir, 'changes.jsonl');
     const focusCandidatesDir = path.join(focusDir, 'candidates');
     const focusRulesFile = path.join(focusDir, 'rules.md');
+    if (focusFixture) await shiftRunTimes(path.join(focusDir, 'runs'), Date.now() - RUNS_EPOCH);
     const instructionsFile = path.join(feedsDir, 'news', 'note.md');
     if (instructions && feed) await cp(instructions, instructionsFile);
     const briefInstructionsFile = path.join(root, briefInstructions ? 'curator.md' : 'curator-missing.md');
@@ -274,7 +288,16 @@ export async function startHub({
     const focusRoutes = createFocusProxy(config);
     const briefRoutes = createBriefRoutes(config);
     const registry = controlledRegistry({ agents, ...registryState });
-    const jobs = controlledJobs(jobsSeed);
+    const focusSettings = focusFixture ? createFocusSettings({ file: config.focusSettingsPath, limits: config.limits }) : null;
+    if (focusSettings) await focusSettings.load();
+    // previous() answers null, so no occurrence is ever due; ticks still
+    // re-read the settings file as the daemon's do.
+    const focusRunner = focusFixture ? createJobRunner({
+      runsDir: config.focusRunsDir, schedule: { ...scheduleModule, previous: () => null }, zone: config.timeZone,
+      limits: config.limits, runLines: config.limits.focusRunLines, tickMs: 100, onTick: () => focusSettings.reload(),
+    }) : null;
+    const scripts = focusFixture ? focusScripts() : null;
+    const jobs = controlledJobs({ ...jobsSeed, runner: focusRunner });
     const threadsDir = path.join(root, 'threads');
     const store = createThreadStore({ dir: threadsDir, limits: config.limits });
     const personas = fakePersonas(personaSeed, store);
@@ -314,9 +337,17 @@ export async function startHub({
       file: config.focusRulesPath, path: 'focus/rules.md', maxBytes: config.limits.focusBoardBytes,
       label: 'Focus', event: 'focus_rules_error',
     }) : null;
+    const focusJobs = focusFixture ? createFocusJobs({
+      runner: focusRunner, board: focusBoard, settings: focusSettings, scans: scripts.scans, curator: scripts.curator,
+      candidatesDir: config.focusCandidatesDir, zone: config.timeZone, limits: config.limits, timeouts: config.timeouts,
+    }) : null;
+    if (focusRunner) {
+      await focusRunner.start();
+      cleanups.push(() => focusRunner.stop());
+    }
     const hub = createTestHub({
       config, focus: focusRoutes, focusBoard, brief: briefRoutes, registry, jobs, routines, adapters, store, bindings, cmux, settings, reads, briefReads, home,
-      notifications, now: clock.now,
+      notifications, focusSettings, focusRunner, now: clock.now,
     });
     await hub.start();
     const delegation = createDelegation({ hub, registry, notifications, limits: config.limits, timeouts: config.timeouts });
@@ -328,7 +359,7 @@ export async function startHub({
     });
     await scheduler.start();
     cleanups.push(async () => scheduler.stop());
-    if (jobsSeed) {
+    if (jobsSeed || focusRunner) {
       await hub.refreshJobs();
       jobs.calls = 0;
     }
@@ -364,7 +395,7 @@ export async function startHub({
     });
     const newHandler = () => createApp({
       config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feeds, sources,
-      ideas, ideasInstructions, focusBoard, focusInstructions,
+      ideas, ideasInstructions, focusBoard, focusInstructions, focusSettings, focusJobs, focusRunner,
       briefInstructions: briefInstructionsReader, notices, settings, registry, routines, scheduler, notifications, log: () => {},
     });
     let handler = newHandler();
@@ -394,6 +425,9 @@ export async function startHub({
       focusBoardFile,
       focusChangesFile,
       focusRulesFile,
+      focusSettingsFile: config.focusSettingsPath,
+      focusRunner,
+      focusScripts: scripts,
       instructionsFile,
       briefInstructionsFile,
       focus,
@@ -457,6 +491,71 @@ export async function startHub({
     await stop();
     throw error;
   }
+}
+
+// Moves every timestamp in a runs folder's logs forward by `ms`, so a
+// fixture's records read as minutes before the test.
+async function shiftRunTimes(dir, ms) {
+  let names;
+  try {
+    names = await readdir(dir);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  for (const name of names.filter((entry) => entry.endsWith('.jsonl'))) {
+    const file = path.join(dir, name);
+    const lines = (await readFile(file, 'utf8')).split('\n').filter(Boolean).map((raw) => {
+      const line = JSON.parse(raw);
+      for (const key of ['startedAt', 'endedAt', 'occurrence']) {
+        if (typeof line[key] === 'string') line[key] = new Date(Date.parse(line[key]) + ms).toISOString();
+      }
+      return JSON.stringify(line);
+    });
+    await writeFile(file, lines.map((line) => `${line}\n`).join(''), { mode: 0o600 });
+  }
+}
+
+// Scripted Focus scans and curator. Each scan resolves one invented
+// candidate for its source after `delayMs`, or once released when a test has
+// called hold(); `scanned` lists the sources in the order they ran. The
+// curator answers the next entry of `outcomes` (a test pushes onto it), or
+// { outcome: 'no change' } when it is empty, and records each call's input
+// in `calls`, so a test can read the run id it was handed.
+export function focusScripts() {
+  const scripts = {
+    delayMs: 20,
+    gate: null,
+    scanned: [],
+    outcomes: [],
+    hold() {
+      let release;
+      scripts.gate = new Promise((resolve) => { release = resolve; });
+      return () => {
+        scripts.gate = null;
+        release();
+      };
+    },
+    scans: null,
+    curator: null,
+  };
+  const scan = (source) => async () => {
+    scripts.scanned.push(source);
+    await new Promise((resolve) => setTimeout(resolve, scripts.delayMs));
+    if (scripts.gate) await scripts.gate;
+    return [{ title: `Invented ${source} candidate`, source, external_id: `${source}-invented` }];
+  };
+  scripts.scans = Object.freeze(Object.fromEntries(['calendar', 'gmail', 'git', 'notes'].map((source) => [source, scan(source)])));
+  scripts.curator = {
+    calls: [],
+    async run(input) {
+      const { signal: _signal, ...seen } = input;
+      scripts.curator.calls.push(seen);
+      const next = scripts.outcomes.shift() ?? { outcome: 'no change' };
+      return { run: input.run ?? 'scripted', ...next };
+    },
+  };
+  return scripts;
 }
 
 // Writes the `routines` seed as the store's files: <id>.json with the
@@ -551,7 +650,8 @@ function controlledRegistry({ ok = true, error = null, agents = [], groups = [] 
 // be changed between refreshes. hold() makes refreshes wait until the
 // returned release() is called; `fail` makes them throw. `refreshedAt`, when
 // set, is used once and then cleared, so later refreshes report now.
-function controlledJobs({ items = [], focusAvailable = null, refreshedAt = null } = {}) {
+// `runner`, when given, adds its rows after the items, as lib/jobs.mjs does.
+function controlledJobs({ items = [], focusAvailable = null, refreshedAt = null, runner = null } = {}) {
   const fake = {
     calls: 0,
     items,
@@ -573,7 +673,8 @@ function controlledJobs({ items = [], focusAvailable = null, refreshedAt = null 
       if (fake.fail) throw new Error('invented refresh failure');
       const at = fake.refreshedAt ?? new Date().toISOString();
       fake.refreshedAt = null;
-      return { refreshedAt: at, focusAvailable: fake.focusAvailable, jobs: fake.items };
+      const dashboard = runner ? runner.rows().map((row) => ({ ...row, agentId: null, agentName: 'Focus' })) : [];
+      return { refreshedAt: at, focusAvailable: fake.focusAvailable, jobs: [...fake.items, ...dashboard] };
     },
   };
   return fake;

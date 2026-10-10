@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "paused": false,
+  "schedules": {
+    "calendar": "5 * * * *",
+    "gmail": "35 * * * *",
+    "git": "15 6,10,14,18 * * *",
+    "notes": "45 5,7,11,15,19 * * *",
+    "rejudge": "30 5 * * *"
+  },
+  "model": { "id": null, "effort": null }
+}

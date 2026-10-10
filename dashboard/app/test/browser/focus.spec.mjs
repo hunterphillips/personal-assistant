@@ -1,13 +1,15 @@
 // The native Focus board against the invented fixture (test/fixtures/focus)
 // copied into the data root: sections, tabs, every card action, the drawers,
 // the side panel, the rules, the stream reaching a second page, and quick
-// chat's context. Every card and agent here is invented for the browser suite.
+// chat's context; then Refresh, the gear's Scans block, and Curation over a
+// real job runner with scripted scans and curator. Every card and agent here
+// is invented for the browser suite.
 
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { expect, expectView, test } from '../support/browser-test.mjs';
+import { expect, expectView, nav, test } from '../support/browser-test.mjs';
 
 const FOCUS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'focus');
 const persona = (fields) => ({
@@ -345,6 +347,97 @@ test.describe('Focus board', () => {
     await expect.poll(() => hub.personas.sent[0]?.context.context).toEqual({
       view: 'focus', detail: '1 now, 1 today, 1 tomorrow, 1 later.',
     });
+  });
+});
+
+test.describe('Focus scans', () => {
+  test.use({ withFocus: false, hubOptions: { focus: FOCUS, agents: AGENTS } });
+
+  const header = (page) => page.locator('[data-actions-for="focus"]');
+  const refresh = (page) => header(page).getByRole('button', { name: 'Refresh' });
+  const scheduleRows = (page) => page.locator('#focus-schedules .focus-schedule');
+  const readSettings = async (hub) => JSON.parse(await readFile(hub.focusSettingsFile, 'utf8'));
+
+  async function openScans(page) {
+    await header(page).getByRole('button', { name: 'Rules' }).click();
+    await expect(page.locator('#focus-scans')).toBeVisible();
+    await expect(scheduleRows(page)).toHaveCount(5);
+  }
+
+  test('Refresh sits beside the gear and spins while the runner works, and a second press says one is running', async ({ page, hub }) => {
+    await openFocus(page, hub);
+    await expect(header(page).locator('button:visible')).toHaveCount(2);
+    await expect(header(page).locator('button:visible').first()).toHaveAttribute('id', 'focus-refresh');
+    await expect(refresh(page)).toBeEnabled();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBe(0);
+
+    const release = hub.focusScripts.hold();
+    await refresh(page).click();
+    await expect(refresh(page)).toBeDisabled();
+    await expect(refresh(page)).toHaveClass(/is-spinning/);
+
+    // A press that reaches the daemon while the run is out, as from a page
+    // whose stream has not caught up.
+    await page.evaluate(() => {
+      const button = document.getElementById('focus-refresh');
+      button.disabled = false;
+      button.click();
+    });
+    await expect(page.locator('#focus-message')).toHaveText('A refresh is already running.');
+
+    release();
+    await expect.poll(() => hub.focusScripts.curator.calls.length).toBe(1);
+    await expect.poll(() => hub.focusRunner.state().running).toBe(null);
+    await expect(refresh(page)).toBeEnabled();
+    await expect(refresh(page)).not.toHaveClass(/is-spinning/);
+    expect(hub.focusScripts.scanned).toEqual(['calendar', 'gmail', 'git', 'notes']);
+    expect(hub.focusScripts.curator.calls[0].trigger).toBe('refresh');
+    expect(hub.focusScripts.curator.calls[0].run).toBe(hub.focusRunner.lastRun('focus.curate').run);
+    await expect(page.locator('#focus-message')).toBeHidden({ timeout: 8000 });
+  });
+
+  test('the gear shows Curation on and each schedule with its last run', async ({ page, hub }) => {
+    await openFocus(page, hub);
+    await openScans(page);
+    const scans = page.locator('#focus-scans');
+    await expect(scans.getByRole('heading', { name: 'Scans', level: 3 })).toBeVisible();
+    await expect(scans.getByRole('switch', { name: 'Curation' })).toBeChecked();
+    await expect(page.locator('#focus-curation-state')).toHaveText('The curator changes the board when a scan finds something new.');
+    await expect(scheduleRows(page).locator('.focus-schedule-name'))
+      .toHaveText(['Calendar scan', 'Gmail scan', 'GitHub scan', 'Notes scan', 'Rejudge']);
+    await expect(scheduleRows(page).locator('.focus-schedule-text')).toHaveText([
+      'Every hour at :05', 'Every hour at :35', 'Every day at 6:15, 10:15, 14:15, and 18:15',
+      'Every day at 5:45, 7:45, 11:45, 15:45, and 19:45', 'Every day at 5:30',
+    ]);
+    await expect(scheduleRows(page).locator('.focus-schedule-run'))
+      .toHaveText(['8 minutes ago', '6 minutes ago', 'Never run', 'Never run', '7 minutes ago']);
+    await expect(page.locator('#focus-instructions-body')).toContainText('A reply someone is waiting on goes under Today.');
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBe(0);
+  });
+
+  test('Curation pauses the curator in the file and on Health, and turns back on', async ({ page, hub }) => {
+    await openFocus(page, hub);
+    await openScans(page);
+    const curation = page.locator('#focus-scans').getByRole('switch', { name: 'Curation' });
+    await curation.uncheck();
+    await expect(page.locator('#focus-curation-state')).toHaveText('Paused. The scans still run and the board stays as it is.');
+    await expect(curation).toBeEnabled();
+    await expect.poll(async () => (await readSettings(hub)).paused).toBe(true);
+
+    await nav(page, 'Health').click();
+    await expectView(page, 'health', 'Health');
+    const curate = page.locator('#jobs-cards [data-job-label="focus.curate"]');
+    await expect(curate.locator('.routine-paused')).toHaveText('Paused');
+
+    await nav(page, 'Focus').click();
+    await expectView(page, 'focus', 'Focus');
+    await openScans(page);
+    await expect(curation).not.toBeChecked();
+    await curation.check();
+    await expect(page.locator('#focus-curation-state')).toHaveText('The curator changes the board when a scan finds something new.');
+    await expect.poll(async () => (await readSettings(hub)).paused).toBe(false);
   });
 });
 
