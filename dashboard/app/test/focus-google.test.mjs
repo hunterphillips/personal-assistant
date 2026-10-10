@@ -6,11 +6,13 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
+import { ScanError } from '../lib/focus/candidates.mjs';
 import { createGoogle } from '../lib/focus/google.mjs';
 import { tempDir } from './support/harness.mjs';
 
 const NOW = Date.parse('2026-09-24T12:00:00Z');
 const later = (ms) => new Date(NOW + ms).toISOString();
+const withCode = (code) => (error) => error instanceof ScanError && error.code === code && typeof error.detail === 'string';
 const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, text: async () => body });
 
 async function seed(t, token = {}) {
@@ -124,17 +126,40 @@ test('gapiPages returns nothing when a page leaves the field out', async (t) => 
   assert.equal(fetch.calls.length, 1);
 });
 
-test('non-2xx and missing tokens fail loudly', async (t) => {
-  const dir = await seed(t);
-  const forbidden = createGoogle({
-    dir,
-    fetch: scriptedFetch([() => reply(403, '{"error":"insufficient scope"}')]),
-    now: () => NOW,
-  });
-  await assert.rejects(() => forbidden.gapi('https://example.test/v1/thing'), /403.*insufficient scope/s);
-
+test('a missing token file or a token without a refresh token is google_signed_out', async (t) => {
   const missingDir = path.join(await tempDir(t), 'missing');
   const missing = createGoogle({ dir: missingDir, fetch: scriptedFetch([]), now: () => NOW });
   assert.equal(missing.hasToken(), false);
-  await assert.rejects(() => missing.gapi('https://example.test/v1/thing'), /no token file.*focus-google-auth/s);
+  await assert.rejects(() => missing.gapi('https://example.test/v1/thing'), withCode('google_signed_out'));
+
+  const dir = await seed(t, { refresh_token: undefined, expires_at: later(-60_000) });
+  const noRefresh = createGoogle({ dir, fetch: scriptedFetch([]), now: () => NOW });
+  await assert.rejects(() => noRefresh.gapi('https://example.test/v1/thing'), withCode('google_signed_out'));
+});
+
+test('the token endpoint answering 400 or 401 is google_reauth', async (t) => {
+  for (const [status, body] of [[400, '{"error":"invalid_grant"}'], [401, '{"error":"unauthorized_client"}']]) {
+    const google = createGoogle({
+      dir: await seed(t, { expires_at: later(-60_000) }),
+      fetch: scriptedFetch([() => reply(status, body)]),
+      now: () => NOW,
+    });
+    await assert.rejects(() => google.gapi('https://example.test/v1/thing'), withCode('google_reauth'));
+  }
+});
+
+test('other statuses, non-JSON bodies, and network errors are google_failed', async (t) => {
+  const stale = { expires_at: later(-60_000) };
+  const cases = [
+    [{}, [() => reply(403, '{"error":"insufficient scope"}')]],
+    [{}, [() => reply(200, 'not json')]],
+    [{}, [() => { throw new TypeError('fetch failed'); }]],
+    [stale, [() => reply(500, 'backend error')]],
+    [stale, [() => reply(200, 'not json')]],
+    [stale, [() => { throw new TypeError('fetch failed'); }]],
+  ];
+  for (const [token, handlers] of cases) {
+    const google = createGoogle({ dir: await seed(t, token), fetch: scriptedFetch(handlers), now: () => NOW });
+    await assert.rejects(() => google.gapi('https://example.test/v1/thing'), withCode('google_failed'));
+  }
 });

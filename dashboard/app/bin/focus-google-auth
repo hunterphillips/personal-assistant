@@ -46,8 +46,8 @@ let client;
 try {
   client = readGoogleClient(dir);
 } catch (error) {
-  if (/no client file/.test(error.message)) printSetup();
-  else console.error(error.message);
+  if (error.code === 'google_signed_out') printSetup();
+  else console.error(error.detail ?? error.message);
   process.exit(1);
 }
 
@@ -100,7 +100,7 @@ const server = createServer(async (request, response) => {
       expires_at: new Date(Date.now() + (Number(data.expires_in) || 3600) * 1000).toISOString(),
     });
   } catch (error) {
-    return fail(error.message);
+    return fail(error.detail ?? error.message);
   }
 
   send(200, page('Focus is connected', 'You can close this tab.'));

@@ -3,11 +3,17 @@
 // presence, one authenticated GET, a bounded page collector, and an explicit
 // refresh. It reads client.json and token.json under dir and only rewrites the
 // token after a refresh; it never requests a write-capable Google scope.
+// Every failure is a ScanError: google_signed_out (no client or token file, or
+// a token without a refresh_token), google_reauth (the token endpoint answered
+// 400 or 401, how an expired or revoked refresh token presents), or
+// google_failed (any other status, a non-JSON body, a network error).
 
 import {
   chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+
+import { ScanError } from './candidates.mjs';
 
 export const SCOPES = Object.freeze([
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -31,12 +37,12 @@ function readJson(file, what) {
   try {
     raw = readFileSync(file, 'utf8');
   } catch {
-    throw new Error(`google: no ${what} file at ${file} — run bin/focus-google-auth`);
+    throw new ScanError('google_signed_out', `google: no ${what} file at ${file} — run bin/focus-google-auth`);
   }
   try {
     return JSON.parse(raw);
   } catch (error) {
-    throw new Error(`google: ${what} file at ${file} is not JSON: ${error.message}`);
+    throw new ScanError('google_failed', `google: ${what} file at ${file} is not JSON: ${error.message}`);
   }
 }
 
@@ -45,7 +51,7 @@ export function readGoogleClient(dir) {
   const document = readJson(client, 'client');
   const credentials = document.installed || document.web || document;
   if (!credentials.client_id || !credentials.client_secret) {
-    throw new Error(`google: client file at ${client} has no client_id/client_secret`);
+    throw new ScanError('google_failed', `google: client file at ${client} has no client_id/client_secret`);
   }
   return Object.freeze({
     client_id: credentials.client_id,
@@ -66,18 +72,20 @@ export function writeGoogleToken(dir, token) {
 }
 
 export async function requestGoogleToken(params, { fetch = globalThis.fetch, signal } = {}) {
-  const response = await fetch(TOKEN_URL, {
+  const { response, body } = await send(fetch, TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(params).toString(),
     signal,
-  });
-  const body = await response.text();
-  if (!response.ok) throw new Error(`google: token request failed (${response.status}): ${body}`);
+  }, 'token request');
+  if (!response.ok) {
+    const code = response.status === 400 || response.status === 401 ? 'google_reauth' : 'google_failed';
+    throw new ScanError(code, `google: token request failed (${response.status}): ${body}`);
+  }
   try {
     return JSON.parse(body);
   } catch (error) {
-    throw new Error(`google: token response is not JSON: ${error.message}`);
+    throw new ScanError('google_failed', `google: token response is not JSON: ${error.message}`);
   }
 }
 
@@ -99,7 +107,7 @@ export function createGoogle({ dir, fetch = globalThis.fetch, now = Date.now, lo
   async function refresh({ signal } = {}) {
     const token = readGoogleToken(dir);
     if (!token.refresh_token) {
-      throw new Error(`google: token file at ${paths.token} has no refresh_token — run bin/focus-google-auth`);
+      throw new ScanError('google_signed_out', `google: token file at ${paths.token} has no refresh_token — run bin/focus-google-auth`);
     }
     const { client_id, client_secret } = readGoogleClient(dir);
     const data = await requestGoogleToken(
@@ -130,21 +138,20 @@ export function createGoogle({ dir, fetch = globalThis.fetch, now = Date.now, lo
 
   async function gapi(url, params = {}, { signal } = {}) {
     const target = buildUrl(url, params);
-    const get = (token) => fetch(target.toString(), {
+    const get = (token) => send(fetch, target.toString(), {
       headers: { authorization: `Bearer ${token}` },
       signal,
-    });
+    }, `GET ${target.pathname}`);
 
-    let response = await get(await accessToken({ signal }));
-    if (response.status === 401) response = await get(await accessToken({ force: true, signal }));
-    const body = await response.text();
+    let { response, body } = await get(await accessToken({ signal }));
+    if (response.status === 401) ({ response, body } = await get(await accessToken({ force: true, signal })));
     if (!response.ok) {
-      throw new Error(`google: GET ${target.pathname} failed (${response.status}): ${body.slice(0, 500)}`);
+      throw new ScanError('google_failed', `google: GET ${target.pathname} failed (${response.status}): ${body.slice(0, 500)}`);
     }
     try {
       return JSON.parse(body);
     } catch (error) {
-      throw new Error(`google: GET ${target.pathname} returned non-JSON: ${error.message}`);
+      throw new ScanError('google_failed', `google: GET ${target.pathname} returned non-JSON: ${error.message}`);
     }
   }
 
@@ -152,7 +159,7 @@ export function createGoogle({ dir, fetch = globalThis.fetch, now = Date.now, lo
   // when nothing matches (Gmail's threads.list answers `{ resultSizeEstimate: 0 }`),
   // so a page without an array under `key` contributes nothing.
   async function gapiPages(url, params = {}, { key, maxPages = 1, signal } = {}) {
-    if (typeof key !== 'string' || !key) throw new Error('google: gapiPages needs a key');
+    if (typeof key !== 'string' || !key) throw new ScanError('google_failed', 'google: gapiPages needs a key');
     const out = [];
     let pageToken;
     for (let page = 0; page < maxPages; page += 1) {
@@ -165,6 +172,17 @@ export function createGoogle({ dir, fetch = globalThis.fetch, now = Date.now, lo
   }
 
   return Object.freeze({ hasToken, gapi, gapiPages, refresh });
+}
+
+// One request and its body text; a rejected fetch or body read (a network
+// error or an abort) becomes google_failed.
+async function send(fetch, url, init, what) {
+  try {
+    const response = await fetch(url, init);
+    return { response, body: await response.text() };
+  } catch (error) {
+    throw new ScanError('google_failed', `google: ${what} did not complete: ${error?.message ?? error}`);
+  }
 }
 
 function buildUrl(url, params) {
