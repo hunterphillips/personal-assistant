@@ -1,0 +1,129 @@
+#!/usr/bin/env node
+// One-time loopback PKCE sign-in for the Gmail and Calendar scans. It asks
+// only for the two read-only scopes and writes the resulting token under the
+// personal-assistant data root with mode 0600.
+
+import { spawn } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { createServer } from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+
+import {
+  AUTH_URL, SCOPES, googlePaths, readGoogleClient, requestGoogleToken, writeGoogleToken,
+} from '../lib/focus/google.mjs';
+
+const home = process.env.PERSONAL_ASSISTANT_HOME || path.join(os.homedir(), '.personal-assistant');
+const dir = path.join(home, 'focus/google');
+const paths = googlePaths(dir);
+
+function printSetup() {
+  console.error(`No Google client file at ${paths.client}.
+
+One-time setup, in the Google Cloud Console (https://console.cloud.google.com):
+
+  1. Project picker (top left) → New project. Name it anything, e.g. "focus".
+  2. APIs & Services → Library → enable BOTH "Gmail API" and
+     "Google Calendar API".
+  3. APIs & Services → OAuth consent screen → User type: External → Create.
+     Fill in app name and your email, save through the steps, then
+     Audience → Test users → Add users → the Google account whose mail and
+     calendar the board reads. (An app in testing needs the account listed
+     there or consent is refused.)
+  4. APIs & Services → Credentials → Create credentials → OAuth client ID →
+     Application type: Desktop app → Create.
+  5. Download JSON on the dialog, then:
+       mkdir -p ${dir}
+       mv ~/Downloads/client_secret_*.json ${paths.client}
+  6. Run bin/focus-google-auth again. A browser tab opens; approve the two
+     read-only scopes and the token lands in ${paths.token}.
+
+Scopes requested, and the only ones this code may ever ask for:
+  ${SCOPES.join('\n  ')}`);
+}
+
+let client;
+try {
+  client = readGoogleClient(dir);
+} catch (error) {
+  if (/no client file/.test(error.message)) printSetup();
+  else console.error(error.message);
+  process.exit(1);
+}
+
+const state = randomBytes(16).toString('hex');
+const verifier = randomBytes(32).toString('base64url');
+const challenge = createHash('sha256').update(verifier).digest('base64url');
+
+const page = (title, body) => `<!doctype html><meta charset="utf-8"><title>${title}</title>`
+  + `<body style="font:16px/1.5 system-ui;margin:4rem auto;max-width:32rem"><h1>${title}</h1><p>${body}</p>`;
+
+const finish = (code) => {
+  server.close();
+  process.exit(code);
+};
+
+const server = createServer(async (request, response) => {
+  const url = new URL(request.url, `http://127.0.0.1:${server.address().port}`);
+  if (!url.searchParams.has('code') && !url.searchParams.has('error')) {
+    response.writeHead(404).end();
+    return;
+  }
+
+  const send = (status, html) => response.writeHead(status, { 'content-type': 'text/html; charset=utf-8' }).end(html);
+  const fail = (message) => {
+    send(400, page('Sign-in failed', message));
+    console.error(`focus-google-auth: ${message}`);
+    finish(1);
+  };
+
+  if (url.searchParams.get('error')) return fail(`Google returned: ${url.searchParams.get('error')}`);
+  if (url.searchParams.get('state') !== state) return fail('state mismatch — start over.');
+
+  try {
+    const data = await requestGoogleToken({
+      code: url.searchParams.get('code'),
+      client_id: client.client_id,
+      client_secret: client.client_secret,
+      redirect_uri: `http://127.0.0.1:${server.address().port}`,
+      grant_type: 'authorization_code',
+      code_verifier: verifier,
+    });
+    if (!data.refresh_token) {
+      return fail('Google sent no refresh token. Revoke focus at myaccount.google.com/permissions and run this again.');
+    }
+    writeGoogleToken(dir, {
+      refresh_token: data.refresh_token,
+      access_token: data.access_token,
+      token_type: data.token_type ?? 'Bearer',
+      scope: data.scope ?? SCOPES.join(' '),
+      expires_at: new Date(Date.now() + (Number(data.expires_in) || 3600) * 1000).toISOString(),
+    });
+  } catch (error) {
+    return fail(error.message);
+  }
+
+  send(200, page('Focus is connected', 'You can close this tab.'));
+  console.log(`Saved ${paths.token}.`);
+  finish(0);
+});
+
+server.listen(0, '127.0.0.1', () => {
+  const redirect = `http://127.0.0.1:${server.address().port}`;
+  const auth = new URL(AUTH_URL);
+  for (const [key, value] of Object.entries({
+    client_id: client.client_id,
+    redirect_uri: redirect,
+    response_type: 'code',
+    scope: SCOPES.join(' '),
+    access_type: 'offline',
+    prompt: 'consent',
+    state,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+  })) auth.searchParams.set(key, value);
+
+  console.log('Approve Focus in the browser tab that just opened. If it did not, open this:\n');
+  console.log(`${auth}\n`);
+  spawn('open', [auth.toString()], { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
+});
