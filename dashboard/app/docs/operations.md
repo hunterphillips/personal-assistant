@@ -20,6 +20,8 @@ The rendered plist is `~/.personal-assistant/cache/launchd/com.personal-assistan
 
 The installer creates only the `com.personal-assistant.dashboard` user LaunchAgent. It does not install or change Focus, the old brief server, or Tailscale Serve. It uses the data root `PERSONAL_ASSISTANT_HOME` names, or `~/.personal-assistant`, and writes `PERSONAL_ASSISTANT_HOME` into the job's environment only when it is set in its own.
 
+The job's `PATH` has no Homebrew, so the installer writes `DASHBOARD_GH_CLI` into the job's environment with the `gh` it finds on its own `PATH`, for Focus's GitHub scan. When it finds none it says so, and the scan looks for `gh` on the job's `PATH`. Focus's curator reads the personal-context store at `~/workspace/personal-context`; a store elsewhere needs `DASHBOARD_PERSONAL_CONTEXT`, which the installer does not write.
+
 The first start over a root without `layout.json` moves the checkout's data into it (see Data root below) and logs `migration_done`; read that in `~/.personal-assistant/log/dashboard.log`. The daemon refuses to start, and launchd keeps retrying it, while that move finds a conflict; the log names the paths.
 
 The installer refuses to render or install when `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` is set in its environment. Persona turns must bill the Claude subscription, never an API key. Unset the variable and run it again. The server has the same guard: if it starts with either variable set, it creates no persona runtime, logs `adapters_disabled`, and every persona shows as unavailable with `api_key_in_env`.
@@ -54,6 +56,12 @@ Standard output and standard error both go to `~/.personal-assistant/log/dashboa
 
 ```sh
 tail -f ~/.personal-assistant/log/dashboard.log
+```
+
+Each of the daemon's Focus jobs keeps its runs in `~/.personal-assistant/focus/runs/<label>.jsonl` (`DASHBOARD_FOCUS_RUNS`), one start line and one end line per run, with the outcome and its detail on the end line, kept to the newest 200 lines. The dashboard log has one `job_run` line per run, and a `focus_curate` line, with the counts and usage, per curate.
+
+```sh
+tail -n 4 ~/.personal-assistant/focus/runs/focus.curate.jsonl
 ```
 
 ## Reinstall and job rollback
@@ -144,7 +152,7 @@ Tailscale Serve is set by hand, as on macOS: point it at `http://127.0.0.1:4243`
 
 Everything the daemon writes while it is used lives in one folder outside the repository: `~/.personal-assistant/`, or the absolute path `PERSONAL_ASSISTANT_HOME` names. Its layout, who writes each file, the lock, and the migration are in `docs/root-README.md`, which the daemon copies into the root as `README.md`. Every store's `DASHBOARD_*` variable still overrides its own path.
 
-At each start the daemon claims `daemon.lock` in the root and refuses, logging `root_locked` with the holder's pid, while another daemon holds it. It then prepares the root: on the first start, with no `layout.json` yet, it moves the data the checkout at `DASHBOARD_MIGRATE_FROM` holds (default this repository; empty for none) and renames each source `<source>.migrated`; a root at layout version 1 is upgraded to version 2, which moves the Feed into the feed `news` under `feeds/` and Watch's run state into `feeds/.run/`, renames `feed/` and `watch/` to `.migrated`, and takes Watch out of the registry (the root's `README.md` lists each step); on every start it seeds `ideas/criteria.md` from the repository's `defaults/` when it is missing. It logs `root` with the path, `migrateFrom`, and the layout version, and sets `PERSONAL_ASSISTANT_HOME` for every agent turn. A worktree or throwaway daemon sets `PERSONAL_ASSISTANT_HOME` to a folder of its own and `DASHBOARD_MIGRATE_FROM` to an empty value.
+At each start the daemon claims `daemon.lock` in the root and refuses, logging `root_locked` with the holder's pid, while another daemon holds it. It then prepares the root: on the first start, with no `layout.json` yet, it moves the data the checkout at `DASHBOARD_MIGRATE_FROM` holds (default this repository; empty for none) and renames each source `<source>.migrated`; a root at layout version 1 is upgraded to version 2, which moves the Feed into the feed `news` under `feeds/` and Watch's run state into `feeds/.run/`, renames `feed/` and `watch/` to `.migrated`, and takes Watch out of the registry (the root's `README.md` lists each step); on every start it seeds `ideas/criteria.md`, `focus/rules.md`, and `focus/settings.json` from the repository's `defaults/` when they are missing and creates `focus/candidates/`, `focus/runs/`, and `focus/google/`. It logs `root` with the path, `migrateFrom`, and the layout version, and sets `PERSONAL_ASSISTANT_HOME` for every agent turn. A worktree or throwaway daemon sets `PERSONAL_ASSISTANT_HOME` to a folder of its own and `DASHBOARD_MIGRATE_FROM` to an empty value.
 
 The brief run (`daily-brief/bin/run-brief`) and the feeds run (`feeds/run/run-feeds`) read the same variable, default `~/.personal-assistant` under `HOME`, and write their briefs, contributions, the feeds run's state, and the feeds' item files there; each prints the root first on `--dry-run`. Their launchd plists set only `HOME`, so a root elsewhere goes into each plist's `EnvironmentVariables` by hand. The feeds run exits with `reason=no-active-feeds` until a feed is active, and a feed without `note.md` fails with `reason=no-note`. `bin/codex-serve` and `bin/codex-new` keep their files under `codex/` in the root (`DASHBOARD_CODEX_DIR` overrides).
 
@@ -221,6 +229,17 @@ The Weekly ideas routine on Myos runs the `weekly-ideas` skill from `agents/myos
 ## Notifications
 
 Agents raise notifications with the `notify` tool into one file, `notifications/notifications.jsonl` in the data root (`DASHBOARD_NOTIFICATIONS_DIR`), one JSON line each. The directory is user-only, since a sentence may carry a figure; it is created on the first raise. The daemon reads the file once at start, skips and logs (`notification_invalid`) any line it cannot read, and keeps at most 200 notifications, rolling off the oldest acknowledged ones first. Routes: `GET /api/notifications`, `POST /api/notifications/<id>/acknowledge`, and `POST /api/notifications/acknowledge` (all); the snapshot carries them under `notifications`. To clear the list, stop the daemon and delete the file; nothing else reads it. To raise a test one, ask an agent in its thread to notify you; it appears under the header's Notifications in every open browser.
+
+## Google sign-in
+
+Focus's Calendar and Gmail scans read Google through a read-only sign-in kept in `focus/google/` under the data root (`DASHBOARD_FOCUS_GOOGLE`): `client.json`, the OAuth client, and `token.json`, the sign-in. Without them both scans end `failed` with "Sign in to Google first." To sign in once:
+
+1. In the Google Cloud Console, create a project, enable the Gmail API and the Google Calendar API, and set up the OAuth consent screen with the user type External.
+2. Under the consent screen's Audience, publish the app so its status reads "In production". An app left in Testing has its sign-in expire after seven days. At consent Google warns that the app is unverified; choose Advanced and continue.
+3. Create an OAuth client ID of type Desktop app, download its JSON, and move it to `~/.personal-assistant/focus/google/client.json`.
+4. Run `./bin/focus-google-auth`. It opens a browser tab asking for the two read-only scopes, Gmail and Calendar, and saves `token.json` (mode 0600) once you approve. Without `client.json` it prints these steps instead.
+
+The daemon reads both files on every call, so the next scan uses a new sign-in without a restart. It refreshes the access token itself and rewrites `token.json`. When Google refuses that refresh (a revoked sign-in, or one from an app still in Testing after seven days) the scans end `failed` with "Sign in to Google again."; run `./bin/focus-google-auth` again. When Google sends no refresh token the script says so: remove the app's access at myaccount.google.com/permissions and run it again. "Google did not answer." covers any other failure, and the next scan tries again.
 
 ## cmux
 

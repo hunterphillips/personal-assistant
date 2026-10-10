@@ -48,9 +48,24 @@ the thread.
 _Avoid_: job, cron, scheduled task, launchd
 
 **Job**:
-A scheduled program an agent's repo runs on its own (a launchd plist on the Mac, a systemd timer on the server).
-Shown in Health, never edited from the interface.
-_Avoid_: routine, scan, daemon
+A scheduled program: one an agent's repo runs on its own (a launchd plist
+on the Mac, a systemd timer on the server), or one the dashboard runs
+itself, such as Focus's scans and curate. Shown in Health, never edited
+from the interface.
+_Avoid_: routine, cron, task
+
+**Scan**:
+A job that reads one source for Focus (Calendar, Gmail, GitHub, or the
+vault's notes) and keeps what it found as candidates. It judges nothing
+and changes nothing.
+_Avoid_: sync, import, crawl
+
+**Curate**:
+The job that changes the Focus board from the scans' candidates, under
+Focus's rules: after a scan finds something new, once each morning over
+the whole board, and on Refresh. Paused from the Curation switch in
+Focus's gear, where the scans keep running.
+_Avoid_: rejudge, triage, sort
 
 **Brief**:
 The Daily Brief: the morning memo the run writes at 06:05. Read in the

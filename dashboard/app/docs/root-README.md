@@ -34,9 +34,9 @@ lives in its repository; the data lives here, as plain files you can read.
 | `focus/board.json` | The Focus board. |
 | `focus/changes.jsonl` | One line for each change to the Focus board. |
 | `focus/candidates/` | Each scan's latest candidates, one `<source>.json` file per scan. |
-| `focus/runs/` | Each Focus job's run records. |
-| `focus/google/` | The Google sign-in files. |
-| `focus/settings.json` | The Focus scans' schedules and the pause switch. |
+| `focus/runs/` | One `<label>.jsonl` per Focus job with its runs. |
+| `focus/google/` | `client.json` and `token.json`, the Google sign-in the Calendar and Gmail scans read. |
+| `focus/settings.json` | The Focus jobs' schedules, whether curation is paused, and the curator's model. |
 | `focus/rules.md` | Hunter's rules for Focus. |
 | `briefs/` | Each day's brief, memo, viewer, brief data, notice, and feedback, and the run lock. |
 | `briefs/contributions/` | Each day's contributions, one folder per date. |
@@ -47,9 +47,11 @@ lives in its repository; the data lives here, as plain files you can read.
 
 The daemon owns every file that is edited after it is created: a feed's
 `feed.json`, `note.md`, and `marks.json`, and every file in `sources/`. The
-daemon is the only writer of the Focus board, change log, rules, runs, and
-settings; a scan writes only its candidates file, and
-`bin/focus-google-auth` writes the Google files. A
+daemon is the only writer of the Focus board, change log, rules, runs,
+settings, and candidates: a scan writes only its own candidates file, and
+a curate rewrites the files' signatures after it places their candidates.
+`bin/focus-google-auth` writes `token.json`, which the daemon rewrites
+when it refreshes the sign-in; `client.json` is copied in by hand. A
 producer, a scheduled run that adds something, only creates its own run
 files, such as a new file under `feeds/<id>/items/` or `ideas/items/`, and
 never edits one that exists. A suggestion run writes a feed's

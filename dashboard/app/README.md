@@ -47,7 +47,7 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `POST /api/focus/changes` | Applies one change to the native Focus board and returns the fresh board. |
 | `GET /api/focus/candidates` | The native Focus board's considered candidates and their current verdicts. |
 | `GET`, `PUT /api/focus/settings` | Reads Focus's pause state, schedules, and model; changes its pause state or model. |
-| `POST /api/focus/refresh` | Bodyless. Queues one native refresh, or refuses while a Focus job is running. |
+| `POST /api/focus/refresh` | Bodyless. Queues one native refresh, or refuses while a Focus job runs or waits. |
 | `GET /api/focus/instructions` | The native Focus board's rules, read as prose. |
 | `POST /api/focus/instructions/propose` | Sends a rules change to the default agent. |
 | `GET /api/brief/latest` | The newest brief as data (below). |
@@ -128,6 +128,7 @@ what `lib/app.mjs` expects from it.
 - `lib/events.mjs` serves `/api/events` and closes the streams at shutdown.
 - `lib/http.mjs` holds the response, error, and request-body helpers the route modules share.
 - `lib/focus-proxy.mjs` forwards the Focus routes.
+- `lib/focus-routes.mjs` serves the native Focus routes over `lib/focus/`, the board store, settings, scans, curator, and Focus's jobs; `lib/jobs-runner.mjs` runs the jobs.
 - `lib/brief-adapter.mjs` serves the brief routes over `lib/briefs.mjs` and `lib/feedback.mjs`.
 - `lib/hub.mjs` keeps the state snapshot and its subscribers.
 - `lib/builtins.mjs` seeds the built-in agents from `registry/builtin.json` at start and picks the agent a setting falls to.
@@ -212,7 +213,11 @@ which the Agents view shortens to `~` in the paths it shows. `focus` and
 `brief` hold what the status route reports (`available` is null and
 `state` is `unknown` before the first check). `focus.native` says the board
 file exists under the data root, and `focus.updated` is that document's
-stamp when the native board is active. `brief.unread` is true when
+stamp when the native board is active. With the native board,
+`focus.paused` says curation is paused, `focus.counts` counts the open
+items in each place, and `focus.scanning` is the running Focus job's
+label, the next job's while Focus work is still queued or draining, and
+null when Focus is idle. `brief.unread` is true when
 the newest brief's date is newer than `brief-reads.json`'s `read` date (or
 nothing has been read yet), present only while `state` is `ready`; `POST
 /api/brief/read` marks the newest brief read (below). Every agent carries its
@@ -547,6 +552,126 @@ row's hover and focus, and a saved row always shows it; on a phone it is
 always shown. A started idea has no bookmark. The `…` menu beside it holds
 Discuss, Start or "Started with" the agent, and Dismiss.
 
+### Focus board
+
+When `focus/board.json` exists under the data root at start, the daemon
+draws the board itself (`public/focus.js`) and runs Focus's scans and its
+curator (`lib/focus/`, composed in `lib/focus/services.mjs`). A board that
+appears later takes effect at the next start. The native `GET /api/focus`
+answers the board with `paused` and `scanning` as the snapshot carries them.
+
+`lib/jobs-runner.mjs` runs the jobs. It holds one queue and runs one job at
+a time. Every 30 seconds (`TIMEOUTS.focusTickMs`) it re-reads
+`focus/settings.json` and queues, as one burst, each job whose latest cron
+occurrence is newer than the last one its runs log records. Whether a
+job may run is asked when it is about to start, so a schedule or pause
+edited in the file by hand applies within a tick. Each job keeps a runs log
+at `focus/runs/<label>.jsonl`: a start line `{ run, occurrence, trigger,
+source?, startedAt }` and an end line `{ run, endedAt, outcome, detail?,
+counts?, pruned?, candidates?, usage? }` sharing `run`, folded as a
+routine's are and kept to the newest 200 lines (`LIMITS.focusRunLines`).
+At start the runner closes any run the last process left open as
+`interrupted`, then catches up: each job with an occurrence missed while
+the daemon was down or the Mac slept runs once, its latest occurrence
+only, looking back at most `LIMITS.routineCatchupDays`. A burst with more
+than one job due, or one due more than a minute late, runs with trigger
+`catchup`. A scan that runs past `TIMEOUTS.focusScanMs` (60 seconds) or a
+curate past `focusCurateMs` (5 minutes) ends `failed` with "The job timed
+out."; stopping the daemon aborts the running job, which ends `failed`
+with "The daemon stopped."
+
+| Label | Name | Seeded schedule | Reads |
+| --- | --- | --- | --- |
+| `focus.scan-calendar` | Calendar scan | `5 * * * *` | Events in the next 48 hours on every calendar but the holiday feed. |
+| `focus.scan-gmail` | Gmail scan | `35 * * * *` | Inbox threads from the last 14 days without bulk mail, and mail from the senders the vault's `notes/communities.md` names; at most 15. |
+| `focus.scan-git` | GitHub scan | `15 6,10,14,18 * * *` | Open work waiting on Hunter in his own repos pushed in the last 30 days: pull requests, issues labeled `ready-for-human` or `needs-info`, a failed run on the default branch, a branch without a pull request; at most 10. |
+| `focus.scan-notes` | Notes scan | `45 5,7,11,15,19 * * *` | Vault notes changed in the last 3 days, newest first. |
+| `focus.curate` | Curate | `30 5 * * *` | The board and every stale candidates file (below). |
+
+Between 22:00 and 05:00 in Chicago time every job but a refresh is held:
+it writes nothing, so its occurrence stays due and runs in the catch-up at
+the first tick after 05:00.
+
+A scan reads its source and writes only `focus/candidates/<source>.json`
+(`calendar`, `gmail`, `git`, `notes`; at most 25 candidates,
+`LIMITS.focusCandidatesMax`, and 256 KiB, `LIMITS.focusCandidateBytes`):
+`{ scanned, signature, curated, candidates }`. `signature` hashes the
+candidates' identities and dates with every open item's place on the
+board; `curated` hashes the candidates alone and is written by the last
+curate that placed them. A scan whose signature differs from the file's
+ends `wrote` and keeps the old signature until a curate places the
+candidates; an equal one ends `no change`. A scheduled scan that ends
+`wrote` queues one curate for its source unless curation is paused. A
+scan that cannot read its source ends `failed` with a sentence such as
+"Sign in to Google first.", "Sign in to Google again.", "Google did not
+answer.", "GitHub could not be read.", "The vault folder is not
+available.", or "The scan produced candidates the board cannot take." The Gmail and notes
+scans and the curator read the vault from the folder of the registry's
+`second-brain` agent; the GitHub scan runs `gh` (`DASHBOARD_GH_CLI`); the
+Google scans read `focus/google/` (`docs/operations.md`, Google sign-in).
+
+A curate is one Claude Agent SDK query with no tools, no settings
+sources, and a JSON schema for its answer, a list of ops. Its prompt holds
+the rules in `focus/rules.md`, the time, the vault's priorities and
+project state, the personal-context profile (`DASHBOARD_PERSONAL_CONTEXT`),
+the board, the candidates, the other sources' latest candidates, and
+Hunter's last 10 corrections from the change log's last 14 days. It runs
+on the model and effort `focus/settings.json` names, each falling back to
+Settings' default. It prunes old tombstones first, then hands the ops to
+the board store's guarded path, and ends:
+
+- `wrote`, with `counts { added, changed, expired }`, or `no change`;
+- `rejected`, with the first op or invariant that failed;
+- `skipped`, when the board changed during the call;
+- `failed`, when the call did not complete. With an API key in the
+  daemon's environment every curate fails with "Model calls are off while
+  an API key is in the daemon's environment."
+
+Its end line carries `pruned` and `usage { input, output, costUsd }`.
+A candidates file is stale when its `curated` hash no longer matches its
+candidates. Every curate covers every stale file beside the sources that
+fired it; a scan's curate that finds other stale files runs as a catch-up
+over all of them and lists the files it covered as `covered` on its end
+line. After `wrote` or `no change` it signs every file again against the
+board it left and marks it curated; after any other outcome the files stay as they
+were, so the next curate covers them again. The curate's own daily
+occurrence is the rejudge: it re-judges every open item against the rules
+and places the stale files' candidates.
+
+Refresh in Focus's header posts `POST /api/focus/refresh`, which queues
+the four scans as one burst and then one curate over every source. It
+runs in the quiet hours and while curation is paused. It answers 202
+`{ run }`, the first scan's run id; 409 `already_running` while any Focus
+job runs or waits; and 404 `no_board` when there was no board at start or
+there is none now. The button spins and is disabled while the snapshot's
+`focus.scanning` names a job. A refusal shows "A refresh is already
+running." or "The refresh could not start." for four seconds.
+
+`focus/settings.json` (`DASHBOARD_FOCUS_SETTINGS`, seeded from
+`defaults/focus-settings.json` when missing) is `{ version: 1, paused,
+schedules: { calendar, gmail, git, notes, rejudge }, model: { id, effort }
+}`, the schedules cron lines. A missing file reads as the defaults. A file
+that exists but cannot be read, parsed, or validated, or is over 16 KiB
+(`LIMITS.focusSettingsBytes`), reads as paused and is left as it is.
+`GET /api/focus/settings` answers `{ paused, schedules: [{ source, cron,
+text, lastRun }], model }`, `text` the schedule in words and `lastRun`
+the job's last run record or null. `PUT` takes `{ paused }`, `{ model }`,
+or both and answers the same; anything else, the schedules included, is
+400 `invalid_body`, and a file that reads as broken is 409
+`settings_invalid`. Paused, the scans still run and write their files,
+no scan queues a curate, and a curate already queued or due is dropped
+when it comes to run; Refresh still curates.
+
+Focus's gear panel opens with Scans above the rules: the Curation switch
+and the five jobs, each with its schedule in words and its last run
+("Never run" before the first). The switch sends `PUT { paused }`, and
+the sentence under it reads "The curator changes the board when a scan
+finds something new." or "Paused. The scans still run and the board stays
+as it is." A refusal reads "The settings file could not be read. Fix or
+delete it." (409) or "The setting could not be saved.", and a failed
+read "The dashboard did not respond." The block is read when the
+panel opens and again on each change to `focus` while it is open.
+
 ### Focus proxy
 
 `lib/focus-proxy.mjs` forwards a fixed set of routes to
@@ -604,7 +729,18 @@ the schedule, in the same words as a plist's. Focus scans
 module only reads: it never loads, starts, or stops a job, and it runs only
 when asked.
 
-A job is a launchd plist an agent's repo owns; a routine (a scheduled
+The daemon's own Focus jobs (Focus board, above) come after the registry's,
+read from the job runner, with `source: 'dashboard'`, `agentId: null`, and
+`agentName: 'Focus'`. `lastRun` is the last run's start; `outcome` is its
+end, `running` while it runs, `interrupted` when the daemon stopped during
+it, and `never ran` before the first; `detail` is the end line's sentence;
+`failures24h` counts the runs that ended `failed` or `rejected` in the last
+24 hours; and `paused` is true on the Curate row while curation is paused.
+A run's start or end, or a change to the settings, replaces these rows in
+the snapshot in place, without a refresh.
+
+A job is a launchd plist an agent's repo owns, or one of the daemon's own
+Focus jobs; a routine (a scheduled
 prompt the daemon runs itself) is a different thing and never appears
 here. The snapshot's `jobs` key, `public/jobs.js`, and
 `POST /api/jobs/refresh` carry the name; `/routines` still redirects to
@@ -1008,8 +1144,8 @@ detail under it. The message itself is recorded as typed.
 ### Health view
 
 The Health view, at `/health` and the last entry on the rail, opens with
-the Settings card and then lists the launchd jobs of every registry entry
-under the heading "Jobs". It scrolls on its own, in a 720px column.
+the Settings card and then lists the jobs of every registry entry, then
+the daemon's own Focus jobs, under the heading "Jobs". It scrolls on its own, in a 720px column.
 
 The Settings card has five rows, each a select. "Default model" offers
 "Claude Code default" and the model table's names (Fable, Opus, Sonnet,
@@ -1032,8 +1168,8 @@ unreadable), or "Settings could not be saved." for anything else. When no
 agent receives the brief the card says "No agent receives the brief." On a
 phone each label sits above its select. There is one card for each agent that has
 jobs, in registry order, with the agent's name and role. Each job is a row
-with its name, schedule, last run, and outcome, and Focus scans with
-failures in the last 24 hours also show how many. Times under a day are
+with its name, schedule, last run, and outcome, and a row with failures in
+the last 24 hours also shows how many. Times under a day are
 relative ("12 minutes ago"); older ones read "Yesterday 21:00" or "Sep 3
 21:00". The header shows when the jobs were last refreshed and has a
 Refresh button, which reads "Refreshing…" while a refresh runs. Above the
@@ -1042,7 +1178,16 @@ view), and nothing while both answer.
 
 Jobs are refreshed only on demand: when the view opens and the last
 refresh is missing or more than 60 seconds old, and when Refresh is chosen.
-The Focus card shows "Paused" when any scan is paused, and a Pause or
+The daemon's Focus jobs sit on one card named Focus, after the agents'
+cards. A row whose last run failed or was rejected shows its detail under
+it, cut at 200 characters, and the Curate row shows "Paused" beside its
+outcome while curation is paused. Their outcomes read Wrote, No change,
+Skipped, Rejected, Failed, Running, Interrupted, or Never ran. The rail's
+Health icon carries a mark while any job's last run failed or was
+rejected. Until the move, the old Focus repo's launchd scans keep their
+own card, Focus Board, beside it.
+
+The Focus Board card shows "Paused" when any scan is paused, and a Pause or
 Resume button that posts to the forwarded `/api/pause` or `/api/resume`;
 the server then refreshes the jobs, and the card follows the state. If the
 request gets no answer, or the proxy answers 502 or 504 because Focus gave
@@ -1053,7 +1198,7 @@ registry that cannot be read ("The registry could not be read." followed
 by the registry's error), a failed refresh ("Jobs could not be
 refreshed."), and an empty list ("No jobs are registered.") each get one
 plain sentence, and when Focus did not answer during the refresh the Focus
-card says its rows come from the job runner. While the view is off screen its
+Board card says its rows come from the job runner. While the view is off screen its
 cards are not rebuilt; opening it renders the latest state.
 
 ## Personas
@@ -2045,6 +2190,14 @@ visibility, scrolling inside the frames, and a real phone after cutover.
 | `DASHBOARD_IDEAS_INSTRUCTIONS` | `<root>/ideas/criteria.md` | The criteria the ideas producer reads; seeded from `defaults/ideas-criteria.md` when missing. |
 | `DASHBOARD_BRIEF_INSTRUCTIONS` | `../../daily-brief/curator.md` | The rules the brief's curator follows, shown from Instructions in the brief's overlay. Resolved from this directory; does not need to exist at startup. |
 | `DASHBOARD_FOCUS_ORIGIN` | `http://127.0.0.1:4242` | Must be an `http://` loopback origin other than `127.0.0.1:<DASHBOARD_PORT>`. |
+| `DASHBOARD_FOCUS_BOARD` | `<root>/focus/board.json` | The native Focus board. Its existence at start turns on the native view and Focus's jobs. |
+| `DASHBOARD_FOCUS_CHANGES` | `<root>/focus/changes.jsonl` | The board's change log. |
+| `DASHBOARD_FOCUS_CANDIDATES` | `<root>/focus/candidates` | Each scan's latest candidates. |
+| `DASHBOARD_FOCUS_RUNS` | `<root>/focus/runs` | Each Focus job's runs log. |
+| `DASHBOARD_FOCUS_GOOGLE` | `<root>/focus/google` | The Google sign-in files the Calendar and Gmail scans read; `bin/focus-google-auth` reads the same variable. |
+| `DASHBOARD_FOCUS_SETTINGS` | `<root>/focus/settings.json` | Focus's schedules, pause, and curator model; seeded from `defaults/focus-settings.json` when missing. |
+| `DASHBOARD_FOCUS_RULES` | `<root>/focus/rules.md` | The rules the curator follows; seeded from `defaults/focus-rules.md` when missing. |
+| `DASHBOARD_PERSONAL_CONTEXT` | `~/workspace/personal-context` | The personal-context store whose profile the curator reads; a missing store leaves the profile out. |
 | `DASHBOARD_REGISTRY_PATH` | `<root>/registry/agents.json` | Agent registry JSON file; does not need to exist at startup. |
 | `DASHBOARD_LAUNCH_AGENTS_DIR` | `~/Library/LaunchAgents` | Directory holding launchd plists; does not need to exist at startup. |
 | `DASHBOARD_JOB_RUNNER` | `launchd` on macOS, `systemd` elsewhere | What runs the registry's jobs, and so where Health reads them: launchd plists or systemd user units. Any other value refuses to start. |
@@ -2067,7 +2220,11 @@ most 2 MiB more of the upload, for at most 2 seconds, before cutting the
 connection. The event stream limits (`LIMITS.eventStreams`, 8;
 `TIMEOUTS.heartbeatMs`, 25 seconds; `TIMEOUTS.statusPollMs`, 30 seconds;
 `TIMEOUTS.sessionsPollMs`, 10 seconds) are
-constants in `lib/config.mjs`, not environment variables. Logs record method, route, status, and duration; a response that
+constants in `lib/config.mjs`, not environment variables, as are Focus's
+(`LIMITS.focusRunLines`, 200; `focusSettingsBytes`, 16 KiB;
+`focusCandidatesMax`, 25; `focusCandidateBytes`, 256 KiB;
+`TIMEOUTS.focusScanMs`, 60 seconds; `focusCurateMs`, 5 minutes;
+`focusTickMs`, 30 seconds). Logs record method, route, status, and duration; a response that
 never completed is logged with status 0. They also carry the persona events:
 `persona_init`, `persona_usage`, `persona_turn_error` (with bounded error
 text and, for a failure before init, the CLI's last 2 KiB of stderr),
@@ -2081,7 +2238,14 @@ skipped), the routes' `routine_write_error`, the notification store's
 the notify tool's `notification_raised` and `notification_error`, the
 notification routes' `notification_write_error`, the scheduler's
 `routine_run`, `routine_log_error`, `routine_line_error`, and
-`routine_tick_error`, the bindings reader's `bindings_error` and
+`routine_tick_error`, the Focus job runner's `job_run` (label, trigger,
+outcome, ms), `job_due_error`, `job_log_error`, `job_burst_error`,
+`job_queue_error`, `job_tick_error`, `job_tick_hook_error`, and
+`job_runner_listener_error`, the curator's `focus_curate` (run, trigger,
+outcome, counts, pruned, usage) and `focus_curate_error` (with the CLI's
+last 2 KiB of stderr), Focus's `focus_settings_error`,
+`focus_google_refreshed`, and `focus_scan_github` (repos, found, kept),
+the bindings reader's `bindings_error` and
 `bindings_listener_error`, and the cmux events
 `cmux_auth_failed`, `cmux_inventory_error`, `cmux_frame_too_large`,
 `cmux_surface_list_shape`, `cmux_record_skipped`, `cmux_cli_missing`, and

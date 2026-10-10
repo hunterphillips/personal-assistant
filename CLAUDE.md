@@ -49,6 +49,10 @@ from here.
   renders the board from the data root's `focus/` when a board file
   exists there (phase 1 of the Focus design, landed 2026-10-10,
   `thoughts/shared/plans/2026-10-09-focus-into-dashboard-design.md`), and
+  the daemon runs its four scans and the curator itself (phase 2, landed
+  2026-10-10, `thoughts/shared/plans/2026-10-10-focus-phase-2-scans-and-curate.md`):
+  Refresh in its header, Scans with the Curation switch in its gear, and
+  the five jobs on a Focus card in Health; it
   is embedded through a proxy and takes the dashboard's theme otherwise,
   Goals reads
   the vault's priorities with add and edit going through the Second
@@ -179,8 +183,9 @@ picks one up and ends by updating it.
   renamed `.migrated`, deleted a week later), with `defaults/ideas-criteria.md`
   seeding the root's copy when it is missing.
 - `focus/` under the data root holds the board, its change log, each
-  scan's candidates, and the rules, with `defaults/focus-rules.md`
-  seeding the rules when missing; the old Focus repo still runs the live
+  scan's candidates, each job's runs, the Google sign-in, the settings,
+  and the rules, with `defaults/` seeding the rules and the settings when
+  missing; the old Focus repo still runs the live
   board until the move.
 - `agents/`: one folder per agent that lives in this repo (Assistant,
   Scout, Myos), its CLAUDE.md and skills; the folder is the agent's `cwd`.
@@ -215,8 +220,10 @@ picks one up and ends by updating it.
   the curator toward all of them, and under the data root the daemon is
   the only writer of a file once it exists. The Daily Brief writes
   contribution files, briefs, and the feedback file saved beside a
-  brief. The dashboard forwards
-  Focus actions to Focus unchanged and holds no task state; Goals reads the
+  brief. Without a board file the dashboard forwards Focus actions to
+  Focus unchanged and holds no task state; with one, the daemon is the
+  board's only writer, through its own change route and the curator's
+  guarded path; Goals reads the
   vault and only messages the Second brain agent. The dashboard writes
   Ideas marks and manual ideas; Myos's weekly run writes one run file.
   Agents act under Hunter's inline approvals; the dashboard never sends a
@@ -243,5 +250,5 @@ picks one up and ends by updating it.
   are merged through one local review branch. A run the factory cuts off
   is finished locally on its branch. Nothing watches PRs between
   sessions; pickup lists them.
-- Focus owns persistent task state. The brief may say Hunter owes someone a
+- The Focus board owns persistent task state. The brief may say Hunter owes someone a
   decision; it never becomes the store of record.
