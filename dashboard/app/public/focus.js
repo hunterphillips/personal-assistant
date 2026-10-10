@@ -68,7 +68,7 @@
     notes: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
     manual: '<path d="M17 3a2.8 2.8 0 0 1 4 4L8 20l-5 1 1-5z"/>',
   };
-  var SCHEDULE_NAMES = { calendar: 'Calendar scan', gmail: 'Gmail scan', git: 'GitHub scan', notes: 'Notes scan', rejudge: 'Rejudge' };
+  var SCHEDULE_NAMES = { calendar: 'Calendar scan', gmail: 'Gmail scan', git: 'GitHub scan', notes: 'Notes scan', rejudge: 'Curate' };
   var FLASH_MS = 4000;
   var CHECK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m4 12.5 5.2 5.2L20 6.8"/></svg>';
   var DOTS = '<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
@@ -1065,15 +1065,22 @@
 
     function renderRefresh() {
       var running = typeof scanning === 'string' && scanning !== '';
-      refreshButton.disabled = running;
+      refreshButton.disabled = running || starting;
       refreshButton.classList.toggle('is-spinning', running);
     }
 
     // The run's progress arrives through the stream as focus.scanning; the
     // answer only says whether it started.
+    // The button stays off from the press until the answer, so a double
+    // click sends one request; the stream then keeps it off while scanning.
+    var starting = false;
     refreshButton.addEventListener('click', function () {
-      if (refreshButton.disabled) return;
+      if (refreshButton.disabled || starting) return;
+      starting = true;
+      refreshButton.disabled = true;
       request('/api/focus/refresh', { method: 'POST' }).then(function (result) {
+        starting = false;
+        renderRefresh();
         if (result && result.status === 202) return;
         showFlash(result && result.status === 409 ? 'A refresh is already running.' : 'The refresh could not start.');
       });
@@ -1118,6 +1125,9 @@
         if (id !== settingsSequence || saving) return;
         if (result && result.status === 200 && result.body && Array.isArray(result.body.schedules)) {
           focusSettings = result.body;
+          // A read that answers clears only its own failure; a refused
+          // change's sentence stays until the next change.
+          if (curationReason.textContent === NO_ANSWER) setCurationReason('');
           renderScans();
         } else if (!focusSettings) {
           renderScans();

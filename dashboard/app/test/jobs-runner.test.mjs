@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { LIMITS } from '../lib/config.mjs';
-import { createJobRunner } from '../lib/jobs-runner.mjs';
+import { createJobRunner, scanningOf } from '../lib/jobs-runner.mjs';
 import { tempDir } from './support/harness.mjs';
 
 const START = '2026-10-05T12:00:10.000Z';
@@ -235,7 +235,9 @@ test('rows and onChange reflect starts, ends, failures, paused state, and runnin
   assert.equal(runner.rows()[0].lastRun, START);
   assert.equal(runner.rows()[0].failures24h, 1);
   assert.ok(Object.isFrozen(runner.rows()[0]));
-  assert.deepEqual(changes, ['health', 'health', 'health', null]);
+  // The last change is the drain ending, which clears busy.
+  assert.deepEqual(changes, ['health', 'health', 'health', null, null]);
+  assert.deepEqual({ ...runner.state() }, { running: null, busy: false, next: null });
 });
 
 test('a job started by a tick that enqueues another holds the runner until it ends', async (t) => {
@@ -390,4 +392,34 @@ test('a job with no record reads never ran, and a running one reads running', as
   release();
   await tick;
   assert.equal(runner.rows()[0].outcome, 'wrote');
+});
+
+test('state() stays busy and names the next job between the jobs of a batch and while work waits', async (t) => {
+  const { runner } = await setup(t);
+  const gates = {};
+  const hold = (label) => new Promise((resolve) => { gates[label] = resolve; });
+  runner.register(scriptedJob('first', [], { run: async () => { await hold('first'); return { outcome: 'wrote' }; } }));
+  runner.register(scriptedJob('second', [], { run: async () => { await hold('second'); return { outcome: 'wrote' }; } }));
+  runner.register(scriptedJob('third', [], { run: async () => ({ outcome: 'wrote' }) }));
+  const seen = [];
+  runner.onChange(() => seen.push(scanningOf(runner.state())));
+  await runner.enqueue([{ label: 'first', trigger: 'refresh' }, { label: 'second', trigger: 'refresh' }]);
+  await runner.enqueue('third', 'refresh');
+  await settle(() => typeof gates.first === 'function');
+  assert.deepEqual({ ...runner.state() }, { running: 'first', busy: true, next: 'second' });
+  gates.first();
+  await settle(() => typeof gates.second === 'function');
+  assert.deepEqual({ ...runner.state() }, { running: 'second', busy: true, next: 'third' });
+  gates.second();
+  await settle(() => !runner.state().busy);
+  assert.equal(scanningOf(runner.state()), null);
+  // Every change while the work lasted named a job; only the drain's end is null.
+  assert.equal(seen.at(-1), null);
+  assert.ok(seen.slice(0, -1).every((label) => typeof label === 'string'), JSON.stringify(seen));
+});
+
+test('state() reports busy with a queued item and nothing running', () => {
+  assert.equal(scanningOf({ running: null, busy: true, next: 'focus.scan-git' }), 'focus.scan-git');
+  assert.equal(scanningOf({ running: null, busy: false, next: 'focus.scan-git' }), null);
+  assert.equal(scanningOf({ running: 'focus.curate', busy: true, next: null }), 'focus.curate');
 });

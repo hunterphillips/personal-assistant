@@ -370,3 +370,19 @@ test('a call without a result logs an error line with the stderr tail', async (t
   assert.equal(line.stderr.length, 2000);
   assert.ok(line.stderr.endsWith('last words'));
 });
+
+test('a run id given to run() is the run on the prune and curate lines and in the answer', async (t) => {
+  const document = JSON.parse(await readFile(FIXTURE));
+  document.items.push({
+    id: 'old-tombstone', title: 'Old closed task', source: 'notes', external_id: 'old', link: null, meta: null,
+    tier: 'later', now: false, status: 'expired', created: '2026-07-01T00:00:00.000Z', updated: '2026-08-01T00:00:00.000Z',
+  });
+  const query = fakeQuery(async function* () { yield init(); yield result({ ops: [{ op: 'expire', id: 'tomorrow-one', meta: 'Shipped' }] }); });
+  const found = await setup(t, { query, body: JSON.stringify(document) });
+  const answer = await found.curator.run({ trigger: 'rejudge', run: 'runner-run-1' });
+  assert.equal(answer.outcome, 'wrote');
+  assert.equal(answer.run, 'runner-run-1');
+  const lines = await changeLines(found.changesFile);
+  assert.deepEqual(lines.map((line) => line.who), ['daemon', 'curator']);
+  assert.deepEqual(lines.map((line) => line.run), ['runner-run-1', 'runner-run-1']);
+});

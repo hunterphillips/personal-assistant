@@ -27,6 +27,11 @@
 //     the array is one burst. `{ exclusive: true }` refuses the whole enqueue
 //     while any work is running or queued.
 //   rows(), state(), lastRun(label), runs(label, n), onChange(fn)
+//   state() answers { running, busy, next }: the running job's label, whether
+//   any work is running or waiting (the condition an exclusive enqueue
+//   refuses on), and the label of the job that runs next, else the one that
+//   ran last in the work still draining. scanningOf(state) reads one label
+//   from it for as long as the work lasts.
 
 import { randomBytes, randomUUID as nodeRandomUUID } from 'node:crypto';
 import { appendFile, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
@@ -67,6 +72,8 @@ export function createJobRunner({
   let ticking = null;
   let pumping = null;
   let running = null;
+  let batchLeft = []; // the draining batch's items not started yet
+  let lastLabel = null; // the last job the draining work started
   let writeChain = Promise.resolve();
 
   function notify() {
@@ -256,11 +263,15 @@ export function createJobRunner({
 
   async function runBatch(items, { burst = false } = {}) {
     const results = [];
+    batchLeft = [...items];
     for (const item of items) {
       if (stopped) break;
+      batchLeft.shift();
+      lastLabel = item.job.label;
       const result = await execute(item);
       if (result) results.push(result);
     }
+    batchLeft = [];
     if (!stopped && burst) await burstEnded(results);
     return results;
   }
@@ -281,6 +292,8 @@ export function createJobRunner({
       }
     } finally {
       pumping = null;
+      lastLabel = null;
+      notify();
     }
   }
 
@@ -318,6 +331,7 @@ export function createJobRunner({
     if (options.exclusive && (running || queue.length > 0 || pumping)) return Promise.resolve({ ok: false, reason: 'already_running' });
     queue.push({ items, burst: items.length > 1 });
     void pump();
+    notify();
     return Promise.resolve({ ok: true, run: items[0].run });
   }
 
@@ -426,7 +440,11 @@ export function createJobRunner({
     tick,
     enqueue,
     rows,
-    state: () => freeze({ running: running?.job.label ?? null }),
+    state: () => freeze({
+      running: running?.job.label ?? null,
+      busy: Boolean(running || queue.length > 0 || pumping),
+      next: batchLeft[0]?.job.label ?? queue[0]?.items[0]?.job.label ?? lastLabel ?? null,
+    }),
     lastRun(label) {
       const record = records(label).at(-1);
       return record ? freeze({ ...record }) : null;
@@ -440,6 +458,14 @@ export function createJobRunner({
       return () => listeners.delete(fn);
     },
   };
+}
+
+// The label Focus shows as scanning: the running job's, else, while work is
+// still running or waiting, the next or last one's; null when idle.
+export function scanningOf(state) {
+  if (!state) return null;
+  if (typeof state.running === 'string') return state.running;
+  return state.busy ? state.next ?? null : null;
 }
 
 function fold(lines) {

@@ -5,6 +5,7 @@
 import { defaultAgentId } from './builtins.mjs';
 import { HttpError, readJsonBody, sendJson } from './http.mjs';
 import { createInstructionsRoutes } from './instructions-routes.mjs';
+import { scanningOf } from './jobs-runner.mjs';
 import { describe, parseCron } from './schedule.mjs';
 
 const SCHEDULES = Object.freeze([
@@ -23,7 +24,7 @@ export function createFocusRoutes({ board = null, instructions = null, instructi
   async function serveRead(res) {
     const value = await board.read();
     if (!value.board && !value.problem) throw new HttpError(404, 'no_board');
-    sendJson(res, 200, { ...value, paused: settings?.current().paused ?? false, scanning: runner?.state().running ?? null });
+    sendJson(res, 200, { ...value, paused: settings?.current().paused ?? false, scanning: scanningOf(runner?.state()) });
   }
 
   async function serveChange(req, res) {

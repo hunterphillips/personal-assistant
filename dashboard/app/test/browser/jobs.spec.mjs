@@ -479,6 +479,8 @@ test.describe('with the daemon\'s Focus jobs', () => {
   test('the five rows sit on one Focus card with their badges and details, and a rejected run marks the rail', async ({ page, hub }) => {
     await openHealth(page, hub);
     await expect(dashboardCard(page).locator('.card-name')).toHaveText('Focus');
+    await expect(dashboardCard(page)).toHaveAttribute('aria-labelledby', 'jobs-dashboard-Focus');
+    await expect(launchdCard(page)).toHaveAttribute('aria-labelledby', 'jobs-agent-focus');
     await expect(dashboardCard(page).locator('.role-chip')).toHaveCount(0);
     await expect(dashboardCard(page).locator('.routine-name'))
       .toHaveText(['Calendar scan', 'Gmail scan', 'GitHub scan', 'Notes scan', 'Curate']);

@@ -16,7 +16,11 @@
 //       updatedAt,                // ISO time of the last change
 //       home,                     // the home directory, for showing paths
 //       focus: { available, native, updated?, paused?, counts?, scanning? }, // native selects the board;
-//                                               // updated is its document stamp
+//                                               // updated is its document stamp;
+//                                               // scanning is the running Focus
+//                                               // job's label, else the next (or
+//                                               // last) one's while a burst is
+//                                               // still running or queued, else null
 //       brief,                    // exactly what /api/dashboard/status reports:
 //                                 // { state, date?, revision?, unread? }, or
 //                                 // { state: 'unknown' } before the first check.
@@ -295,6 +299,7 @@ import os from 'node:os';
 
 import { inspectAvatar, readAvatar } from './avatars.mjs';
 import { LIMITS, TIMEOUTS, TIME_ZONE } from './config.mjs';
+import { scanningOf } from './jobs-runner.mjs';
 import { MODELS } from './models.mjs';
 import * as defaultSchedule from './schedule.mjs';
 import { DEFAULTS as SETTINGS_DEFAULTS } from './settings.mjs';
@@ -339,7 +344,7 @@ export function createHub({
     updated: board?.updated ?? null,
     paused: focusSettings?.current?.().paused ?? false,
     counts: focusCounts(board?.items),
-    scanning: focusRunner?.state?.().running ?? null,
+    scanning: scanningOf(focusRunner?.state?.()),
   });
   const turnMaxMs = timeouts.turnMaxMs ?? TIMEOUTS.turnMaxMs;
   // agentId -> runtime entry for each registry persona (see personaEntry).
@@ -671,7 +676,7 @@ export function createHub({
     const patch = {};
     runnerJobsPatch(patch);
     if (state.focus.native === true) {
-      const nextFocus = { ...state.focus, scanning: focusRunner.state().running ?? null };
+      const nextFocus = { ...state.focus, scanning: scanningOf(focusRunner.state()) };
       if (!sameJson(nextFocus, state.focus)) patch.focus = nextFocus;
     }
     if (Object.keys(patch).length > 0) commit(patch);

@@ -42,6 +42,7 @@
   };
   var WATCHED = ['jobs', 'registry', 'focus', 'agents', 'codex', 'cmux'];
   var DETAIL_CHARS = 200;
+  var DASHBOARD_KEY = 'dashboard:'; // the card key of rows with no agentId
 
   function pad(n) {
     return n < 10 ? '0' + n : String(n);
@@ -100,13 +101,14 @@
 
   // Cards in agent order, each with that agent's jobs; jobs naming an
   // agent the registry no longer lists, or none (the daemon's own Focus
-  // jobs, keyed on their agentName), come last under their own name.
+  // jobs, keyed on 'dashboard:' and their agentName), come last under their
+  // own name.
   function groups(state) {
     var byAgent = {};
     var order = [];
     var items = state.jobs.items || [];
     for (var i = 0; i < items.length; i += 1) {
-      var id = items[i].agentId || items[i].agentName;
+      var id = items[i].agentId || DASHBOARD_KEY + items[i].agentName;
       if (!Object.prototype.hasOwnProperty.call(byAgent, id)) {
         byAgent[id] = [];
         order.push(id);
@@ -128,6 +130,15 @@
       result.push({ id: order[k], name: first.agentName || order[k], role: null, items: byAgent[order[k]] });
     }
     return result;
+  }
+
+  // An id for a card's heading, one token for aria-labelledby: a registry
+  // agent's under jobs-agent-, the daemon's own rows' under jobs-dashboard-
+  // with anything outside [A-Za-z0-9_-] in the name made a hyphen.
+  function headingId(key) {
+    var text = String(key);
+    if (text.indexOf(DASHBOARD_KEY) === 0) return 'jobs-dashboard-' + text.slice(DASHBOARD_KEY.length).replace(/[^A-Za-z0-9_-]/g, '-');
+    return 'jobs-agent-' + text.replace(/[^A-Za-z0-9_-]/g, '-');
   }
 
   // Whether the state shows any Focus scan paused.
@@ -208,10 +219,10 @@
     function section(group) {
       var node = element('section', 'routine-card');
       var header = element('div', 'card-header');
-      var headingId = 'jobs-agent-' + group.id;
-      node.setAttribute('aria-labelledby', headingId);
+      var titleId = headingId(group.id);
+      node.setAttribute('aria-labelledby', titleId);
       var title = element('h3', 'card-name', group.name);
-      title.id = headingId;
+      title.id = titleId;
       header.appendChild(title);
       // A role that only repeats the name is not shown as a chip.
       if (group.role && group.role !== group.name) header.appendChild(element('span', 'role-chip', group.role));

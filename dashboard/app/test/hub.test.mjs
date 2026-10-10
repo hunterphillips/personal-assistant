@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createHub } from '../lib/hub.mjs';
+import { createJobRunner } from '../lib/jobs-runner.mjs';
 import { RuntimeError } from '../lib/runtime/adapter.mjs';
 
 const REVISION = 'c'.repeat(64);
@@ -1476,4 +1477,32 @@ test('a picture that cannot be used is logged once with its reason, and the agen
     { event: 'avatar_skipped', agentId: 'brain', reason: 'wrong_type' },
     { event: 'avatar_skipped', agentId: 'board', reason: 'missing' },
   ]);
+});
+
+test('focus.scanning names the next job of a burst between its jobs, and clears when the burst ends', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'hub-runner-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const runner = createJobRunner({ runsDir: dir, zone: 'UTC', setTimeout: () => ({ unref() {} }), clearTimeout: () => {} });
+  let hub = null;
+  let between;
+  const job = (label, extra = {}) => ({
+    label, name: label, cron: () => '0 12 * * *', due: () => true, timeoutMs: 1_000,
+    run: async () => ({ outcome: 'wrote' }), ...extra,
+  });
+  runner.register(job('focus.scan-calendar'));
+  // Called after the first job's end is out and before the second starts.
+  runner.register(job('focus.scan-gmail', { due: () => { between = hub.snapshot().focus.scanning; return true; } }));
+  t.after(() => runner.stop());
+  ({ hub } = makeHub({ focusBoard: fakeFocusBoard({ items: [] }), focusRunner: runner }));
+  t.after(() => hub.close());
+  await hub.refreshStatus();
+  assert.equal(hub.snapshot().focus.scanning, null);
+  await runner.enqueue([{ label: 'focus.scan-calendar', trigger: 'refresh' }, { label: 'focus.scan-gmail', trigger: 'refresh' }]);
+  const deadline = Date.now() + 5_000;
+  while (runner.state().busy || between === undefined) {
+    if (Date.now() > deadline) throw new Error('the burst did not end');
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(between, 'focus.scan-gmail');
+  assert.equal(hub.snapshot().focus.scanning, null);
 });

@@ -373,8 +373,10 @@ test.describe('Focus scans', () => {
     expect(overflow).toBe(0);
 
     const release = hub.focusScripts.hold();
-    await refresh(page).click();
+    // A double press sends one request.
+    await refresh(page).dblclick();
     await expect(refresh(page)).toBeDisabled();
+    await expect.poll(() => hub.requests('/api/focus/refresh').length).toBe(1);
     await expect(refresh(page)).toHaveClass(/is-spinning/);
 
     // A press that reaches the daemon while the run is out, as from a page
@@ -405,7 +407,7 @@ test.describe('Focus scans', () => {
     await expect(scans.getByRole('switch', { name: 'Curation' })).toBeChecked();
     await expect(page.locator('#focus-curation-state')).toHaveText('The curator changes the board when a scan finds something new.');
     await expect(scheduleRows(page).locator('.focus-schedule-name'))
-      .toHaveText(['Calendar scan', 'Gmail scan', 'GitHub scan', 'Notes scan', 'Rejudge']);
+      .toHaveText(['Calendar scan', 'Gmail scan', 'GitHub scan', 'Notes scan', 'Curate']);
     await expect(scheduleRows(page).locator('.focus-schedule-text')).toHaveText([
       'Every hour at :05', 'Every hour at :35', 'Every day at 6:15, 10:15, 14:15, and 18:15',
       'Every day at 5:45, 7:45, 11:45, 15:45, and 19:45', 'Every day at 5:30',
