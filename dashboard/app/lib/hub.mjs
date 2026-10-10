@@ -646,18 +646,30 @@ export function createHub({
     if (!sameJson(next, state.focus)) commit({ focus: next });
   }) : () => {};
 
+  // The runner's rows in place of the dashboard rows, as a patch or nothing.
+  function runnerJobsPatch(patch) {
+    if (!focusRunner || typeof focusRunner.rows !== 'function') return;
+    const dashboard = focusRunner.rows().map((row) => ({ ...row, agentId: null, agentName: 'Focus' }));
+    const nextJobs = { ...state.jobs, items: withDashboardRows(state.jobs.items, dashboard) };
+    if (!sameJson(nextJobs, state.jobs)) patch.jobs = nextJobs;
+  }
+
+  // A settings change also moves the Curate row's pause.
   const unsubscribeFocusSettings = focusSettings && typeof focusSettings.onChange === 'function' ? focusSettings.onChange(() => {
-    if (closed || state.focus.native !== true) return;
-    const next = { ...state.focus, paused: focusSettings.current().paused };
-    if (!sameJson(next, state.focus)) commit({ focus: next });
+    if (closed) return;
+    const patch = {};
+    runnerJobsPatch(patch);
+    if (state.focus.native === true) {
+      const next = { ...state.focus, paused: focusSettings.current().paused };
+      if (!sameJson(next, state.focus)) patch.focus = next;
+    }
+    if (Object.keys(patch).length > 0) commit(patch);
   }) : () => {};
 
   const unsubscribeFocusRunner = focusRunner && typeof focusRunner.onChange === 'function' ? focusRunner.onChange(() => {
     if (closed) return;
-    const dashboard = focusRunner.rows().map((row) => ({ ...row, agentId: null, agentName: 'Focus' }));
     const patch = {};
-    const nextJobs = { ...state.jobs, items: withDashboardRows(state.jobs.items, dashboard) };
-    if (!sameJson(nextJobs, state.jobs)) patch.jobs = nextJobs;
+    runnerJobsPatch(patch);
     if (state.focus.native === true) {
       const nextFocus = { ...state.focus, scanning: focusRunner.state().running ?? null };
       if (!sameJson(nextFocus, state.focus)) patch.focus = nextFocus;

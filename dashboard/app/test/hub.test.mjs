@@ -392,6 +392,32 @@ test('a runner change replaces the Focus rows where they stood', async () => {
   hub.close();
 });
 
+test('a Focus settings change moves the Curate row\'s pause where it stands', async () => {
+  const settingsListeners = new Set();
+  let paused = false;
+  const focusSettings = {
+    current: () => ({ paused }),
+    onChange(fn) { settingsListeners.add(fn); return () => settingsListeners.delete(fn); },
+  };
+  const focusRunner = {
+    state: () => ({ running: null }),
+    rows: () => [{ label: 'focus.curate', source: 'dashboard', paused }],
+    onChange: () => () => {},
+  };
+  const jobs = fakeJobs({ refreshedAt: '2026-09-25T12:00:00.000Z', focusAvailable: true, jobs: [
+    { label: 'focus.curate', source: 'dashboard', paused: false, agentId: null, agentName: 'Focus' },
+    { label: 'com.invented.b', source: 'launchctl' },
+  ] });
+  const { hub } = makeHub({ jobs, focusSettings, focusRunner });
+  await hub.refreshJobs();
+  paused = true;
+  for (const fn of settingsListeners) fn();
+  assert.deepEqual(hub.snapshot().jobs.items.map((row) => [row.label, row.paused ?? null]), [
+    ['focus.curate', true], ['com.invented.b', null],
+  ]);
+  hub.close();
+});
+
 test('an absent native board keeps the proxy status and marks it non-native', async () => {
   const focusBoard = fakeFocusBoard({ present: false });
   const { hub, status } = makeHub({ focusBoard });
