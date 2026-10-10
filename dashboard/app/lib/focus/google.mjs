@@ -148,26 +148,17 @@ export function createGoogle({ dir, fetch = globalThis.fetch, now = Date.now, lo
     }
   }
 
-  // Google list endpoints used by Focus have one top-level array. Remember its
-  // name from the first page so later pages cannot accidentally change shape.
-  async function gapiPages(url, params = {}, { maxPages = 1, signal } = {}) {
+  // Collects `data[key]` across pages. A list endpoint leaves the field out
+  // when nothing matches (Gmail's threads.list answers `{ resultSizeEstimate: 0 }`),
+  // so a page without an array under `key` contributes nothing.
+  async function gapiPages(url, params = {}, { key, maxPages = 1, signal } = {}) {
+    if (typeof key !== 'string' || !key) throw new Error('google: gapiPages needs a key');
     const out = [];
     let pageToken;
-    let collectionKey = null;
     for (let page = 0; page < maxPages; page += 1) {
       const data = await gapi(url, { ...params, pageToken }, { signal });
-      if (collectionKey === null) {
-        const arrays = Object.keys(data).filter((key) => Array.isArray(data[key]));
-        if (arrays.length !== 1) {
-          throw new Error(`google: GET ${new URL(url).pathname} returned ${arrays.length} collection fields`);
-        }
-        [collectionKey] = arrays;
-      }
-      if (!Array.isArray(data[collectionKey])) {
-        throw new Error(`google: GET ${new URL(url).pathname} omitted collection ${collectionKey}`);
-      }
-      out.push(...data[collectionKey]);
-      pageToken = data.nextPageToken;
+      if (Array.isArray(data?.[key])) out.push(...data[key]);
+      pageToken = data?.nextPageToken;
       if (!pageToken) break;
     }
     return out;

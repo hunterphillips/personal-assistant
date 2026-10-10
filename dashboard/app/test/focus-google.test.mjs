@@ -102,7 +102,7 @@ test('query arrays repeat their key and signals reach fetch', async (t) => {
   }, { signal: controller.signal });
 });
 
-test('gapiPages collects the sole array and stops at maxPages', async (t) => {
+test('gapiPages collects the named field and stops at maxPages', async (t) => {
   const fetch = scriptedFetch([
     () => reply(200, '{"threads":[{"id":"a"}],"nextPageToken":"p2"}'),
     (url) => {
@@ -111,12 +111,20 @@ test('gapiPages collects the sole array and stops at maxPages', async (t) => {
     },
   ]);
   const google = createGoogle({ dir: await seed(t), fetch, now: () => NOW });
-  const threads = await google.gapiPages('https://example.test/v1/threads', {}, { maxPages: 2 });
+  const threads = await google.gapiPages('https://example.test/v1/threads', {}, { key: 'threads', maxPages: 2 });
   assert.deepEqual(threads.map((thread) => thread.id), ['a', 'b']);
   assert.equal(fetch.calls.length, 2);
 });
 
-test('non-2xx, ambiguous page shapes, and missing tokens fail loudly', async (t) => {
+test('gapiPages returns nothing when a page leaves the field out', async (t) => {
+  const fetch = scriptedFetch([() => reply(200, '{"resultSizeEstimate":0}')]);
+  const google = createGoogle({ dir: await seed(t), fetch, now: () => NOW });
+  const threads = await google.gapiPages('https://example.test/v1/threads', { q: 'nothing' }, { key: 'threads', maxPages: 3 });
+  assert.deepEqual(threads, []);
+  assert.equal(fetch.calls.length, 1);
+});
+
+test('non-2xx and missing tokens fail loudly', async (t) => {
   const dir = await seed(t);
   const forbidden = createGoogle({
     dir,
@@ -124,13 +132,6 @@ test('non-2xx, ambiguous page shapes, and missing tokens fail loudly', async (t)
     now: () => NOW,
   });
   await assert.rejects(() => forbidden.gapi('https://example.test/v1/thing'), /403.*insufficient scope/s);
-
-  const ambiguous = createGoogle({
-    dir,
-    fetch: scriptedFetch([() => reply(200, '{"items":[],"messages":[]}')]),
-    now: () => NOW,
-  });
-  await assert.rejects(() => ambiguous.gapiPages('https://example.test/v1/list'), /2 collection fields/);
 
   const missingDir = path.join(await tempDir(t), 'missing');
   const missing = createGoogle({ dir: missingDir, fetch: scriptedFetch([]), now: () => NOW });

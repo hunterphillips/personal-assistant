@@ -231,11 +231,11 @@ export async function scan({ google, vault, now: _now, limits, signal } = {}) {
   const inbox = await google.gapiPages(
     `${API}/threads`,
     { q: INBOX_QUERY, maxResults: PAGE_SIZE },
-    { maxPages: MAX_PAGES, signal },
+    { key: 'threads', maxPages: MAX_PAGES, signal },
   );
   const query = communityQuery(vault.communitySenders());
   const community = query
-    ? await google.gapiPages(`${API}/threads`, { q: query, maxResults: PAGE_SIZE }, { maxPages: 1, signal })
+    ? await google.gapiPages(`${API}/threads`, { q: query, maxResults: PAGE_SIZE }, { key: 'threads', maxPages: 1, signal })
     : [];
 
   const groups = vault.communityGroups();
