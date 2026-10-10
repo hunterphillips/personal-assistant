@@ -57,6 +57,7 @@ import { createFeeds } from '../../lib/feeds.mjs';
 import { createBriefInstructions } from '../../lib/brief-instructions.mjs';
 import { loadConfig } from '../../lib/config.mjs';
 import { createFocusProxy } from '../../lib/focus-proxy.mjs';
+import { createBoard } from '../../lib/focus/board.mjs';
 import { createGoals } from '../../lib/goals.mjs';
 import { createIdeas } from '../../lib/ideas.mjs';
 import { createInstructions } from '../../lib/instructions.mjs';
@@ -115,6 +116,11 @@ export { focusSourceAvailable };
 //   ideas      a directory of Ideas run files, marks, and criteria copied
 //              into the temporary directory. `ideasDir`, `ideasMarksFile`,
 //              and `ideasInstructionsFile` name the copy.
+//   focus      a Focus folder (such as test/fixtures/focus) copied into the
+//              data root's focus/: board.json makes the hub report
+//              focus.native and the shell show the board; rules.md is the
+//              gear's rules. `focusBoardFile`, `focusChangesFile`, and
+//              `focusRulesFile` name the copy.
 //   instructions  a note (such as
 //              test/fixtures/feed-instructions/relevance.md) copied in as the
 //              feed `news`'s note.md when `feed` is given.
@@ -151,7 +157,7 @@ export { focusSourceAvailable };
 export async function startHub({
   withFocus = true, agents = [], registry: registryState, jobs: jobsSeed, personas: personaSeed = {},
   codex: codexSeed = null, cmux: cmuxSeed = null, bindings: bindingSeed = null, home = '/invented',
-  vault = null, feed = null, ideas: ideasFixture = null, instructions = null, briefInstructions = null, settings: settingsSeed = null, delegationWaitMs = null,
+  vault = null, feed = null, ideas: ideasFixture = null, focus: focusFixture = null, instructions = null, briefInstructions = null, settings: settingsSeed = null, delegationWaitMs = null,
   routines: routineSeed = null, notifications: notificationSeed = null, avatars = [],
 } = {}) {
   if (vault && agents.some((agent) => agent.id === SECOND_BRAIN.id)) {
@@ -196,6 +202,12 @@ export async function startHub({
     if (ideasFixture) await cp(ideasFixture, ideasDir, { recursive: true });
     const ideasMarksFile = path.join(ideasDir, 'marks.json');
     const ideasInstructionsFile = path.join(ideasDir, 'criteria.md');
+    const focusDir = path.join(root, 'home', focusFixture ? 'focus' : 'focus-missing');
+    if (focusFixture) await cp(focusFixture, focusDir, { recursive: true });
+    const focusBoardFile = path.join(focusDir, 'board.json');
+    const focusChangesFile = path.join(focusDir, 'changes.jsonl');
+    const focusCandidatesDir = path.join(focusDir, 'candidates');
+    const focusRulesFile = path.join(focusDir, 'rules.md');
     const instructionsFile = path.join(feedsDir, 'news', 'note.md');
     if (instructions && feed) await cp(instructions, instructionsFile);
     const briefInstructionsFile = path.join(root, briefInstructions ? 'curator.md' : 'curator-missing.md');
@@ -243,6 +255,10 @@ export async function startHub({
       DASHBOARD_IDEAS_DIR: ideasDir,
       DASHBOARD_IDEAS_MARKS: ideasMarksFile,
       DASHBOARD_IDEAS_INSTRUCTIONS: ideasInstructionsFile,
+      DASHBOARD_FOCUS_BOARD: focusBoardFile,
+      DASHBOARD_FOCUS_CHANGES: focusChangesFile,
+      DASHBOARD_FOCUS_CANDIDATES: focusCandidatesDir,
+      DASHBOARD_FOCUS_RULES: focusRulesFile,
     });
     // A shorter ask wait lets a test see the pending sentence.
     const config = delegationWaitMs === null
@@ -290,8 +306,16 @@ export async function startHub({
     await reads.load((registry.current()?.agents ?? []).filter((agent) => agent.kind === 'persona').map((agent) => agent.id));
     const briefReads = createBriefReads({ file: config.briefReadsPath });
     await briefReads.load();
+    const focusBoard = focusFixture ? createBoard({
+      file: config.focusBoardPath, changesFile: config.focusChangesPath, candidatesDir: config.focusCandidatesDir,
+      limits: config.limits,
+    }) : null;
+    const focusInstructions = focusFixture ? createInstructions({
+      file: config.focusRulesPath, path: 'focus/rules.md', maxBytes: config.limits.focusBoardBytes,
+      label: 'Focus', event: 'focus_rules_error',
+    }) : null;
     const hub = createTestHub({
-      config, focus: focusRoutes, brief: briefRoutes, registry, jobs, routines, adapters, store, bindings, cmux, settings, reads, briefReads, home,
+      config, focus: focusRoutes, focusBoard, brief: briefRoutes, registry, jobs, routines, adapters, store, bindings, cmux, settings, reads, briefReads, home,
       notifications, now: clock.now,
     });
     await hub.start();
@@ -340,7 +364,7 @@ export async function startHub({
     });
     const newHandler = () => createApp({
       config, focus: focusRoutes, brief: briefRoutes, hub: appHub, store, cmux, goals, feeds, sources,
-      ideas, ideasInstructions,
+      ideas, ideasInstructions, focusBoard, focusInstructions,
       briefInstructions: briefInstructionsReader, notices, settings, registry, routines, scheduler, notifications, log: () => {},
     });
     let handler = newHandler();
@@ -367,6 +391,9 @@ export async function startHub({
       ideasDir,
       ideasMarksFile,
       ideasInstructionsFile,
+      focusBoardFile,
+      focusChangesFile,
+      focusRulesFile,
       instructionsFile,
       briefInstructionsFile,
       focus,
