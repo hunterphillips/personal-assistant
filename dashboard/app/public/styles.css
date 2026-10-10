@@ -1750,6 +1750,274 @@ div.panel-row.now-row:hover { background: none; }
   .ideas-week-refresh:disabled { opacity: 0.5; }
 }
 
+/* Focus: the board from the data root, its horizon tabs under the header
+   (the Feed's tabs) and its sections in the Feed's centered column. */
+.focus-board {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.focus-page {
+  flex: 1;
+  min-height: 0;
+  padding: 24px 34px 96px;
+  overflow: auto;
+}
+.focus-page > * {
+  width: 100%;
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.focus-tab-drop {
+  border-bottom-color: var(--green);
+  color: var(--green);
+}
+.focus-heading {
+  margin: 32px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+#focus-heading-now { margin-top: 4px; }
+.focus-list,
+.focus-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.focus-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 8px 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.focus-card[draggable="true"] { cursor: grab; }
+.focus-card-dragging { opacity: 0.35; }
+.focus-card-done { opacity: 0.55; }
+:root[data-theme="dark"] .focus-card-done { opacity: 0.8; }
+.focus-card-collapsed { padding-top: 8px; padding-bottom: 8px; align-items: center; }
+.focus-check {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  padding: 0;
+  border: 1.5px solid var(--faint);
+  border-radius: 50%;
+  background: none;
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.focus-check svg { opacity: 0; }
+.focus-check:hover { border-color: var(--green); }
+.focus-check[aria-pressed="true"] { border-color: var(--green); background: var(--green); }
+.focus-check[aria-pressed="true"] svg { opacity: 1; }
+.focus-card-collapsed .focus-check { margin-top: 0; }
+.focus-card-body { min-width: 0; }
+.focus-card-done .focus-card-body { cursor: pointer; }
+.focus-card-body:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 4px; }
+.focus-title {
+  display: block;
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+a.focus-title:hover { text-decoration: underline; text-decoration-color: var(--faint); }
+.focus-title[data-editable] { cursor: text; }
+.focus-card-big .focus-title { font-size: 18px; font-weight: 600; }
+.focus-card-done .focus-title { text-decoration: line-through; }
+.focus-card-collapsed .focus-title { font-size: 15px; }
+.focus-meta {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.focus-source-icon { flex: none; color: var(--faint); }
+.focus-meta .focus-source-icon { display: inline-block; margin-right: 6px; vertical-align: -2px; }
+.focus-note {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--rule);
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.focus-edit,
+.focus-note-edit {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+.focus-edit { margin: -3px 0; padding: 2px 6px; font-size: 16px; font-weight: 500; line-height: 1.4; }
+.focus-card-big .focus-edit { font-size: 18px; font-weight: 600; }
+.focus-note-edit { min-height: 54px; margin-top: 8px; padding: 6px 8px; font-size: 13px; line-height: 1.5; resize: vertical; }
+.focus-edit:focus,
+.focus-note-edit:focus { outline: none; }
+.focus-menu-wrap { position: relative; margin: -10px 0 -10px; }
+.focus-card-collapsed .focus-menu-wrap { margin: -12px 0; }
+.focus-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.focus-more svg { fill: currentColor; }
+.focus-card:hover .focus-more,
+.focus-card:focus-within .focus-more,
+.focus-more[aria-expanded="true"] { opacity: 1; }
+.focus-more:hover { background: var(--hover-tint); color: var(--ink); }
+.focus-menu {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  z-index: 7;
+  display: grid;
+  width: 168px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 8px 24px var(--shadow-pop);
+}
+.focus-menu-entry { min-height: 40px; font-weight: 500; }
+.focus-menu-entry[aria-current="true"] { color: var(--green); font-weight: 600; }
+.focus-menu-divided { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 7px 7px; }
+.focus-dropline {
+  height: 2px;
+  margin: -5px 0;
+  border-radius: 2px;
+  background: var(--green);
+  list-style: none;
+}
+.focus-empty-row { list-style: none; }
+.focus-empty { margin: 0; padding: 10px 2px; color: var(--muted); }
+.focus-add { margin-top: 16px; }
+.focus-add input {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 16px;
+  border: 1px dashed var(--rule);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+}
+.focus-add input::placeholder { color: var(--faint); }
+.focus-add input:focus { outline: none; border-color: var(--green); border-style: solid; }
+.focus-drawer {
+  margin-top: 32px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.focus-drawer + .focus-drawer { margin-top: 16px; }
+.focus-drawer summary {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+.focus-drawer summary::-webkit-details-marker { display: none; }
+.focus-drawer summary::before { content: "\25B8"; margin-right: 8px; font-size: 10px; }
+.focus-drawer[open] summary::before { content: "\25BE"; }
+.focus-drawer summary:hover { color: var(--ink); }
+.focus-drawer summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 4px; }
+.focus-drawer .focus-rows { gap: 2px; margin-top: 10px; }
+.focus-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 4px 2px;
+  color: var(--ink-soft);
+}
+.focus-row-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.focus-row-dismissed .focus-row-title { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+.focus-pill {
+  flex: none;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.focus-pill:hover { border-color: var(--green); color: var(--green); }
+.focus-candidate { align-items: flex-start; }
+.focus-candidate .focus-source-icon { margin-top: 4px; }
+.focus-candidate-group {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.focus-candidate-text { flex: 1; min-width: 0; }
+.focus-candidate-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.focus-candidate-meta {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-candidate .focus-edit { font-size: 14px; font-weight: 400; }
+.focus-verdict { flex: none; padding-top: 2px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+@media (hover: none) {
+  .focus-more { opacity: 1; }
+}
+
 /* Goals: the vault's priorities and goal notes, one row per goal under each
    section heading, the details only when a row is open. */
 
@@ -2972,6 +3240,11 @@ textarea.form-input {
   .ideas-week-refresh { opacity: 1; }
   .ideas-week-refresh:disabled { opacity: 0.5; }
   .ideas-menu { right: 4px; max-width: calc(100vw - 32px); }
+  .focus-page { padding: 16px 16px 96px; }
+  .focus-tabs { padding: 0 16px; }
+  .focus-card { padding-left: 12px; gap: 10px; }
+  .focus-more { opacity: 1; }
+  .focus-menu { right: 0; max-width: calc(100vw - 32px); }
   .feed-item { grid-template-columns: 24px minmax(0, 1fr); }
   .feed-badge { width: 24px; height: 24px; }
 

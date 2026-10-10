@@ -1,6 +1,7 @@
 // What quick chat sends along with Hunter's message: the view he was on
 // and, when the view has one, the object in it (the selected job, the feed
-// item in view, the open agent). The send route takes it as the body's
+// item in view, the open agent), or for the Focus board a detail alone (its
+// counts), which keeps the label-less line. The send route takes it as the body's
 // optional `context`; the Claude adapter records it as one system line
 // before the user's message and prefixes the prompt the model receives
 // with it, while the user's message is recorded as typed.

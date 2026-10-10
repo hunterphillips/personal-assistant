@@ -59,7 +59,11 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
               </button>
             </div>
-            <div class="header-action-group" data-actions-for="focus" hidden></div>
+            <div class="header-action-group" data-actions-for="focus" hidden>
+              <button type="button" class="button icon-button" id="focus-instructions-toggle" aria-label="Rules" title="Rules" aria-expanded="false" aria-controls="focus-instructions" hidden>
+                <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
+            </div>
             <div class="header-action-group" data-actions-for="goals" hidden>
               <button type="button" class="button" id="goals-add">Add goal</button>
             </div>
@@ -132,6 +136,7 @@
             </div>
           </section>
           <section data-panel-for="feed" hidden></section>
+          <section data-panel-for="focus" hidden></section>
           <section data-panel-for="goals" hidden></section>
           <section data-panel-for="ideas" hidden></section>
           <section data-panel-for="health" hidden></section>
@@ -179,6 +184,57 @@
               <button type="button" data-action="retry">Retry</button>
             </div>
             <div class="frame-slot" id="focus-slot"></div>
+            <div class="focus-board" id="focus-board" hidden>
+              <div class="feed-tabs focus-tabs" id="focus-tabs" role="tablist" aria-label="Horizon">
+                <button type="button" class="feed-tab" role="tab" id="focus-tab-today" data-focus-tab="today" aria-selected="true" aria-controls="focus-sections">Today</button>
+                <button type="button" class="feed-tab" role="tab" id="focus-tab-tomorrow" data-focus-tab="tomorrow" aria-selected="false" aria-controls="focus-sections" tabindex="-1">Tomorrow</button>
+                <button type="button" class="feed-tab" role="tab" id="focus-tab-later" data-focus-tab="later" aria-selected="false" aria-controls="focus-sections" tabindex="-1">Later</button>
+              </div>
+              <div class="focus-page" id="focus-page">
+                <section class="instructions" id="focus-instructions" aria-labelledby="focus-instructions-heading" hidden>
+                  <h2 class="instructions-heading" id="focus-instructions-heading">Focus rules</h2>
+                  <p class="instructions-intro">The board follows these rules. A change goes to the pinned agent, which edits the file.</p>
+                  <div id="focus-instructions-body"></div>
+                  <form class="composer instructions-composer" id="focus-instructions-form">
+                    <label class="composer-label" for="focus-instructions-input">What should change?</label>
+                    <textarea class="composer-input" id="focus-instructions-input" rows="3"></textarea>
+                    <div class="composer-row instructions-actions">
+                      <button type="submit" class="button button-primary">Send</button>
+                      <button type="button" class="button" id="focus-instructions-cancel">Cancel</button>
+                    </div>
+                    <p class="composer-reason" id="focus-instructions-reason" role="status" hidden></p>
+                  </form>
+                </section>
+                <p class="routines-message focus-message" id="focus-message" role="status" hidden></p>
+                <div class="focus-sections" id="focus-sections" role="tabpanel" aria-labelledby="focus-tab-today" hidden>
+                  <div class="focus-horizon" data-focus-horizon="today">
+                    <h2 class="focus-heading" id="focus-heading-now">Now</h2>
+                    <ul class="focus-list" data-place="now" aria-labelledby="focus-heading-now"></ul>
+                    <h2 class="focus-heading" id="focus-heading-today">Rest of today</h2>
+                    <ul class="focus-list" data-place="today" aria-labelledby="focus-heading-today"></ul>
+                    <div class="focus-add">
+                      <input type="text" id="focus-add" placeholder="Add something" aria-label="Add" autocomplete="off" spellcheck="false" maxlength="200">
+                    </div>
+                  </div>
+                  <div class="focus-horizon" data-focus-horizon="tomorrow">
+                    <h2 class="focus-heading focus-lead" id="focus-heading-tomorrow">Tomorrow</h2>
+                    <ul class="focus-list" data-place="tomorrow" aria-label="Tomorrow"></ul>
+                  </div>
+                  <div class="focus-horizon" data-focus-horizon="later">
+                    <h2 class="focus-heading focus-lead" id="focus-heading-later">Later</h2>
+                    <ul class="focus-list" data-place="later" aria-label="Later"></ul>
+                    <details class="focus-drawer" id="focus-cleared" hidden>
+                      <summary>Recently cleared</summary>
+                      <ul class="focus-rows" id="focus-cleared-list"></ul>
+                    </details>
+                    <details class="focus-drawer" id="focus-considered" hidden>
+                      <summary>Considered</summary>
+                      <div id="focus-considered-body"></div>
+                    </details>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section class="view" id="view-feed" data-view="feed" aria-label="Feed" hidden>
@@ -400,6 +456,7 @@
   <script src="/assets/thread-view.js"></script>
   <script src="/assets/goals.js"></script>
   <script src="/assets/instructions.js"></script>
+  <script src="/assets/focus.js"></script>
   <script src="/assets/ideas.js"></script>
   <script src="/assets/feed.js"></script>
   <script src="/assets/feed-settings.js"></script>

@@ -1,7 +1,9 @@
 // Dashboard shell: switches between Agents (Home, agents.js), the Feed
 // (feed.js), Focus, Goals (goals.js), Ideas (ideas.js), and Health (jobs.js, the launchd jobs)
-// with the History API, creates the Focus frame the first time its view is
-// shown and keeps it afterwards, and keeps one copy of the server's state,
+// with the History API. Focus is the board (focus.js) when the snapshot's
+// focus.native is true, and otherwise the proxied Focus in a frame, created
+// the first time its view is shown and kept afterwards. The shell keeps one
+// copy of the server's state,
 // which it hands to the Health, Agents, and Goals views, the header's
 // notifications (notifications.js), the brief's overlay (brief-overlay.js),
 // whose links open views through shellApi, and quick chat (quick-chat.js),
@@ -26,7 +28,8 @@
 // /api/state is fetched every 30 seconds, and after a second failed attempt
 // the shell notice offers Retry. Every view change also fetches /api/state.
 //
-// The Focus frame is created only from state that has just arrived (a
+// The Focus frame (only while focus.native is false) is created only from
+// state that has just arrived (a
 // snapshot, a delta touching focus, or a finished /api/state fetch), never
 // from the copy kept since, and is never replaced by a state change. A frame
 // whose page comes back as a JSON error is hidden and marked failed; the
@@ -104,6 +107,7 @@
   var agents = window.DashboardAgents ? window.DashboardAgents.create(shellApi) : null;
   var goals = window.DashboardGoals ? window.DashboardGoals.create(shellApi) : null;
   var ideas = window.DashboardIdeas ? window.DashboardIdeas.create(shellApi) : null;
+  var focus = window.DashboardFocus ? window.DashboardFocus.create(shellApi) : null;
   var feed = window.DashboardFeed ? window.DashboardFeed.create(shellApi) : null;
   // The Feed's settings sheet (feed-settings.js), closed whenever the Feed is left.
   var feedSettings = feed && window.DashboardFeedSettings ? window.DashboardFeedSettings.create(feed, shellApi) : null;
@@ -134,10 +138,11 @@
   // What quick chat sends along: with the brief's overlay open, the brief
   // and the item in view there, since the overlay sits above every view;
   // otherwise the view and the object in it: Health's selected job, the
-  // feed item in view, the open agent. Focus and Goals give the view's
-  // name alone.
+  // feed item in view, the open agent, the board's counts. Goals, and Focus
+  // in its frame, give the view's name alone.
   function viewContext() {
     if (overlay && overlay.isOpen()) return overlay.context();
+    if (current === 'focus' && focus && focusNative()) return focus.context();
     if (current === 'health') return jobs ? jobs.context() : { view: 'health' };
     if (current === 'agents') return agents ? agents.context() : { view: 'agents' };
     if (current === 'feed') return feed ? feed.context() : { view: 'feed' };
@@ -205,6 +210,22 @@
     return !!(state && state.focus && state.focus.available === false);
   }
 
+  // The board lives in the data root; the frame is the proxied Focus.
+  function focusNative() {
+    return !!(state && state.focus && state.focus.native === true);
+  }
+
+  // Shows the board or the frame's slot, and shows or hides the board's
+  // module to match.
+  function syncFocus() {
+    var native = focusNative();
+    $('focus-board').hidden = !native;
+    $('focus-slot').hidden = native;
+    if (!focus) return;
+    if (current === 'focus' && native && !document.hidden) focus.show();
+    else focus.hide();
+  }
+
   function createFrame(slot, id, title, src) {
     var frame = document.createElement('iframe');
     frame.id = id;
@@ -244,9 +265,12 @@
     renderRailIndicators();
     renderBriefDot();
 
-    // Focus: mount once it answers; afterwards keep the frame and only report.
-    if (fresh && current === 'focus' && !frames.focus && focusAvailable()) mountFocus();
-    $('focus-notice').hidden = !(focusDown() || failed(frames.focus));
+    // Focus: the board when native; otherwise mount the frame once it
+    // answers, then keep it and only report.
+    var native = focusNative();
+    if (fresh && current === 'focus' && !native && !frames.focus && focusAvailable()) mountFocus();
+    $('focus-notice').hidden = native || !(focusDown() || failed(frames.focus));
+    syncFocus();
 
     if (briefInstructions) briefInstructions.setIntro(briefIntroSentence());
   }
@@ -278,7 +302,7 @@
     var reload = wantReload;
     wantReload = false;
     if (!state) return;
-    if (reload && failed(frames.focus) && focusAvailable()) mountFocus();
+    if (reload && failed(frames.focus) && focusAvailable() && !focusNative()) mountFocus();
   }
 
   // Replaces the state. `keys` names the top-level keys that changed, or is
@@ -294,6 +318,7 @@
     if (agents) agents.update(state, keys);
     if (goals) goals.update(state, keys);
     if (ideas) ideas.update(state, keys);
+    if (focus) focus.update(state, keys);
     if (feed) feed.update(state, keys);
     if (notifications) notifications.update(state, keys);
     if (quickChat) quickChat.update(state, keys);
@@ -438,8 +463,8 @@
   }
 
   // The side panel shows the current view's own section, or `now` for a
-  // view whose section is missing or empty (Focus, or the Feed before its
-  // first answer).
+  // view whose section is missing or empty (Focus in its frame, or the Feed
+  // before its first answer).
   function panelSection() {
     var own = document.querySelector('[data-panel-for="' + current + '"]');
     var shown = own && own.childElementCount > 0 ? current : 'now';
@@ -492,6 +517,7 @@
       if (view === 'ideas') ideas.show();
       else ideas.hide();
     }
+    // The board when native; render() below calls syncFocus().
     if (quickChat && changed) quickChat.viewChanged();
     render(false);
     fetchState();
@@ -530,7 +556,8 @@
 
   window.addEventListener('dashboardthemechange', function () {
     // Focus reads the query during its own load; rebuilding is simpler than
-    // maintaining a cross-frame message protocol for this rare choice.
+    // maintaining a cross-frame message protocol for this rare choice. The
+    // board takes the dashboard's tokens and needs nothing.
     if (frames.focus) mountFocus();
   });
 
@@ -543,6 +570,7 @@
       if (goals) goals.hide();
       if (feed) feed.hide();
       if (ideas) ideas.hide();
+      if (focus) focus.hide();
       if (quickChat) quickChat.visibility(true);
     } else {
       connect();
@@ -552,6 +580,7 @@
       if (goals && current === 'goals') goals.show();
       if (feed && current === 'feed') feed.show();
       if (ideas && current === 'ideas') ideas.show();
+      syncFocus();
       if (quickChat) quickChat.visibility(false);
     }
   });
