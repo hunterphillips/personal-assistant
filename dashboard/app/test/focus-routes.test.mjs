@@ -195,7 +195,12 @@ test('native Focus settings and refresh routes expose size, invalid-file, busy, 
   const busy = await startControls(t, { focusJobs: { refresh: async () => ({ ok: false, reason: 'already_running' }) } });
   assert.deepEqual([(await request(busy, 'POST', '/api/focus/refresh', { headers: { origin: busy.origin } })).status], [409]);
   const missing = await startControls(t, { includeBoard: false });
-  assert.deepEqual([(await request(missing, 'POST', '/api/focus/refresh', { headers: { origin: missing.origin } })).status], [404]);
+  const gone = await request(missing, 'POST', '/api/focus/refresh', { headers: { origin: missing.origin } });
+  assert.deepEqual([gone.status, gone.json], [404, { error: 'no_board' }]);
+  // No board at start means no jobs; a board added later still answers no_board.
+  const unstarted = await startControls(t, { focusJobs: null });
+  const late = await request(unstarted, 'POST', '/api/focus/refresh', { headers: { origin: unstarted.origin } });
+  assert.deepEqual([late.status, late.json], [404, { error: 'no_board' }]);
 });
 
 test('GET /api/focus returns no_board if the selected native board disappears', async (t) => {

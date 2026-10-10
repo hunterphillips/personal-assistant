@@ -334,7 +334,9 @@ export function createApp({
         if (!focusBoardRoutes || !focusSettings || !focusRunner) throw new HttpError(404, 'not_found');
         return req.method === 'GET' ? focusBoardRoutes.serveSettings(res) : focusBoardRoutes.serveSettingsUpdate(req, res);
       case 'focus-refresh':
-        if (!focusBoardRoutes || !focusBoard || !focusJobs) throw new HttpError(404, 'not_found');
+        if (!focusBoardRoutes || !focusBoard) throw new HttpError(404, 'not_found');
+        // The jobs exist only when a board did at start.
+        if (!focusJobs) throw new HttpError(404, 'no_board');
         return focusBoardRoutes.serveRefresh(res);
       case 'focus-instructions':
         if (!focusBoardRoutes || !focusInstructions) throw new HttpError(404, 'not_found');
