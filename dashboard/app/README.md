@@ -307,8 +307,8 @@ daemon cannot read is skipped and logged `notification_invalid`.
 `notifications` in the snapshot holds every kept item, newest first, and
 `open`, how many are unacknowledged; each raise or acknowledge is one
 revision with a `notifications` patch. The header shows `open` beside
-Notifications when it is above zero (on a phone, beside Menu and the
-menu's Notifications entry), and the list under the header shows the
+Notifications when it is above zero, on a desk and on a phone alike, and
+the list under the header shows the
 open items with Acknowledge, Acknowledge all, and the acknowledged ones
 under a divider. A card up, a run that ended waiting, an unopened reply,
 and a failed job never become notifications; they are the rail's marks.
