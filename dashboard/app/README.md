@@ -42,6 +42,10 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /api/dashboard/status` | Focus and brief status (below). The shell no longer reads it; kept for one release. |
 | `GET /assets/<name>` | Shell scripts and styles. |
 | `GET /embedded/focus`, `/api/focus`, `/api/status`; `PUT /api/focus`; `POST /api/pause`, `/api/resume`, `/api/refresh` | Forwarded to Focus (below). |
+| `POST /api/focus/changes` | Applies one change to the native Focus board and returns the fresh board. |
+| `GET /api/focus/candidates` | The native Focus board's considered candidates and their current verdicts. |
+| `GET /api/focus/instructions` | The native Focus board's rules, read as prose. |
+| `POST /api/focus/instructions/propose` | Sends a rules change to the default agent. |
 | `GET /api/brief/latest` | The newest brief as data (below). |
 | `POST /api/brief/read` | Bodyless. Marks the newest brief read, so `brief.unread` in the snapshot goes false everywhere; `{"ok": true}` even when there is no ready brief to mark (below). |
 | `GET /api/brief/<date>` | One date's brief as data. |
@@ -164,7 +168,7 @@ snapshot; concurrent requests share one check. It stays for one release.
 
 ```json
 { "revision": 7, "updatedAt": "<ISO>", "home": "/Users/hunter",
-  "focus": { "available": true },
+  "focus": { "available": true, "native": true, "updated": "<ISO>" },
   "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>", "unread": false },
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
   "groups": [{ "id": "work", "name": "Work" }, { "id": "personal", "name": "Personal" }],
@@ -201,7 +205,9 @@ snapshot; concurrent requests share one check. It stays for one release.
 `revision` goes up by one on every change. `home` is the home directory,
 which the Agents view shortens to `~` in the paths it shows. `focus` and
 `brief` hold what the status route reports (`available` is null and
-`state` is `unknown` before the first check). `brief.unread` is true when
+`state` is `unknown` before the first check). `focus.native` says the board
+file exists under the data root, and `focus.updated` is that document's
+stamp when the native board is active. `brief.unread` is true when
 the newest brief's date is newer than `brief-reads.json`'s `read` date (or
 nothing has been read yet), present only while `state` is `ready`; `POST
 /api/brief/read` marks the newest brief read (below). Every agent carries its
@@ -540,6 +546,8 @@ Discuss, Start or "Started with" the agent, and Dismiss.
 
 `lib/focus-proxy.mjs` forwards a fixed set of routes to
 `DASHBOARD_FOCUS_ORIGIN`, each to one upstream path. Nothing else is forwarded.
+When `focus/board.json` exists under the data root, the native board routes
+take precedence over the proxy's `GET /api/focus`.
 
 | Dashboard route | Focus route |
 | --- | --- |

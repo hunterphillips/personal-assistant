@@ -51,7 +51,7 @@ test('a stream opens with SSE headers and a snapshot whose id is its revision', 
   const first = await stream.next();
   assert.equal(first.event, 'snapshot');
   assert.equal(first.id, String(first.data.revision));
-  assert.deepEqual(first.data.focus, { available: true });
+  assert.deepEqual(first.data.focus, { available: true, native: false });
   assert.deepEqual(first.data.brief, { state: 'ready', date: '2026-09-25', revision: REVISION });
   assert.equal(first.data.revision, app.hub.snapshot().revision);
 });
@@ -202,7 +202,7 @@ test('GET /api/state checks Focus and the brief, then returns the hub snapshot',
   const app = await startStreamingApp(t);
   const response = await request(app, 'GET', '/api/state');
   assert.equal(app.counts.health, 1);
-  assert.deepEqual(response.json.focus, { available: true });
+  assert.deepEqual(response.json.focus, { available: true, native: false });
   assert.equal(response.status, 200);
   assert.equal(response.headers['cache-control'], 'no-store');
   assert.match(response.headers['content-type'], /^application\/json/);

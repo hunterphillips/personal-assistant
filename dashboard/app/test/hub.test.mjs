@@ -72,6 +72,7 @@ function makeHub(overrides = {}) {
     registry: overrides.registry ?? fakeRegistry(),
     jobs: overrides.jobs ?? fakeJobs(),
     focus: status.focus,
+    focusBoard: overrides.focusBoard ?? null,
     brief: status.brief,
     timeouts: { statusMs: 200, turnMaxMs: overrides.turnMaxMs ?? 60_000 },
     limits: { requestInputBytes: 64, previewChars: 10 },
@@ -272,7 +273,7 @@ test('a status change bumps once with focus and brief in the patch', async () =>
   assert.equal(hub.snapshot().revision, 2);
   assert.deepEqual(deltas, [{
     revision: 2,
-    patch: { focus: { available: true }, brief: { state: 'ready', date: '2026-09-25', revision: REVISION } },
+    patch: { focus: { available: true, native: false }, brief: { state: 'ready', date: '2026-09-25', revision: REVISION } },
   }]);
 });
 
@@ -289,7 +290,49 @@ test('only the status part that changed is in the patch', async () => {
   await hub.refreshStatus();
   status.available = false;
   await hub.refreshStatus();
-  assert.deepEqual(deltas[1], { revision: 3, patch: { focus: { available: false } } });
+  assert.deepEqual(deltas[1], { revision: 3, patch: { focus: { available: false, native: false } } });
+});
+
+function fakeFocusBoard({ present = true, updated = '2026-10-10T12:00:00.000Z' } = {}) {
+  const listeners = new Set();
+  return {
+    exists: async () => present,
+    read: async () => ({ board: present ? { updated, items: [] } : null, problem: null }),
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    emit(nextUpdated) {
+      updated = nextUpdated;
+      for (const fn of listeners) fn({ updated, items: [] });
+    },
+  };
+}
+
+test('a native Focus board supplies status without probing the proxy', async () => {
+  const focusBoard = fakeFocusBoard();
+  const { hub, status } = makeHub({ focusBoard });
+  await hub.refreshStatus();
+  assert.deepEqual(hub.snapshot().focus, { available: true, native: true, updated: '2026-10-10T12:00:00.000Z' });
+  assert.equal(status.calls.health, 0);
+});
+
+test('a Focus board change bumps the revision with its document stamp', async () => {
+  const focusBoard = fakeFocusBoard();
+  const { hub, deltas } = makeHub({ focusBoard });
+  await hub.refreshStatus();
+  const before = hub.snapshot().revision;
+  focusBoard.emit('2026-10-10T12:05:00.000Z');
+  assert.equal(hub.snapshot().revision, before + 1);
+  assert.deepEqual(deltas.at(-1).patch, { focus: { available: true, native: true, updated: '2026-10-10T12:05:00.000Z' } });
+  hub.close();
+  focusBoard.emit('2026-10-10T12:06:00.000Z');
+  assert.equal(hub.snapshot().revision, before + 1);
+});
+
+test('an absent native board keeps the proxy status and marks it non-native', async () => {
+  const focusBoard = fakeFocusBoard({ present: false });
+  const { hub, status } = makeHub({ focusBoard });
+  await hub.refreshStatus();
+  assert.deepEqual(hub.snapshot().focus, { available: true, native: false });
+  assert.equal(status.calls.health, 1);
 });
 
 test('status copies only non-content brief fields and reports failures as unavailable', async () => {
@@ -304,7 +347,7 @@ test('status copies only non-content brief fields and reports failures as unavai
   };
   const other = makeHub({ status: failing });
   await other.hub.refreshStatus();
-  assert.deepEqual([other.hub.snapshot().focus, other.hub.snapshot().brief], [{ available: false }, { state: 'unavailable' }]);
+  assert.deepEqual([other.hub.snapshot().focus, other.hub.snapshot().brief], [{ available: false, native: false }, { state: 'unavailable' }]);
 });
 
 // read is the briefReads.read() answer; marks records every mark() call.
@@ -406,7 +449,7 @@ test('an aborted caller stops waiting without aborting the shared status run', a
   assert.equal(hub.snapshot().revision, 1);
   gate.resolve();
   await second;
-  assert.deepEqual(hub.snapshot().focus, { available: true });
+  assert.deepEqual(hub.snapshot().focus, { available: true, native: false });
 });
 
 test('a jobs refresh bumps for refreshing and again for the result', async () => {

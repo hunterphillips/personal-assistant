@@ -186,11 +186,11 @@ export function fakeSettings(initial = {}, { ok = true, error = null } = {}) {
 // jobs, and settings unless real ones are passed, and no persona
 // adapters unless given.
 export function createTestHub({
-  config, focus, brief, registry = fakeRegistry(), jobs = fakeJobs(), routines = null, adapters = {}, store = null, bindings = null,
+  config, focus, focusBoard = null, brief, registry = fakeRegistry(), jobs = fakeJobs(), routines = null, adapters = {}, store = null, bindings = null,
   cmux = null, settings = fakeSettings(), reads = null, briefReads = null, notifications = null, home = '/invented', log = () => {}, now = undefined,
 }) {
   return createHub({
-    registry, jobs, routines, focus, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, reads,
+    registry, jobs, routines, focus, focusBoard, brief, timeouts: config.timeouts, limits: config.limits, adapters, store, bindings, cmux, settings, reads,
     briefReads, notifications, home, log,
     ...(now ? { now } : {}),
   });
@@ -253,7 +253,7 @@ export function fakeCmux(inventory = null) {
 // (notifications.mjs, optional) goes to the hub and the routes. `configure`
 // may adjust config.
 export async function startApp(t, {
-  env = {}, focus, brief, registry = fakeRegistry(), jobs, routines = null, scheduler = null, hub, adapters, store, bindings,
+  env = {}, focus, focusBoard = null, focusInstructions = null, brief, registry = fakeRegistry(), jobs, routines = null, scheduler = null, hub, adapters, store, bindings,
   cmux = null, goals, feeds, sources, ideas = null, ideasInstructions = null, briefInstructions, notices = null, settings = fakeSettings(), reads = null,
   briefReads = null, notifications = null, configure = (c) => c,
   delegation = null,
@@ -281,7 +281,7 @@ export async function startApp(t, {
   const briefRoutes = brief ?? createBriefRoutes(config);
   const jobsModule = jobs ?? fakeJobs();
   const stateHub = hub ?? createTestHub({
-    config, focus: focusRoutes, brief: briefRoutes, registry, jobs: jobsModule, routines, adapters, store, bindings, cmux, log,
+    config, focus: focusRoutes, focusBoard, brief: briefRoutes, registry, jobs: jobsModule, routines, adapters, store, bindings, cmux, log,
     ...(settings ? { settings } : {}), ...(reads ? { reads } : {}), ...(briefReads ? { briefReads } : {}), notifications,
   });
   if (!hub) await stateHub.start();
@@ -300,7 +300,7 @@ export async function startApp(t, {
     ? createBriefInstructions({ file: config.briefInstructionsPath, limits: config.limits, log })
     : briefInstructions;
   const handler = createApp({
-    config, focus: focusRoutes, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feeds: feedStore,
+    config, focus: focusRoutes, focusBoard, focusInstructions, brief: briefRoutes, hub: stateHub, store, cmux, goals: goalsReader, feeds: feedStore,
     sources: sourceStore, ideas, ideasInstructions, briefInstructions: briefInstructionsReader, notices, settings, registry, routines,
     scheduler: schedulerService, notifications, log,
   });

@@ -15,7 +15,8 @@
 //     { revision,                 // integer, starts at 1, +1 on every change
 //       updatedAt,                // ISO time of the last change
 //       home,                     // the home directory, for showing paths
-//       focus: { available },     // null until the first refreshStatus
+//       focus: { available, native, updated }, // native selects the board;
+//                                               // updated is its document stamp
 //       brief,                    // exactly what /api/dashboard/status reports:
 //                                 // { state, date?, revision?, unread? }, or
 //                                 // { state: 'unknown' } before the first check.
@@ -304,7 +305,7 @@ const REVISION = /^[0-9a-f]{64}$/;
 const STATE_WORD = /^[a-z_]{1,40}$/;
 
 export function createHub({
-  registry, jobs, routines = null, schedule = defaultSchedule, timeZone = TIME_ZONE, focus, brief, timeouts, limits = LIMITS,
+  registry, jobs, routines = null, schedule = defaultSchedule, timeZone = TIME_ZONE, focus, focusBoard = null, brief, timeouts, limits = LIMITS,
   adapters = {}, store = null, bindings = null, cmux = null, adaptersDisabled = null, settings = null, reads = null, briefReads = null, notifications = null, models = MODELS,
   home = os.homedir(), log = () => {}, now = () => new Date(),
 }) {
@@ -630,6 +631,12 @@ export function createHub({
     if (Object.keys(patch).length > 0) commit(patch);
   }) : () => {};
 
+  const unsubscribeFocusBoard = focusBoard && typeof focusBoard.onChange === 'function' ? focusBoard.onChange((board) => {
+    if (closed) return;
+    const next = { available: true, native: true, updated: board?.updated ?? null };
+    if (!sameJson(next, state.focus)) commit({ focus: next });
+  }) : () => {};
+
   // Adds `unread` to a ready brief summary when briefReads is configured:
   // true when nothing has been read yet or the last read date is older than
   // this one. Any other state (or no briefReads) is returned unchanged.
@@ -641,11 +648,14 @@ export function createHub({
 
   async function runStatus() {
     const budget = timeouts.statusMs;
+    const native = focusBoard && await focusBoard.exists();
     const [focusStatus, briefStatus] = await Promise.all([
-      bounded((signal) => focus.checkHealth({ signal }), budget).then(
-        (result) => ({ available: result?.available === true }),
-        () => ({ available: false }),
-      ),
+      native
+        ? focusBoard.read().then((value) => ({ available: true, native: true, updated: value.board?.updated ?? null }))
+        : bounded((signal) => focus.checkHealth({ signal }), budget).then(
+          (result) => ({ available: result?.available === true, native: false }),
+          () => ({ available: false, native: false }),
+        ),
       bounded((signal) => brief.latestMetadata({ signal }), budget).then(
         (metadata) => withUnread(summarizeBrief(metadata)),
         () => ({ state: 'unavailable' }),
@@ -870,6 +880,7 @@ export function createHub({
       unsubscribeSettings();
       unsubscribeRoutines();
       unsubscribeNotifications();
+      unsubscribeFocusBoard();
       for (const unsubscribe of adapterUnsubscribes.splice(0)) unsubscribe();
       for (const entry of personas.values()) {
         clearTimeout(entry.timer);

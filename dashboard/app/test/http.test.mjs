@@ -253,7 +253,7 @@ test('missing briefs and unavailable Focus do not affect health or shell', async
   }
   const status = await request(app, 'GET', '/api/dashboard/status');
   assert.equal(status.status, 200);
-  assert.deepEqual(status.json, { focus: { available: false }, brief: { state: 'unavailable' } });
+  assert.deepEqual(status.json, { focus: { available: false, native: false }, brief: { state: 'unavailable' } });
   assertJsonError(await request(app, 'GET', '/embedded/focus'), 502);
   assertJsonError(await request(app, 'GET', '/api/focus'), 502);
   assertJsonError(await request(app, 'PUT', '/api/focus', {
@@ -287,7 +287,7 @@ test('status copies only non-content brief fields', async (t) => {
   const app = await startApp(t, { focus: consumingFocus(), brief: recordingBrief() });
   const response = await request(app, 'GET', '/api/dashboard/status');
   assert.deepEqual(response.json, {
-    focus: { available: true },
+    focus: { available: true, native: false },
     brief: { state: 'ready', date: '2026-01-02', revision: REVISION },
   });
 });
@@ -307,7 +307,7 @@ test('status survives dependencies that throw or hang', async (t) => {
     const started = Date.now();
     const response = await request(app, 'GET', '/api/dashboard/status');
     assert.equal(response.status, 200);
-    assert.deepEqual(response.json, { focus: { available: false }, brief: { state: 'unavailable' } });
+    assert.deepEqual(response.json, { focus: { available: false, native: false }, brief: { state: 'unavailable' } });
     assert.ok(Date.now() - started < 1_000);
   }
 });

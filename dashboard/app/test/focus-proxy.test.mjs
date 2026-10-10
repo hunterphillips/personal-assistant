@@ -440,14 +440,14 @@ test('with nothing listening on the Focus origin, shell and brief routes answer 
   assert.deepEqual(latest.json, { error: 'brief_directory_unavailable' });
   const status = await request(app, 'GET', '/api/dashboard/status');
   assert.equal(status.status, 200);
-  assert.deepEqual(status.json.focus, { available: false });
+  assert.deepEqual(status.json.focus, { available: false, native: false });
 });
 
 test('status reports Focus available when upstream answers JSON', async (t) => {
   const upstream = await startScriptedFocus(t);
   const app = await appFor(t, upstream);
   const status = await request(app, 'GET', '/api/dashboard/status');
-  assert.deepEqual(status.json.focus, { available: true });
+  assert.deepEqual(status.json.focus, { available: true, native: false });
   assert.deepEqual(upstream.records.map((r) => [r.method, r.url]), [['GET', '/api/focus']]);
 });
 
@@ -482,7 +482,7 @@ test('checkHealth reports a truncated response as unavailable', async (t) => {
   assert.deepEqual(await proxy.checkHealth({}), { available: false });
   chunked = true;
   assert.deepEqual(await proxy.checkHealth({}), { available: false });
-  assert.deepEqual((await request(app, 'GET', '/api/dashboard/status')).json.focus, { available: false });
+  assert.deepEqual((await request(app, 'GET', '/api/dashboard/status')).json.focus, { available: false, native: false });
 });
 
 test('checkHealth reads the whole response and Focus sees a clean close', async (t) => {
@@ -676,7 +676,7 @@ test('the dashboard status moved to /api/dashboard/status; /api/status is Focus\
   });
   const app = await appFor(t, upstream);
   const dashboard = await request(app, 'GET', '/api/dashboard/status');
-  assert.deepEqual(dashboard.json.focus, { available: true });
+  assert.deepEqual(dashboard.json.focus, { available: true, native: false });
   assert.deepEqual(upstream.records.map((r) => r.url), ['/api/focus']);
   const focus = await request(app, 'GET', '/api/status');
   assert.deepEqual(focus.json, { from: '/api/status' });
@@ -695,7 +695,7 @@ test('isolated Focus: page and API load through the proxy', isolated, async (t) 
   const api = await request(app, 'GET', '/api/focus');
   assert.equal(api.status, 200);
   assert.deepEqual(api.json.items.map((item) => item.id), ['fixture-a', 'fixture-b']);
-  assert.deepEqual((await request(app, 'GET', '/api/dashboard/status')).json.focus, { available: true });
+  assert.deepEqual((await request(app, 'GET', '/api/dashboard/status')).json.focus, { available: true, native: false });
 });
 
 test('isolated Focus: the fixture is its own Git repository', isolated, async (t) => {

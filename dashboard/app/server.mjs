@@ -47,6 +47,7 @@ import { createFeeds } from './lib/feeds.mjs';
 import { createBriefInstructions } from './lib/brief-instructions.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
+import { createBoard } from './lib/focus/board.mjs';
 import { createGoals } from './lib/goals.mjs';
 import { createIdeas } from './lib/ideas.mjs';
 import { createInstructions } from './lib/instructions.mjs';
@@ -134,6 +135,10 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
     created: prepared.created, moved: prepared.moved.length,
   });
   const focus = createFocusProxy(config);
+  const focusBoard = createBoard({
+    file: config.focusBoardPath, changesFile: config.focusChangesPath,
+    candidatesDir: config.focusCandidatesDir, limits: config.limits, log: logEntry,
+  });
   const brief = createBriefRoutes(config);
   const registry = createRegistry({ path: config.registryPath, log: logEntry });
   const bindings = createBindings({ path: path.join(config.codexDir, 'bindings.json'), pollMs: config.timeouts.codexPollMs, log: logEntry });
@@ -187,6 +192,7 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
     routines,
     timeZone: config.timeZone,
     focus,
+    focusBoard,
     brief,
     timeouts: config.timeouts,
     limits: config.limits,
@@ -218,6 +224,10 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
     file: config.ideasInstructionsPath, path: 'ideas/criteria.md', maxBytes: config.limits.ideasFileBytes,
     label: 'Ideas', event: 'ideas_instructions_error', log: logEntry,
   });
+  const focusInstructions = createInstructions({
+    file: config.focusRulesPath, path: 'focus/rules.md', maxBytes: config.limits.focusBoardBytes,
+    label: 'Focus', event: 'focus_rules_error', log: logEntry,
+  });
   const briefInstructions = createBriefInstructions({ file: config.briefInstructionsPath, limits: config.limits, log: logEntry });
   const notices = createNotices({
     briefsDir: config.briefsDir,
@@ -228,7 +238,7 @@ async function startOnRoot({ env, config, logEntry, createAdapters }) {
     log: logEntry,
   });
   const app = createApp({
-    config, focus, brief, hub, store, cmux, goals, feeds, sources, ideas, ideasInstructions, briefInstructions, notices, settings, registry, routines,
+    config, focus, focusBoard, focusInstructions, brief, hub, store, cmux, goals, feeds, sources, ideas, ideasInstructions, briefInstructions, notices, settings, registry, routines,
     scheduler, notifications, log: logEntry,
   });
   const server = http.createServer(app);

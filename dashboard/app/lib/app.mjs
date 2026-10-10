@@ -44,6 +44,7 @@ import { createFeedRoutes } from './feed-routes.mjs';
 import { createSourceRoutes } from './source-routes.mjs';
 import { createGoalsRoutes } from './goals-routes.mjs';
 import { createIdeasRoutes } from './ideas-routes.mjs';
+import { createFocusRoutes } from './focus-routes.mjs';
 import { createNotificationRoutes } from './notification-routes.mjs';
 import { createRoutineRoutes } from './routine-routes.mjs';
 import { createSettingsRoutes } from './settings-routes.mjs';
@@ -95,6 +96,10 @@ const EXACT_ROUTES = new Map([
   ['/api/sessions/refresh', { name: 'sessions-refresh', methods: ['POST'], bodyless: true }],
   ['/embedded/focus', { name: 'focus-page', methods: ['GET'] }],
   ['/api/focus', { name: 'focus-api', methods: ['GET', 'PUT'] }],
+  ['/api/focus/changes', { name: 'focus-changes', methods: ['POST'] }],
+  ['/api/focus/candidates', { name: 'focus-candidates', methods: ['GET'] }],
+  ['/api/focus/instructions', { name: 'focus-instructions', methods: ['GET'] }],
+  ['/api/focus/instructions/propose', { name: 'focus-instructions-propose', methods: ['POST'] }],
   // Focus's own status and scan controls, called by its page at these
   // absolute paths and forwarded to the same upstream path. The POSTs carry
   // no body, so they need Origin but not a JSON content type.
@@ -133,7 +138,7 @@ export function defaultLog(entry) {
 
 export function createApp({
   config, focus, brief, hub, store = null, cmux = null, goals = null, feeds = null, sources = null,
-  ideas = null, ideasInstructions = null,
+  ideas = null, ideasInstructions = null, focusBoard = null, focusInstructions = null,
   briefInstructions = null, notices = null, settings = null, registry = null, routines = null, scheduler = null, notifications = null,
   log = defaultLog,
 }) {
@@ -159,6 +164,12 @@ export function createApp({
   const ideasRoutes = ideas && ideasInstructions
     ? createIdeasRoutes({
       ideas, instructions: ideasInstructions, instructionsFile: config.ideasInstructionsPath, hub, scheduler, log, limits: config.limits, shuttingDown: isShuttingDown,
+    })
+    : null;
+  const focusBoardRoutes = focusBoard && focusInstructions
+    ? createFocusRoutes({
+      board: focusBoard, instructions: focusInstructions, instructionsFile: config.focusRulesPath,
+      hub, log, limits: config.limits, shuttingDown: isShuttingDown,
     })
     : null;
   const routineRoutes = routines
@@ -300,13 +311,28 @@ export function createApp({
       case 'focus-page':
         return focus.handlePage(req, res);
       case 'focus-api': {
-        if (req.method === 'GET') return focus.handleApi(req, res, {});
+        if (req.method === 'GET') {
+          if (focusBoardRoutes && await focusBoard.exists()) return focusBoardRoutes.serveRead(res);
+          return focus.handleApi(req, res, {});
+        }
         const limit = config.limits.focusBodyBytes;
         if (declaredLengthExceeds(req, limit)) throw new HttpError(413, 'payload_too_large');
         return focus.handleApi(req, res, { body: limitRequestBody(req, limit) });
       }
       case 'focus-control':
         return serveFocusControl(req, res, route.label);
+      case 'focus-changes':
+        if (!focusBoardRoutes) throw new HttpError(404, 'not_found');
+        return focusBoardRoutes.serveChange(req, res);
+      case 'focus-candidates':
+        if (!focusBoardRoutes) throw new HttpError(404, 'not_found');
+        return focusBoardRoutes.serveCandidates(res);
+      case 'focus-instructions':
+        if (!focusBoardRoutes) throw new HttpError(404, 'not_found');
+        return focusBoardRoutes.serveInstructions(res);
+      case 'focus-instructions-propose':
+        if (!focusBoardRoutes) throw new HttpError(404, 'not_found');
+        return focusBoardRoutes.serveProposeInstructions(req, res);
       case 'brief-latest':
         return brief.handleLatest(req, res);
       case 'brief-read':
