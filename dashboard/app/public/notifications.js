@@ -3,9 +3,8 @@
 // every open browser shows the same count; this module only renders it and
 // sends Acknowledge (POST /api/notifications/:id/acknowledge) and
 // Acknowledge all (POST /api/notifications/acknowledge), then lets the next
-// delta redraw. The count sits on the header's Notifications entry when it
-// is above zero; on a phone, where that entry lives in the menu, it sits on
-// the menu toggle and on the entry inside the menu.
+// delta redraw. The count sits on the header's Notifications button, on a
+// desk and on a phone alike.
 //
 // The list is a popover under the header: open items first, then the
 // acknowledged ones under a divider. Each shows the agent's name (its id
@@ -80,10 +79,6 @@
   function create(shellApi) {
     var toggle = document.getElementById('notifications-toggle');
     var count = document.getElementById('notifications-count');
-    var menuEntry = document.getElementById('notifications-menu-entry');
-    var menuEntryCount = document.getElementById('notifications-menu-count');
-    var menuToggle = document.getElementById('app-menu-toggle');
-    var menuCount = document.getElementById('app-menu-count');
     var panel = document.getElementById('notifications-panel');
     var openList = document.getElementById('notifications-open');
     var doneList = document.getElementById('notifications-acknowledged');
@@ -139,11 +134,8 @@
     function renderCount() {
       var open = data().open;
       setCount(count, open);
-      setCount(menuEntryCount, open);
-      setCount(menuCount, open);
       var label = open > 0 ? 'Notifications, ' + open + ' open' : 'Notifications';
       toggle.setAttribute('aria-label', label);
-      if (menuEntry) menuEntry.setAttribute('aria-label', label);
     }
 
     function row(item) {
@@ -264,7 +256,6 @@
       panel.hidden = true;
       toggle.setAttribute('aria-expanded', 'false');
       if (restore && opener && opener.offsetParent !== null) opener.focus();
-      else if (restore && menuToggle) menuToggle.focus();
     }
 
     function acknowledge(id) {
@@ -306,11 +297,6 @@
       if (panel.hidden) open(toggle);
       else close(true);
     });
-    if (menuEntry) menuEntry.addEventListener('click', function () {
-      // The menu closes itself on an entry (theme.js); the list opens in
-      // its place.
-      open(menuToggle);
-    });
     all.addEventListener('click', function () { acknowledge(null); });
     panel.addEventListener('click', function (event) {
       var button = event.target.closest && event.target.closest('button[data-notification-action="acknowledge"]');
@@ -333,7 +319,7 @@
       // The path as dispatched: a click on Acknowledge redraws the list, so
       // its button may be gone from the page by the time this runs.
       var path = event.composedPath();
-      if (path.indexOf(panel) !== -1 || path.indexOf(toggle) !== -1 || (menuEntry && path.indexOf(menuEntry) !== -1)) return;
+      if (path.indexOf(panel) !== -1 || path.indexOf(toggle) !== -1) return;
       close(false);
     });
 

@@ -44,9 +44,8 @@
   });
   document.addEventListener('click', function (event) {
     if (menu.hidden) return;
-    // An entry (Brief or Notifications, on a phone) closes the menu too; the
-    // shell's own link handler still routes Brief, and Notifications opens
-    // its list in the menu's place.
+    // An entry (Brief or Quick chat, on a phone) closes the menu too; the
+    // shell's own link handler still routes Brief.
     var entry = event.target.closest && event.target.closest('.menu-entry');
     if (entry && entry !== settings) close(false);
     else if (!menu.contains(event.target) && !toggle.contains(event.target)) close(false);

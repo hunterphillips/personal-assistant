@@ -287,8 +287,7 @@ test.describe('on a phone', () => {
     await toggle(page).click();
     await expectShown(page);
 
-    await page.getByRole('button', { name: 'Menu', exact: true }).click();
-    await page.locator('#notifications-menu-entry').click();
+    await page.locator('#notifications-toggle').click();
     const notifications = page.locator('#notifications-panel');
     await expect(notifications).toBeVisible();
     await page.keyboard.press('Escape');

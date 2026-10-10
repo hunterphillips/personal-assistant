@@ -23,20 +23,13 @@ const JOB = Object.freeze({
 
 const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
 
-// The count on the entry Hunter can see: the header's on a desk, the menu
-// toggle's on a phone.
+// The count on the Notifications button, the same on a desk and a phone.
 function countOf(page) {
-  return page.viewportSize().width < 720 ? page.locator('#app-menu-count') : page.locator('#notifications-count');
+  return page.locator('#notifications-count');
 }
 
 async function openList(page) {
-  if (page.viewportSize().width < 720) {
-    await page.getByRole('button', { name: /^Menu/ }).click();
-    await page.locator('#notifications-menu-entry').click();
-    await expect(page.locator('#app-menu')).toBeHidden();
-  } else {
-    await page.locator('#notifications-toggle').click();
-  }
+  await page.locator('#notifications-toggle').click();
   const panel = page.getByRole('dialog', { name: 'Notifications' });
   await expect(panel).toBeVisible();
   return panel;

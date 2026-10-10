@@ -65,8 +65,8 @@ test.describe('header shell', () => {
     // logs a stylesheet-blocked violation and fails even for untouched
     // elements, e.g. .header-brief) -- unrelated to these buttons; each
     // label is checked on the attribute that is its source instead, which
-    // also still works while the entries are display:none on a phone
-    // (getByRole excludes hidden elements, so it cannot be used here).
+    // also still works while Brief and Quick chat are display:none on a
+    // phone (getByRole excludes hidden elements, so it cannot be used here).
     await expect(headerEntries.nth(0)).toHaveAttribute('aria-label', 'Brief');
     await expect(headerEntries.nth(1)).toHaveAttribute('aria-label', 'Quick chat');
     await expect(headerEntries.nth(2)).toHaveAttribute('aria-label', 'Notifications');
@@ -110,7 +110,7 @@ test.describe('header entries', () => {
     if (onPhone) {
       await expect(headerBrief).toBeHidden();
       await page.getByRole('button', { name: 'Menu', exact: true }).click();
-      await expect(menu.locator('.menu-entry:visible')).toHaveText(['Brief', 'Quick chat', 'Notifications', 'Settings']);
+      await expect(menu.locator('.menu-entry:visible')).toHaveText(['Brief', 'Quick chat', 'Settings']);
       await expect(menu.getByRole('group', { name: 'Theme' })).toBeVisible();
       await menu.getByRole('button', { name: 'Brief', exact: true }).click();
       await expect(menu).toBeHidden();
@@ -122,6 +122,14 @@ test.describe('header entries', () => {
     await expect(page.locator('.brief-title')).toHaveText('Invented brief for tests, not a real day');
     await expect(page).toHaveURL(hub.origin + '/goals');
     await expect(page.locator('#view-goals')).toBeVisible();
+  });
+
+  test('the Notifications bell stays in the header on a phone, not the menu, and opens the panel', async ({ page, hub }) => {
+    await page.goto(hub.origin + '/goals');
+    const bell = page.locator('#notifications-toggle');
+    await expect(bell).toBeVisible();
+    await bell.click();
+    await expect(page.getByRole('dialog', { name: 'Notifications' })).toBeVisible();
   });
 });
 
