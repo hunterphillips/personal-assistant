@@ -135,8 +135,8 @@ export function createBoard({ file, changesFile, candidatesDir, limits, log: raw
       const invariantErrors = checkInvariants(current.board, next);
       if (invariantErrors.length > 0) throw new BoardError('rejected', { detail: invariantErrors[0] });
       const counts = countChanges(current.board, next);
-      if (ops.length === 0) {
-        return deepFreeze({ board: current.board, counts });
+      if (JSON.stringify(next) === JSON.stringify(current.board)) {
+        return deepFreeze({ board: current.board, counts: { added: 0, changed: 0, expired: 0 } });
       }
       const schemaErrors = validateFocus(next);
       if (schemaErrors.length > 0) throw new BoardError('rejected', { detail: schemaErrors[0] });
@@ -239,18 +239,21 @@ function curatorLines(ops, current, next, run, stamp) {
   const currentIds = new Set(current.items.map((item) => item.id));
   const additions = next.items.filter((item) => !currentIds.has(item.id));
   let addition = 0;
-  return ops.map((op) => {
-    const item = op.op === 'add'
-      ? additions[addition++]
-      : next.items.find((entry) => entry.id === op.id) ?? current.items.find((entry) => entry.id === op.id);
+  const lines = [];
+  for (const op of ops) {
+    const after = op.op === 'add' ? additions[addition++] : next.items.find((entry) => entry.id === op.id);
+    const before = current.items.find((entry) => entry.id === (after?.id ?? op.id));
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    const item = after ?? before;
     const fields = { ...op };
     delete fields.op;
     delete fields.id;
-    return {
+    lines.push({
       at: stamp, who: 'curator', via: 'run', run, op: op.op, id: item.id,
       summary: `${op.op} ${quote(item.title)}`, fields,
-    };
-  });
+    });
+  }
+  return lines;
 }
 
 function applyHunterOp(current, op, stamp) {

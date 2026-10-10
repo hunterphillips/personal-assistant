@@ -187,15 +187,30 @@ test('curate with empty ops writes nothing', async (t) => {
   await assert.rejects(readFile(changesFile), { code: 'ENOENT' });
 });
 
-test('curate audits an accepted non-empty no-op without changing the board', async (t) => {
+test('curate writes nothing for an accepted non-empty no-op', async (t) => {
   const { board, file, changesFile } = await setup(t);
-  const before = await readFile(file, 'utf8');
+  const before = await readFile(file);
+  let notified = 0;
+  board.onChange(() => { notified += 1; });
   const result = await board.curate({
     basis: OLD, run: 'no-op', ops: [{ op: 'update', id: 'tomorrow-one', tier: 'tomorrow' }],
   });
   assert.deepEqual(result.counts, { added: 0, changed: 0, expired: 0 });
-  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), JSON.parse(before));
-  assert.deepEqual((await lines(changesFile)).map((line) => line.summary), ['update "Review the release checklist"']);
+  assert.deepEqual(await readFile(file), before);
+  await assert.rejects(readFile(changesFile), { code: 'ENOENT' });
+  assert.equal(notified, 0);
+});
+
+test('curate logs only the ops in a mixed batch that changed an item', async (t) => {
+  const { board, changesFile } = await setup(t);
+  const result = await board.curate({
+    basis: OLD, run: 'mixed', ops: [
+      { op: 'update', id: 'tomorrow-one', tier: 'tomorrow' },
+      { op: 'expire', id: 'later-one', meta: 'Booked already.' },
+    ],
+  });
+  assert.deepEqual(result.counts, { added: 0, changed: 0, expired: 1 });
+  assert.deepEqual((await lines(changesFile)).map((line) => line.summary), ['expire "Book the practice room"']);
 });
 
 test('prune removes only old tombstones, logs them, and notifies listeners', async (t) => {
