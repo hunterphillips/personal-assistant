@@ -8,7 +8,9 @@ Ideas lists the week's suggestions; Health lists the launchd jobs. The
 Daily Brief opens from the header as an overlay over any view. Personas
 run on the Claude Agent SDK, Codex threads are observed on a shared
 app-server, and cmux terminals are listed with their state.
-Focus runs in an iframe through a proxy to its own server. Briefs are read
+The Focus view renders the board from the data root's `focus/` when
+`focus/board.json` exists there, and runs in an iframe through a proxy to
+its own server otherwise. Briefs are read
 from `briefs/` in the data root, and feedback is saved beside them.
 
 Everything the daemon and the producers write lives in the data root,
@@ -640,7 +642,9 @@ bottom bar: the toggle opens it, and the scrim, Escape, or another view
 closes it; nothing stores it. The script switches views
 with the History API and handles
 Back and Forward, and a reload or bookmark opens the same view. The Focus
-frame is created the first time its view opens and stays in the page
+frame exists only when the snapshot's `focus.native` is false;
+`public/focus.js` draws the board instead when it is true. The frame is
+created the first time its view opens and stays in the page
 afterwards, hidden while another view is shown, so Focus keeps its state. The page has no inline script or style, as the
 shell CSP requires.
 

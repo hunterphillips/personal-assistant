@@ -45,8 +45,12 @@ from here.
   (with images, and Discuss opening Scout; a gear opens the feed's
   instructions, its sources, and the Sources list), the Daily Brief opens as an
   overlay from the header on any view (rendered from the run's brief
-  JSON, with Approve, Dismiss, notes, and its own instructions), Focus is
-  embedded through a proxy and takes the dashboard's theme, Goals reads
+  JSON, with Approve, Dismiss, notes, and its own instructions), Focus
+  renders the board from the data root's `focus/` when a board file
+  exists there (phase 1 of the Focus design, landed 2026-10-10,
+  `thoughts/shared/plans/2026-10-09-focus-into-dashboard-design.md`), and
+  is embedded through a proxy and takes the dashboard's theme otherwise,
+  Goals reads
   the vault's priorities with add and edit going through the Second
   brain agent, Ideas lists what the weekly run on Myos suggests (at most
   five a run, from the criteria file), with Discuss opening quick chat,
@@ -174,6 +178,10 @@ picks one up and ends by updating it.
   are outputs, under the data root since 2026-10-06 (the repo's copies
   renamed `.migrated`, deleted a week later), with `defaults/ideas-criteria.md`
   seeding the root's copy when it is missing.
+- `focus/` under the data root holds the board, its change log, each
+  scan's candidates, and the rules, with `defaults/focus-rules.md`
+  seeding the rules when missing; the old Focus repo still runs the live
+  board until the move.
 - `agents/`: one folder per agent that lives in this repo (Assistant,
   Scout, Myos), its CLAUDE.md and skills; the folder is the agent's `cwd`.
 - `systems/`: symlinks to the agents' repos.
