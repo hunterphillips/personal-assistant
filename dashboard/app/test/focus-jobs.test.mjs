@@ -101,8 +101,8 @@ test('refresh is one exclusive four-scan batch and its burst always queues one c
   assert.deepEqual(value.enqueues[0][3], { exclusive: true });
   value.enqueues.length = 0;
   await value.byLabel['focus.curate'].onBurstEnd([
-    { label: 'focus.scan-calendar', outcome: 'no change', burst: 'refresh', changed: false, signature: 'a' },
-    { label: 'focus.scan-gmail', outcome: 'failed', burst: 'refresh', changed: false },
+    { label: 'focus.scan-calendar', outcome: 'no change', trigger: 'refresh', changed: false, signature: 'a' },
+    { label: 'focus.scan-gmail', outcome: 'failed', trigger: 'refresh', changed: false },
   ]);
   assert.equal(value.enqueues.length, 1);
   assert.deepEqual(value.enqueues[0].slice(0, 2), ['focus.curate', 'refresh']);
@@ -115,8 +115,8 @@ test('catch-up fan-in includes only changed sources and rejudge has no candidate
     scanned: '2026-10-10T12:00:00.000Z', signature: null, candidates: [candidate('calendar')],
   }, LIMITS);
   await value.byLabel['focus.curate'].onBurstEnd([
-    { label: 'focus.scan-calendar', outcome: 'wrote', burst: 'catchup', changed: true, signature: 'a' },
-    { label: 'focus.scan-gmail', outcome: 'no change', burst: 'catchup', changed: false, signature: 'b' },
+    { label: 'focus.scan-calendar', outcome: 'wrote', trigger: 'catchup', changed: true, signature: 'a' },
+    { label: 'focus.scan-gmail', outcome: 'no change', trigger: 'catchup', changed: false, signature: 'b' },
   ]);
   assert.deepEqual(value.enqueues[0][2], { sources: [{ source: 'calendar', signature: 'a' }] });
   await value.byLabel['focus.curate'].run('catchup', value.enqueues[0][2], value.controls);
@@ -170,8 +170,8 @@ async function withRunner(t, { now }) {
   const curator = { calls: [], async run(input) { curator.calls.push(input); return { run: 'curator-run', outcome: 'no change' }; } };
   const board = { async read() { return { board: { updated: now, items: [] }, problem: null }; } };
   const scans = Object.fromEntries(['calendar', 'gmail', 'git', 'notes'].map((source) => [source, async () => [candidate(source)]]));
-  createFocusJobs({ runner, board, settings, scans, curator, candidatesDir: dir, zone: 'America/Chicago', limits: LIMITS, timeouts: TIMEOUTS, now: () => new Date(now) });
-  return { runner, curator };
+  const jobs = createFocusJobs({ runner, board, settings, scans, curator, candidatesDir: dir, zone: 'America/Chicago', limits: LIMITS, timeouts: TIMEOUTS, now: () => new Date(now) });
+  return { runner, curator, jobs };
 }
 
 async function settle(condition) {
@@ -203,4 +203,19 @@ test('a curate catch-up with sources stays a catch-up, and one without sources i
   await runner.enqueue('focus.curate', 'catchup');
   await settle(() => curator.calls.length === 2);
   assert.equal(curator.calls[1].trigger, 'rejudge');
+});
+
+test('a refresh through the runner queues its curate from the results\' trigger, and scan end lines carry no burst', async (t) => {
+  const { runner, curator, jobs } = await withRunner(t, { now: '2026-10-10T10:30:10.000Z' });
+  await runner.start();
+  curator.calls.length = 0;
+  assert.equal((await jobs.refresh()).ok, true);
+  await settle(() => curator.calls.length === 1 && runner.state().running === null);
+  assert.equal(curator.calls[0].trigger, 'refresh');
+  assert.equal(curator.calls[0].candidates.length, 4);
+  const scan = runner.lastRun('focus.scan-calendar');
+  assert.equal(scan.trigger, 'refresh');
+  assert.equal(scan.changed, true);
+  assert.equal(typeof scan.signature, 'string');
+  assert.equal(Object.hasOwn(scan, 'burst'), false);
 });

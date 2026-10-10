@@ -47,11 +47,11 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
       }
       return Object.freeze({
         outcome: changed ? 'wrote' : 'no change', candidates: candidates.length,
-        ...(['refresh', 'catchup'].includes(trigger) ? { changed, signature: nextSignature, burst: trigger } : {}),
+        ...(['refresh', 'catchup'].includes(trigger) ? { changed, signature: nextSignature } : {}),
       });
     } catch (error) {
       const detail = error instanceof ScanError ? (SCAN_DETAILS[error.code] ?? error.message) : (error?.message ?? String(error));
-      return Object.freeze({ outcome: 'failed', detail, ...(['refresh', 'catchup'].includes(trigger) ? { changed: false, burst: trigger } : {}) });
+      return Object.freeze({ outcome: 'failed', detail, ...(['refresh', 'catchup'].includes(trigger) ? { changed: false } : {}) });
     }
   }
 
@@ -85,14 +85,14 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
 
   async function onBurstEnd(results) {
     const scanResults = results.filter((result) => sourceOf(result.label));
-    const refreshed = scanResults.filter((result) => result.burst === 'refresh');
+    const refreshed = scanResults.filter((result) => result.trigger === 'refresh');
     if (refreshed.length > 0) {
       await runner.enqueue(LABELS.rejudge, 'refresh', {
         sources: refreshed.map((result) => ({ source: sourceOf(result.label), signature: result.signature })),
       });
       return;
     }
-    const changed = scanResults.filter((result) => result.burst === 'catchup' && result.changed === true);
+    const changed = scanResults.filter((result) => result.trigger === 'catchup' && result.changed === true);
     if (changed.length > 0) await runner.enqueue(LABELS.rejudge, 'catchup', { sources: signaturesOf(changed) });
   }
 

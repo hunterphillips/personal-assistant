@@ -61,7 +61,7 @@ test('a due job runs once, a missed burst runs in registration order, and burst 
   assert.deepEqual(events.map((event) => event.slice(0, 3)), [['start', 'one', 'schedule'], ['end', 'one']]);
   assert.equal(runner.lastRun('one').occurrence, '2026-10-05T12:00:00.000Z');
   assert.equal(runner.lastRun('one').outcome, 'wrote');
-  assert.deepEqual(bursts, [['one', [{ label: 'one', outcome: 'wrote', value: 'one' }]]]);
+  assert.deepEqual(bursts, [['one', [{ label: 'one', outcome: 'wrote', value: 'one', trigger: 'schedule' }]]]);
 
   set('2026-10-06T12:05:00.000Z');
   const secondEvents = [];
@@ -75,7 +75,7 @@ test('a due job runs once, a missed burst runs in registration order, and burst 
   assert.deepEqual(secondEvents.map((event) => event.slice(0, 3)), [
     ['start', 'a', 'catchup'], ['end', 'a'], ['start', 'b', 'catchup'], ['end', 'b'],
   ]);
-  assert.deepEqual(seen, [[{ label: 'a', outcome: 'wrote', value: 'a' }, { label: 'b', outcome: 'wrote', value: 'b' }]]);
+  assert.deepEqual(seen, [[{ label: 'a', outcome: 'wrote', value: 'a', trigger: 'catchup' }, { label: 'b', outcome: 'wrote', value: 'b', trigger: 'catchup' }]]);
 });
 
 test('explicit work is FIFO ahead of due work, runs one at a time, and exclusive enqueue refuses while busy', async (t) => {
@@ -135,7 +135,7 @@ test('a job can enqueue another job while running, and an array enqueue is one o
     ['start', 'first', 'refresh'], ['end', 'first'], ['start', 'second', 'refresh'], ['end', 'second'],
     ['start', 'second', 'scan'], ['end', 'second'],
   ]);
-  assert.deepEqual(bursts, [[{ label: 'first', outcome: 'wrote' }, { label: 'second', outcome: 'wrote', value: 'second' }]]);
+  assert.deepEqual(bursts, [[{ label: 'first', outcome: 'wrote', trigger: 'refresh' }, { label: 'second', outcome: 'wrote', value: 'second', trigger: 'refresh' }]]);
 });
 
 test('timeout and stop abort the signal and write their failed end line before settling', async (t) => {

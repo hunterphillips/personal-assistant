@@ -8,7 +8,9 @@
 //                   setTimeout, clearTimeout, randomUUID }) returns:
 //   register(job)                 Add one job before start. A job may carry
 //                                 triggerFor(trigger, context), whose answer
-//                                 replaces the trigger for that run.
+//                                 replaces the trigger for that run. Its
+//                                 onBurstEnd(results) gets each run's answer
+//                                 with its label and trigger.
 //   start()                       Load logs, close open runs, tick, and arm.
 //   stop()                        Abort and await the running job.
 //   tick()                        Run the latest due occurrence for each job.
@@ -225,7 +227,7 @@ export function createJobRunner({
       if (running === active) running = null;
       notify();
     }
-    return { label: job.label, ...answer };
+    return { label: job.label, ...answer, trigger };
   }
 
   async function burstEnded(results) {
