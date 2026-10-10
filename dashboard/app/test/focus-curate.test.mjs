@@ -100,6 +100,16 @@ test('rejudge has no candidates and refresh renders one candidates section per s
   assert.match(query.calls[1].prompt, /source: notes/);
 });
 
+test('catchup renders a candidates section per source like refresh', async (t) => {
+  const query = fakeQuery(async function* () { yield init(); yield result(); });
+  const found = await setup(t, { query });
+  const answer = await found.curator.run({
+    trigger: 'catchup', candidates: [{ source: 'gmail', candidates: [{ title: 'Mail' }] }],
+  });
+  assert.equal(answer.outcome, 'no change');
+  assert.match(query.calls[0].prompt, /=== CANDIDATES \(source: gmail\)/);
+});
+
 test('a prune happens before the prompt and is logged as the daemon', async (t) => {
   const document = JSON.parse(await readFile(FIXTURE));
   document.items.push({
@@ -268,21 +278,27 @@ test('query null disables model calls', async (t) => {
   });
 });
 
-test('a missing or blank rules file fails before any query', async (t) => {
+test('a missing or blank rules file fails before any query or board write', async (t) => {
   const query = fakeQuery(async function* () { yield init(); yield result(); });
   const missing = await setup(t, { query });
+  const missingBefore = await readFile(missing.file);
   await unlink(missing.rules);
   const missingAnswer = await missing.curator.run({ trigger: 'rejudge' });
   assert.equal(missingAnswer.outcome, 'failed');
   assert.equal(missingAnswer.detail, 'The Focus rules file is missing.');
   assert.equal(query.calls.length, 0);
+  assert.deepEqual(await readFile(missing.file), missingBefore);
+  assert.equal((await changeLines(missing.changesFile)).length, 0);
 
   const blank = await setup(t, { query });
+  const blankBefore = await readFile(blank.file);
   await writeFile(blank.rules, '  \n\t\n');
   const blankAnswer = await blank.curator.run({ trigger: 'rejudge' });
   assert.equal(blankAnswer.outcome, 'failed');
   assert.equal(blankAnswer.detail, 'The Focus rules file is empty.');
   assert.equal(query.calls.length, 0);
+  assert.deepEqual(await readFile(blank.file), blankBefore);
+  assert.equal((await changeLines(blank.changesFile)).length, 0);
 });
 
 test('an unknown trigger fails before any query', async (t) => {

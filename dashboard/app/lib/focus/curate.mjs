@@ -11,7 +11,7 @@ import { RuntimeError } from '../runtime/adapter.mjs';
 import { createQueryLoader, SUBSCRIPTION_SOURCES } from '../runtime/sdk.mjs';
 
 const DAY_MS = 86_400_000;
-const TRIGGERS = new Set(['scan', 'refresh', 'rejudge']);
+const TRIGGERS = new Set(['scan', 'refresh', 'rejudge', 'catchup']);
 const STDERR_TAIL = 2000;
 const BOARD_PROBLEMS = { no_board: 'The board file is missing.', board_invalid: 'The board file is not valid.' };
 const SYSTEM_PROMPT = 'You curate the Focus board. Answer with the ops object the schema describes and nothing else.';
@@ -46,6 +46,7 @@ export function createCurator(deps) {
     };
     if (!TRIGGERS.has(trigger)) return outcome('failed', { detail: 'The curate was asked to run with an unknown trigger.' });
     try {
+      const rulebook = await readRules(rules, limits.briefInstructionsBytes);
       const pruneResult = await board.prune({ run: runId });
       pruned = pruneResult.pruned;
       if (disabled) return outcome('failed', { detail: 'Model calls are off while an API key is in the daemon\'s environment.', pruned });
@@ -53,7 +54,6 @@ export function createCurator(deps) {
       const current = await board.read();
       if (!current.board) return outcome('failed', { detail: boardProblem(current), pruned });
       const basis = current.board.updated;
-      const rulebook = await readRules(rules, limits.briefInstructionsBytes);
       const at = now();
       const [priorities, projectState, person, corrections] = await Promise.all([
         Promise.resolve(vault.readPriorities()),
