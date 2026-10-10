@@ -1,0 +1,109 @@
+{
+  "data": {
+    "repository": {
+      "name": "recipe-box",
+      "url": "https://github.com/hunterphillips/recipe-box",
+      "defaultBranchRef": {
+        "name": "main",
+        "target": {
+          "checkSuites": {
+            "nodes": [
+              {
+                "conclusion": "FAILURE",
+                "url": "https://github.com/hunterphillips/recipe-box/commit/bbb222/checks?check_suite_id=202",
+                "updatedAt": "2026-10-07T12:00:00Z"
+              }
+            ]
+          }
+        }
+      },
+      "pullRequests": {
+        "nodes": [
+          {
+            "number": 3,
+            "title": "Unit conversions",
+            "url": "https://github.com/hunterphillips/recipe-box/pull/3",
+            "isDraft": false,
+            "updatedAt": "2026-09-30T12:00:00Z",
+            "author": {
+              "login": "hunterphillips"
+            },
+            "reviewRequests": {
+              "nodes": []
+            }
+          }
+        ]
+      },
+      "refs": {
+        "nodes": [
+          {
+            "name": "main",
+            "target": {
+              "committedDate": "2026-10-05T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "b1",
+            "target": {
+              "committedDate": "2026-10-04T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "b2",
+            "target": {
+              "committedDate": "2026-10-03T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "b3",
+            "target": {
+              "committedDate": "2026-10-02T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "b4",
+            "target": {
+              "committedDate": "2026-10-01T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "b5",
+            "target": {
+              "committedDate": "2026-09-29T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "b6",
+            "target": {
+              "committedDate": "2026-09-28T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          }
+        ]
+      },
+      "closedIssues": {
+        "nodes": []
+      }
+    }
+  }
+}

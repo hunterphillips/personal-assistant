@@ -1,0 +1,35 @@
+[
+  {
+    "repository": {
+      "name": "garden-planner",
+      "nameWithOwner": "hunterphillips/garden-planner"
+    },
+    "number": 20,
+    "title": "Pick a mapping library",
+    "url": "https://github.com/hunterphillips/garden-planner/issues/20",
+    "labels": [
+      {
+        "name": "ready-for-human"
+      }
+    ],
+    "updatedAt": "2026-10-08T13:00:00Z"
+  },
+  {
+    "repository": {
+      "name": "recipe-box",
+      "nameWithOwner": "hunterphillips/recipe-box"
+    },
+    "number": 21,
+    "title": "Which units to support",
+    "url": "https://github.com/hunterphillips/recipe-box/issues/21",
+    "labels": [
+      {
+        "name": "bug"
+      },
+      {
+        "name": "needs-info"
+      }
+    ],
+    "updatedAt": "2026-10-10T06:00:00Z"
+  }
+]

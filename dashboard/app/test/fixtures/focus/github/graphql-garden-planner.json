@@ -1,0 +1,182 @@
+{
+  "data": {
+    "repository": {
+      "name": "garden-planner",
+      "url": "https://github.com/hunterphillips/garden-planner",
+      "defaultBranchRef": {
+        "name": "main",
+        "target": {
+          "checkSuites": {
+            "nodes": [
+              {
+                "conclusion": "FAILURE",
+                "url": "https://github.com/hunterphillips/garden-planner/commit/aaa111/checks?check_suite_id=101",
+                "updatedAt": "2026-10-09T10:00:00Z"
+              }
+            ]
+          }
+        }
+      },
+      "pullRequests": {
+        "nodes": [
+          {
+            "number": 11,
+            "title": "Water schedule view",
+            "url": "https://github.com/hunterphillips/garden-planner/pull/11",
+            "isDraft": false,
+            "updatedAt": "2026-10-09T12:00:00Z",
+            "author": {
+              "login": "hunterphillips"
+            },
+            "reviewRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "number": 12,
+            "title": "Seed catalog import",
+            "url": "https://github.com/hunterphillips/garden-planner/pull/12",
+            "isDraft": true,
+            "updatedAt": "2026-10-07T12:00:00Z",
+            "author": {
+              "login": "hunterphillips"
+            },
+            "reviewRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "number": 13,
+            "title": "Frost date lookup",
+            "url": "https://github.com/hunterphillips/garden-planner/pull/13",
+            "isDraft": false,
+            "updatedAt": "2026-09-09T12:00:00Z",
+            "author": {
+              "login": "hunterphillips"
+            },
+            "reviewRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "number": 14,
+            "title": "Compost tracker",
+            "url": "https://github.com/hunterphillips/garden-planner/pull/14",
+            "isDraft": false,
+            "updatedAt": "2026-10-09T12:00:00Z",
+            "author": {
+              "login": "garden-helper"
+            },
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": {
+                    "login": "hunterphillips"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 15,
+            "title": "Plot layout grid",
+            "url": "https://github.com/hunterphillips/garden-planner/pull/15",
+            "isDraft": false,
+            "updatedAt": "2026-10-09T12:00:00Z",
+            "author": {
+              "login": "garden-helper"
+            },
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": {}
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "refs": {
+        "nodes": [
+          {
+            "name": "main",
+            "target": {
+              "committedDate": "2026-10-09T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "idle-branch",
+            "target": {
+              "committedDate": "2026-10-05T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "with-pr",
+            "target": {
+              "committedDate": "2026-10-05T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": [
+                {
+                  "state": "OPEN"
+                }
+              ]
+            }
+          },
+          {
+            "name": "claude/issue-7",
+            "target": {
+              "committedDate": "2026-10-06T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "claude/issue-8",
+            "target": {
+              "committedDate": "2026-10-06T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "fresh-branch",
+            "target": {
+              "committedDate": "2026-10-09T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          },
+          {
+            "name": "ancient-branch",
+            "target": {
+              "committedDate": "2026-08-31T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": []
+            }
+          }
+        ]
+      },
+      "closedIssues": {
+        "nodes": [
+          {
+            "number": 7
+          },
+          {
+            "number": 3
+          }
+        ]
+      }
+    }
+  }
+}
