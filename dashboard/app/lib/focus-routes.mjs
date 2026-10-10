@@ -43,13 +43,24 @@ export function createFocusRoutes({ board = null, instructions = null, instructi
     sendJson(res, 200, await board.candidates());
   }
 
+  // Without a board no Focus job is registered, so the runner refuses every
+  // label; a label it does not know has never run.
+  function lastRunOf(label) {
+    try {
+      return runner.lastRun(label);
+    } catch (error) {
+      if (error?.code === 'no_such_job') return null;
+      throw error;
+    }
+  }
+
   function settingsView() {
     const current = settings.current();
     return {
       paused: current.paused,
       schedules: SCHEDULES.map(([source, label]) => {
         const cron = current.schedules[source];
-        return { source, cron, text: describe(parseCron(cron)), lastRun: runner.lastRun(label) };
+        return { source, cron, text: describe(parseCron(cron)), lastRun: lastRunOf(label) };
       }),
       model: current.model,
     };

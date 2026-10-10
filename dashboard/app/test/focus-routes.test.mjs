@@ -9,6 +9,7 @@ import { LIMITS } from '../lib/config.mjs';
 import { createBoard } from '../lib/focus/board.mjs';
 import { createFocusRoutes, instructionsMessage } from '../lib/focus-routes.mjs';
 import { createFocusSettings } from '../lib/focus/settings.mjs';
+import { createJobRunner } from '../lib/jobs-runner.mjs';
 import { createInstructions } from '../lib/instructions.mjs';
 import { fakeRegistry, request, startApp, tempDir } from './support/harness.mjs';
 
@@ -272,4 +273,16 @@ test('Focus instructions resolve the pinned default agent and name the absolute 
   const response = await proposal;
   assert.deepEqual([response.status, response.json.agentId], [202, 'pinned']);
   assert.deepEqual(app.adapter.calls[0].slice(0, 2), ['pinned', instructionsMessage('Prefer smaller tasks.', app.rulesFile)]);
+});
+
+test('a settings GET with a runner that has no jobs answers every schedule with no last run', async (t) => {
+  const root = await tempDir(t);
+  const runner = createJobRunner({ runsDir: path.join(root, 'runs'), setTimeout: () => ({ unref() {} }), clearTimeout: () => {} });
+  const { routes } = await settingsRoutes(t, { runner });
+  const res = fakeResponse();
+  await routes.serveSettings(res);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json.schedules.map((entry) => entry.source), ['calendar', 'gmail', 'git', 'notes', 'rejudge']);
+  assert.ok(res.json.schedules.every((entry) => entry.lastRun === null));
+  assert.throws(() => runner.lastRun('focus.curate'), { code: 'no_such_job' });
 });
