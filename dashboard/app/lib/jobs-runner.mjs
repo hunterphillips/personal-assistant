@@ -13,7 +13,9 @@
 //                                 triggerFor(trigger, context), whose answer
 //                                 replaces the trigger for that run. Its
 //                                 onBurstEnd(results) gets each run's answer
-//                                 with its label and trigger.
+//                                 with its label and trigger. run(trigger,
+//                                 context, { signal, enqueue, run }) gets
+//                                 the run id its log lines carry.
 //   start()                       Load logs, close open runs, kick the first
 //                                 tick without awaiting its drain, and arm.
 //   stop()                        Abort and await the running job. Later
@@ -217,7 +219,7 @@ export function createJobRunner({
     try {
       answer = active.abortDetail
         ? { outcome: 'failed', detail: active.abortDetail }
-        : await job.run(trigger, context, { signal: controller.signal, enqueue: nestedEnqueue });
+        : await job.run(trigger, context, { signal: controller.signal, enqueue: nestedEnqueue, run });
     } catch (error) {
       answer = { outcome: 'failed', detail: messageOf(error) };
     } finally {
@@ -371,6 +373,7 @@ export function createJobRunner({
     return Object.freeze(jobs.map((job) => {
       const cron = currentCron(job);
       const last = records(job.label).at(-1) ?? null;
+      const isRunning = running?.job.label === job.label;
       let failures24h = 0;
       for (const record of records(job.label)) {
         const ended = typeof record.endedAt === 'string' ? Date.parse(record.endedAt) : NaN;
@@ -378,9 +381,13 @@ export function createJobRunner({
       }
       return freeze({
         label: job.label, name: job.name, schedule: { kind: 'cron', text: cron ? schedule.describe(cron) : '' },
-        lastRun: last?.startedAt ?? last?.endedAt ?? null, outcome: last?.outcome ?? null, detail: last?.detail ?? null,
+        // A job with no record never ran; one whose open record has no end yet
+        // is running.
+        lastRun: last?.startedAt ?? last?.endedAt ?? null,
+        outcome: isRunning && typeof last?.outcome !== 'string' ? 'running' : last ? last.outcome ?? null : 'never ran',
+        detail: last?.detail ?? null,
         failures24h, paused: typeof job.paused === 'function' ? Boolean(job.paused()) : false,
-        running: running?.job.label === job.label, source: 'dashboard', available: true,
+        running: isRunning, source: 'dashboard', available: true,
       });
     }));
   }

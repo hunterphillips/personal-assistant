@@ -842,6 +842,26 @@ a:focus-visible, button:focus-visible, iframe:focus-visible, main:focus-visible 
 .badge-wait { background: var(--amber-bg); color: var(--amber); }
 .badge-bad { background: var(--red-bg); color: var(--red); }
 
+/* A row's badges: the outcome, after Paused on the daemon's own rows. */
+.routine-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  grid-area: badge;
+  justify-self: end;
+  min-width: 0;
+}
+
+/* Why a failed or rejected run ended, under its row. */
+.routine-detail {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .button-primary {
   border-color: var(--green);
   background: var(--green);
@@ -1329,6 +1349,59 @@ div.panel-row.now-row:hover { background: none; }
 }
 
 .instructions-actions { margin-top: 8px; }
+
+/* Focus's Scans, above the rules in the gear's panel. */
+.focus-scans {
+  margin: 16px 0 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.focus-scans-heading {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 400;
+}
+.focus-curation { margin-top: 6px; }
+.focus-curation-switch { font-weight: 600; }
+.focus-curation-state,
+.focus-curation-reason {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.focus-curation-reason { color: var(--red); }
+.focus-schedules {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.focus-schedule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 2px 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+.focus-schedule-name { font-weight: 600; }
+.focus-schedule-text,
+.focus-schedule-run {
+  min-width: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.focus-schedule-run { text-align: right; }
+
+/* Refresh turns while a Focus job runs. */
+.focus-refresh.is-spinning svg { animation: focus-spin 1s linear infinite; }
+@keyframes focus-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-refresh.is-spinning svg { animation: none; opacity: 0.5; }
+}
 
 /* Spacing counts only what is shown, so a source filter leaves no gap. */
 .feed-run:not([hidden]) ~ .feed-run { margin-top: 32px; }
@@ -3180,6 +3253,17 @@ textarea.form-input {
   .header-actions,
   .header-action-group { gap: 2px; }
   .header-action-group .button:not(.icon-button) { padding: 0 10px; }
+  /* Focus's Refresh and gear sit side by side. */
+  .header-action-group[data-actions-for="focus"] { flex: none; }
+  .focus-schedule {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name run"
+      "text text";
+  }
+  .focus-schedule-name { grid-area: name; }
+  .focus-schedule-run { grid-area: run; }
+  .focus-schedule-text { grid-area: text; }
   /* New feed becomes an icon button, same as the settings gear beside it. */
   #feed-new {
     display: inline-flex;

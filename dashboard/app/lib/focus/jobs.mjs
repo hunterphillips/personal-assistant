@@ -56,7 +56,7 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
     }
   }
 
-  async function runCurate(trigger, context = {}, { signal }) {
+  async function runCurate(trigger, context = {}, { signal, run }) {
     const files = await candidateFiles();
     // A file is stale when its candidates are not the ones a curate last
     // placed. Board moves alone do not make a file stale; a file without
@@ -84,7 +84,7 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
       candidates = covered.map(group);
     }
     const others = SOURCES.filter((id) => !coveredSet.has(id)).map(group).filter(Boolean);
-    const answer = await curator.run({ trigger: curatorTrigger, source, candidates, others, signal });
+    const answer = await curator.run({ trigger: curatorTrigger, source, candidates, others, signal, ...(run ? { run } : {}) });
     // Each file the curate covered, or that was not stale before it, is signed
     // again against the board the curate left and marked curated: a covered
     // file's candidates were placed, and a non-stale file's candidates were

@@ -376,3 +376,18 @@ test('onTick is awaited before the due check reads any cron', async (t) => {
   assert.equal(order[0], 'onTick');
   assert.equal(runner.lastRun('hooked-cron').occurrence, '2026-10-05T12:00:00.000Z');
 });
+
+test('a job with no record reads never ran, and a running one reads running', async (t) => {
+  const { runner } = await setup(t);
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  runner.register(scriptedJob('fresh', [], { run: async () => { await held; return { outcome: 'wrote' }; } }));
+  assert.equal(runner.rows()[0].outcome, 'never ran');
+  assert.equal(runner.rows()[0].lastRun, null);
+  const tick = runner.tick();
+  await settle(() => runner.state().running === 'fresh');
+  assert.equal(runner.rows()[0].outcome, 'running');
+  release();
+  await tick;
+  assert.equal(runner.rows()[0].outcome, 'wrote');
+});

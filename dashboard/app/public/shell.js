@@ -281,7 +281,7 @@
         (Array.isArray(agent.forwarded) && agent.forwarded.length > 0);
     }));
     var failedJob = !!(state && state.jobs && Array.isArray(state.jobs.items) && state.jobs.items.some(function (job) {
-      return job.outcome === 'failed';
+      return job.outcome === 'failed' || job.outcome === 'rejected';
     }));
     $('agents-indicator').hidden = !agentsNeedYou;
     $('health-indicator').hidden = !failedJob;

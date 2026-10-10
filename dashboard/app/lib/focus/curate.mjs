@@ -27,8 +27,10 @@ export function createCurator(deps) {
   const loader = disabled ? null : createQueryLoader({ query: deps.query, ...(deps.importSdk ? { importSdk: deps.importSdk } : {}) });
   const log = (entry) => { try { rawLog(entry); } catch {} };
 
-  async function run({ trigger, source = null, candidates = [], others = [], signal = null }) {
-    const runId = randomUUID();
+  // `run`, when given, is the caller's run id (the job runner's), so the
+  // runs log and the changes lines share it.
+  async function run({ trigger, source = null, candidates = [], others = [], signal = null, run: givenRun = null }) {
+    const runId = typeof givenRun === 'string' && givenRun !== '' ? givenRun : randomUUID();
     let pruned;
     let usage;
     let abortDetail = null;

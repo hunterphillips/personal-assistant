@@ -8,7 +8,9 @@
 //
 // Jobs are refreshed only on demand: when the view opens and the last
 // refresh is missing or older than 60 seconds, and when Refresh is chosen.
-// The Focus card carries Pause or Resume, forwarded to Focus; the server
+// The daemon's own Focus jobs sit on one card named Focus; a failed or
+// rejected row shows its detail under it. The launchd Focus scans' card
+// carries Pause or Resume, forwarded to Focus; the server
 // refreshes jobs after either succeeds, and the card follows the state.
 // A failed Pause or Resume is reported there until the next attempt or
 // until the state shows Focus paused or resumed.
@@ -29,7 +31,9 @@
     ok: { text: 'OK', tone: 'good' },
     wrote: { text: 'Wrote', tone: 'good' },
     'no change': { text: 'No change', tone: 'good' },
+    rejected: { text: 'Rejected', tone: 'bad' },
     skipped: { text: 'Skipped', tone: 'wait' },
+    interrupted: { text: 'Interrupted', tone: 'wait' },
     'never ran': { text: 'Never ran', tone: 'wait' },
     running: { text: 'Running', tone: 'wait' },
     failed: { text: 'Failed', tone: 'bad' },
@@ -37,6 +41,7 @@
     unknown: { text: 'Unknown', tone: 'wait' },
   };
   var WATCHED = ['jobs', 'registry', 'focus', 'agents', 'codex', 'cmux'];
+  var DETAIL_CHARS = 200;
 
   function pad(n) {
     return n < 10 ? '0' + n : String(n);
@@ -77,6 +82,13 @@
     return typeof item.label === 'string' && item.label.indexOf(FOCUS_SCAN_PREFIX) === 0;
   }
 
+  // The detail under a failed or rejected row, cut to DETAIL_CHARS.
+  function failureDetail(item) {
+    if ((item.outcome !== 'failed' && item.outcome !== 'rejected') || typeof item.detail !== 'string') return '';
+    var text = item.detail.trim();
+    return text.length > DETAIL_CHARS ? text.slice(0, DETAIL_CHARS - 1) + '…' : text;
+  }
+
   function badgeFor(item) {
     if (item.available === false) return BADGES.unknown;
     var badge = BADGES[item.outcome] || BADGES.unknown;
@@ -87,13 +99,14 @@
   }
 
   // Cards in agent order, each with that agent's jobs; jobs naming an
-  // agent the registry no longer lists come last under their own name.
+  // agent the registry no longer lists, or none (the daemon's own Focus
+  // jobs, keyed on their agentName), come last under their own name.
   function groups(state) {
     var byAgent = {};
     var order = [];
     var items = state.jobs.items || [];
     for (var i = 0; i < items.length; i += 1) {
-      var id = items[i].agentId;
+      var id = items[i].agentId || items[i].agentName;
       if (!Object.prototype.hasOwnProperty.call(byAgent, id)) {
         byAgent[id] = [];
         order.push(id);
@@ -138,6 +151,8 @@
     lines.push('Outcome: ' + (job.available === false ? 'unknown' : job.outcome || 'unknown') +
       (typeof job.exitStatus === 'number' ? ' (exit ' + job.exitStatus + ')' : ''));
     if (typeof job.failures24h === 'number' && job.failures24h > 0) lines.push('Failures in the last day: ' + job.failures24h);
+    var detail = failureDetail(job);
+    if (detail) lines.push('Detail: ' + detail);
     if (job.paused === true) lines.push('Paused');
     if (job.source) lines.push('Source: ' + job.source);
     return lines.join('\n');
@@ -172,14 +187,20 @@
       when.appendChild(element('span', 'routine-schedule', item.schedule && item.schedule.text ? item.schedule.text : ''));
       var run = element('span', 'routine-run');
       run.appendChild(element('span', null, item.lastRun ? formatTime(item.lastRun, Date.now()) : 'Never run'));
-      if (isFocusScan(item) && typeof item.failures24h === 'number' && item.failures24h > 0) {
+      if (typeof item.failures24h === 'number' && item.failures24h > 0) {
         run.appendChild(element('span', 'routine-failures',
           item.failures24h === 1 ? '1 failure today' : item.failures24h + ' failures today'));
       }
       when.appendChild(run);
       li.appendChild(when);
       var badge = badgeFor(item);
-      li.appendChild(element('span', 'badge badge-' + badge.tone, badge.text));
+      var badges = element('span', 'routine-badges');
+      // A launchd scan's pause shows on its card; the daemon's own rows carry it.
+      if (item.paused === true && !isFocusScan(item)) badges.appendChild(element('span', 'badge badge-wait routine-paused', 'Paused'));
+      badges.appendChild(element('span', 'badge badge-' + badge.tone, badge.text));
+      li.appendChild(badges);
+      var detail = failureDetail(item);
+      if (detail) li.appendChild(element('p', 'routine-detail', detail));
       return li;
     }
 

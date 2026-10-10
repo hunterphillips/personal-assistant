@@ -378,3 +378,13 @@ test('a schedule changed on disk is the next tick\'s cron', async (t) => {
   assert.equal(runner.lastRun('focus.curate').occurrence, '2026-10-10T10:31:00.000Z');
   assert.equal(runner.rows().at(-1).schedule.text, 'Every day at 5:31');
 });
+
+test('the curator is handed the runner\'s run id, so its changes lines and the runs log share it', async (t) => {
+  const { runner, curator } = await withRunner(t, { now: '2026-10-10T10:30:10.000Z' });
+  await runner.start();
+  await runner.tick();
+  assert.equal(curator.calls.length, 1);
+  const record = runner.lastRun('focus.curate');
+  assert.equal(typeof record.run, 'string');
+  assert.equal(curator.calls[0].run, record.run);
+});

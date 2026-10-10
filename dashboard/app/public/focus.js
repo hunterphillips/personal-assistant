@@ -28,8 +28,13 @@
 // The side panel's Focus section lists Now, Today, Tomorrow, and Later with
 // their open counts, then Recently cleared and Considered while they hold
 // anything; choosing one selects the tab that shows it and scrolls to it.
-// The rules panel behind the header's gear is instructions.js's. Every text
-// node is set with textContent.
+// The rules panel behind the header's gear is instructions.js's; above its
+// rules sits Scans: the Curation switch (PUT /api/focus/settings { paused })
+// and each schedule from GET /api/focus/settings with its last run, read when
+// the panel opens and again on a `focus` patch while it is open. Refresh in
+// the header POSTs /api/focus/refresh; it spins and is disabled while the
+// snapshot's focus.scanning names a running job. Every text node is set with
+// textContent.
 (function () {
   'use strict';
 
@@ -63,6 +68,8 @@
     notes: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
     manual: '<path d="M17 3a2.8 2.8 0 0 1 4 4L8 20l-5 1 1-5z"/>',
   };
+  var SCHEDULE_NAMES = { calendar: 'Calendar scan', gmail: 'Gmail scan', git: 'GitHub scan', notes: 'Notes scan', rejudge: 'Rejudge' };
+  var FLASH_MS = 4000;
   var CHECK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m4 12.5 5.2 5.2L20 6.8"/></svg>';
   var DOTS = '<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
 
@@ -156,6 +163,13 @@
     var considered = document.getElementById('focus-considered');
     var consideredBody = document.getElementById('focus-considered-body');
     var side = document.querySelector('[data-panel-for="focus"]');
+    var refreshButton = document.getElementById('focus-refresh');
+    var rulesPanel = document.getElementById('focus-instructions');
+    var rulesToggle = document.getElementById('focus-instructions-toggle');
+    var curation = document.getElementById('focus-curation');
+    var curationState = document.getElementById('focus-curation-state');
+    var curationReason = document.getElementById('focus-curation-reason');
+    var schedules = document.getElementById('focus-schedules');
     var lists = {};
     Array.prototype.forEach.call(board.querySelectorAll('ul[data-place]'), function (list) {
       lists[list.getAttribute('data-place')] = list;
@@ -188,6 +202,12 @@
     var idleTimer = null;
     var tickTimer = null;
     var rendering = false;
+    var flash = null; // a refresh's sentence, shown for a few seconds
+    var flashTimer = null;
+    var scanning = null; // the running job's label, from the snapshot
+    var focusSettings = null; // GET /api/focus/settings's answer
+    var settingsSequence = 0;
+    var saving = false;
 
     function byId(id) {
       return data ? arrayOf(data.items).find(function (item) { return item.id === id; }) || null : null;
@@ -225,7 +245,7 @@
     }
 
     function setMessage() {
-      var lines = [problem, notice].filter(Boolean);
+      var lines = [problem, notice, flash].filter(Boolean);
       message.textContent = lines.join(' ');
       message.hidden = lines.length === 0;
     }
@@ -1030,6 +1050,116 @@
       })
       : null;
 
+    // ---------------------------------------------------------------- refresh
+
+    function showFlash(text) {
+      flash = text;
+      setMessage();
+      if (flashTimer !== null) clearTimeout(flashTimer);
+      flashTimer = setTimeout(function () {
+        flashTimer = null;
+        flash = null;
+        setMessage();
+      }, FLASH_MS);
+    }
+
+    function renderRefresh() {
+      var running = typeof scanning === 'string' && scanning !== '';
+      refreshButton.disabled = running;
+      refreshButton.classList.toggle('is-spinning', running);
+    }
+
+    // The run's progress arrives through the stream as focus.scanning; the
+    // answer only says whether it started.
+    refreshButton.addEventListener('click', function () {
+      if (refreshButton.disabled) return;
+      request('/api/focus/refresh', { method: 'POST' }).then(function (result) {
+        if (result && result.status === 202) return;
+        showFlash(result && result.status === 409 ? 'A refresh is already running.' : 'The refresh could not start.');
+      });
+    });
+
+    // ---------------------------------------------------------------- scans
+
+    function rulesOpen() { return !!rulesPanel && !rulesPanel.hidden; }
+
+    function lastRunText(record) {
+      var at = record && (record.startedAt || record.endedAt);
+      var text = at && window.DashboardJobs ? window.DashboardJobs.formatTime(at, Date.now()) : '';
+      return text || 'Never run';
+    }
+
+    function setCurationReason(text) {
+      curationReason.textContent = text || '';
+      curationReason.hidden = !text;
+    }
+
+    function renderScans() {
+      var on = !!focusSettings && focusSettings.paused !== true;
+      curation.checked = on;
+      curation.disabled = saving || !focusSettings;
+      curationState.textContent = !focusSettings ? '' : on
+        ? 'The curator changes the board when a scan finds something new.'
+        : 'Paused. The scans still run and the board stays as it is.';
+      schedules.textContent = '';
+      arrayOf(focusSettings && focusSettings.schedules).forEach(function (entry) {
+        var row = element('li', 'focus-schedule');
+        row.setAttribute('data-focus-schedule', entry.source);
+        row.appendChild(element('span', 'focus-schedule-name', SCHEDULE_NAMES[entry.source] || entry.source));
+        row.appendChild(element('span', 'focus-schedule-text', entry.text || ''));
+        row.appendChild(element('span', 'focus-schedule-run', lastRunText(entry.lastRun)));
+        schedules.appendChild(row);
+      });
+    }
+
+    function loadSettings() {
+      var id = ++settingsSequence;
+      return request('/api/focus/settings', { method: 'GET' }).then(function (result) {
+        if (id !== settingsSequence || saving) return;
+        if (result && result.status === 200 && result.body && Array.isArray(result.body.schedules)) {
+          focusSettings = result.body;
+          renderScans();
+        } else if (!focusSettings) {
+          renderScans();
+          setCurationReason(NO_ANSWER);
+        }
+      });
+    }
+
+    // Opening the gear reads the scans; instructions.js's own click handler
+    // runs first and opens or closes the panel.
+    if (rulesToggle) {
+      rulesToggle.addEventListener('click', function () {
+        if (!rulesOpen()) return;
+        setCurationReason('');
+        loadSettings();
+      });
+    }
+
+    curation.addEventListener('change', function () {
+      if (saving || !focusSettings) return;
+      var paused = !curation.checked;
+      saving = true;
+      settingsSequence += 1;
+      setCurationReason('');
+      renderScans();
+      curation.checked = !paused;
+      request('/api/focus/settings', {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paused: paused }),
+      }).then(function (result) {
+        saving = false;
+        if (result && result.status === 200 && result.body && Array.isArray(result.body.schedules)) {
+          focusSettings = result.body;
+          renderScans();
+          return;
+        }
+        renderScans();
+        setCurationReason(result && result.status === 409
+          ? 'The settings file could not be read. Fix or delete it.'
+          : 'The setting could not be saved.');
+      });
+    });
+
     function startTick() {
       if (tickTimer !== null) clearInterval(tickTimer);
       tickTimer = setInterval(function () { if (!busy()) render(); }, TICK_MS);
@@ -1040,7 +1170,10 @@
         state = next;
         if (keys && keys.indexOf('focus') === -1) return;
         var focus = next && next.focus;
+        scanning = focus && typeof focus.scanning === 'string' ? focus.scanning : null;
+        renderRefresh();
         if (!visible || !focus || focus.native !== true) return;
+        if (rulesOpen()) loadSettings();
         // Before the first answer, show()'s own read is still out.
         if (!data && problem === null) return;
         if (focus.updated === seen && !pending) return;
@@ -1050,6 +1183,9 @@
         if (visible) return;
         visible = true;
         if (rules) rules.show();
+        refreshButton.hidden = false;
+        scanning = state && state.focus && typeof state.focus.scanning === 'string' ? state.focus.scanning : null;
+        renderRefresh();
         selectTab(tab);
         load();
         loadCandidates();
@@ -1072,6 +1208,10 @@
         tickTimer = null;
         if (side) side.textContent = '';
         if (rules) rules.hide();
+        refreshButton.hidden = true;
+        if (flashTimer !== null) clearTimeout(flashTimer);
+        flashTimer = null;
+        flash = null;
       },
       // One sentence of open counts, for quick chat.
       context: function () {

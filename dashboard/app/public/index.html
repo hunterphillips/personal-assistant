@@ -60,6 +60,9 @@
               </button>
             </div>
             <div class="header-action-group" data-actions-for="focus" hidden>
+              <button type="button" class="button icon-button focus-refresh" id="focus-refresh" aria-label="Refresh" title="Refresh" hidden>
+                <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+              </button>
               <button type="button" class="button icon-button" id="focus-instructions-toggle" aria-label="Rules" title="Rules" aria-expanded="false" aria-controls="focus-instructions" hidden>
                 <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
               </button>
@@ -193,6 +196,15 @@
               <div class="focus-page" id="focus-page">
                 <section class="instructions" id="focus-instructions" aria-labelledby="focus-instructions-heading" hidden>
                   <h2 class="instructions-heading" id="focus-instructions-heading">Focus rules</h2>
+                  <section class="focus-scans" id="focus-scans" aria-labelledby="focus-scans-heading">
+                    <h3 class="focus-scans-heading" id="focus-scans-heading">Scans</h3>
+                    <div class="focus-curation">
+                      <label class="form-check focus-curation-switch"><input type="checkbox" role="switch" id="focus-curation">Curation</label>
+                      <p class="focus-curation-state" id="focus-curation-state"></p>
+                      <p class="focus-curation-reason" id="focus-curation-reason" role="status" hidden></p>
+                    </div>
+                    <ul class="focus-schedules" id="focus-schedules"></ul>
+                  </section>
                   <p class="instructions-intro">The board follows these rules. A change goes to the pinned agent, which edits the file.</p>
                   <div id="focus-instructions-body"></div>
                   <form class="composer instructions-composer" id="focus-instructions-form">
