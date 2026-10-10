@@ -119,8 +119,10 @@ export async function scan({ google, now = Date.now, limits, signal } = {}) {
     }
   }
 
+  // The validator allows at most focusCandidatesMax; the soonest events stay.
   const candidates = events
     .map(candidateFromEvent)
-    .sort((a, b) => Date.parse(a.occurs_at) - Date.parse(b.occurs_at));
+    .sort((a, b) => Date.parse(a.occurs_at) - Date.parse(b.occurs_at))
+    .slice(0, limits.focusCandidatesMax);
   return checkedCandidates(candidates, limits);
 }

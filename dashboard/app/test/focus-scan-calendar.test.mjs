@@ -110,9 +110,26 @@ test('scan asks for the next 48 hours, skips the holiday calendar, and dedups ac
   assert.equal(eventCalls[0].params.singleEvents, true);
 });
 
+test('more events than focusCandidatesMax keeps the soonest', async () => {
+  const hours = Array.from({ length: LIMITS.focusCandidatesMax + 2 }, (_, i) => i + 1);
+  const make = (h) => event({ id: `h${h}`, start: { dateTime: at(h) } });
+  const google = fakeGoogle(
+    [{ id: 'me', summary: 'Me' }, { id: 'family', summary: 'Family' }],
+    {
+      me: hours.filter((h) => h % 2 === 0).reverse().map(make),
+      family: hours.filter((h) => h % 2 === 1).map(make),
+    },
+  );
+  const candidates = await scan({ google, now: NOW, limits: LIMITS });
+  assert.equal(candidates.length, LIMITS.focusCandidatesMax);
+  assert.deepEqual(
+    candidates.map((c) => c.external_id),
+    hours.slice(0, LIMITS.focusCandidatesMax).map((h) => `h${h}`),
+  );
+});
+
 test('scan output that fails validation throws a ScanError', async () => {
-  const many = Array.from({ length: LIMITS.focusCandidatesMax + 1 }, (_, i) => event({ id: `e${i}` }));
-  const google = fakeGoogle([{ id: 'me', summary: 'Me' }], { me: many });
+  const google = fakeGoogle([{ id: 'me', summary: 'Me' }], { me: [event({ id: '' })] });
   await assert.rejects(
     scan({ google, now: NOW, limits: LIMITS }),
     (error) => error instanceof ScanError && error.code === 'invalid_candidates',
