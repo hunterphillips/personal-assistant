@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "required": ["id", "title", "source", "tier", "now", "status", "created", "updated"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "source": { "enum": ["manual", "gmail", "calendar", "notes", "git", "work"] },
+    "external_id": { "type": ["string", "null"], "$comment": "dedup key: thread id, event id, repo path, note path" },
+    "link": { "type": ["string", "null"] },
+    "meta": { "type": ["string", "null"], "$comment": "display line, e.g. 'Gmail · waiting 2h'" },
+    "note": { "type": ["string", "null"], "maxLength": 500, "$comment": "the user's own words on this item; user-only — the curator reads it, never writes it" },
+    "rank": { "type": ["integer", "null"], "minimum": 0, "$comment": "order within a tier, 0 first; the curator sets it, and the user's drags rewrite it" },
+    "tier": { "enum": ["today", "tomorrow", "later"] },
+    "now": { "type": "boolean", "$comment": "lens flag; only meaningful when tier=today" },
+    "status": { "enum": ["open", "done", "expired", "dismissed"] },
+    "created": { "type": "string", "format": "date-time" },
+    "updated": { "type": "string", "format": "date-time" }
+  }
+}

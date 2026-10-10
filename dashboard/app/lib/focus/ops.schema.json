@@ -1,0 +1,90 @@
+{
+  "$comment": "The curator's answer: decisions, not a document. curator/apply.mjs turns these into the next focus.json. Enforced twice — the API constrains the response to this schema (runners/claude.sh --json-schema) and applyOps re-checks every op. Keep it inside the structured-output subset: anyOf (oneOf is rejected), additionalProperties false on every object, no minLength/maxLength/minimum.",
+  "type": "object",
+  "required": ["ops"],
+  "additionalProperties": false,
+  "properties": {
+    "ops": {
+      "type": "array",
+      "description": "Every change to make, applied in order. Empty means the board is right as it stands. An item you do not name in an op is left untouched.",
+      "items": {
+        "anyOf": [
+          {
+            "title": "add",
+            "description": "Put a new item on the board. Code sets its id, created and updated; it starts open.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["op", "title", "source", "tier", "now"],
+            "properties": {
+              "op": { "type": "string", "const": "add" },
+              "title": { "type": "string", "description": "the action the user takes; at most 200 characters" },
+              "source": { "enum": ["gmail", "calendar", "notes", "git"] },
+              "external_id": { "type": "string", "description": "dedup key: thread id, event id, repo path, note path" },
+              "link": { "type": "string" },
+              "meta": { "type": "string", "description": "display line of facts, e.g. 'Gmail · Lauren · asked 9/22'" },
+              "tier": { "enum": ["today", "tomorrow", "later"] },
+              "now": { "type": "boolean" },
+              "rank": { "type": "integer", "description": "order within the tier, 0 first" }
+            }
+          },
+          {
+            "title": "update",
+            "description": "Change an open item in place. Fields you leave out are untouched.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["op", "id"],
+            "properties": {
+              "op": { "type": "string", "const": "update" },
+              "id": { "type": "string" },
+              "title": { "type": "string", "description": "never on a manual item" },
+              "link": { "type": "string" },
+              "meta": { "type": "string" },
+              "tier": { "enum": ["today", "tomorrow", "later"] },
+              "now": { "type": "boolean" },
+              "rank": { "type": "integer" }
+            }
+          },
+          {
+            "title": "expire",
+            "description": "Take an open item off the surface: it went stale rather than getting done (§6). Say why in meta.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["op", "id"],
+            "properties": {
+              "op": { "type": "string", "const": "expire" },
+              "id": { "type": "string" },
+              "meta": { "type": "string" }
+            }
+          },
+          {
+            "title": "reopen",
+            "description": "Put an item you previously expired back on the board, rather than adding a duplicate (§6). Only an expired item can be reopened.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["op", "id", "tier"],
+            "properties": {
+              "op": { "type": "string", "const": "reopen" },
+              "id": { "type": "string" },
+              "tier": { "enum": ["today", "tomorrow", "later"] },
+              "now": { "type": "boolean" },
+              "meta": { "type": "string" },
+              "rank": { "type": "integer" }
+            }
+          },
+          {
+            "title": "done",
+            "description": "Close an open item as finished, on evidence you can point to (§6). Never use this for something that merely went quiet.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["op", "id"],
+            "properties": {
+              "op": { "type": "string", "const": "done" },
+              "id": { "type": "string" },
+              "meta": { "type": "string" }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
