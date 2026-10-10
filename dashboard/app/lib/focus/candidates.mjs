@@ -1,13 +1,14 @@
 // Focus candidates files: validates scanner output and reads or atomically
 // writes one source's { scanned, signature, candidates } document. Reads return
-// a frozen document or null and never throw; this module never runs a scan.
-// ScanError is what a scan throws, and checkedCandidates is the gate every
-// scan's output passes before it is returned.
+// a frozen document or null and never throw; writes refuse a document that
+// would read back as null. This module never runs a scan. ScanError is what a
+// scan throws, and checkedCandidates is the gate every scan's output passes
+// before it is returned.
 
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 
-import { atomicJson, deepFreeze } from './board.mjs';
+import { atomicText, deepFreeze } from './board.mjs';
 import { SCAN_SOURCES } from './validate.mjs';
 
 export class ScanError extends Error {
@@ -19,12 +20,12 @@ export class ScanError extends Error {
   }
 }
 
-// Returns the list unchanged when it is valid; throws
+// Returns the list deep-frozen when it is valid; throws
 // ScanError('invalid_candidates') with the problems otherwise.
 export function checkedCandidates(list, limits) {
   const problems = validateCandidates(list, limits);
   if (problems.length > 0) throw new ScanError('invalid_candidates', problems.join('; '));
-  return list;
+  return deepFreeze(list);
 }
 
 export function validateCandidates(list, limits) {
@@ -84,13 +85,28 @@ export async function readCandidatesFile(file, limits) {
   }
 }
 
-export async function writeCandidatesFile(file, { scanned, signature, candidates }) {
-  await atomicJson(file, { scanned, signature, candidates });
+// Throws ScanError('invalid_candidates') with the problems, writing nothing,
+// when readCandidatesFile would read the document back as null.
+export async function writeCandidatesFile(file, { scanned, signature, candidates }, limits) {
+  const document = { scanned, signature, candidates };
+  const problems = documentProblems(document, limits);
+  const text = `${JSON.stringify(document, null, 2)}\n`;
+  if (problems.length === 0 && Buffer.byteLength(text) > limits.focusCandidateBytes) {
+    problems.push(`over ${limits.focusCandidateBytes} bytes`);
+  }
+  if (problems.length > 0) throw new ScanError('invalid_candidates', problems.join('; '));
+  await atomicText(file, text);
 }
 
 function validDocument(document, limits) {
-  if (document === null || typeof document !== 'object' || Array.isArray(document)) return false;
-  if (typeof document.scanned !== 'string' || document.scanned.length === 0) return false;
-  if (typeof document.signature !== 'string' || document.signature.length === 0) return false;
-  return validateCandidates(document.candidates, limits).length === 0;
+  return documentProblems(document, limits).length === 0;
+}
+
+function documentProblems(document, limits) {
+  if (document === null || typeof document !== 'object' || Array.isArray(document)) return ['not an object'];
+  const problems = [];
+  if (typeof document.scanned !== 'string' || document.scanned.length === 0) problems.push('bad scanned');
+  if (typeof document.signature !== 'string' || document.signature.length === 0) problems.push('bad signature');
+  problems.push(...validateCandidates(document.candidates, limits));
+  return problems;
 }

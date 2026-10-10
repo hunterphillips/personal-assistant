@@ -22,7 +22,6 @@ function registry(agents) {
 function vaultAt(root) {
   return createVault({
     registry: registry([{ id: 'second-brain', kind: 'persona', cwd: root }]),
-    limits: LIMITS,
   });
 }
 
@@ -95,7 +94,7 @@ test('a long heading is cut to the title limit', async (t) => {
 
 test('no vault folder throws ScanError vault_unavailable', async (t) => {
   const missing = path.join(await tempDir(t), 'absent');
-  for (const vault of [vaultAt(missing), createVault({ registry: registry([]), limits: LIMITS })]) {
+  for (const vault of [vaultAt(missing), createVault({ registry: registry([]) })]) {
     await assert.rejects(
       scan({ vault, now: NOW, limits: LIMITS }),
       (error) => error instanceof ScanError && error.code === 'vault_unavailable',

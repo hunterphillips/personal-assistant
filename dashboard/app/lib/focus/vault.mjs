@@ -1,11 +1,14 @@
-// Vault: Focus's read-only view of the Second brain persona's working tree.
-// createVault({ registry, agentId, limits }) returns the current root, bounded
+// Vault: Focus's read-only view of the Second brain agent's working tree.
+// createVault({ registry, agentId, now }) returns the current root, bounded
 // priority and project-state context, community senders and groups, and the
-// priority paths excluded by the notes scan. Missing or non-persona agents and
-// missing or non-directory roots produce null, empty strings, and empty arrays.
-// It never writes the vault and never reads profile data.
+// priority paths excluded by the notes scan. A missing agent, one of another
+// kind, and a missing or non-directory root produce null, empty strings, and
+// empty arrays. Only regular files are read; a symlink or a FIFO reads as
+// absent. It never writes the vault and never reads profile data.
 
-import { readFileSync, statSync } from 'node:fs';
+import {
+  closeSync, constants, fstatSync, openSync, readFileSync, statSync,
+} from 'node:fs';
 import path from 'node:path';
 
 const MAX_BLOCK_CHARS = 12_000;
@@ -16,7 +19,7 @@ const PRIORITY_RELATIVE = Object.freeze([
 ]);
 const SENDER_RE = /`([^`\s]+@[^`\s]+|@?[a-z0-9.-]+\.[a-z]{2,})`/gi;
 
-export function createVault({ registry, agentId = 'second-brain', limits: _limits }) {
+export function createVault({ registry, agentId = 'second-brain', now = () => new Date() }) {
   function root() {
     const agent = (registry.current()?.agents ?? [])
       .find((entry) => entry.id === agentId && entry.kind === 'persona');
@@ -78,10 +81,10 @@ export function createVault({ registry, agentId = 'second-brain', limits: _limit
     return Object.freeze(groups);
   }
 
-  function readProjectState(now = new Date()) {
+  function readProjectState(at = typeof now === 'function' ? now() : now) {
     const vaultRoot = root();
     if (!vaultRoot) return '';
-    const date = now instanceof Date ? now : new Date(now);
+    const date = at instanceof Date ? at : new Date(at);
     return readBlocks([
       path.join(vaultRoot, 'notes/projects-overview.md'),
       path.join(vaultRoot, `log/audit-${date.toISOString().slice(0, 7)}.md`),
@@ -91,11 +94,7 @@ export function createVault({ registry, agentId = 'second-brain', limits: _limit
   function readCommunities() {
     const files = priorityFiles();
     if (files.length === 0) return '';
-    try {
-      return readFileSync(files[2], 'utf8');
-    } catch {
-      return '';
-    }
+    return readRegular(files[2]) ?? '';
   }
 
   return Object.freeze({
@@ -106,12 +105,24 @@ export function createVault({ registry, agentId = 'second-brain', limits: _limit
 function readBlocks(files) {
   const blocks = [];
   for (const file of files) {
-    try {
-      const text = readFileSync(file, 'utf8').trim().slice(0, MAX_BLOCK_CHARS);
-      blocks.push(`--- ${file} ---\n${text}`);
-    } catch {
-      // One absent context note does not discard the others.
-    }
+    // One absent context note does not discard the others.
+    const text = readRegular(file);
+    if (text !== null) blocks.push(`--- ${file} ---\n${text.trim().slice(0, MAX_BLOCK_CHARS)}`);
   }
   return blocks.join('\n\n');
+}
+
+// The file's text, or null when it is missing or not a regular file. The open
+// neither follows a symlink nor waits on a FIFO's writer.
+function readRegular(file) {
+  let fd;
+  try {
+    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    if (!fstatSync(fd).isFile()) return null;
+    return readFileSync(fd, 'utf8');
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
 }

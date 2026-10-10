@@ -7,7 +7,9 @@ import { mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { readCandidatesFile, validateCandidates, writeCandidatesFile } from '../lib/focus/candidates.mjs';
+import {
+  checkedCandidates, readCandidatesFile, ScanError, validateCandidates, writeCandidatesFile,
+} from '../lib/focus/candidates.mjs';
 
 const limits = { focusCandidatesMax: 2, focusCandidateBytes: 1024 };
 const candidate = (over = {}) => ({ title: 'Answer Lauren', source: 'gmail', external_id: 'thread-1', ...over });
@@ -88,7 +90,32 @@ test('readCandidatesFile accepts opaque non-empty scanned and signature strings'
 test('writeCandidatesFile atomically writes formatted JSON with mode 0600', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-candidates-write-'));
   const file = path.join(dir, 'nested', 'git.json');
-  await writeCandidatesFile(file, document());
+  await writeCandidatesFile(file, document(), limits);
   assert.equal(await readFile(file, 'utf8'), `${JSON.stringify(document(), null, 2)}\n`);
   assert.equal((await stat(file)).mode & 0o777, 0o600);
+});
+
+test('writeCandidatesFile refuses a document that would read back as null and writes nothing', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-candidates-refuse-'));
+  const file = path.join(dir, 'git.json');
+  const invalid = [
+    document({ candidates: [candidate({ title: '' })] }),
+    document({ candidates: [candidate(), candidate(), candidate()] }),
+    document({ scanned: '' }),
+    document({ signature: 'a'.repeat(2000) }),
+  ];
+  for (const bad of invalid) {
+    await assert.rejects(
+      writeCandidatesFile(file, bad, limits),
+      (error) => error instanceof ScanError && error.code === 'invalid_candidates',
+    );
+  }
+  await assert.rejects(stat(file), { code: 'ENOENT' });
+});
+
+test('checkedCandidates returns the valid list deep-frozen', () => {
+  const list = [candidate()];
+  const checked = checkedCandidates(list, limits);
+  assert.ok(Object.isFrozen(checked) && Object.isFrozen(checked[0]));
+  assert.throws(() => checkedCandidates([candidate({ title: '' })], limits), (error) => error.code === 'invalid_candidates');
 });
