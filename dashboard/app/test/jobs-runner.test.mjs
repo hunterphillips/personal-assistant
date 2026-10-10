@@ -46,10 +46,10 @@ function scriptedJob(label, events, extra = {}) {
 }
 
 async function settle(condition) {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + 5_000;
   while (!condition()) {
     if (Date.now() > deadline) throw new Error('condition did not hold');
-    await new Promise((resolve) => setTimeout(resolve, 2));
+    await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
@@ -244,9 +244,11 @@ test('a job started by a tick that enqueues another holds the runner until it en
   let release;
   const held = new Promise((resolve) => { release = resolve; });
   const seen = [];
+  let enqueued = false;
   runner.register(scriptedJob('first', events, {
     run: async ({ enqueue }) => {
       await enqueue('second', 'scan', { n: 1 });
+      enqueued = true;
       await held;
       return { outcome: 'wrote' };
     },
@@ -255,7 +257,8 @@ test('a job started by a tick that enqueues another holds the runner until it en
   const tick = runner.tick();
   await settle(() => events.length === 1);
   runner.onChange(() => { if (!events.some((event) => event[0] === 'end')) seen.push(runner.state().running); });
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  // Once the second job is queued, nothing can start until the first ends.
+  await settle(() => enqueued);
   assert.deepEqual(events.map((event) => event.slice(0, 3)), [['start', 'first', 'schedule']]);
   assert.equal(runner.state().running, 'first');
   assert.deepEqual(await runner.enqueue('second', 'refresh', null, { exclusive: true }), { ok: false, reason: 'already_running' });
@@ -273,10 +276,11 @@ test('a job whose due check settles after stop does not start', async (t) => {
   const { runner } = await setup(t);
   const events = [];
   let answer;
+  let asked = false;
   const due = new Promise((resolve) => { answer = resolve; });
-  runner.register(scriptedJob('late', events, { due: () => due }));
+  runner.register(scriptedJob('late', events, { due: () => { asked = true; return due; } }));
   const tick = runner.tick();
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await settle(() => asked);
   const stopping = runner.stop();
   answer(true);
   await stopping;

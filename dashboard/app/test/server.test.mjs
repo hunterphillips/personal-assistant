@@ -144,7 +144,6 @@ test('Focus jobs are registered and started only when the board exists', async (
   await writeFile(boardFile, await readFile(path.join(APP_DIR, 'test/fixtures/focus/board.json')));
   const presentRunner = scriptedFocusRunner();
   const present = await startDashboard({ env: presentEnv, log: () => {}, focusRunner: presentRunner });
-  await new Promise((resolve) => setTimeout(resolve, 10));
   const presentState = await (await fetch(`http://127.0.0.1:${present.config.port}/api/state`)).json();
   assert.equal(presentRunner.registered.length, 5);
   assert.equal(presentRunner.started, 1);

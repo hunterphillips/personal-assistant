@@ -756,7 +756,8 @@ test('a persona whose provider has no adapter is unavailable with the reason', a
 });
 
 async function until(predicate) {
-  for (let i = 0; i < 200 && !predicate(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  const deadline = Date.now() + 5_000;
+  while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
   assert.ok(predicate(), 'condition not met in time');
 }
 

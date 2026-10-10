@@ -198,10 +198,10 @@ async function withRunner(t, { now: start, seed = true }) {
 }
 
 async function settle(condition) {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + 5_000;
   while (!condition()) {
     if (Date.now() > deadline) throw new Error('condition did not hold');
-    await new Promise((resolve) => setTimeout(resolve, 2));
+    await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
