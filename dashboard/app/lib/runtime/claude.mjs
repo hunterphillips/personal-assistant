@@ -202,6 +202,7 @@ import { isPermission, sdkModeFor } from '../permissions.mjs';
 import { AGENT_ID } from '../registry.mjs';
 import { truncateUtf8 } from '../threads.mjs';
 import { RuntimeError } from './adapter.mjs';
+import { createQueryLoader, importClaudeSdk, SUBSCRIPTION_SOURCES } from './sdk.mjs';
 
 const ERROR_TEXT_MAX = 500;
 const MODEL_MAX = 64;
@@ -213,14 +214,6 @@ const START_FAILED = 'The turn could not start. Retry; if it keeps failing, star
 const RUN_START_FAILED = 'The run could not start.';
 // What the CLI prints when a resume points at a session it cannot find.
 const SESSION_MISSING = /(session|conversation)[\s\S]{0,80}(not found|does not exist)|no conversation/i;
-// The SDK's ApiKeySource values that do not bill an API key: 'none' is
-// claude.ai OAuth (or a bearer token or cloud provider) and 'oauth' is its
-// legacy spelling. Everything else, including a value this build does not
-// know, is refused.
-const SUBSCRIPTION_SOURCES = new Set(['none', 'oauth']);
-
-const importClaudeSdk = () => import('@anthropic-ai/claude-agent-sdk');
-
 export function createClaudeAdapter({
   query = null, importSdk = importClaudeSdk, store, config, log = () => {}, now = () => new Date(), turnTools = null,
 }) {
@@ -229,21 +222,7 @@ export function createClaudeAdapter({
   const entries = new Map();
   const listeners = new Set();
   let closing = false;
-  let loadingSdk = null;
-
-  // The SDK is imported once, outside any turn, so an unloadable package
-  // fails start() instead of a turn; a failed import is retried next time.
-  function ensureQuery() {
-    if (query) return Promise.resolve(query);
-    loadingSdk ??= importSdk().then((sdk) => {
-      query = sdk.query;
-      return query;
-    }, (error) => {
-      loadingSdk = null;
-      throw new RuntimeError('sdk_unavailable', { cause: error });
-    });
-    return loadingSdk;
-  }
+  const { ensureQuery } = createQueryLoader({ query, importSdk });
 
   function entryFor(agentId) {
     let entry = entries.get(agentId);

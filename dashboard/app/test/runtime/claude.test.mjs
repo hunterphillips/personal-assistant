@@ -3,6 +3,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { createClaudeAdapter, identityPrompt } from '../../lib/runtime/claude.mjs';
+import { createQueryLoader } from '../../lib/runtime/sdk.mjs';
 import { createThreadStore } from '../../lib/threads.mjs';
 import { tempDir } from '../support/harness.mjs';
 
@@ -429,6 +430,42 @@ test('start imports the SDK once and rejects sdk_unavailable when it cannot', as
   assert.equal(imports, 3);
   assert.equal(query.calls.length, 1);
   assert.equal(typeof query.calls[0].options.stderr, 'function');
+});
+
+test('the shared query loader prefers an injected query and imports once', async () => {
+  const query = () => {};
+  let imports = 0;
+  const injected = createQueryLoader({ query, importSdk: async () => { imports += 1; return { query: () => {} }; } });
+  assert.equal(await injected.ensureQuery(), query);
+  assert.equal(imports, 0);
+
+  const loaded = createQueryLoader({ importSdk: async () => { imports += 1; return { query }; } });
+  const [first, second] = await Promise.all([loaded.ensureQuery(), loaded.ensureQuery()]);
+  assert.equal(first, query);
+  assert.equal(second, query);
+  assert.equal(await loaded.ensureQuery(), query);
+  assert.equal(imports, 1);
+});
+
+test('the shared query loader wraps a failed import and retries', async () => {
+  const cause = new Error('package missing');
+  const query = () => {};
+  let imports = 0;
+  const loader = createQueryLoader({
+    importSdk: async () => {
+      imports += 1;
+      if (imports === 1) throw cause;
+      return { query };
+    },
+  });
+  await assert.rejects(loader.ensureQuery(), (error) => {
+    assert.equal(error.name, 'RuntimeError');
+    assert.equal(error.code, 'sdk_unavailable');
+    assert.equal(error.cause, cause);
+    return true;
+  });
+  assert.equal(await loader.ensureQuery(), query);
+  assert.equal(imports, 2);
 });
 
 test('a turn whose init reports an API key source is refused and aborted', async (t) => {
