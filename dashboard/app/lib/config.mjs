@@ -91,6 +91,9 @@ export const LIMITS = Object.freeze({
   ideasFileBytes: 256 * 1024, // one ideas run, the marks, or the criteria file
   ideaTitleChars: 200, // one producer idea's title
   ideaBodyBytes: 16 * 1024, // one Ideas POST body
+  focusChangeBytes: 16 * 1024, // one Focus board change body
+  focusBoardBytes: 4 * 1024 * 1024, // the Focus board file
+  focusChangesLines: 5000, // newest entries kept in the Focus change log
   briefInstructionsBytes: 64 * 1024, // the brief's rules file read by the Brief tab
   settingsBodyBytes: 4 * 1024, // one PUT /api/settings body
   agentBodyBytes: 16 * 1024, // one PUT /api/agents/:id/settings or POST /api/agents body
@@ -163,6 +166,10 @@ export function loadConfig(env = process.env, { platform = process.platform } = 
   const ideasDir = parsePath(env.DASHBOARD_IDEAS_DIR, root.ideasDir);
   const ideasMarksPath = parsePath(env.DASHBOARD_IDEAS_MARKS, root.ideasMarks);
   const ideasInstructionsPath = parsePath(env.DASHBOARD_IDEAS_INSTRUCTIONS, root.ideasInstructions);
+  const focusBoardPath = parsePath(env.DASHBOARD_FOCUS_BOARD, root.focusBoard);
+  const focusChangesPath = parsePath(env.DASHBOARD_FOCUS_CHANGES, root.focusChanges);
+  const focusCandidatesDir = parsePath(env.DASHBOARD_FOCUS_CANDIDATES, root.focusCandidates);
+  const focusRulesPath = parsePath(env.DASHBOARD_FOCUS_RULES, root.focusRules);
   const briefInstructionsPath = parsePath(env.DASHBOARD_BRIEF_INSTRUCTIONS, DEFAULT_BRIEF_INSTRUCTIONS);
   const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, root.registry);
   const routinesDir = parsePath(env.DASHBOARD_ROUTINES_DIR, root.routinesDir);
@@ -214,6 +221,10 @@ export function loadConfig(env = process.env, { platform = process.platform } = 
     ideasDir,
     ideasMarksPath,
     ideasInstructionsPath,
+    focusBoardPath,
+    focusChangesPath,
+    focusCandidatesDir,
+    focusRulesPath,
     briefInstructionsPath,
     registryPath,
     builtinPath,

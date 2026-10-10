@@ -99,6 +99,10 @@ test('the data root defaults to ~/.personal-assistant and every store default de
     ideasDir: config.ideasDir,
     ideasMarksPath: config.ideasMarksPath,
     ideasInstructionsPath: config.ideasInstructionsPath,
+    focusBoardPath: config.focusBoardPath,
+    focusChangesPath: config.focusChangesPath,
+    focusCandidatesDir: config.focusCandidatesDir,
+    focusRulesPath: config.focusRulesPath,
     briefsDir: config.briefsDir,
     briefReadsPath: config.briefReadsPath,
   }, {
@@ -113,6 +117,10 @@ test('the data root defaults to ~/.personal-assistant and every store default de
     ideasDir: '/data/root/ideas/items',
     ideasMarksPath: '/data/root/ideas/marks.json',
     ideasInstructionsPath: '/data/root/ideas/criteria.md',
+    focusBoardPath: '/data/root/focus/board.json',
+    focusChangesPath: '/data/root/focus/changes.jsonl',
+    focusCandidatesDir: '/data/root/focus/candidates',
+    focusRulesPath: '/data/root/focus/rules.md',
     briefsDir: '/data/root/briefs',
     briefReadsPath: '/data/root/brief-reads.json',
   });
@@ -139,6 +147,10 @@ test('each store override still wins over the data root', () => {
     DASHBOARD_IDEAS_DIR: ['ideasDir', '/o/ideas'],
     DASHBOARD_IDEAS_MARKS: ['ideasMarksPath', '/o/marks.json'],
     DASHBOARD_IDEAS_INSTRUCTIONS: ['ideasInstructionsPath', '/o/criteria.md'],
+    DASHBOARD_FOCUS_BOARD: ['focusBoardPath', '/o/focus-board.json'],
+    DASHBOARD_FOCUS_CHANGES: ['focusChangesPath', '/o/focus-changes.jsonl'],
+    DASHBOARD_FOCUS_CANDIDATES: ['focusCandidatesDir', '/o/focus-candidates'],
+    DASHBOARD_FOCUS_RULES: ['focusRulesPath', '/o/focus-rules.md'],
     DASHBOARD_BRIEFS_DIR: ['briefsDir', '/o/briefs'],
     DASHBOARD_BRIEF_READS_PATH: ['briefReadsPath', '/o/brief-reads.json'],
   };

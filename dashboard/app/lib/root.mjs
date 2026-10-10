@@ -130,7 +130,7 @@ const PAIRS = [
 const BRIEF_DATA = [/^viewer-.*\.html$/, /^brief-.*\.json$/, /^notice-.*\.json$/, /^memo-.*\.md$/, /^.{4}-.{2}-.{2}.*\.md$/, /^feedback-/, /^\.run\.lock$/];
 const BRIEF_CODE = new Set(['build.py', 'check-viewer.mjs', '__pycache__']);
 
-const SEEDS = [['ideasInstructions', 'ideas-criteria.md']];
+const SEEDS = [['ideasInstructions', 'ideas-criteria.md'], ['focusRules', 'focus-rules.md']];
 
 // The version 1 to 2 upgrade: today's one feed becomes the feed `news`, and
 // the producer that wrote it, retired with version 1, gives way to the
@@ -221,6 +221,7 @@ export async function seedDefaults(root, { defaultsDir, readmeFile, log = () => 
   for (const [key, value] of Object.entries(paths)) {
     await mkdir(key.endsWith('Dir') ? value : path.dirname(value), { recursive: true, mode: 0o700 });
   }
+  await mkdir(paths.focusCandidates, { recursive: true, mode: 0o700 });
   const seeded = [];
   const readme = readmeFile ? await readOptional(readmeFile) : null;
   if (readme !== null) {

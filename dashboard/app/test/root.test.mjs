@@ -111,6 +111,7 @@ async function fixtureRepo(dir) {
 async function fixtureDefaults(dir) {
   const defaultsDir = path.join(dir, 'defaults');
   await put(path.join(defaultsDir, 'ideas-criteria.md'), 'Default ideas criteria.\n');
+  await put(path.join(defaultsDir, 'focus-rules.md'), 'Default focus rules.\n');
   const readmeFile = path.join(dir, 'root-README.md');
   await put(readmeFile, '# The data root\n');
   return { defaultsDir, readmeFile };
@@ -146,7 +147,11 @@ test('layoutPaths answers the frozen v2 table under the root', () => {
   assert.equal(paths.contributionsDir, '/data/root/briefs/contributions');
   assert.equal(paths.cacheDir, '/data/root/cache');
   assert.equal(paths.briefReads, '/data/root/brief-reads.json');
-  assert.equal(Object.keys(paths).length, 21);
+  assert.equal(paths.focusBoard, '/data/root/focus/board.json');
+  assert.equal(paths.focusChanges, '/data/root/focus/changes.jsonl');
+  assert.equal(paths.focusCandidates, '/data/root/focus/candidates');
+  assert.equal(paths.focusRules, '/data/root/focus/rules.md');
+  assert.equal(Object.keys(paths).length, 26);
   for (const value of Object.values(paths)) assert.ok(value.startsWith('/data/root/'));
 });
 
@@ -163,7 +168,7 @@ test('prepareRoot moves every source of a full checkout into an empty root', asy
   assert.deepEqual(result.skipped, []);
   assert.deepEqual(result.upgraded, UPGRADE_KEYS);
   // The criteria files came from the checkout, so only the README is seeded.
-  assert.deepEqual(result.seeded, ['readme']);
+  assert.deepEqual(result.seeded, ['readme', 'focusRules']);
 
   for (const [, body, mode, target, landed = body] of FIXTURE) {
     const file = path.join(root, target);
@@ -241,17 +246,21 @@ for (const [name, setup] of [
     const result = await prepareRoot(root, { migrateFrom, defaultsDir, readmeFile, log: (entry) => logs.push(entry) });
     assert.equal(result.created, true);
     assert.deepEqual(result.moved, []);
-    assert.deepEqual(result.seeded, ['readme', 'ideasInstructions']);
+    assert.deepEqual(result.seeded, ['readme', 'ideasInstructions', 'focusRules']);
     assert.deepEqual(result.upgraded, []);
     assert.deepEqual(logs.find((entry) => entry.event === 'root_seeded'), { event: 'root_seeded', keys: result.seeded });
     const paths = layoutPaths(root);
     for (const key of ['routinesDir', 'threadsDir', 'codexDir', 'notificationsDir', 'feedsDir', 'sourcesDir', 'feedsRunDir',
-      'ideasDir', 'briefsDir', 'contributionsDir', 'logDir', 'cacheDir']) {
+      'ideasDir', 'focusDir', 'briefsDir', 'contributionsDir', 'logDir', 'cacheDir']) {
       assert.ok((await lstat(paths[key])).isDirectory(), key);
       assert.equal(await modeOf(paths[key]), 0o700, key);
     }
     assert.equal(await readFile(paths.ideasInstructions, 'utf8'), 'Default ideas criteria.\n');
     assert.equal(await modeOf(paths.ideasInstructions), 0o600);
+    assert.equal(await readFile(paths.focusRules, 'utf8'), 'Default focus rules.\n');
+    assert.equal(await modeOf(paths.focusRules), 0o600);
+    assert.ok((await lstat(paths.focusCandidates)).isDirectory());
+    assert.equal(await modeOf(paths.focusCandidates), 0o700);
     // A fresh root has no feed until one is made.
     assert.deepEqual(await readdir(paths.feedsDir), ['.run']);
     assert.ok(!existsSync(path.join(root, 'feed')));
@@ -270,10 +279,12 @@ test('a root at version 2 only seeds what is missing and rewrites the README whe
   await prepareRoot(root, { migrateFrom: '', defaultsDir, readmeFile, log: () => {} });
   const paths = layoutPaths(root);
   await unlink(paths.ideasInstructions);
+  await unlink(paths.focusRules);
 
   const result = await prepareRoot(root, { migrateFrom: repo, defaultsDir, readmeFile, log: () => {} });
-  assert.deepEqual(result, { created: false, moved: [], skipped: [], upgraded: [], seeded: ['ideasInstructions'] });
+  assert.deepEqual(result, { created: false, moved: [], skipped: [], upgraded: [], seeded: ['ideasInstructions', 'focusRules'] });
   assert.equal(await readFile(paths.ideasInstructions, 'utf8'), 'Default ideas criteria.\n');
+  assert.equal(await readFile(paths.focusRules, 'utf8'), 'Default focus rules.\n');
   await writeFile(paths.ideasInstructions, 'Edited ideas criteria.\n');
   await prepareRoot(root, { migrateFrom: '', defaultsDir, readmeFile, log: () => {} });
   assert.equal(await readFile(paths.ideasInstructions, 'utf8'), 'Edited ideas criteria.\n');
@@ -291,6 +302,8 @@ test('seedDefaults skips a default file that is not there', async (t) => {
   const seeded = await seedDefaults(root, { defaultsDir: path.join(dir, 'nowhere'), readmeFile: path.join(dir, 'none.md'), log: () => {} });
   assert.deepEqual(seeded, []);
   assert.ok(!existsSync(layoutPaths(root).ideasInstructions));
+  assert.ok(!existsSync(layoutPaths(root).focusRules));
+  assert.ok(existsSync(layoutPaths(root).focusCandidates));
   assert.ok(existsSync(layoutPaths(root).feedsDir));
 });
 
@@ -445,7 +458,7 @@ test('a version 1 root upgrades to version 2: the feed, its note, and the run st
   const logs = [];
   const result = await prepareRoot(root, { migrateFrom: '/nowhere', defaultsDir, readmeFile, log: (entry) => logs.push(entry) });
 
-  assert.deepEqual(result, { created: false, moved: [], skipped: [], upgraded: UPGRADE_KEYS, seeded: ['readme', 'ideasInstructions'] });
+  assert.deepEqual(result, { created: false, moved: [], skipped: [], upgraded: UPGRADE_KEYS, seeded: ['readme', 'ideasInstructions', 'focusRules'] });
   for (const [rel, body, mode, target, landed = body] of V1_ROOT) {
     assert.equal(await readFile(path.join(root, target), 'utf8'), landed, target);
     assert.equal(await modeOf(path.join(root, target)), mode, target);

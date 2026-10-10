@@ -1,0 +1,12 @@
+{
+  "updated": "2026-10-10T12:00:00.000Z",
+  "items": [
+    { "id": "now-one", "title": "Send the draft agenda", "source": "gmail", "external_id": "thread-agenda", "link": null, "meta": "Gmail · reply requested", "tier": "today", "now": true, "rank": 0, "status": "open", "created": "2026-10-09T12:00:00.000Z", "updated": "2026-10-10T12:00:00.000Z" },
+    { "id": "today-one", "title": "Choose a workshop topic", "source": "manual", "external_id": null, "link": null, "meta": "added by you", "note": "Keep the first session practical", "tier": "today", "now": false, "rank": 0, "status": "open", "created": "2026-10-08T12:00:00.000Z", "updated": "2026-10-09T12:00:00.000Z" },
+    { "id": "tomorrow-one", "title": "Review the release checklist", "source": "git", "external_id": "repo-checklist", "link": "https://example.test/checklist", "meta": "Git · checklist changed", "tier": "tomorrow", "now": false, "rank": 0, "status": "open", "created": "2026-10-08T12:00:00.000Z", "updated": "2026-10-09T13:00:00.000Z" },
+    { "id": "later-one", "title": "Book the practice room", "source": "calendar", "external_id": "event-practice", "link": null, "meta": "Calendar · next month", "tier": "later", "now": false, "rank": 0, "status": "open", "created": "2026-10-07T12:00:00.000Z", "updated": "2026-10-08T12:00:00.000Z" },
+    { "id": "done-one", "title": "Confirm the sample order", "source": "gmail", "external_id": "thread-order", "link": null, "meta": null, "tier": "today", "now": false, "status": "done", "created": "2026-10-06T12:00:00.000Z", "updated": "2026-10-08T12:00:00.000Z" },
+    { "id": "expired-one", "title": "Prepare the old demo", "source": "calendar", "external_id": "event-old-demo", "link": null, "meta": null, "tier": "today", "now": false, "status": "expired", "created": "2026-10-01T12:00:00.000Z", "updated": "2026-10-07T12:00:00.000Z" },
+    { "id": "dismissed-one", "title": "Read the product announcement", "source": "gmail", "external_id": "thread-announcement", "link": null, "meta": null, "tier": "later", "now": false, "status": "dismissed", "created": "2026-10-01T12:00:00.000Z", "updated": "2026-10-07T13:00:00.000Z" }
+  ]
+}

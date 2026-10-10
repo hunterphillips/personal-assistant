@@ -1,0 +1,7 @@
+{
+  "scanned": "2026-10-10T12:30:00.000Z",
+  "candidates": [
+    { "title": "Agenda reply", "external_id": "thread-agenda", "link": null, "meta": "Reply requested" },
+    { "title": "Venue question", "external_id": "thread-venue", "link": null, "meta": "A new question" }
+  ]
+}

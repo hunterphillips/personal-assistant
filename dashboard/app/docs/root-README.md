@@ -31,6 +31,10 @@ lives in its repository; the data lives here, as plain files you can read.
 | `ideas/items/` | One `<date>-<producer>.json` per run of an Ideas producer. |
 | `ideas/marks.json` | The marks on ideas: taken, dismissed, saved, replaced. |
 | `ideas/criteria.md` | Hunter's criteria for Ideas. |
+| `focus/board.json` | The Focus board. |
+| `focus/changes.jsonl` | One line for each change to the Focus board. |
+| `focus/candidates/` | Each scan's latest candidates, one `<source>.json` file per scan. |
+| `focus/rules.md` | Hunter's rules for Focus. |
 | `briefs/` | Each day's brief, memo, viewer, brief data, notice, and feedback, and the run lock. |
 | `briefs/contributions/` | Each day's contributions, one folder per date. |
 | `log/` | `dashboard.log`, and under `checkout/` the log the checkout held before the move. |
@@ -39,7 +43,9 @@ lives in its repository; the data lives here, as plain files you can read.
 ## Who writes what
 
 The daemon owns every file that is edited after it is created: a feed's
-`feed.json`, `note.md`, and `marks.json`, and every file in `sources/`. A
+`feed.json`, `note.md`, and `marks.json`, and every file in `sources/`. The
+daemon is the only writer of the Focus board, change log, and rules; a scan
+writes only its candidates file. A
 producer, a scheduled run that adds something, only creates its own run
 files, such as a new file under `feeds/<id>/items/` or `ideas/items/`, and
 never edits one that exists. A suggestion run writes a feed's
