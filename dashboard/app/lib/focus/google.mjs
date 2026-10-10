@@ -2,17 +2,17 @@
 // createGoogle({ dir, fetch, now, log }) returns a frozen client with token
 // presence, one authenticated GET, a bounded page collector, and an explicit
 // refresh. It reads client.json and token.json under dir and only rewrites the
-// token after a refresh; it never requests a write-capable Google scope.
+// token after a refresh, atomically, with one refresh in flight per client; it
+// never requests a write-capable Google scope.
 // Every failure is a ScanError: google_signed_out (no client or token file, or
 // a token without a refresh_token), google_reauth (the token endpoint answered
 // 400 or 401, how an expired or revoked refresh token presents), or
 // google_failed (any other status, a non-JSON body, a network error).
 
-import {
-  chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { atomicText } from './board.mjs';
 import { ScanError } from './candidates.mjs';
 
 export const SCOPES = Object.freeze([
@@ -63,11 +63,10 @@ export function readGoogleToken(dir) {
   return readJson(googlePaths(dir).token, 'token');
 }
 
-export function writeGoogleToken(dir, token) {
-  const { token: file } = googlePaths(dir);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(file, `${JSON.stringify(token, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(file, 0o600);
+// A scan reading the token while another rewrites it sees the old file or
+// the new one, never half of either.
+export async function writeGoogleToken(dir, token) {
+  await atomicText(googlePaths(dir).token, `${JSON.stringify(token, null, 2)}\n`);
   return token;
 }
 
@@ -104,7 +103,14 @@ export function createGoogle({ dir, fetch = globalThis.fetch, now = Date.now, lo
     return existsSync(paths.token);
   }
 
-  async function refresh({ signal } = {}) {
+  // Callers that find the token stale together share one token request.
+  let refreshing = null;
+  function refresh({ signal } = {}) {
+    refreshing ??= requestRefresh({ signal }).finally(() => { refreshing = null; });
+    return refreshing;
+  }
+
+  async function requestRefresh({ signal }) {
     const token = readGoogleToken(dir);
     if (!token.refresh_token) {
       throw new ScanError('google_signed_out', `google: token file at ${paths.token} has no refresh_token — run bin/focus-google-auth`);
@@ -121,7 +127,7 @@ export function createGoogle({ dir, fetch = globalThis.fetch, now = Date.now, lo
       scope: data.scope ?? token.scope,
       expires_at: new Date(time() + (Number(data.expires_in) || 3600) * 1000).toISOString(),
     };
-    writeGoogleToken(dir, next);
+    await writeGoogleToken(dir, next);
     log({ event: 'focus_google_refreshed' });
     return next.access_token;
   }

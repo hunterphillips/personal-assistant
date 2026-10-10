@@ -2,7 +2,7 @@
 // fetch replies; no test can contact Google.
 
 import assert from 'node:assert/strict';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -69,6 +69,33 @@ test('a token inside the five-minute skew refreshes and is rewritten mode 0600',
   assert.equal(saved.expires_at, new Date(NOW + 3599_000).toISOString());
   assert.equal((await stat(path.join(dir, 'token.json'))).mode & 0o777, 0o600);
   assert.deepEqual(logs, [{ event: 'focus_google_refreshed' }]);
+});
+
+test('two calls that find the token stale share one token request', async (t) => {
+  const dir = await seed(t, { expires_at: later(-60_000) });
+  const calls = [];
+  let releaseToken;
+  const tokenReply = new Promise((resolve) => { releaseToken = resolve; });
+  const fetch = async (url, init = {}) => {
+    calls.push(String(url));
+    if (String(url) === 'https://oauth2.googleapis.com/token') {
+      await tokenReply;
+      return reply(200, '{"access_token":"at-new","expires_in":3600}');
+    }
+    assert.equal(init.headers.authorization, 'Bearer at-new');
+    return reply(200, '{"ok":true}');
+  };
+  const google = createGoogle({ dir, fetch, now: () => NOW });
+  const both = Promise.all([
+    google.gapi('https://example.test/v1/a'),
+    google.gapi('https://example.test/v1/b'),
+  ]);
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseToken();
+  assert.deepEqual(await both, [{ ok: true }, { ok: true }]);
+  assert.equal(calls.filter((url) => url === 'https://oauth2.googleapis.com/token').length, 1);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(await readdir(dir), ['client.json', 'token.json'], 'no temp file is left behind');
 });
 
 test('a 401 buys exactly one forced refresh and one retry', async (t) => {

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // One-time loopback PKCE sign-in for the Gmail and Calendar scans. It asks
-// only for the two read-only scopes and writes the resulting token under the
-// personal-assistant data root with mode 0600.
+// only for the two read-only scopes and writes the resulting token, mode 0600,
+// to DASHBOARD_FOCUS_GOOGLE when set (an absolute path), else the data root's
+// focus/google/.
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -14,7 +15,12 @@ import {
 } from '../lib/focus/google.mjs';
 
 const home = process.env.PERSONAL_ASSISTANT_HOME || path.join(os.homedir(), '.personal-assistant');
-const dir = path.join(home, 'focus/google');
+const override = process.env.DASHBOARD_FOCUS_GOOGLE;
+if (override && !path.isAbsolute(override)) {
+  console.error(`focus-google-auth: DASHBOARD_FOCUS_GOOGLE must be an absolute path, not ${override}.`);
+  process.exit(1);
+}
+const dir = override || path.join(home, 'focus/google');
 const paths = googlePaths(dir);
 
 function printSetup() {
@@ -26,16 +32,17 @@ One-time setup, in the Google Cloud Console (https://console.cloud.google.com):
   2. APIs & Services → Library → enable BOTH "Gmail API" and
      "Google Calendar API".
   3. APIs & Services → OAuth consent screen → User type: External → Create.
-     Fill in app name and your email, save through the steps, then
-     Audience → Test users → Add users → the Google account whose mail and
-     calendar the board reads. (An app in testing needs the account listed
-     there or consent is refused.)
-  4. APIs & Services → Credentials → Create credentials → OAuth client ID →
+     Fill in app name and your email, and save through the steps.
+  4. OAuth consent screen → Audience → Publishing status → Publish app, so it
+     reads "In production". A "Testing" app's refresh tokens expire after
+     seven days. The app is yours, so leaving it unverified is fine: at
+     consent, Google warns that it is unverified; choose Advanced → continue.
+  5. APIs & Services → Credentials → Create credentials → OAuth client ID →
      Application type: Desktop app → Create.
-  5. Download JSON on the dialog, then:
+  6. Download JSON on the dialog, then:
        mkdir -p ${dir}
        mv ~/Downloads/client_secret_*.json ${paths.client}
-  6. Run bin/focus-google-auth again. A browser tab opens; approve the two
+  7. Run bin/focus-google-auth again. A browser tab opens; approve the two
      read-only scopes and the token lands in ${paths.token}.
 
 Scopes requested, and the only ones this code may ever ask for:
@@ -55,6 +62,8 @@ const state = randomBytes(16).toString('hex');
 const verifier = randomBytes(32).toString('base64url');
 const challenge = createHash('sha256').update(verifier).digest('base64url');
 
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 const page = (title, body) => `<!doctype html><meta charset="utf-8"><title>${title}</title>`
   + `<body style="font:16px/1.5 system-ui;margin:4rem auto;max-width:32rem"><h1>${title}</h1><p>${body}</p>`;
 
@@ -72,7 +81,7 @@ const server = createServer(async (request, response) => {
 
   const send = (status, html) => response.writeHead(status, { 'content-type': 'text/html; charset=utf-8' }).end(html);
   const fail = (message) => {
-    send(400, page('Sign-in failed', message));
+    send(400, page('Sign-in failed', escapeHtml(message)));
     console.error(`focus-google-auth: ${message}`);
     finish(1);
   };
@@ -92,7 +101,7 @@ const server = createServer(async (request, response) => {
     if (!data.refresh_token) {
       return fail('Google sent no refresh token. Revoke focus at myaccount.google.com/permissions and run this again.');
     }
-    writeGoogleToken(dir, {
+    await writeGoogleToken(dir, {
       refresh_token: data.refresh_token,
       access_token: data.access_token,
       token_type: data.token_type ?? 'Bearer',

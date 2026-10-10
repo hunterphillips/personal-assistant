@@ -292,7 +292,8 @@ async function appendChange(file, line, limit) {
 }
 
 export async function atomicJson(file, value) { await atomicText(file, `${JSON.stringify(value, null, 2)}\n`); }
-async function atomicText(file, text) {
+// Writes a 0600 temp file beside `file`, fsyncs it, and renames it into place.
+export async function atomicText(file, text) {
   const dir = path.dirname(file);
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const tmp = path.join(dir, `.${path.basename(file)}.${randomBytes(6).toString('hex')}.tmp`);
