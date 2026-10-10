@@ -31,5 +31,23 @@
       }
     ],
     "updatedAt": "2026-10-10T06:00:00Z"
+  },
+  {
+    "repository": {
+      "name": "garden-planner",
+      "nameWithOwner": "hunterphillips/garden-planner"
+    },
+    "number": 22,
+    "title": "Choose a trellis design",
+    "url": "https://github.com/hunterphillips/garden-planner/issues/22",
+    "labels": [
+      {
+        "name": "ready-for-human"
+      },
+      {
+        "name": "needs-info"
+      }
+    ],
+    "updatedAt": "2026-10-09T15:00:00Z"
   }
 ]

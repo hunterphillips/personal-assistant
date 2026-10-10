@@ -20,6 +20,25 @@
       "pullRequests": {
         "nodes": [
           {
+            "number": 5,
+            "title": "Freezer inventory sync",
+            "url": "https://github.com/hunterphillips/recipe-box/pull/5",
+            "isDraft": false,
+            "updatedAt": "2026-10-07T12:00:00Z",
+            "author": {
+              "login": "pantry-bot"
+            },
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": {
+                    "login": "hunterphillips"
+                  }
+                }
+              ]
+            }
+          },
+          {
             "number": 3,
             "title": "Unit conversions",
             "url": "https://github.com/hunterphillips/recipe-box/pull/3",

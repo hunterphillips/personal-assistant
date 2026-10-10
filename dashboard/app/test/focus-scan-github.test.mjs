@@ -38,15 +38,23 @@ function byTitle(candidates) {
   return new Map(candidates.map((c) => [c.title, c]));
 }
 
-// Every rule's window, without the cap of 10 getting in the way.
+// Every rule's window, without the cap of 10 getting in the way. Also drops
+// recipe-box#5 and garden-planner#22, the fixtures for the two-labels and
+// idle-and-requested overlap cases, which would otherwise push recipe-box#3
+// out of this budget; the tests for those two cases restore one at a time.
 async function uncapped() {
   const gh = fakeGh({
     'api graphql': (args) => {
       const name = args.find((arg) => arg.startsWith('name=')).slice('name='.length);
       const answer = JSON.parse(fixture(`graphql-${name}.json`));
-      if (name === 'recipe-box') answer.data.repository.refs.nodes = answer.data.repository.refs.nodes.slice(0, 1);
+      if (name === 'recipe-box') {
+        answer.data.repository.refs.nodes = answer.data.repository.refs.nodes.slice(0, 1);
+        answer.data.repository.pullRequests.nodes = answer.data.repository.pullRequests.nodes
+          .filter((pr) => pr.number !== 5);
+      }
       return JSON.stringify(answer);
     },
+    'search issues': () => JSON.stringify(JSON.parse(fixture('issues.json')).filter((issue) => issue.number !== 22)),
   });
   return byTitle(await run(gh));
 }
@@ -79,12 +87,61 @@ test('a review request naming hunterphillips counts at any age; a team request d
   assert.equal(found.has('garden-planner#15: review and merge'), false);
 });
 
+test('a pull request both idle and requested reads once, as review requested', async () => {
+  const gh = fakeGh({
+    'api graphql': (args) => {
+      const name = args.find((arg) => arg.startsWith('name=')).slice('name='.length);
+      const answer = JSON.parse(fixture(`graphql-${name}.json`));
+      if (name === 'recipe-box') answer.data.repository.refs.nodes = answer.data.repository.refs.nodes.slice(0, 1);
+      return JSON.stringify(answer);
+    },
+    'search issues': () => JSON.stringify(JSON.parse(fixture('issues.json')).filter((issue) => issue.number !== 22)),
+  });
+  const candidates = await run(gh);
+  const url = 'https://github.com/hunterphillips/recipe-box/pull/5';
+  const matches = candidates.filter((c) => c.external_id === url);
+  assert.equal(matches.length, 1);
+  assert.deepEqual(matches[0], {
+    title: 'recipe-box#5: review and merge',
+    source: 'git',
+    external_id: url,
+    link: url,
+    meta: 'review requested · 3d',
+    occurs_at: '2026-10-07T12:00:00Z',
+  });
+});
+
 test('ready-for-human issues are decisions and needs-info issues are answers', async () => {
   const found = await uncapped();
   const decide = found.get('garden-planner#20: decide');
   assert.equal(decide.meta, 'ready-for-human · 1d');
   assert.equal(decide.external_id, 'https://github.com/hunterphillips/garden-planner/issues/20');
   assert.equal(found.get('recipe-box#21: answer').meta, 'needs-info · 6h');
+});
+
+test('an issue carrying both ready-for-human and needs-info is a decision, not an answer', async () => {
+  const gh = fakeGh({
+    'api graphql': (args) => {
+      const name = args.find((arg) => arg.startsWith('name=')).slice('name='.length);
+      const answer = JSON.parse(fixture(`graphql-${name}.json`));
+      if (name === 'recipe-box') {
+        answer.data.repository.refs.nodes = answer.data.repository.refs.nodes.slice(0, 1);
+        answer.data.repository.pullRequests.nodes = answer.data.repository.pullRequests.nodes
+          .filter((pr) => pr.number !== 5);
+      }
+      return JSON.stringify(answer);
+    },
+  });
+  const found = byTitle(await run(gh));
+  assert.deepEqual(found.get('garden-planner#22: decide'), {
+    title: 'garden-planner#22: decide',
+    source: 'git',
+    external_id: 'https://github.com/hunterphillips/garden-planner/issues/22',
+    link: 'https://github.com/hunterphillips/garden-planner/issues/22',
+    meta: 'ready-for-human · 21h',
+    occurs_at: '2026-10-09T15:00:00Z',
+  });
+  assert.equal(found.has('garden-planner#22: answer'), false);
 });
 
 test('a failed default-branch run counts within 2 days', async () => {
@@ -118,15 +175,15 @@ test('freshest first, capped at 10', async () => {
   const candidates = await run();
   assert.deepEqual(candidates.map((c) => c.title), [
     'recipe-box#21: answer',
+    'garden-planner#22: decide',
     'garden-planner#14: review and merge',
     'garden-planner: fix the failed run',
     'garden-planner#20: decide',
     'garden-planner#12: review and merge',
+    'recipe-box#5: review and merge',
     'garden-planner/claude/issue-8: finish or delete',
     'garden-planner/idle-branch: finish or delete',
     'recipe-box/b1: finish or delete',
-    'recipe-box/b2: finish or delete',
-    'recipe-box/b3: finish or delete',
   ]);
 });
 
