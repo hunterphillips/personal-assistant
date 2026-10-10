@@ -4,8 +4,11 @@
 // through one queue, so exactly one job runs at a time, and it never calls an
 // external service itself.
 //
-// createJobRunner({ runsDir, schedule, zone, timeouts, limits, log, now,
-//                   setTimeout, clearTimeout, randomUUID }) returns:
+// createJobRunner({ runsDir, schedule, zone, limits, runLines, tickMs, onTick,
+//                   log, now, setTimeout, clearTimeout, randomUUID }) returns:
+//   `runLines` caps each runs log; `tickMs` is the due check's interval;
+//   `onTick()`, when given, is awaited at the start of every tick, before the
+//   due check reads any job's cron.
 //   register(job)                 Add one job before start. A job may carry
 //                                 triggerFor(trigger, context), whose answer
 //                                 replaces the trigger for that run. Its
@@ -13,7 +16,8 @@
 //                                 with its label and trigger.
 //   start()                       Load logs, close open runs, kick the first
 //                                 tick without awaiting its drain, and arm.
-//   stop()                        Abort and await the running job.
+//   stop()                        Abort and await the running job. Later
+//                                 enqueues answer { ok: false, reason: 'stopped' }.
 //   tick()                        Run the latest due occurrence for each job.
 //   enqueue(label, trigger, context, options?)
 //                                 Queue explicit work ahead of scheduled work.
@@ -23,13 +27,15 @@
 //   rows(), state(), lastRun(label), runs(label, n), onChange(fn)
 
 import { randomBytes, randomUUID as nodeRandomUUID } from 'node:crypto';
-import { appendFile, mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises';
+import { appendFile, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
-import { LIMITS, TIME_ZONE, TIMEOUTS } from './config.mjs';
+import { LIMITS, TIME_ZONE } from './config.mjs';
 import * as defaultSchedule from './schedule.mjs';
 
 const DAY_MS = 86_400_000;
+const RUN_LINES = 200;
+const TICK_MS = 30_000;
 const FAILURE_OUTCOMES = new Set(['failed', 'rejected']);
 
 export class JobRunnerError extends Error {
@@ -42,7 +48,8 @@ export class JobRunnerError extends Error {
 }
 
 export function createJobRunner({
-  runsDir, schedule = defaultSchedule, zone = TIME_ZONE, timeouts = TIMEOUTS, limits = LIMITS, log = () => {},
+  runsDir, schedule = defaultSchedule, zone = TIME_ZONE, limits = LIMITS, runLines = RUN_LINES, tickMs = TICK_MS,
+  onTick = null, log = () => {},
   now = () => new Date(), setTimeout: setTimer = globalThis.setTimeout, clearTimeout: clearTimer = globalThis.clearTimeout,
   randomUUID = nodeRandomUUID,
 }) {
@@ -89,7 +96,6 @@ export function createJobRunner({
   async function loadLog(label) {
     let text;
     try {
-      await stat(fileFor(label));
       text = await readFile(fileFor(label), 'utf8');
     } catch (error) {
       if (error?.code === 'ENOENT') return { lines: [], records: [] };
@@ -134,8 +140,8 @@ export function createJobRunner({
       const entry = logs.get(label) ?? { lines: [], records: [] };
       logs.set(label, entry);
       entry.lines.push(clean);
-      if (entry.lines.length > limits.focusRunLines) {
-        entry.lines = entry.lines.slice(-limits.focusRunLines);
+      if (entry.lines.length > runLines) {
+        entry.lines = entry.lines.slice(-runLines);
         await rewrite(label, entry.lines);
       }
       entry.records = fold(entry.lines);
@@ -217,13 +223,17 @@ export function createJobRunner({
     } finally {
       if (timeout) clearTimer(timeout);
     }
-    if (active.abortDetail) answer = { outcome: 'failed', detail: active.abortDetail };
+    if (active.abortDetail) answer = { ...(isRecord(answer) ? answer : {}), outcome: 'failed', detail: active.abortDetail };
     if (!isRecord(answer) || typeof answer.outcome !== 'string') answer = { outcome: 'failed', detail: 'The job did not return an outcome.' };
     const endedAt = now();
     const end = { run, endedAt: endedAt.toISOString(), ...answer };
+    // A failed end line is logged, never thrown: the rest of the batch and
+    // its burst end still run.
     try {
       await append(job.label, end);
       log({ event: 'job_run', label: job.label, trigger, outcome: end.outcome, ms: endedAt.getTime() - startedAt.getTime() });
+    } catch (error) {
+      log({ event: 'job_log_error', label: job.label, error: messageOf(error) });
     } finally {
       if (running === active) running = null;
       notify();
@@ -302,6 +312,7 @@ export function createJobRunner({
     // For the array form, callers may pass options as the second argument.
     if (Array.isArray(label) && isRecord(trigger)) options = trigger;
     const items = normalizeEnqueue(label, trigger, context);
+    if (stopped) return Promise.resolve({ ok: false, reason: 'stopped' });
     if (options.exclusive && (running || queue.length > 0 || pumping)) return Promise.resolve({ ok: false, reason: 'already_running' });
     queue.push({ items, burst: items.length > 1 });
     void pump();
@@ -312,13 +323,21 @@ export function createJobRunner({
     if (stopped) return;
     await pump();
     if (stopped) return;
+    if (onTick) {
+      try {
+        await onTick();
+      } catch (error) {
+        log({ event: 'job_tick_hook_error', error: messageOf(error) });
+      }
+      if (stopped) return;
+    }
     const at = now();
     const due = dueEntries(at);
     if (due.length === 0) return;
     const many = due.length > 1;
     const items = due.map(({ job, occurrence }) => ({
       job, occurrence, context: null, run: randomUUID(),
-      trigger: many || at.getTime() - occurrence.getTime() >= 2 * timeouts.focusTickMs ? 'catchup' : 'schedule',
+      trigger: many || at.getTime() - occurrence.getTime() >= 2 * tickMs ? 'catchup' : 'schedule',
     }));
     queue.push({ items, burst: true });
     await pump();
@@ -337,7 +356,7 @@ export function createJobRunner({
     timer = setTimer(() => {
       timer = null;
       tick().finally(arm);
-    }, timeouts.focusTickMs);
+    }, tickMs);
     timer?.unref?.();
   }
 

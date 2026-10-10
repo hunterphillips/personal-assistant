@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { LIMITS, TIMEOUTS } from '../lib/config.mjs';
+import { LIMITS } from '../lib/config.mjs';
 import { createJobRunner } from '../lib/jobs-runner.mjs';
 import { tempDir } from './support/harness.mjs';
 
 const START = '2026-10-05T12:00:10.000Z';
+const TICK_MS = 30_000;
 
-async function setup(t, { clock = START, limits = {}, timeouts = {} } = {}) {
+async function setup(t, { clock = START, runLines = 200, onTick = null } = {}) {
   let time = Date.parse(clock);
   let uuid = 0;
   const timers = [];
@@ -17,7 +18,7 @@ async function setup(t, { clock = START, limits = {}, timeouts = {} } = {}) {
   const dir = path.join(await tempDir(t), 'focus-runs');
   const now = () => new Date(time);
   const runner = createJobRunner({
-    runsDir: dir, zone: 'UTC', limits: { ...LIMITS, ...limits }, timeouts: { ...TIMEOUTS, ...timeouts }, now,
+    runsDir: dir, zone: 'UTC', limits: LIMITS, runLines, tickMs: TICK_MS, onTick, now,
     log: (entry) => logs.push(entry), randomUUID: () => `run-${++uuid}`,
     setTimeout: (fn, ms) => {
       const timer = { fn, ms, cleared: false, unref() {} };
@@ -108,7 +109,7 @@ test('a scheduled guard leaves the marker alone, while a guarded explicit run is
   await settle(() => runner.state().running === null);
   assert.deepEqual(runner.runs('guarded'), []);
   allowed = true;
-  advance(2 * TIMEOUTS.focusTickMs);
+  advance(2 * TICK_MS);
   await runner.tick();
   assert.equal(runner.lastRun('guarded').trigger, 'catchup');
   assert.equal(runner.lastRun('guarded').run, 'run-3');
@@ -176,7 +177,7 @@ test('timeout and stop abort the signal and write their failed end line before s
 });
 
 test('start closes open runs, trims and folds logs, arms ticks, and reloads the retained records', async (t) => {
-  const first = await setup(t, { limits: { focusRunLines: 3 } });
+  const first = await setup(t, { runLines: 3 });
   const events = [];
   first.runner.register(scriptedJob('job', events, { cron: null }));
   await first.runner.enqueue('job', 'refresh');
@@ -187,17 +188,17 @@ test('start closes open runs, trims and folds logs, arms ticks, and reloads the 
   assert.equal(first.runner.runs('job').at(-1).startedAt, undefined, 'the oldest start line was trimmed');
   await first.runner.stop();
 
-  const second = await setup(t, { limits: { focusRunLines: 3 } });
+  const second = await setup(t, { runLines: 3 });
   // Reuse the first runner's directory with a new runner to exercise loading.
   const reload = createJobRunner({
-    runsDir: first.dir, zone: 'UTC', limits: { ...LIMITS, focusRunLines: 3 }, timeouts: TIMEOUTS,
+    runsDir: first.dir, zone: 'UTC', limits: LIMITS, runLines: 3, tickMs: TICK_MS,
     now: first.now, randomUUID: () => 'reload-run',
     setTimeout: (fn, ms) => { const timer = { fn, ms, unref() {} }; second.timers.push(timer); return timer; }, clearTimeout: () => {},
   });
   reload.register(scriptedJob('job', [], { cron: null }));
   await reload.start();
   assert.equal(reload.runs('job').length, 2);
-  assert.equal(second.timers.at(-1).ms, TIMEOUTS.focusTickMs);
+  assert.equal(second.timers.at(-1).ms, TICK_MS);
   await reload.stop();
 
   const open = await setup(t, { clock: '2026-10-05T13:00:00.000Z' });
@@ -310,4 +311,64 @@ test('start runs a missed occurrence once as a catch-up', async (t) => {
   assert.equal(runner.runs('daily').length, 2);
   await runner.tick();
   assert.equal(events.length, 2);
+});
+
+test('an abort keeps the job\'s extra fields on its failed end line', async (t) => {
+  const { runner, timers } = await setup(t);
+  runner.register(scriptedJob('slow', [], {
+    cron: null, timeoutMs: 20,
+    run: ({ signal }) => new Promise((resolve) => {
+      signal.addEventListener('abort', () => resolve({ outcome: 'wrote', candidates: 3 }), { once: true });
+    }),
+  }));
+  await runner.enqueue('slow', 'refresh');
+  await settle(() => timers.some((timer) => timer.ms === 20));
+  timers.find((timer) => timer.ms === 20).fn();
+  await settle(() => runner.lastRun('slow')?.endedAt);
+  assert.equal(runner.lastRun('slow').outcome, 'failed');
+  assert.equal(runner.lastRun('slow').detail, 'The job timed out.');
+  assert.equal(runner.lastRun('slow').candidates, 3);
+});
+
+test('a failed end line is logged and the rest of the burst and its end still run', async (t) => {
+  const { runner, dir, logs } = await setup(t);
+  const events = [];
+  const bursts = [];
+  runner.register(scriptedJob('a', events, {
+    cron: null,
+    run: async () => {
+      await chmod(path.join(dir, 'a.jsonl'), 0o400);
+      return { outcome: 'wrote' };
+    },
+    onBurstEnd: (results) => bursts.push(results),
+  }));
+  runner.register(scriptedJob('b', events, { cron: null }));
+  await runner.enqueue([{ label: 'a', trigger: 'refresh' }, { label: 'b', trigger: 'refresh' }]);
+  await settle(() => bursts.length === 1);
+  assert.deepEqual(events.map((event) => event.slice(0, 2)), [['start', 'a'], ['end', 'a'], ['start', 'b'], ['end', 'b']]);
+  assert.deepEqual(bursts[0].map((result) => [result.label, result.outcome]), [['a', 'wrote'], ['b', 'wrote']]);
+  assert.equal(logs.filter((entry) => entry.event === 'job_log_error' && entry.label === 'a').length, 1);
+  assert.equal(runner.state().running, null);
+  assert.equal(runner.lastRun('b').outcome, 'wrote');
+});
+
+test('enqueue after stop answers stopped and queues nothing', async (t) => {
+  const { runner } = await setup(t);
+  const events = [];
+  runner.register(scriptedJob('job', events, { cron: null }));
+  await runner.stop();
+  assert.deepEqual(await runner.enqueue('job', 'refresh'), { ok: false, reason: 'stopped' });
+  assert.deepEqual(await runner.enqueue([{ label: 'job', trigger: 'refresh' }], { exclusive: true }), { ok: false, reason: 'stopped' });
+  assert.deepEqual(events, []);
+});
+
+test('onTick is awaited before the due check reads any cron', async (t) => {
+  let line = null;
+  const order = [];
+  const { runner } = await setup(t, { onTick: async () => { order.push('onTick'); line = '0 12 * * *'; } });
+  const events = [];
+  runner.register({ ...scriptedJob('hooked-cron', events), cron: () => { order.push('cron'); return line; } });
+  await runner.tick();
+  assert.equal(order[0], 'onTick');
+  assert.equal(runner.lastRun('hooked-cron').occurrence, '2026-10-05T12:00:00.000Z');
 });

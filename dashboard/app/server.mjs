@@ -172,7 +172,8 @@ async function startOnRoot({ env, config, logEntry, createAdapters, injectedFocu
   const focusSettings = createFocusSettings({ file: config.focusSettingsPath, limits: config.limits, log: logEntry });
   await focusSettings.load();
   const focusRunner = injectedFocusRunner ?? createJobRunner({
-    runsDir: config.focusRunsDir, zone: config.timeZone, timeouts: config.timeouts, limits: config.limits, log: logEntry,
+    runsDir: config.focusRunsDir, zone: config.timeZone, limits: config.limits,
+    runLines: config.limits.focusRunLines, tickMs: config.timeouts.focusTickMs, log: logEntry,
   });
   const hasFocusBoard = await focusBoard.exists();
   let focusJobs = null;

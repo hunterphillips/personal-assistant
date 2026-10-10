@@ -163,7 +163,7 @@ async function withRunner(t, { now }) {
   await settings.load();
   let uuid = 0;
   const runner = createJobRunner({
-    runsDir, zone: 'America/Chicago', limits: LIMITS, timeouts: TIMEOUTS, now: () => new Date(now), randomUUID: () => `run-${++uuid}`,
+    runsDir, zone: 'America/Chicago', limits: LIMITS, now: () => new Date(now), randomUUID: () => `run-${++uuid}`,
     setTimeout: () => ({ unref() {} }), clearTimeout: () => {},
   });
   t.after(() => runner.stop());
