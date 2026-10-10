@@ -1,12 +1,31 @@
 // Focus candidates files: validates scanner output and reads or atomically
 // writes one source's { scanned, signature, candidates } document. Reads return
 // a frozen document or null and never throw; this module never runs a scan.
+// ScanError is what a scan throws, and checkedCandidates is the gate every
+// scan's output passes before it is returned.
 
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 
 import { atomicJson } from './board.mjs';
 import { SCAN_SOURCES } from './validate.mjs';
+
+export class ScanError extends Error {
+  constructor(code, detail = undefined) {
+    super(detail ? `${code}: ${detail}` : code);
+    this.name = 'ScanError';
+    this.code = code;
+    if (detail !== undefined) this.detail = detail;
+  }
+}
+
+// Returns the list unchanged when it is valid; throws
+// ScanError('invalid_candidates') with the problems otherwise.
+export function checkedCandidates(list, limits) {
+  const problems = validateCandidates(list, limits);
+  if (problems.length > 0) throw new ScanError('invalid_candidates', problems.join('; '));
+  return list;
+}
 
 export function validateCandidates(list, limits) {
   if (!Array.isArray(list)) return Object.freeze(['not an array']);
