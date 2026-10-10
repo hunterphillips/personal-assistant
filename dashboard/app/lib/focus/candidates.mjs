@@ -7,7 +7,7 @@
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 
-import { atomicJson } from './board.mjs';
+import { atomicJson, deepFreeze } from './board.mjs';
 import { SCAN_SOURCES } from './validate.mjs';
 
 export class ScanError extends Error {
@@ -93,12 +93,4 @@ function validDocument(document, limits) {
   if (typeof document.scanned !== 'string' || document.scanned.length === 0) return false;
   if (typeof document.signature !== 'string' || document.signature.length === 0) return false;
   return validateCandidates(document.candidates, limits).length === 0;
-}
-
-function deepFreeze(value) {
-  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-    for (const child of Object.values(value)) deepFreeze(child);
-    Object.freeze(value);
-  }
-  return value;
 }

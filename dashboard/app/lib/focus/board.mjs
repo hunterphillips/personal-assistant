@@ -301,7 +301,7 @@ async function atomicText(file, text) {
   try { await rename(tmp, file); } catch (error) { await unlink(tmp).catch(() => {}); throw error; }
 }
 
-function deepFreeze(value) {
+export function deepFreeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const child of Object.values(value)) deepFreeze(child);
     Object.freeze(value);
