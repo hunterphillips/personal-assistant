@@ -26,16 +26,21 @@ test('validateCandidates preserves the scanner rules and enforces the configured
   assert.deepEqual(validateCandidates([candidate({ title: 'x'.repeat(201) })], limits), ['[0] bad title']);
   assert.deepEqual(validateCandidates([candidate({ source: 'manual' })], limits), ['[0] bad source "manual"']);
   assert.deepEqual(validateCandidates([candidate({ external_id: '' })], limits), ['[0] bad external_id']);
+  assert.deepEqual(validateCandidates([[]], limits), [
+    '[0] bad title',
+    '[0] bad source undefined',
+    '[0] bad external_id',
+  ]);
   for (const key of ['link', 'meta', 'occurs_at', 'text']) {
     assert.deepEqual(validateCandidates([candidate({ [key]: 1 })], limits), [`[0] ${key} must be string or null`]);
     assert.deepEqual(validateCandidates([candidate({ [key]: null })], limits), []);
   }
 });
 
-test('readCandidatesFile returns a frozen exact document', async () => {
+test('readCandidatesFile returns a frozen projection of the candidate document', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-candidates-'));
   const file = path.join(dir, 'gmail.json');
-  await writeFile(file, JSON.stringify(document()));
+  await writeFile(file, JSON.stringify(document({ extra: true })));
   const read = await readCandidatesFile(file, limits);
   assert.deepEqual(read, document());
   assert.ok(Object.isFrozen(read));
@@ -54,14 +59,21 @@ test('readCandidatesFile returns null for missing, oversize, malformed, or inval
   assert.equal(await readCandidatesFile(file, limits), null);
 
   for (const invalid of [
-    document({ scanned: 'soon' }),
-    document({ signature: 'no' }),
+    document({ scanned: '' }),
+    document({ signature: '' }),
     document({ candidates: [candidate({ text: 7 })] }),
-    { ...document(), extra: true },
   ]) {
     await writeFile(file, JSON.stringify(invalid));
     assert.equal(await readCandidatesFile(file, limits), null);
   }
+});
+
+test('readCandidatesFile accepts opaque non-empty scanned and signature strings', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-candidates-envelope-'));
+  const file = path.join(dir, 'gmail.json');
+  const opaque = document({ scanned: 'latest scan', signature: 'signature-v1' });
+  await writeFile(file, JSON.stringify(opaque));
+  assert.deepEqual(await readCandidatesFile(file, limits), opaque);
 });
 
 test('writeCandidatesFile atomically writes formatted JSON with mode 0600', async () => {

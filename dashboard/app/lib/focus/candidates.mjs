@@ -7,8 +7,6 @@ import { readFile, stat } from 'node:fs/promises';
 import { atomicJson } from './board.mjs';
 import { SCAN_SOURCES } from './validate.mjs';
 
-const SHA256 = /^[a-f0-9]{64}$/;
-
 export function validateCandidates(list, limits) {
   if (!Array.isArray(list)) return Object.freeze(['not an array']);
   const problems = [];
@@ -16,7 +14,7 @@ export function validateCandidates(list, limits) {
     problems.push(`at most ${limits.focusCandidatesMax} candidates`);
   }
   list.forEach((candidate, index) => {
-    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+    if (typeof candidate !== 'object' || candidate === null) {
       problems.push(`[${index}] not an object`);
       return;
     }
@@ -46,7 +44,11 @@ export async function readCandidatesFile(file, limits) {
     if (raw.byteLength > limits.focusCandidateBytes) return null;
     const document = JSON.parse(raw.toString('utf8'));
     if (!validDocument(document, limits)) return null;
-    return deepFreeze(structuredClone(document));
+    return deepFreeze(structuredClone({
+      scanned: document.scanned,
+      signature: document.signature,
+      candidates: document.candidates,
+    }));
   } catch {
     return null;
   }
@@ -58,9 +60,8 @@ export async function writeCandidatesFile(file, { scanned, signature, candidates
 
 function validDocument(document, limits) {
   if (document === null || typeof document !== 'object' || Array.isArray(document)) return false;
-  if (Object.keys(document).some((key) => !['scanned', 'signature', 'candidates'].includes(key))) return false;
-  if (typeof document.scanned !== 'string' || Number.isNaN(Date.parse(document.scanned))) return false;
-  if (typeof document.signature !== 'string' || !SHA256.test(document.signature)) return false;
+  if (typeof document.scanned !== 'string' || document.scanned.length === 0) return false;
+  if (typeof document.signature !== 'string' || document.signature.length === 0) return false;
   return validateCandidates(document.candidates, limits).length === 0;
 }
 
