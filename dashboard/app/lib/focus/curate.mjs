@@ -169,7 +169,10 @@ function buildPrompt({ rulebook, at, zone, priorities, projectState, profile, cu
     ...renderDocument(current), '',
   ];
   if (trigger === 'rejudge') {
-    sections.push('=== REJUDGE ===', 'No new candidates. Re-judge every open item in the current document against the rules as if it had just arrived, using the latest candidates from every source below as evidence. Expire what the rules would not create today, close as done what is evidenced finished, retier what is misplaced.', '');
+    const groups = candidates.filter(hasCandidates);
+    const opening = groups.length ? 'New candidates follow the current document.' : 'No new candidates.';
+    sections.push('=== REJUDGE ===', `${opening} Re-judge every open item in the current document against the rules as if it had just arrived, using the latest candidates from every source below as evidence. Expire what the rules would not create today, close as done what is evidenced finished, retier what is misplaced.`, '');
+    for (const group of groups) sections.push(`=== CANDIDATES (source: ${group.source}) ===`, JSON.stringify(group.candidates, null, 2), '');
   } else if (trigger === 'scan') {
     sections.push(`=== CANDIDATES (source: ${source}) ===`, JSON.stringify(candidates, null, 2), '');
   } else {

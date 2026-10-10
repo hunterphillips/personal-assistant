@@ -100,6 +100,24 @@ test('rejudge has no candidates and refresh renders one candidates section per s
   assert.match(query.calls[1].prompt, /source: notes/);
 });
 
+test('a rejudge with candidate groups says new candidates follow and renders their sections; one without says none', async (t) => {
+  const query = fakeQuery(async function* () { yield init(); yield result(); });
+  const found = await setup(t, { query });
+  await found.curator.run({
+    trigger: 'rejudge', candidates: [{ source: 'calendar', scanned: 'now', candidates: [{ title: 'Night event' }] }],
+    others: [{ source: 'git', scanned: 'now', candidates: [{ title: 'PR' }] }],
+  });
+  const prompt = query.calls[0].prompt;
+  assert.match(prompt, /=== REJUDGE ===\nNew candidates follow the current document\. Re-judge every open item/);
+  assert.doesNotMatch(prompt, /No new candidates\./);
+  assert.match(prompt, /=== CANDIDATES \(source: calendar\) ===/);
+  assert.match(prompt, /Night event/);
+  assert.ok(prompt.indexOf('=== CANDIDATES (source: calendar)') < prompt.indexOf('=== LATEST CANDIDATES FROM THE OTHER SOURCES'));
+  await found.curator.run({ trigger: 'rejudge', candidates: [], others: [] });
+  assert.match(query.calls[1].prompt, /=== REJUDGE ===\nNo new candidates\. Re-judge every open item/);
+  assert.doesNotMatch(query.calls[1].prompt, /=== CANDIDATES \(source:/);
+});
+
 test('catchup renders a candidates section per source like refresh', async (t) => {
   const query = fakeQuery(async function* () { yield init(); yield result(); });
   const found = await setup(t, { query });

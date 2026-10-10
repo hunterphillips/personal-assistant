@@ -57,29 +57,42 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
 
   async function runCurate(trigger, context = {}, { signal }) {
     const files = await candidateFiles();
-    let covered = [];
-    let source = null;
+    const before = (await board.read()).board;
+    // A file is stale when its candidates have not been placed on this board.
+    const stale = new Set(SOURCES.filter((id) => files[id] && files[id].signature !== candidateSignature(files[id].candidates, before)));
+    let explicit = [];
     if (trigger === 'scan' && SOURCES.includes(context?.source)) {
-      covered = [{ source: context.source, signature: context.signature }];
-      source = context.source;
+      explicit = [context.source];
     } else if (trigger === 'refresh' || trigger === 'catchup') {
-      covered = Array.isArray(context?.sources) ? context.sources.filter((entry) => SOURCES.includes(entry?.source)) : [];
+      explicit = Array.isArray(context?.sources) ? context.sources.map((entry) => entry?.source).filter((id) => SOURCES.includes(id)) : [];
     }
-    const coveredSet = new Set(covered.map((entry) => entry.source));
+    // Every stale file is covered, so a curate never marks candidates curated
+    // that it did not hand over as candidates.
+    const coveredSet = new Set([...explicit, ...stale]);
+    const covered = [...coveredSet].filter((id) => files[id]);
     const group = (id) => files[id] ? { source: id, scanned: files[id].scanned, candidates: files[id].candidates } : null;
-    const candidates = trigger === 'rejudge' ? []
-      : trigger === 'scan' ? (files[source]?.candidates ?? [])
-        : covered.map(({ source: id }) => group(id)).filter(Boolean);
+    let curatorTrigger = trigger;
+    let source = null;
+    let candidates;
+    if (trigger === 'scan' && coveredSet.size === 1 && coveredSet.has(context?.source)) {
+      source = context.source;
+      candidates = files[source]?.candidates ?? [];
+    } else {
+      if (trigger === 'scan') curatorTrigger = 'catchup';
+      candidates = covered.map(group);
+    }
     const others = SOURCES.filter((id) => !coveredSet.has(id)).map(group).filter(Boolean);
-    const answer = await curator.run({ trigger, source, candidates, others, signal });
-    // The curator saw every file that exists, as candidates or as others, so
-    // each one's signature is taken again against the board the curate left;
-    // the scan's own signature was taken against the board before it.
+    const answer = await curator.run({ trigger: curatorTrigger, source, candidates, others, signal });
+    // Each file the curate covered, or that was not stale before it, is signed
+    // again against the board the curate left: a covered file's candidates
+    // were placed, and a non-stale file's candidates were already on the board
+    // and only the board moved. Every stale file is covered, so this is every
+    // file; the guard stays so an uncovered stale file can never be marked.
     if (answer.outcome === 'wrote' || answer.outcome === 'no change') {
       const after = (await board.read()).board;
       for (const id of SOURCES) {
         const held = files[id];
-        if (!held) continue;
+        if (!held || !(coveredSet.has(id) || !stale.has(id))) continue;
         await writeCandidatesFile(fileFor(id), { ...held, signature: candidateSignature(held.candidates, after) }, limits);
       }
     }
@@ -89,7 +102,7 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
 
   async function onBurstEnd(results) {
     // A burst that ran the curate's own occurrence ran a rejudge after every
-    // scan in it, which saw every file and advanced every signature.
+    // scan in it, which took every stale file as candidates.
     if (results.some((result) => result.label === LABELS.rejudge)) return;
     const scanResults = results.filter((result) => sourceOf(result.label));
     const refreshed = scanResults.filter((result) => result.trigger === 'refresh');
