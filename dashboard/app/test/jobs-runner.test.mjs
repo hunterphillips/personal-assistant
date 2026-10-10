@@ -236,3 +236,51 @@ test('rows and onChange reflect starts, ends, failures, paused state, and runnin
   assert.ok(Object.isFrozen(runner.rows()[0]));
   assert.deepEqual(changes, ['health', 'health', 'health', null]);
 });
+
+test('a job started by a tick that enqueues another holds the runner until it ends', async (t) => {
+  const { runner } = await setup(t);
+  const events = [];
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const seen = [];
+  runner.register(scriptedJob('first', events, {
+    run: async ({ enqueue }) => {
+      await enqueue('second', 'scan', { n: 1 });
+      await held;
+      return { outcome: 'wrote' };
+    },
+  }));
+  runner.register(scriptedJob('second', events, { cron: null }));
+  const tick = runner.tick();
+  await settle(() => events.length === 1);
+  runner.onChange(() => { if (!events.some((event) => event[0] === 'end')) seen.push(runner.state().running); });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(events.map((event) => event.slice(0, 3)), [['start', 'first', 'schedule']]);
+  assert.equal(runner.state().running, 'first');
+  assert.deepEqual(await runner.enqueue('second', 'refresh', null, { exclusive: true }), { ok: false, reason: 'already_running' });
+  release();
+  await tick;
+  await settle(() => runner.runs('second')[0]?.endedAt);
+  assert.deepEqual(events.map((event) => event.slice(0, 3)), [
+    ['start', 'first', 'schedule'], ['end', 'first'], ['start', 'second', 'scan'], ['end', 'second'],
+  ]);
+  assert.ok(seen.every((label) => label === 'first'));
+  assert.equal(runner.runs('second').length, 1);
+});
+
+test('a job whose due check settles after stop does not start', async (t) => {
+  const { runner } = await setup(t);
+  const events = [];
+  let answer;
+  const due = new Promise((resolve) => { answer = resolve; });
+  runner.register(scriptedJob('late', events, { due: () => due }));
+  const tick = runner.tick();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const stopping = runner.stop();
+  answer(true);
+  await stopping;
+  await tick;
+  assert.deepEqual(events, []);
+  assert.deepEqual(runner.runs('late'), []);
+  assert.equal(runner.state().running, null);
+});

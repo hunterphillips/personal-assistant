@@ -1,7 +1,8 @@
 // The in-process job runner: registers scheduled jobs, catches up their most
 // recent missed occurrences, serializes explicit and scheduled work, and keeps
-// one folded JSON-lines run log per label. It never overlaps jobs and never
-// calls an external service itself.
+// one folded JSON-lines run log per label. Scheduled and explicit work go
+// through one queue, so exactly one job runs at a time, and it never calls an
+// external service itself.
 //
 // createJobRunner({ runsDir, schedule, zone, timeouts, limits, log, now,
 //                   setTimeout, clearTimeout, randomUUID }) returns:
@@ -174,7 +175,7 @@ export function createJobRunner({
       log({ event: 'job_due_error', label: job.label, error: messageOf(error) });
       allowed = false;
     }
-    if (!allowed) return null;
+    if (!allowed || stopped) return null;
 
     const startedAt = now();
     const controller = new AbortController();
@@ -187,7 +188,7 @@ export function createJobRunner({
         run, occurrence: occurrence ? occurrence.toISOString() : null, trigger, ...(source ? { source } : {}), startedAt: startedAt.toISOString(),
       });
     } catch (error) {
-      running = null;
+      if (running === active) running = null;
       notify();
       throw error;
     }
@@ -218,7 +219,7 @@ export function createJobRunner({
       await append(job.label, end);
       log({ event: 'job_run', label: job.label, trigger, outcome: end.outcome, ms: endedAt.getTime() - startedAt.getTime() });
     } finally {
-      running = null;
+      if (running === active) running = null;
       notify();
     }
     return { label: job.label, ...answer };
@@ -246,18 +247,29 @@ export function createJobRunner({
     return results;
   }
 
+  // The one place jobs start: explicit and scheduled batches share this
+  // queue, so a job that enqueues another never runs beside it. `pumping` is
+  // cleared in the same turn the loop sees an empty queue, so an enqueue
+  // never lands behind a drain that has already finished.
   async function drainQueue() {
-    while (!stopped && queue.length > 0) {
-      const batch = queue.shift();
-      await runBatch(batch.items, { burst: batch.burst });
+    try {
+      while (!stopped && queue.length > 0) {
+        const batch = queue.shift();
+        try {
+          await runBatch(batch.items, { burst: batch.burst });
+        } catch (error) {
+          log({ event: 'job_queue_error', error: messageOf(error) });
+        }
+      }
+    } finally {
+      pumping = null;
     }
   }
 
   function pump() {
     if (pumping) return pumping;
-    pumping = drainQueue()
-      .catch((error) => log({ event: 'job_queue_error', error: messageOf(error) }))
-      .finally(() => { pumping = null; });
+    if (stopped || queue.length === 0) return Promise.resolve();
+    pumping = drainQueue();
     return pumping;
   }
 
@@ -294,7 +306,7 @@ export function createJobRunner({
       job, occurrence, context: null, run: randomUUID(),
       trigger: many || at.getTime() - occurrence.getTime() >= 2 * timeouts.focusTickMs ? 'catchup' : 'schedule',
     }));
-    await runBatch(items, { burst: true });
+    queue.push({ items, burst: true });
     await pump();
   }
 
