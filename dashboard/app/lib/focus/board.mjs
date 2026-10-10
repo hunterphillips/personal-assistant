@@ -291,7 +291,7 @@ async function appendChange(file, line, limit) {
   if (lines.length > limit) await atomicText(file, `${lines.slice(-limit).join('\n')}\n`);
 }
 
-async function atomicJson(file, value) { await atomicText(file, `${JSON.stringify(value, null, 2)}\n`); }
+export async function atomicJson(file, value) { await atomicText(file, `${JSON.stringify(value, null, 2)}\n`); }
 async function atomicText(file, text) {
   const dir = path.dirname(file);
   await mkdir(dir, { recursive: true, mode: 0o700 });
