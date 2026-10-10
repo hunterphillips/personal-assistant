@@ -75,7 +75,7 @@ export function createFocusRoutes({ board = null, instructions = null, instructi
   async function serveRefresh(res) {
     if (!board || !await board.exists()) throw new HttpError(404, 'no_board');
     const answer = await jobs.refresh();
-    if (!answer?.ok && answer?.reason === 'already_running') throw new HttpError(409, 'already_running');
+    if (!answer?.ok) throw new HttpError(409, typeof answer?.reason === 'string' ? answer.reason : 'not_started');
     sendJson(res, 202, { run: answer.run });
   }
 

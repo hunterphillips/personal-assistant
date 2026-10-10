@@ -655,9 +655,8 @@ export function createHub({
   const unsubscribeFocusRunner = focusRunner && typeof focusRunner.onChange === 'function' ? focusRunner.onChange(() => {
     if (closed) return;
     const dashboard = focusRunner.rows().map((row) => ({ ...row, agentId: null, agentName: 'Focus' }));
-    const retained = state.jobs.items.filter((row) => row.source !== 'dashboard');
     const patch = {};
-    const nextJobs = { ...state.jobs, items: [...retained, ...dashboard] };
+    const nextJobs = { ...state.jobs, items: withDashboardRows(state.jobs.items, dashboard) };
     if (!sameJson(nextJobs, state.jobs)) patch.jobs = nextJobs;
     if (state.focus.native === true) {
       const nextFocus = { ...state.focus, scanning: focusRunner.state().running ?? null };
@@ -1337,4 +1336,14 @@ function deepFreeze(value) {
     Object.freeze(value);
   }
   return value;
+}
+
+// Puts the runner's rows where the old ones stood, so a run starting or ending
+// never reorders the list; with none there yet they go last.
+function withDashboardRows(items, dashboard) {
+  const first = items.findIndex((row) => row.source === 'dashboard');
+  if (first === -1) return [...items, ...dashboard];
+  const others = items.filter((row) => row.source !== 'dashboard');
+  const before = items.slice(0, first).filter((row) => row.source !== 'dashboard').length;
+  return [...others.slice(0, before), ...dashboard, ...others.slice(before)];
 }

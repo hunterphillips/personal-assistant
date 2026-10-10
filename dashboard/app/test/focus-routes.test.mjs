@@ -144,6 +144,8 @@ test('Focus refresh returns its run and maps busy and missing board', async (t) 
 
   const busy = await settingsRoutes(t, { jobs: { refresh: async () => ({ ok: false, reason: 'already_running' }) } });
   await assert.rejects(busy.routes.serveRefresh(fakeResponse()), (error) => error.status === 409 && error.code === 'already_running');
+  const refused = await settingsRoutes(t, { jobs: { refresh: async () => ({ ok: false, reason: 'stopped' }) } });
+  await assert.rejects(refused.routes.serveRefresh(fakeResponse()), (error) => error.status === 409 && error.code === 'stopped');
   const missing = await settingsRoutes(t, { board: { exists: async () => false } });
   await assert.rejects(missing.routes.serveRefresh(fakeResponse()), (error) => error.status === 404 && error.code === 'no_board');
 });
