@@ -21,6 +21,10 @@
 //   DASHBOARD_BRIEF_INSTRUCTIONS the rules the brief's curator follows, a contract in the
 //                               repository (default ../../daily-brief/curator.md)
 //   DASHBOARD_FOCUS_ORIGIN      Focus server, http:// loopback only (default http://127.0.0.1:4242)
+//   DASHBOARD_FOCUS_RUNS        the Focus job run records (default <home>/focus/runs)
+//   DASHBOARD_FOCUS_GOOGLE      the Focus Google sign-in files (default <home>/focus/google)
+//   DASHBOARD_FOCUS_SETTINGS    the Focus scan settings (default <home>/focus/settings.json)
+//   DASHBOARD_PERSONAL_CONTEXT  the personal-context store (default ~/workspace/personal-context)
 //   DASHBOARD_REGISTRY_PATH     agent registry JSON file (default <home>/registry/agents.json)
 //   DASHBOARD_BUILTIN_PATH      the agents that are part of the dashboard, seeded into the
 //                               registry when missing (default ../../registry/builtin.json;
@@ -94,6 +98,10 @@ export const LIMITS = Object.freeze({
   focusChangeBytes: 16 * 1024, // one Focus board change body
   focusBoardBytes: 4 * 1024 * 1024, // the Focus board file
   focusChangesLines: 5000, // newest entries kept in the Focus change log
+  focusRunLines: 200, // lines kept in one Focus job's runs log
+  focusSettingsBytes: 16 * 1024, // the Focus settings file
+  focusCandidatesMax: 25, // candidates kept from one Focus scan
+  focusCandidateBytes: 256 * 1024, // one Focus candidates file
   briefInstructionsBytes: 64 * 1024, // the brief's rules file read by the Brief tab
   settingsBodyBytes: 4 * 1024, // one PUT /api/settings body
   agentBodyBytes: 16 * 1024, // one PUT /api/agents/:id/settings or POST /api/agents body
@@ -140,6 +148,9 @@ export const TIMEOUTS = Object.freeze({
   cmuxSessionsMs: 5_000, // budget for one `cmux sessions list --json`
   cmuxStaleMs: 5 * 60_000, // a cached cmux inventory is served stale for at most this long
   routineTickMs: 30_000, // the scheduler asks what is due this often (scheduler.mjs)
+  focusScanMs: 60_000, // one Focus scan
+  focusCurateMs: 300_000, // one Focus curate pass
+  focusTickMs: 30_000, // the Focus scheduler's due check
 });
 
 export class ConfigError extends Error {
@@ -169,7 +180,11 @@ export function loadConfig(env = process.env, { platform = process.platform } = 
   const focusBoardPath = parsePath(env.DASHBOARD_FOCUS_BOARD, root.focusBoard);
   const focusChangesPath = parsePath(env.DASHBOARD_FOCUS_CHANGES, root.focusChanges);
   const focusCandidatesDir = parsePath(env.DASHBOARD_FOCUS_CANDIDATES, root.focusCandidates);
+  const focusRunsDir = parsePath(env.DASHBOARD_FOCUS_RUNS, root.focusRuns);
+  const focusGoogleDir = parsePath(env.DASHBOARD_FOCUS_GOOGLE, root.focusGoogle);
+  const focusSettingsPath = parsePath(env.DASHBOARD_FOCUS_SETTINGS, root.focusSettings);
   const focusRulesPath = parsePath(env.DASHBOARD_FOCUS_RULES, root.focusRules);
+  const personalContextDir = parsePath(env.DASHBOARD_PERSONAL_CONTEXT, path.join(os.homedir(), 'workspace', 'personal-context'));
   const briefInstructionsPath = parsePath(env.DASHBOARD_BRIEF_INSTRUCTIONS, DEFAULT_BRIEF_INSTRUCTIONS);
   const registryPath = parsePath(env.DASHBOARD_REGISTRY_PATH, root.registry);
   const routinesDir = parsePath(env.DASHBOARD_ROUTINES_DIR, root.routinesDir);
@@ -224,7 +239,11 @@ export function loadConfig(env = process.env, { platform = process.platform } = 
     focusBoardPath,
     focusChangesPath,
     focusCandidatesDir,
+    focusRunsDir,
+    focusGoogleDir,
+    focusSettingsPath,
     focusRulesPath,
+    personalContextDir,
     briefInstructionsPath,
     registryPath,
     builtinPath,

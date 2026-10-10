@@ -22,7 +22,14 @@ test('defaults resolve from the source location and the data root', () => {
   assert.deepEqual([...config.allowedHosts], ['127.0.0.1:4243', 'localhost:4243']);
   assert.deepEqual([...config.allowedOrigins], ['http://127.0.0.1:4243', 'http://localhost:4243']);
   assert.equal(config.limits.focusBodyBytes, 1_000_000);
+  assert.equal(config.limits.focusRunLines, 200);
+  assert.equal(config.limits.focusSettingsBytes, 16 * 1024);
+  assert.equal(config.limits.focusCandidatesMax, 25);
+  assert.equal(config.limits.focusCandidateBytes, 256 * 1024);
   assert.equal(config.limits.feedbackBodyBytes, 131_072);
+  assert.equal(config.timeouts.focusScanMs, 60_000);
+  assert.equal(config.timeouts.focusCurateMs, 300_000);
+  assert.equal(config.timeouts.focusTickMs, 30_000);
   assert.equal(config.timeouts.launchctlMs, 3_000);
 });
 
@@ -102,7 +109,11 @@ test('the data root defaults to ~/.personal-assistant and every store default de
     focusBoardPath: config.focusBoardPath,
     focusChangesPath: config.focusChangesPath,
     focusCandidatesDir: config.focusCandidatesDir,
+    focusRunsDir: config.focusRunsDir,
+    focusGoogleDir: config.focusGoogleDir,
+    focusSettingsPath: config.focusSettingsPath,
     focusRulesPath: config.focusRulesPath,
+    personalContextDir: config.personalContextDir,
     briefsDir: config.briefsDir,
     briefReadsPath: config.briefReadsPath,
   }, {
@@ -120,7 +131,11 @@ test('the data root defaults to ~/.personal-assistant and every store default de
     focusBoardPath: '/data/root/focus/board.json',
     focusChangesPath: '/data/root/focus/changes.jsonl',
     focusCandidatesDir: '/data/root/focus/candidates',
+    focusRunsDir: '/data/root/focus/runs',
+    focusGoogleDir: '/data/root/focus/google',
+    focusSettingsPath: '/data/root/focus/settings.json',
     focusRulesPath: '/data/root/focus/rules.md',
+    personalContextDir: path.join(os.homedir(), 'workspace', 'personal-context'),
     briefsDir: '/data/root/briefs',
     briefReadsPath: '/data/root/brief-reads.json',
   });
@@ -150,7 +165,11 @@ test('each store override still wins over the data root', () => {
     DASHBOARD_FOCUS_BOARD: ['focusBoardPath', '/o/focus-board.json'],
     DASHBOARD_FOCUS_CHANGES: ['focusChangesPath', '/o/focus-changes.jsonl'],
     DASHBOARD_FOCUS_CANDIDATES: ['focusCandidatesDir', '/o/focus-candidates'],
+    DASHBOARD_FOCUS_RUNS: ['focusRunsDir', '/o/focus-runs'],
+    DASHBOARD_FOCUS_GOOGLE: ['focusGoogleDir', '/o/focus-google'],
+    DASHBOARD_FOCUS_SETTINGS: ['focusSettingsPath', '/o/focus-settings.json'],
     DASHBOARD_FOCUS_RULES: ['focusRulesPath', '/o/focus-rules.md'],
+    DASHBOARD_PERSONAL_CONTEXT: ['personalContextDir', '/o/personal-context'],
     DASHBOARD_BRIEFS_DIR: ['briefsDir', '/o/briefs'],
     DASHBOARD_BRIEF_READS_PATH: ['briefReadsPath', '/o/brief-reads.json'],
   };

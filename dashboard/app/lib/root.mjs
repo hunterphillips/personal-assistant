@@ -22,10 +22,10 @@
 //
 // seedDefaults(root, { defaultsDir, readmeFile, log }) -> Promise<[key]>
 //   Creates every directory of the layout (0700). Writes README.md from
-//   readmeFile when the bytes differ, and copies <defaultsDir>/ideas-criteria.md
-//   to the Ideas criteria file only when the target is missing, so a
-//   deliberate delete starts from the default again. A missing default is
-//   skipped. Answers the keys it wrote and logs root_seeded.
+//   readmeFile when the bytes differ, and copies the Ideas criteria, Focus
+//   rules, and Focus settings defaults only when their targets are missing,
+//   so a deliberate delete starts from the default again. A missing default
+//   is skipped. Answers the keys it wrote and logs root_seeded.
 //
 // migrateFromRepo(root, { migrateFrom, log, rename }) -> Promise<{ moved,
 //   skipped, migratedFrom }>
@@ -130,7 +130,11 @@ const PAIRS = [
 const BRIEF_DATA = [/^viewer-.*\.html$/, /^brief-.*\.json$/, /^notice-.*\.json$/, /^memo-.*\.md$/, /^.{4}-.{2}-.{2}.*\.md$/, /^feedback-/, /^\.run\.lock$/];
 const BRIEF_CODE = new Set(['build.py', 'check-viewer.mjs', '__pycache__']);
 
-const SEEDS = [['ideasInstructions', 'ideas-criteria.md'], ['focusRules', 'focus-rules.md']];
+const SEEDS = [
+  ['ideasInstructions', 'ideas-criteria.md'],
+  ['focusRules', 'focus-rules.md'],
+  ['focusSettings', 'focus-settings.json'],
+];
 
 // The version 1 to 2 upgrade: today's one feed becomes the feed `news`, and
 // the producer that wrote it, retired with version 1, gives way to the
@@ -222,6 +226,8 @@ export async function seedDefaults(root, { defaultsDir, readmeFile, log = () => 
     await mkdir(key.endsWith('Dir') ? value : path.dirname(value), { recursive: true, mode: 0o700 });
   }
   await mkdir(paths.focusCandidates, { recursive: true, mode: 0o700 });
+  await mkdir(paths.focusRuns, { recursive: true, mode: 0o700 });
+  await mkdir(paths.focusGoogle, { recursive: true, mode: 0o700 });
   const seeded = [];
   const readme = readmeFile ? await readOptional(readmeFile) : null;
   if (readme !== null) {
