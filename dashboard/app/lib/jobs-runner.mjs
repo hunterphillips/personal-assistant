@@ -11,7 +11,8 @@
 //                                 replaces the trigger for that run. Its
 //                                 onBurstEnd(results) gets each run's answer
 //                                 with its label and trigger.
-//   start()                       Load logs, close open runs, tick, and arm.
+//   start()                       Load logs, close open runs, kick the first
+//                                 tick without awaiting its drain, and arm.
 //   stop()                        Abort and await the running job.
 //   tick()                        Run the latest due occurrence for each job.
 //   enqueue(label, trigger, context, options?)
@@ -379,7 +380,9 @@ export function createJobRunner({
           }
         }
       }
-      await tick();
+      // The first tick drains in the background, so a caller that awaits
+      // start() is not held behind a night's catch-up.
+      void tick();
       arm();
     },
     async stop() {

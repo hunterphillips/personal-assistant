@@ -185,6 +185,7 @@ async function settle(condition) {
 test('the curate\'s scheduled occurrence reaches the curator as a rejudge and its start line says so', async (t) => {
   const { runner, curator } = await withRunner(t, { now: '2026-10-10T10:30:10.000Z' }); // 05:30:10 Chicago
   await runner.start();
+  await runner.tick();
   assert.equal(curator.calls.length, 1);
   assert.equal(curator.calls[0].trigger, 'rejudge');
   assert.deepEqual(curator.calls[0].candidates, []);
@@ -195,6 +196,7 @@ test('the curate\'s scheduled occurrence reaches the curator as a rejudge and it
 test('a curate catch-up with sources stays a catch-up, and one without sources is a rejudge', async (t) => {
   const { runner, curator } = await withRunner(t, { now: '2026-10-10T10:30:10.000Z' });
   await runner.start();
+  await runner.tick();
   curator.calls.length = 0;
   await runner.enqueue('focus.curate', 'catchup', { sources: [{ source: 'calendar', signature: 'a' }] });
   await settle(() => curator.calls.length === 1);
@@ -208,6 +210,7 @@ test('a curate catch-up with sources stays a catch-up, and one without sources i
 test('a refresh through the runner queues its curate from the results\' trigger, and scan end lines carry no burst', async (t) => {
   const { runner, curator, jobs } = await withRunner(t, { now: '2026-10-10T10:30:10.000Z' });
   await runner.start();
+  await runner.tick();
   curator.calls.length = 0;
   assert.equal((await jobs.refresh()).ok, true);
   await settle(() => curator.calls.length === 1 && runner.state().running === null);

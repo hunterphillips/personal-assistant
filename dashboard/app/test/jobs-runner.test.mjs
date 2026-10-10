@@ -303,6 +303,7 @@ test('start runs a missed occurrence once as a catch-up', async (t) => {
   const events = [];
   runner.register(scriptedJob('daily', events));
   await runner.start();
+  await settle(() => runner.lastRun('daily')?.run !== 'old' && runner.lastRun('daily')?.endedAt);
   assert.deepEqual(events.map((event) => event.slice(0, 3)), [['start', 'daily', 'catchup'], ['end', 'daily']]);
   assert.equal(runner.lastRun('daily').trigger, 'catchup');
   assert.equal(runner.lastRun('daily').occurrence, '2026-10-07T12:00:00.000Z');

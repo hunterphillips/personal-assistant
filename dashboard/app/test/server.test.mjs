@@ -9,6 +9,7 @@ import { lstat, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promis
 import path from 'node:path';
 
 import { TIMEOUTS } from '../lib/config.mjs';
+import { createJobRunner } from '../lib/jobs-runner.mjs';
 import { createScheduler } from '../lib/scheduler.mjs';
 import { forcedExitMs, startDashboard } from '../server.mjs';
 import { freePort, tempDir } from './support/harness.mjs';
@@ -150,6 +151,33 @@ test('Focus jobs are registered and started only when the board exists', async (
   assert.equal(presentState.jobs.items.filter((row) => row.source === 'dashboard').length, 5);
   await present.close();
   assert.equal(presentRunner.stopped, 1);
+});
+
+test('startDashboard listens while the Focus runner\'s first run is still pending', async (t) => {
+  const env = await testEnv(t);
+  const boardFile = path.join(env.PERSONAL_ASSISTANT_HOME, 'focus', 'board.json');
+  await mkdir(path.dirname(boardFile), { recursive: true });
+  await writeFile(boardFile, await readFile(path.join(APP_DIR, 'test/fixtures/focus/board.json')));
+  // A real runner with one job registered ahead of Focus's, due every minute,
+  // that holds the queue until the daemon stops it.
+  const runner = createJobRunner({ runsDir: path.join(await tempDir(t), 'runs'), zone: 'UTC' });
+  let pending = false;
+  runner.register({
+    label: 'probe', name: 'Probe', cron: () => '* * * * *', due: () => true,
+    run: (_trigger, _context, { signal }) => new Promise((resolve) => {
+      pending = true;
+      signal.addEventListener('abort', () => resolve({ outcome: 'failed' }), { once: true });
+    }),
+  });
+  const dashboard = await startDashboard({ env, log: () => {}, focusRunner: runner });
+  const deadline = Date.now() + 5_000;
+  while (!pending && Date.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pending, true);
+  assert.equal(runner.state().running, 'probe');
+  const response = await fetch(`http://127.0.0.1:${dashboard.config.port}/api/state`);
+  assert.equal(response.status, 200);
+  await dashboard.close();
+  assert.equal(runner.state().running, null);
 });
 
 test('shutdown settles the Focus runner before it stops the scheduler and closes the hub', async (t) => {
