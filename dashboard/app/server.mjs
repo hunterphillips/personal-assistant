@@ -49,16 +49,7 @@ import { createBriefInstructions } from './lib/brief-instructions.mjs';
 import { ConfigError, loadConfig } from './lib/config.mjs';
 import { createFocusProxy } from './lib/focus-proxy.mjs';
 import { createBoard } from './lib/focus/board.mjs';
-import { createCurator } from './lib/focus/curate.mjs';
-import { createGoogle } from './lib/focus/google.mjs';
-import { createFocusJobs } from './lib/focus/jobs.mjs';
-import { createProfile } from './lib/focus/profile.mjs';
-import { createFocusSettings } from './lib/focus/settings.mjs';
-import { createVault } from './lib/focus/vault.mjs';
-import { scan as scanCalendar } from './lib/focus/scans/calendar.mjs';
-import { scan as scanGmail } from './lib/focus/scans/gmail.mjs';
-import { createGh, scan as scanGithub } from './lib/focus/scans/github.mjs';
-import { scan as scanNotes } from './lib/focus/scans/notes.mjs';
+import { createFocusServices } from './lib/focus/services.mjs';
 import { createGoals } from './lib/goals.mjs';
 import { createIdeas } from './lib/ideas.mjs';
 import { createInstructions } from './lib/instructions.mjs';
@@ -73,12 +64,10 @@ import { createRoutines } from './lib/routines.mjs';
 import { createScheduler } from './lib/scheduler.mjs';
 import { createSources } from './lib/sources.mjs';
 import { createJobs } from './lib/jobs.mjs';
-import { createJobRunner } from './lib/jobs-runner.mjs';
 import { createSettings } from './lib/settings.mjs';
 import { createClaudeAdapter } from './lib/runtime/claude.mjs';
 import { createCmux } from './lib/runtime/cmux.mjs';
 import { createCodexAdapter } from './lib/runtime/codex.mjs';
-import { createQueryLoader } from './lib/runtime/sdk.mjs';
 import { createThreadStore } from './lib/threads.mjs';
 
 const API_KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
@@ -169,43 +158,10 @@ async function startOnRoot({ env, config, logEntry, createAdapters, injectedFocu
   const settings = createSettings({ path: config.settingsPath, log: logEntry });
   await settings.load();
   const apiKeyInEnv = API_KEY_VARS.some((name) => typeof env[name] === 'string' && env[name] !== '');
-  const focusSettings = createFocusSettings({ file: config.focusSettingsPath, limits: config.limits, log: logEntry });
-  await focusSettings.load();
-  const focusRunner = injectedFocusRunner ?? createJobRunner({
-    runsDir: config.focusRunsDir, zone: config.timeZone, limits: config.limits,
-    runLines: config.limits.focusRunLines, tickMs: config.timeouts.focusTickMs,
-    // A hand-edited schedule or pause takes effect within a tick.
-    onTick: () => focusSettings.reload(), log: logEntry,
-  });
   const hasFocusBoard = await focusBoard.exists();
-  let focusJobs = null;
-  if (hasFocusBoard) {
-    const google = createGoogle({ dir: config.focusGoogleDir, log: logEntry });
-    const vault = createVault({ registry, agentId: 'second-brain' });
-    const profile = createProfile({ dir: config.personalContextDir, timeoutMs: config.timeouts.focusScanMs });
-    const gh = createGh({ cli: config.ghCli, timeout: config.timeouts.focusScanMs });
-    const queryLoader = createQueryLoader();
-    const query = apiKeyInEnv ? null : async function* queryFocus(input) {
-      const sdkQuery = await queryLoader.ensureQuery();
-      yield* sdkQuery(input);
-    };
-    const curator = createCurator({
-      query, board: focusBoard, rules: config.focusRulesPath, vault, profile, settings: focusSettings,
-      systemSettings: settings, zone: config.timeZone, limits: config.limits, timeouts: config.timeouts,
-      cwd: config.home, log: logEntry,
-    });
-    focusJobs = createFocusJobs({
-      runner: focusRunner, board: focusBoard, settings: focusSettings,
-      scans: {
-        calendar: (deps) => scanCalendar({ google, ...deps }),
-        gmail: (deps) => scanGmail({ google, vault, ...deps }),
-        git: (deps) => scanGithub({ gh, ...deps }),
-        notes: (deps) => scanNotes({ vault, ...deps }),
-      },
-      curator, candidatesDir: config.focusCandidatesDir, zone: config.timeZone,
-      limits: config.limits, timeouts: config.timeouts, log: logEntry,
-    });
-  }
+  const { focusSettings, runner: focusRunner, jobs: focusJobs } = await createFocusServices({
+    config, registry, focusBoard, settings, apiKeyInEnv, hasBoard: hasFocusBoard, runner: injectedFocusRunner, log: logEntry,
+  });
   const jobs = createJobs({
     registry, runner: focusRunner,
     launchAgentsDir: config.launchAgentsDir,
