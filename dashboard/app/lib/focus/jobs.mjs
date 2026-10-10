@@ -6,7 +6,7 @@
 import path from 'node:path';
 
 import { readCandidatesFile, ScanError, writeCandidatesFile } from './candidates.mjs';
-import { signature as candidateSignature } from './signature.mjs';
+import { candidatesHash, signature as candidateSignature } from './signature.mjs';
 import { wallClock } from '../schedule.mjs';
 
 const SOURCES = Object.freeze(['calendar', 'gmail', 'git', 'notes']);
@@ -40,7 +40,8 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
       const previous = await readCandidatesFile(fileFor(source), limits);
       const changed = previous?.signature !== nextSignature;
       await writeCandidatesFile(fileFor(source), {
-        scanned: dateOf(now()).toISOString(), signature: changed ? (previous?.signature ?? null) : nextSignature, candidates,
+        scanned: dateOf(now()).toISOString(), signature: changed ? (previous?.signature ?? null) : nextSignature,
+        curated: previous?.curated ?? null, candidates,
       }, limits);
       if (changed && trigger === 'schedule' && !settings.current().paused) {
         await enqueue(LABELS.rejudge, 'scan', { source, signature: nextSignature });
@@ -57,9 +58,10 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
 
   async function runCurate(trigger, context = {}, { signal }) {
     const files = await candidateFiles();
-    const before = (await board.read()).board;
-    // A file is stale when its candidates have not been placed on this board.
-    const stale = new Set(SOURCES.filter((id) => files[id] && files[id].signature !== candidateSignature(files[id].candidates, before)));
+    // A file is stale when its candidates are not the ones a curate last
+    // placed. Board moves alone do not make a file stale; a file without
+    // curated (written before the field existed) is stale.
+    const stale = new Set(SOURCES.filter((id) => files[id] && files[id].curated !== candidatesHash(files[id].candidates)));
     let explicit = [];
     if (trigger === 'scan' && SOURCES.includes(context?.source)) {
       explicit = [context.source];
@@ -84,19 +86,25 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
     const others = SOURCES.filter((id) => !coveredSet.has(id)).map(group).filter(Boolean);
     const answer = await curator.run({ trigger: curatorTrigger, source, candidates, others, signal });
     // Each file the curate covered, or that was not stale before it, is signed
-    // again against the board the curate left: a covered file's candidates
-    // were placed, and a non-stale file's candidates were already on the board
-    // and only the board moved. Every stale file is covered, so this is every
-    // file; the guard stays so an uncovered stale file can never be marked.
+    // again against the board the curate left and marked curated: a covered
+    // file's candidates were placed, and a non-stale file's candidates were
+    // already placed and at most the board moved. Every stale file is
+    // covered, so this is every file; the guard stays so an uncovered stale
+    // file can never be marked.
     if (answer.outcome === 'wrote' || answer.outcome === 'no change') {
       const after = (await board.read()).board;
       for (const id of SOURCES) {
         const held = files[id];
         if (!held || !(coveredSet.has(id) || !stale.has(id))) continue;
-        await writeCandidatesFile(fileFor(id), { ...held, signature: candidateSignature(held.candidates, after) }, limits);
+        await writeCandidatesFile(fileFor(id), {
+          ...held, signature: candidateSignature(held.candidates, after), curated: candidatesHash(held.candidates),
+        }, limits);
       }
     }
     const { run: _curatorRun, ...result } = answer;
+    // A scan curate promoted to a catch-up says what it covered; the runner
+    // keeps the scan trigger it recorded.
+    if (curatorTrigger !== trigger) result.covered = [...covered].sort();
     return Object.freeze(result);
   }
 

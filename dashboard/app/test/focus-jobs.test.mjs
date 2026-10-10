@@ -9,23 +9,26 @@ import { ScanError, readCandidatesFile, writeCandidatesFile } from '../lib/focus
 import { createFocusJobs } from '../lib/focus/jobs.mjs';
 import { createFocusSettings } from '../lib/focus/settings.mjs';
 import { createJobRunner } from '../lib/jobs-runner.mjs';
-import { signature as candidateSignature } from '../lib/focus/signature.mjs';
+import { candidatesHash, signature as candidateSignature } from '../lib/focus/signature.mjs';
 
 function candidate(source, id = 'one') { return { title: `${source} ${id}`, source, external_id: id }; }
 
 const SCANNED = '2026-10-10T12:00:00.000Z';
 const EMPTY_BOARD = { updated: SCANNED, items: [] };
 
-// Writes one source's candidates file, fresh (signed against the empty board)
-// or stale (never curated).
-async function seed(dir, source, { fresh }) {
+// Writes one source's candidates file, fresh (curated, and signed against the
+// empty board) or stale (never curated). A signature passed in stands for a
+// board that has moved since.
+async function seed(dir, source, { fresh, signature = undefined }) {
   const candidates = [candidate(source)];
   await writeCandidatesFile(path.join(dir, `${source}.json`), {
-    scanned: SCANNED, signature: fresh ? candidateSignature(candidates, EMPTY_BOARD) : null, candidates,
+    scanned: SCANNED, signature: signature ?? (fresh ? candidateSignature(candidates, EMPTY_BOARD) : null),
+    curated: fresh ? candidatesHash(candidates) : null, candidates,
   }, LIMITS);
 }
 const groupOf = (source) => ({ source, scanned: SCANNED, candidates: [candidate(source)] });
 const signatureOf = async (dir, source) => (await readCandidatesFile(path.join(dir, `${source}.json`), LIMITS)).signature;
+const curatedOf = async (dir, source) => (await readCandidatesFile(path.join(dir, `${source}.json`), LIMITS)).curated;
 
 async function setup({ paused = false, now = '2026-10-10T12:00:00.000Z', scan = null, curate = null, board: givenBoard = null } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-jobs-'));
@@ -120,6 +123,8 @@ test('failed and rejected curates leave the old signature', async () => {
     await value.byLabel['focus.curate'].run('scan', { source: 'calendar', signature }, value.controls);
     assert.equal(await signatureOf(value.dir, 'calendar'), null);
     assert.equal(await signatureOf(value.dir, 'gmail'), null, 'a stale file stays stale');
+    assert.equal(await curatedOf(value.dir, 'gmail'), null);
+    assert.equal(await curatedOf(value.dir, 'calendar'), null);
     assert.equal(await signatureOf(value.dir, 'git'), candidateSignature([candidate('git')], EMPTY_BOARD));
   }
 });
@@ -145,6 +150,7 @@ test('a rejudge hands stale files as candidates and fresh ones as others, then s
   const left = { updated: SCANNED, items };
   for (const source of ['calendar', 'gmail']) {
     assert.equal(await signatureOf(value.dir, source), candidateSignature([candidate(source)], left));
+    assert.equal(await curatedOf(value.dir, source), candidatesHash([candidate(source)]), 'a wrote curate marks the file curated');
   }
 });
 
@@ -153,7 +159,8 @@ test('a scan curate while another file is stale runs as a catch-up over both', a
   await seed(value.dir, 'calendar', { fresh: false });
   await seed(value.dir, 'gmail', { fresh: false });
   await seed(value.dir, 'git', { fresh: true });
-  await value.byLabel['focus.curate'].run('scan', { source: 'calendar', signature: 'x' }, value.controls);
+  const answer = await value.byLabel['focus.curate'].run('scan', { source: 'calendar', signature: 'x' }, value.controls);
+  assert.deepEqual(answer.covered, ['calendar', 'gmail']);
   const call = value.curator.calls.at(-1);
   assert.equal(call.trigger, 'catchup');
   assert.equal(call.source, null);
@@ -165,12 +172,27 @@ test('a scan curate while every other file is fresh stays a single-source scan',
   const value = await setup();
   await seed(value.dir, 'calendar', { fresh: false });
   for (const source of ['gmail', 'git', 'notes']) await seed(value.dir, source, { fresh: true });
-  await value.byLabel['focus.curate'].run('scan', { source: 'calendar', signature: 'x' }, value.controls);
+  const answer = await value.byLabel['focus.curate'].run('scan', { source: 'calendar', signature: 'x' }, value.controls);
+  assert.equal(Object.hasOwn(answer, 'covered'), false);
   const call = value.curator.calls.at(-1);
   assert.equal(call.trigger, 'scan');
   assert.equal(call.source, 'calendar');
   assert.deepEqual(call.candidates, [candidate('calendar')]);
   assert.deepEqual(call.others, ['gmail', 'git', 'notes'].map(groupOf));
+});
+
+test('a board move alone leaves a curated file fresh, so a scan curate stays a scan', async () => {
+  const value = await setup();
+  await seed(value.dir, 'calendar', { fresh: false });
+  for (const source of ['gmail', 'git', 'notes']) await seed(value.dir, source, { fresh: true, signature: 'b'.repeat(64) });
+  const answer = await value.byLabel['focus.curate'].run('scan', { source: 'calendar', signature: 'x' }, value.controls);
+  assert.equal(answer.outcome, 'wrote');
+  assert.equal(Object.hasOwn(answer, 'covered'), false);
+  const call = value.curator.calls.at(-1);
+  assert.equal(call.trigger, 'scan');
+  assert.equal(call.source, 'calendar');
+  assert.deepEqual(call.candidates, [candidate('calendar')]);
+  assert.equal(await signatureOf(value.dir, 'gmail'), candidateSignature([candidate('gmail')], EMPTY_BOARD), 'the moved board is signed again');
 });
 
 test('paused scans write candidates but queue nothing and queued curates are refused', async () => {

@@ -1,6 +1,8 @@
 // Focus candidates files: validates scanner output and reads or atomically
-// writes one source's { scanned, signature, candidates } document; signature is
-// null until that source has first been curated. Reads return
+// writes one source's { scanned, signature, curated, candidates } document;
+// signature (candidates and board placement) and curated (candidates alone, as
+// last placed by a curate) are null until that source has first been curated,
+// and a file without curated reads it as null. Reads return
 // a frozen document or null and never throw; writes refuse a document that
 // would read back as null. This module never runs a scan. ScanError is what a
 // scan throws, and checkedCandidates is the gate every scan's output passes
@@ -77,6 +79,7 @@ export async function readCandidatesFile(file, limits) {
     return deepFreeze(structuredClone({
       scanned: document.scanned,
       signature: document.signature,
+      curated: document.curated ?? null,
       candidates: document.candidates,
     }));
   } catch {
@@ -88,8 +91,8 @@ export async function readCandidatesFile(file, limits) {
 
 // Throws ScanError('invalid_candidates') with the problems, writing nothing,
 // when readCandidatesFile would read the document back as null.
-export async function writeCandidatesFile(file, { scanned, signature, candidates }, limits) {
-  const document = { scanned, signature, candidates };
+export async function writeCandidatesFile(file, { scanned, signature, curated = null, candidates }, limits) {
+  const document = { scanned, signature, curated, candidates };
   const problems = documentProblems(document, limits);
   const text = `${JSON.stringify(document, null, 2)}\n`;
   if (problems.length === 0 && Buffer.byteLength(text) > limits.focusCandidateBytes) {
@@ -108,6 +111,7 @@ function documentProblems(document, limits) {
   const problems = [];
   if (typeof document.scanned !== 'string' || document.scanned.length === 0) problems.push('bad scanned');
   if (document.signature !== null && (typeof document.signature !== 'string' || document.signature.length === 0)) problems.push('bad signature');
+  if (document.curated != null && (typeof document.curated !== 'string' || document.curated.length === 0)) problems.push('bad curated');
   problems.push(...validateCandidates(document.candidates, limits));
   return problems;
 }

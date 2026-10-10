@@ -16,6 +16,7 @@ const candidate = (over = {}) => ({ title: 'Answer Lauren', source: 'gmail', ext
 const document = (over = {}) => ({
   scanned: '2026-10-10T12:00:00.000Z',
   signature: 'a'.repeat(64),
+  curated: 'c'.repeat(64),
   candidates: [candidate()],
   ...over,
 });
@@ -95,6 +96,14 @@ test('candidate files accept a null signature before their first curate', async 
   assert.deepEqual(await readCandidatesFile(file, limits), value);
 });
 
+test('a candidates file without curated loads with curated null', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-candidates-no-curated-'));
+  const file = path.join(dir, 'calendar.json');
+  const { curated: _curated, ...older } = document();
+  await writeFile(file, JSON.stringify(older));
+  assert.deepEqual(await readCandidatesFile(file, limits), { ...older, curated: null });
+});
+
 test('writeCandidatesFile atomically writes formatted JSON with mode 0600', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-candidates-write-'));
   const file = path.join(dir, 'nested', 'git.json');
@@ -111,6 +120,8 @@ test('writeCandidatesFile refuses a document that would read back as null and wr
     document({ candidates: [candidate(), candidate(), candidate()] }),
     document({ scanned: '' }),
     document({ signature: 'a'.repeat(2000) }),
+    document({ curated: '' }),
+    document({ curated: 7 }),
   ];
   for (const bad of invalid) {
     await assert.rejects(

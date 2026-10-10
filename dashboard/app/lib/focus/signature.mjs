@@ -1,6 +1,7 @@
 // Focus scan signature: hashes candidate identity and dates plus every open
 // board item's placement. Returns a stable sha256 string and never reads files
-// or includes scanner prose, board timestamps, or tombstones.
+// or includes scanner prose, board timestamps, or tombstones. candidatesHash
+// hashes the same candidate facts alone, without the board.
 
 import { createHash } from 'node:crypto';
 
@@ -43,4 +44,8 @@ export function signature(candidates, board) {
     focus: focusFacts(board),
   });
   return createHash('sha256').update(canonical).digest('hex');
+}
+
+export function candidatesHash(candidates) {
+  return createHash('sha256').update(JSON.stringify({ candidates: candidateFacts(candidates) })).digest('hex');
 }
