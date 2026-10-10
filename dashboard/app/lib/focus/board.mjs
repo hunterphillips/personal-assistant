@@ -1,15 +1,17 @@
 // Focus board: the dashboard's persistent attention list and Hunter's change
 // log. exists() and read() never reject; read() is single-flight and caches by
 // the board file's signature. change() serializes validated atomic writes,
-// appends one bounded audit line, and notifies listeners. candidates() joins
-// each scanner's latest output to the board by external_id.
+// appends bounded audit lines, and notifies listeners. curate() and prune()
+// are the daemon's serialized write paths. candidates() joins each scanner's
+// latest output to the board by external_id. Nothing here calls a model.
 
 import { constants } from 'node:fs';
 import { appendFile, lstat, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 
-import { NOTE_MAX, SCAN_SOURCES, TIERS, validateFocus } from './validate.mjs';
+import { applyOps } from './apply.mjs';
+import { checkInvariants, NOTE_MAX, pruneTombstones, SCAN_SOURCES, TIERS, validateFocus } from './validate.mjs';
 
 const OPS = new Set(['add', 'done', 'reopen', 'dismiss', 'note', 'title', 'move']);
 const OP_FIELDS = {
@@ -23,11 +25,12 @@ const CONTENT_KEYS = ['title', 'source', 'external_id', 'link', 'meta', 'note', 
 const NO_VERDICT = Object.freeze({ status: null, tier: null, id: null, updated: null });
 
 export class BoardError extends Error {
-  constructor(code, field = undefined) {
+  constructor(code, { field, detail } = {}) {
     super(code);
     this.name = 'BoardError';
     this.code = code;
     if (field !== undefined) this.field = field;
+    if (detail !== undefined) this.detail = detail;
   }
 }
 
@@ -121,6 +124,73 @@ export function createBoard({ file, changesFile, candidatesDir, limits, log: raw
     });
   }
 
+  function curate({ ops, run, basis }) {
+    return serialized(async () => {
+      const current = await read();
+      if (!current.board) throw new BoardError(current.problem === null ? 'no_board' : 'board_invalid');
+      if (current.board.updated !== basis) throw new BoardError('stale');
+      const stamp = now().toISOString();
+      const { next, errors } = applyOps(current.board, ops, stamp);
+      if (errors.length > 0) throw new BoardError('rejected', { detail: errors[0] });
+      const invariantErrors = checkInvariants(current.board, next);
+      if (invariantErrors.length > 0) throw new BoardError('rejected', { detail: invariantErrors[0] });
+      const counts = countChanges(current.board, next);
+      if (ops.length === 0) {
+        return deepFreeze({ board: current.board, counts });
+      }
+      const schemaErrors = validateFocus(next);
+      if (schemaErrors.length > 0) throw new BoardError('rejected', { detail: schemaErrors[0] });
+      await atomicJson(file, next);
+      for (const line of curatorLines(ops, current.board, next, run, stamp)) {
+        await appendChange(changesFile, line, limits.focusChangesLines);
+      }
+      cache = null;
+      const result = (await read()).board;
+      for (const listener of listeners) { try { listener(result); } catch {} }
+      return deepFreeze({ board: result, counts });
+    });
+  }
+
+  function prune({ run }) {
+    return serialized(async () => {
+      const current = await read();
+      if (!current.board) throw new BoardError(current.problem === null ? 'no_board' : 'board_invalid');
+      const stamp = now().toISOString();
+      const next = pruneTombstones(current.board, now());
+      const kept = new Set(next.items.map((item) => item.id));
+      const removed = current.board.items.filter((item) => !kept.has(item.id));
+      if (removed.length === 0) return deepFreeze({ board: current.board, pruned: 0 });
+      next.updated = stamp;
+      await atomicJson(file, next);
+      for (const item of removed) {
+        await appendChange(changesFile, {
+          at: stamp, who: 'daemon', via: 'run', run, op: 'prune', id: item.id,
+          summary: `prune ${quote(item.title)}`, fields: {},
+        }, limits.focusChangesLines);
+      }
+      cache = null;
+      const result = (await read()).board;
+      for (const listener of listeners) { try { listener(result); } catch {} }
+      return deepFreeze({ board: result, pruned: removed.length });
+    });
+  }
+
+  async function corrections({ since, limit }) {
+    let text;
+    try { text = await readFile(changesFile, 'utf8'); } catch { return Object.freeze([]); }
+    const threshold = since instanceof Date ? since.getTime() : Date.parse(since);
+    const found = [];
+    for (const raw of text.split('\n')) {
+      if (!raw) continue;
+      try {
+        const line = JSON.parse(raw);
+        if (line.who === 'hunter' && typeof line.summary === 'string' && Date.parse(line.at) > threshold) found.push(line);
+      } catch {}
+    }
+    found.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+    return Object.freeze(found.slice(0, limit).map((line) => line.summary));
+  }
+
   async function candidates() {
     const { board } = await read();
     const placed = byExternalId(board);
@@ -150,13 +220,43 @@ export function createBoard({ file, changesFile, candidatesDir, limits, log: raw
     return () => listeners.delete(fn);
   }
 
-  return { exists, read, change, candidates, onChange };
+  return { exists, read, change, curate, prune, corrections, candidates, onChange };
+}
+
+function countChanges(current, next) {
+  const previous = new Map(current.items.map((item) => [item.id, item]));
+  const counts = { added: 0, changed: 0, expired: 0 };
+  for (const item of next.items) {
+    const held = previous.get(item.id);
+    if (!held) counts.added += 1;
+    else if (held.status !== 'expired' && item.status === 'expired') counts.expired += 1;
+    else if (JSON.stringify(held) !== JSON.stringify(item)) counts.changed += 1;
+  }
+  return counts;
+}
+
+function curatorLines(ops, current, next, run, stamp) {
+  const currentIds = new Set(current.items.map((item) => item.id));
+  const additions = next.items.filter((item) => !currentIds.has(item.id));
+  let addition = 0;
+  return ops.map((op) => {
+    const item = op.op === 'add'
+      ? additions[addition++]
+      : next.items.find((entry) => entry.id === op.id) ?? current.items.find((entry) => entry.id === op.id);
+    const fields = { ...op };
+    delete fields.op;
+    delete fields.id;
+    return {
+      at: stamp, who: 'curator', via: 'run', run, op: op.op, id: item.id,
+      summary: `${op.op} ${quote(item.title)}`, fields,
+    };
+  });
 }
 
 function applyHunterOp(current, op, stamp) {
   if (!isRecord(op) || !OPS.has(op.op)) throw new BoardError('invalid_op');
   const unknown = Object.keys(op).find((key) => !OP_FIELDS[op.op].has(key));
-  if (unknown !== undefined) throw new BoardError('invalid_field', unknown);
+  if (unknown !== undefined) throw new BoardError('invalid_field', { field: unknown });
   const next = structuredClone(current);
   let item;
   let before;
@@ -173,11 +273,11 @@ function applyHunterOp(current, op, stamp) {
     case 'add': {
       const title = titleOf(op.title);
       optionalString(op, 'external_id'); optionalString(op, 'link'); optionalString(op, 'meta');
-      if (op.tier !== undefined && !TIERS.includes(op.tier)) throw new BoardError('invalid_field', 'tier');
-      if (op.now !== undefined && typeof op.now !== 'boolean') throw new BoardError('invalid_field', 'now');
+      if (op.tier !== undefined && !TIERS.includes(op.tier)) throw new BoardError('invalid_field', { field: 'tier' });
+      if (op.now !== undefined && typeof op.now !== 'boolean') throw new BoardError('invalid_field', { field: 'now' });
       const tier = op.tier ?? 'today';
       const isNow = op.now ?? false;
-      if (isNow && tier !== 'today') throw new BoardError('invalid_field', 'now');
+      if (isNow && tier !== 'today') throw new BoardError('invalid_field', { field: 'now' });
       item = {
         id: randomUUID(), title, source: 'manual', external_id: op.external_id ?? null,
         link: op.link ?? null, meta: op.meta ?? 'added by you', tier, now: isNow,
@@ -199,9 +299,9 @@ function applyHunterOp(current, op, stamp) {
       item.status = 'dismissed'; item.now = false;
       break;
     case 'note':
-      if (!(op.note === null || typeof op.note === 'string')) throw new BoardError('invalid_field', 'note');
+      if (!(op.note === null || typeof op.note === 'string')) throw new BoardError('invalid_field', { field: 'note' });
       item.note = op.note === null ? null : op.note.trim();
-      if (item.note !== null && item.note.length > NOTE_MAX) throw new BoardError('invalid_field', 'note');
+      if (item.note !== null && item.note.length > NOTE_MAX) throw new BoardError('invalid_field', { field: 'note' });
       break;
     case 'title':
       if (item.source !== 'manual') throw new BoardError('not_manual');
@@ -209,7 +309,7 @@ function applyHunterOp(current, op, stamp) {
       break;
     case 'move': {
       if (item.status !== 'open') throw new BoardError('not_open');
-      if (!PLACES.has(op.place)) throw new BoardError('invalid_field', 'place');
+      if (!PLACES.has(op.place)) throw new BoardError('invalid_field', { field: 'place' });
       if (op.order !== undefined && !Array.isArray(op.order)) throw new BoardError('invalid_order');
       if (oldPlace === op.place && op.order !== undefined && sameOrder(op.order, openOrder(current, op.place))) {
         return { board: current, changed: false };
@@ -269,8 +369,8 @@ function placementOf(place) { return place === 'now' ? { tier: 'today', now: tru
 function quote(title) { return `"${String(title ?? '').replace(/\s+/g, ' ').trim()}"`; }
 function valueOf(item, key) { return key === 'note' ? item[key] ?? null : item[key]; }
 function titleOf(value) { return field(typeof value === 'string' ? value.trim() : value, 'title', (title) => typeof title === 'string' && title.length >= 1 && title.length <= 200); }
-function optionalString(op, key) { if (op[key] !== undefined && op[key] !== null && typeof op[key] !== 'string') throw new BoardError('invalid_field', key); }
-function field(value, name, valid) { if (!valid(value)) throw new BoardError('invalid_field', name); return value; }
+function optionalString(op, key) { if (op[key] !== undefined && op[key] !== null && typeof op[key] !== 'string') throw new BoardError('invalid_field', { field: key }); }
+function field(value, name, valid) { if (!valid(value)) throw new BoardError('invalid_field', { field: name }); return value; }
 function isRecord(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 
 function byExternalId(board) {

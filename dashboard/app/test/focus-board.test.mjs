@@ -120,3 +120,114 @@ test('candidates follow scanner order and carry the newest matching verdict', as
   assert.deepEqual(result.sources[0].candidates[1].verdict, { status: null, tier: null, id: null, updated: null });
   assert.deepEqual(result.sources[1], { source: 'calendar', scanned: null, candidates: [] });
 });
+
+test('curate applies ops, counts changes, logs the run, and notifies listeners', async (t) => {
+  const { board, changesFile } = await setup(t);
+  const notifications = [];
+  board.onChange((value) => notifications.push(value.updated));
+  const expired = await board.curate({
+    basis: OLD, run: 'run-expire', ops: [{ op: 'expire', id: 'tomorrow-one', meta: 'The release shipped.' }],
+  });
+  assert.deepEqual(expired.counts, { added: 0, changed: 0, expired: 1 });
+  assert.equal(expired.board.items.find((item) => item.id === 'tomorrow-one').status, 'expired');
+  assert.deepEqual((await lines(changesFile))[0], {
+    at: NOW.toISOString(), who: 'curator', via: 'run', run: 'run-expire', op: 'expire', id: 'tomorrow-one',
+    summary: 'expire "Review the release checklist"', fields: { meta: 'The release shipped.' },
+  });
+  const done = await board.curate({
+    basis: NOW.toISOString(), run: 'run-done', ops: [{ op: 'done', id: 'today-one', meta: 'Finished in the vault.' }],
+  });
+  assert.deepEqual(done.counts, { added: 0, changed: 1, expired: 0 });
+  assert.equal(notifications.length, 2);
+});
+
+test('curate add assigns an id and one timestamp', async (t) => {
+  const { board } = await setup(t);
+  const result = await board.curate({
+    basis: OLD, run: 'run-add', ops: [{
+      op: 'add', title: 'Reply to Morgan', source: 'gmail', external_id: 'thread-morgan',
+      tier: 'tomorrow', now: false,
+    }],
+  });
+  const item = result.board.items.find((entry) => entry.external_id === 'thread-morgan');
+  assert.ok(item.id);
+  assert.equal(item.created, NOW.toISOString());
+  assert.equal(item.updated, item.created);
+  assert.deepEqual(result.counts, { added: 1, changed: 0, expired: 0 });
+});
+
+test('curate rejects bad answers and stale bases without writing', async (t) => {
+  const { board, file, changesFile } = await setup(t);
+  const before = await readFile(file, 'utf8');
+  await assert.rejects(
+    board.curate({ basis: OLD, run: 'bad', ops: [{ op: 'update', id: 'done-one', meta: 'changed' }] }),
+    (error) => error.code === 'rejected' && /done/.test(error.detail),
+  );
+  await assert.rejects(
+    board.curate({ basis: '2026-10-10T11:00:00.000Z', run: 'stale', ops: [] }),
+    { code: 'stale' },
+  );
+  const capOps = Array.from({ length: 3 }, (_, index) => ({
+    op: 'add', title: `Now ${index}`, source: 'notes', tier: 'today', now: true,
+  }));
+  await assert.rejects(
+    board.curate({ basis: OLD, run: 'cap', ops: capOps }),
+    (error) => error.code === 'rejected' && /now cap exceeded/.test(error.detail),
+  );
+  assert.equal(await readFile(file, 'utf8'), before);
+  await assert.rejects(readFile(changesFile), { code: 'ENOENT' });
+});
+
+test('curate with empty ops writes nothing', async (t) => {
+  const { board, file, changesFile } = await setup(t);
+  const before = await readFile(file, 'utf8');
+  const result = await board.curate({ basis: OLD, run: 'empty', ops: [] });
+  assert.deepEqual(result.counts, { added: 0, changed: 0, expired: 0 });
+  assert.equal(await readFile(file, 'utf8'), before);
+  await assert.rejects(readFile(changesFile), { code: 'ENOENT' });
+});
+
+test('curate audits an accepted non-empty no-op without changing the board', async (t) => {
+  const { board, file, changesFile } = await setup(t);
+  const before = await readFile(file, 'utf8');
+  const result = await board.curate({
+    basis: OLD, run: 'no-op', ops: [{ op: 'update', id: 'tomorrow-one', tier: 'tomorrow' }],
+  });
+  assert.deepEqual(result.counts, { added: 0, changed: 0, expired: 0 });
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), JSON.parse(before));
+  assert.deepEqual((await lines(changesFile)).map((line) => line.summary), ['update "Review the release checklist"']);
+});
+
+test('prune removes only old tombstones, logs them, and notifies listeners', async (t) => {
+  const fixture = JSON.parse(await readFile(new URL('board.json', FIXTURE)));
+  fixture.items.find((item) => item.id === 'done-one').updated = '2026-08-01T12:00:00.000Z';
+  fixture.items.find((item) => item.id === 'expired-one').updated = '2026-10-01T12:00:00.000Z';
+  const found = await setup(t, { body: JSON.stringify(fixture) });
+  let notified = 0;
+  found.board.onChange(() => { notified += 1; });
+  const result = await found.board.prune({ run: 'run-prune' });
+  assert.equal(result.pruned, 1);
+  assert.equal(result.board.items.some((item) => item.id === 'done-one'), false);
+  assert.equal(result.board.items.some((item) => item.id === 'expired-one'), true);
+  assert.equal(notified, 1);
+  assert.deepEqual((await lines(found.changesFile))[0], {
+    at: NOW.toISOString(), who: 'daemon', via: 'run', run: 'run-prune', op: 'prune', id: 'done-one',
+    summary: 'prune "Confirm the sample order"', fields: {},
+  });
+});
+
+test('corrections returns recent Hunter summaries newest first', async (t) => {
+  const { board, changesFile } = await setup(t);
+  const entries = [
+    { at: '2026-09-01T00:00:00.000Z', who: 'hunter', summary: 'too old' },
+    { at: '2026-10-08T10:00:00.000Z', who: 'curator', summary: 'skip curator' },
+    { at: '2026-10-09T10:00:00.000Z', who: 'hunter', summary: 'older Hunter' },
+    { at: '2026-10-10T10:00:00.000Z', who: 'daemon', summary: 'skip daemon' },
+    { at: '2026-10-10T11:00:00.000Z', who: 'hunter', summary: 'newer Hunter' },
+  ];
+  await writeFile(changesFile, `${entries.map(JSON.stringify).join('\n')}\n`);
+  assert.deepEqual(await board.corrections({ since: new Date('2026-09-26T00:00:00.000Z'), limit: 10 }), [
+    'newer Hunter', 'older Hunter',
+  ]);
+  assert.deepEqual(await board.corrections({ since: new Date('2026-09-26T00:00:00.000Z'), limit: 1 }), ['newer Hunter']);
+});
