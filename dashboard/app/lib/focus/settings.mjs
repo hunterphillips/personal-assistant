@@ -1,7 +1,13 @@
 // Focus settings: pause state, fixed scan schedules, and the curator's model
-// override. load() keeps invalid hand edits intact and exposes one plain-word
-// problem; update() atomically writes only paused/model changes and notifies
-// listeners. It never schedules work or calls a model.
+// override. current() answers the defaults until load() has resolved; the
+// server calls load() at start, and there is no polling, since the daemon is
+// the file's only writer. A missing file reads as the defaults with
+// `problem: null`. A file that exists but cannot be read, does not parse,
+// fails validation, or is oversize reads as the defaults with `paused: true`
+// and one plain-word `problem`, so a broken hand edit never silently turns
+// the scans back on; the file is kept intact and update() refuses until it
+// is fixed. update() atomically writes only paused/model changes and
+// notifies listeners. It never schedules work or calls a model.
 
 import { lstat, readFile } from 'node:fs/promises';
 
@@ -55,9 +61,7 @@ export function createFocusSettings({ file, limits, log: rawLog = () => {} }) {
       if (Buffer.byteLength(text) > limits.focusSettingsBytes) return fail('The Focus settings file is too large.');
       parsed = JSON.parse(text);
     } catch (error) {
-      return fail(error instanceof SyntaxError
-        ? 'The Focus settings file is not valid JSON.'
-        : 'The Focus settings file could not be read.', error);
+      return fail('The settings file could not be read, so curation is paused.', error);
     }
     const problem = validateDocument(parsed);
     if (problem) return fail(`The Focus settings file is invalid: ${problem}.`);
@@ -72,7 +76,7 @@ export function createFocusSettings({ file, limits, log: rawLog = () => {} }) {
   }
 
   function fail(problem, error = null) {
-    state = deepFreeze({ ...DEFAULTS, problem });
+    state = deepFreeze({ ...DEFAULTS, paused: true, problem });
     log({ event: 'focus_settings_error', problem, ...(error ? { error: error?.message ?? String(error) } : {}) });
     return state;
   }

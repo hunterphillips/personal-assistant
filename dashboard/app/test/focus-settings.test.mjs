@@ -45,12 +45,17 @@ test('valid settings load and invalid, oversized, or malformed files fall back w
   assert.equal(valid.settings.current().paused, true);
   assert.deepEqual(valid.settings.current().model, { id: 'claude-opus-4-1', effort: 'high' });
 
-  for (const body of ['{', JSON.stringify({ version: 1 }), 'x'.repeat(LIMITS.focusSettingsBytes + 1)]) {
+  for (const [body, problem] of [
+    ['{', 'The settings file could not be read, so curation is paused.'],
+    [JSON.stringify({ version: 1 }), /^The Focus settings file is invalid: /],
+    ['x'.repeat(LIMITS.focusSettingsBytes + 1), 'The Focus settings file is too large.'],
+  ]) {
     const found = await setup(t);
     await writeFile(found.file, body);
     await found.settings.load();
-    assert.equal(found.settings.current().paused, false);
-    assert.match(found.settings.current().problem, /^The Focus settings/);
+    assert.equal(found.settings.current().paused, true);
+    if (typeof problem === 'string') assert.equal(found.settings.current().problem, problem);
+    else assert.match(found.settings.current().problem, problem);
     await assert.rejects(found.settings.update({ paused: true }), { code: 'settings_invalid' });
     assert.equal(await readFile(found.file, 'utf8'), body);
   }
