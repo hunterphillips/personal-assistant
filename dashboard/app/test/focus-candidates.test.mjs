@@ -87,6 +87,14 @@ test('readCandidatesFile accepts opaque non-empty scanned and signature strings'
   assert.deepEqual(await readCandidatesFile(file, limits), opaque);
 });
 
+test('candidate files accept a null signature before their first curate', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-candidates-null-signature-'));
+  const file = path.join(dir, 'calendar.json');
+  const value = document({ signature: null });
+  await writeCandidatesFile(file, value, limits);
+  assert.deepEqual(await readCandidatesFile(file, limits), value);
+});
+
 test('writeCandidatesFile atomically writes formatted JSON with mode 0600', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-candidates-write-'));
   const file = path.join(dir, 'nested', 'git.json');

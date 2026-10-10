@@ -1,5 +1,6 @@
 // Focus candidates files: validates scanner output and reads or atomically
-// writes one source's { scanned, signature, candidates } document. Reads return
+// writes one source's { scanned, signature, candidates } document; signature is
+// null until that source has first been curated. Reads return
 // a frozen document or null and never throw; writes refuse a document that
 // would read back as null. This module never runs a scan. ScanError is what a
 // scan throws, and checkedCandidates is the gate every scan's output passes
@@ -106,7 +107,7 @@ function documentProblems(document, limits) {
   if (document === null || typeof document !== 'object' || Array.isArray(document)) return ['not an object'];
   const problems = [];
   if (typeof document.scanned !== 'string' || document.scanned.length === 0) problems.push('bad scanned');
-  if (typeof document.signature !== 'string' || document.signature.length === 0) problems.push('bad signature');
+  if (document.signature !== null && (typeof document.signature !== 'string' || document.signature.length === 0)) problems.push('bad signature');
   problems.push(...validateCandidates(document.candidates, limits));
   return problems;
 }
