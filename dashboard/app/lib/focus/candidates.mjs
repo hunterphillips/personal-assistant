@@ -2,7 +2,8 @@
 // writes one source's { scanned, signature, candidates } document. Reads return
 // a frozen document or null and never throw; this module never runs a scan.
 
-import { readFile, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 
 import { atomicJson } from './board.mjs';
 import { SCAN_SOURCES } from './validate.mjs';
@@ -37,12 +38,20 @@ export function validateCandidates(list, limits) {
 }
 
 export async function readCandidatesFile(file, limits) {
+  let handle;
   try {
-    const info = await stat(file);
+    handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const info = await handle.stat();
     if (!info.isFile() || info.size > limits.focusCandidateBytes) return null;
-    const raw = await readFile(file);
-    if (raw.byteLength > limits.focusCandidateBytes) return null;
-    const document = JSON.parse(raw.toString('utf8'));
+    const buffer = Buffer.alloc(limits.focusCandidateBytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > limits.focusCandidateBytes) return null;
+    const document = JSON.parse(buffer.subarray(0, length).toString('utf8'));
     if (!validDocument(document, limits)) return null;
     return deepFreeze(structuredClone({
       scanned: document.scanned,
@@ -51,6 +60,8 @@ export async function readCandidatesFile(file, limits) {
     }));
   } catch {
     return null;
+  } finally {
+    await handle?.close().catch(() => {});
   }
 }
 

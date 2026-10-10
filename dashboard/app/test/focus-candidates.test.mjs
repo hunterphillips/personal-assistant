@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -66,6 +66,15 @@ test('readCandidatesFile returns null for missing, oversize, malformed, or inval
     await writeFile(file, JSON.stringify(invalid));
     assert.equal(await readCandidatesFile(file, limits), null);
   }
+});
+
+test('readCandidatesFile does not follow symbolic links', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-candidates-link-'));
+  const target = path.join(dir, 'target.json');
+  const file = path.join(dir, 'gmail.json');
+  await writeFile(target, JSON.stringify(document()));
+  await symlink(target, file);
+  assert.equal(await readCandidatesFile(file, limits), null);
 });
 
 test('readCandidatesFile accepts opaque non-empty scanned and signature strings', async () => {
