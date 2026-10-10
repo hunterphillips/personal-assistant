@@ -98,6 +98,8 @@ const EXACT_ROUTES = new Map([
   ['/api/focus', { name: 'focus-api', methods: ['GET', 'PUT'] }],
   ['/api/focus/changes', { name: 'focus-changes', methods: ['POST'] }],
   ['/api/focus/candidates', { name: 'focus-candidates', methods: ['GET'] }],
+  ['/api/focus/settings', { name: 'focus-settings', methods: ['GET', 'PUT'] }],
+  ['/api/focus/refresh', { name: 'focus-refresh', methods: ['POST'], bodyless: true }],
   ['/api/focus/instructions', { name: 'focus-instructions', methods: ['GET'] }],
   ['/api/focus/instructions/propose', { name: 'focus-instructions-propose', methods: ['POST'] }],
   // Focus's own status and scan controls, called by its page at these
@@ -138,7 +140,7 @@ export function defaultLog(entry) {
 
 export function createApp({
   config, focus, brief, hub, store = null, cmux = null, goals = null, feeds = null, sources = null,
-  ideas = null, ideasInstructions = null, focusBoard = null, focusInstructions = null,
+  ideas = null, ideasInstructions = null, focusBoard = null, focusInstructions = null, focusSettings = null, focusJobs = null, focusRunner = null,
   briefInstructions = null, notices = null, settings = null, registry = null, routines = null, scheduler = null, notifications = null,
   log = defaultLog,
 }) {
@@ -166,9 +168,10 @@ export function createApp({
       ideas, instructions: ideasInstructions, instructionsFile: config.ideasInstructionsPath, hub, scheduler, log, limits: config.limits, shuttingDown: isShuttingDown,
     })
     : null;
-  const focusBoardRoutes = focusBoard && focusInstructions
+  const focusBoardRoutes = focusBoard || focusInstructions || focusSettings || focusJobs || focusRunner
     ? createFocusRoutes({
       board: focusBoard, instructions: focusInstructions, instructionsFile: config.focusRulesPath,
+      settings: focusSettings, jobs: focusJobs, runner: focusRunner,
       hub, log, limits: config.limits, shuttingDown: isShuttingDown,
     })
     : null;
@@ -312,7 +315,7 @@ export function createApp({
         return focus.handlePage(req, res);
       case 'focus-api': {
         if (req.method === 'GET') {
-          if (focusBoardRoutes && await focusBoard.exists()) return focusBoardRoutes.serveRead(res);
+          if (focusBoardRoutes && focusBoard && await focusBoard.exists()) return focusBoardRoutes.serveRead(res);
           return focus.handleApi(req, res, {});
         }
         const limit = config.limits.focusBodyBytes;
@@ -322,16 +325,22 @@ export function createApp({
       case 'focus-control':
         return serveFocusControl(req, res, route.label);
       case 'focus-changes':
-        if (!focusBoardRoutes) throw new HttpError(404, 'not_found');
+        if (!focusBoardRoutes || !focusBoard) throw new HttpError(404, 'not_found');
         return focusBoardRoutes.serveChange(req, res);
       case 'focus-candidates':
-        if (!focusBoardRoutes) throw new HttpError(404, 'not_found');
+        if (!focusBoardRoutes || !focusBoard) throw new HttpError(404, 'not_found');
         return focusBoardRoutes.serveCandidates(res);
+      case 'focus-settings':
+        if (!focusBoardRoutes || !focusSettings || !focusRunner) throw new HttpError(404, 'not_found');
+        return req.method === 'GET' ? focusBoardRoutes.serveSettings(res) : focusBoardRoutes.serveSettingsUpdate(req, res);
+      case 'focus-refresh':
+        if (!focusBoardRoutes || !focusBoard || !focusJobs) throw new HttpError(404, 'not_found');
+        return focusBoardRoutes.serveRefresh(res);
       case 'focus-instructions':
-        if (!focusBoardRoutes) throw new HttpError(404, 'not_found');
+        if (!focusBoardRoutes || !focusInstructions) throw new HttpError(404, 'not_found');
         return focusBoardRoutes.serveInstructions(res);
       case 'focus-instructions-propose':
-        if (!focusBoardRoutes) throw new HttpError(404, 'not_found');
+        if (!focusBoardRoutes || !focusInstructions) throw new HttpError(404, 'not_found');
         return focusBoardRoutes.serveProposeInstructions(req, res);
       case 'brief-latest':
         return brief.handleLatest(req, res);

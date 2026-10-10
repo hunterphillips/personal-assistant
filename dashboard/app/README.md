@@ -46,6 +46,8 @@ Operations are in [docs/operations.md](docs/operations.md).
 | `GET /embedded/focus`, `/api/focus`, `/api/status`; `PUT /api/focus`; `POST /api/pause`, `/api/resume`, `/api/refresh` | Forwarded to Focus (below). |
 | `POST /api/focus/changes` | Applies one change to the native Focus board and returns the fresh board. |
 | `GET /api/focus/candidates` | The native Focus board's considered candidates and their current verdicts. |
+| `GET`, `PUT /api/focus/settings` | Reads Focus's pause state, schedules, and model; changes its pause state or model. |
+| `POST /api/focus/refresh` | Bodyless. Queues one native refresh, or refuses while a Focus job is running. |
 | `GET /api/focus/instructions` | The native Focus board's rules, read as prose. |
 | `POST /api/focus/instructions/propose` | Sends a rules change to the default agent. |
 | `GET /api/brief/latest` | The newest brief as data (below). |
@@ -170,7 +172,8 @@ snapshot; concurrent requests share one check. It stays for one release.
 
 ```json
 { "revision": 7, "updatedAt": "<ISO>", "home": "/Users/hunter",
-  "focus": { "available": true, "native": true, "updated": "<ISO>" },
+  "focus": { "available": true, "native": true, "updated": "<ISO>", "paused": false,
+             "counts": { "now": 2, "today": 3, "tomorrow": 1, "later": 4 }, "scanning": null },
   "brief": { "state": "ready", "date": "2026-09-21", "revision": "<64 hex>", "unread": false },
   "registry": { "ok": true, "error": null, "loadedAt": "<ISO>" },
   "groups": [{ "id": "work", "name": "Work" }, { "id": "personal", "name": "Personal" }],
