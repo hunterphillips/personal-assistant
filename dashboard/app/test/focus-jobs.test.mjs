@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -8,6 +8,7 @@ import { LIMITS, TIMEOUTS } from '../lib/config.mjs';
 import { ScanError, readCandidatesFile, writeCandidatesFile } from '../lib/focus/candidates.mjs';
 import { createFocusJobs } from '../lib/focus/jobs.mjs';
 import { createFocusSettings } from '../lib/focus/settings.mjs';
+import { createJobRunner } from '../lib/jobs-runner.mjs';
 
 function candidate(source, id = 'one') { return { title: `${source} ${id}`, source, external_id: id }; }
 
@@ -147,4 +148,59 @@ test('candidate file JSON carries null before curation', async () => {
   const value = await setup();
   await value.byLabel['focus.scan-calendar'].run('schedule', null, value.controls);
   assert.equal(JSON.parse(await readFile(path.join(value.dir, 'calendar.json'), 'utf8')).signature, null);
+});
+
+// A real runner on a fixed clock. The scans' logs carry a future occurrence so
+// only the curate is due.
+async function withRunner(t, { now }) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-jobs-runner-'));
+  const runsDir = path.join(dir, 'runs');
+  await mkdir(runsDir, { recursive: true });
+  for (const source of ['calendar', 'gmail', 'git', 'notes']) {
+    await writeFile(path.join(runsDir, `focus.scan-${source}.jsonl`), `${JSON.stringify({ run: `seed-${source}`, occurrence: '2099-01-01T00:00:00.000Z', trigger: 'schedule', startedAt: now, endedAt: now, outcome: 'no change' })}\n`);
+  }
+  const settings = createFocusSettings({ file: path.join(dir, 'settings.json'), limits: LIMITS });
+  await settings.load();
+  let uuid = 0;
+  const runner = createJobRunner({
+    runsDir, zone: 'America/Chicago', limits: LIMITS, timeouts: TIMEOUTS, now: () => new Date(now), randomUUID: () => `run-${++uuid}`,
+    setTimeout: () => ({ unref() {} }), clearTimeout: () => {},
+  });
+  t.after(() => runner.stop());
+  const curator = { calls: [], async run(input) { curator.calls.push(input); return { run: 'curator-run', outcome: 'no change' }; } };
+  const board = { async read() { return { board: { updated: now, items: [] }, problem: null }; } };
+  const scans = Object.fromEntries(['calendar', 'gmail', 'git', 'notes'].map((source) => [source, async () => [candidate(source)]]));
+  createFocusJobs({ runner, board, settings, scans, curator, candidatesDir: dir, zone: 'America/Chicago', limits: LIMITS, timeouts: TIMEOUTS, now: () => new Date(now) });
+  return { runner, curator };
+}
+
+async function settle(condition) {
+  const deadline = Date.now() + 2_000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error('condition did not hold');
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
+test('the curate\'s scheduled occurrence reaches the curator as a rejudge and its start line says so', async (t) => {
+  const { runner, curator } = await withRunner(t, { now: '2026-10-10T10:30:10.000Z' }); // 05:30:10 Chicago
+  await runner.start();
+  assert.equal(curator.calls.length, 1);
+  assert.equal(curator.calls[0].trigger, 'rejudge');
+  assert.deepEqual(curator.calls[0].candidates, []);
+  assert.equal(runner.lastRun('focus.curate').trigger, 'rejudge');
+  assert.equal(runner.lastRun('focus.curate').occurrence, '2026-10-10T10:30:00.000Z');
+});
+
+test('a curate catch-up with sources stays a catch-up, and one without sources is a rejudge', async (t) => {
+  const { runner, curator } = await withRunner(t, { now: '2026-10-10T10:30:10.000Z' });
+  await runner.start();
+  curator.calls.length = 0;
+  await runner.enqueue('focus.curate', 'catchup', { sources: [{ source: 'calendar', signature: 'a' }] });
+  await settle(() => curator.calls.length === 1);
+  assert.equal(curator.calls[0].trigger, 'catchup');
+  await settle(() => runner.lastRun('focus.curate')?.endedAt && runner.lastRun('focus.curate').trigger === 'catchup');
+  await runner.enqueue('focus.curate', 'catchup');
+  await settle(() => curator.calls.length === 2);
+  assert.equal(curator.calls[1].trigger, 'rejudge');
 });

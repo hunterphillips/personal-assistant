@@ -99,7 +99,7 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
   for (const source of SOURCES) {
     runner.register(Object.freeze({
       label: LABELS[source], name: NAMES[source], cron: () => settings.current().schedules[source],
-      due: allowed, paused: () => false, timeoutMs: timeouts.focusScanMs,
+      due: allowed, paused: () => false, timeoutMs: timeouts.focusScanMs, triggerFor: (trigger) => trigger,
       run: (trigger, context, controls) => runScan(source, trigger, context, controls),
     }));
   }
@@ -107,6 +107,9 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
     label: LABELS.rejudge, name: 'Curate', cron: () => settings.current().schedules.rejudge,
     due: (at, trigger) => allowed(at, trigger) && (trigger === 'refresh' || !settings.current().paused),
     paused: () => settings.current().paused, timeoutMs: timeouts.focusCurateMs, run: runCurate, onBurstEnd,
+    // The curate's own occurrence, and a catch-up that carries no sources, is
+    // the rejudge.
+    triggerFor: (trigger, context) => (trigger === 'schedule' || (trigger === 'catchup' && !Array.isArray(context?.sources)) ? 'rejudge' : trigger),
   }));
 
   async function refresh() {

@@ -284,3 +284,12 @@ test('a job whose due check settles after stop does not start', async (t) => {
   assert.deepEqual(runner.runs('late'), []);
   assert.equal(runner.state().running, null);
 });
+
+test('a job\'s triggerFor answer is the trigger its start line and run see', async (t) => {
+  const { runner } = await setup(t);
+  const events = [];
+  runner.register({ ...scriptedJob('mapped', events), triggerFor: (trigger) => (trigger === 'schedule' ? 'rejudge' : trigger) });
+  await runner.tick();
+  assert.deepEqual(events.map((event) => event.slice(0, 3)), [['start', 'mapped', 'rejudge'], ['end', 'mapped']]);
+  assert.equal(runner.lastRun('mapped').trigger, 'rejudge');
+});

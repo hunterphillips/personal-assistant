@@ -6,7 +6,9 @@
 //
 // createJobRunner({ runsDir, schedule, zone, timeouts, limits, log, now,
 //                   setTimeout, clearTimeout, randomUUID }) returns:
-//   register(job)                 Add one job before start.
+//   register(job)                 Add one job before start. A job may carry
+//                                 triggerFor(trigger, context), whose answer
+//                                 replaces the trigger for that run.
 //   start()                       Load logs, close open runs, tick, and arm.
 //   stop()                        Abort and await the running job.
 //   tick()                        Run the latest due occurrence for each job.
@@ -167,7 +169,8 @@ export function createJobRunner({
   }
 
   async function execute(item) {
-    const { job, trigger, context, occurrence, run } = item;
+    const { job, context, occurrence, run } = item;
+    const trigger = triggerOf(job, item.trigger, context);
     let allowed;
     try {
       allowed = await job.due(now(), trigger);
@@ -271,6 +274,14 @@ export function createJobRunner({
     if (stopped || queue.length === 0) return Promise.resolve();
     pumping = drainQueue();
     return pumping;
+  }
+
+  // A job may name what an occurrence means to it; its answer is the trigger
+  // the guard, the start line, and the run all see.
+  function triggerOf(job, trigger, context) {
+    if (typeof job.triggerFor !== 'function') return trigger;
+    const mapped = job.triggerFor(trigger, context);
+    return typeof mapped === 'string' && mapped !== '' ? mapped : trigger;
   }
 
   function normalizeEnqueue(label, trigger, context) {
