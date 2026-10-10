@@ -72,11 +72,15 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
         : covered.map(({ source: id }) => group(id)).filter(Boolean);
     const others = SOURCES.filter((id) => !coveredSet.has(id)).map(group).filter(Boolean);
     const answer = await curator.run({ trigger, source, candidates, others, signal });
+    // The curator saw every file that exists, as candidates or as others, so
+    // each one's signature is taken again against the board the curate left;
+    // the scan's own signature was taken against the board before it.
     if (answer.outcome === 'wrote' || answer.outcome === 'no change') {
-      for (const entry of covered) {
-        const held = files[entry.source];
-        if (!held || typeof entry.signature !== 'string') continue;
-        await writeCandidatesFile(fileFor(entry.source), { ...held, signature: entry.signature }, limits);
+      const after = (await board.read()).board;
+      for (const id of SOURCES) {
+        const held = files[id];
+        if (!held) continue;
+        await writeCandidatesFile(fileFor(id), { ...held, signature: candidateSignature(held.candidates, after) }, limits);
       }
     }
     const { run: _curatorRun, ...result } = answer;
@@ -84,6 +88,9 @@ export function createFocusJobs({ runner, board, settings, scans, curator, candi
   }
 
   async function onBurstEnd(results) {
+    // A burst that ran the curate's own occurrence ran a rejudge after every
+    // scan in it, which saw every file and advanced every signature.
+    if (results.some((result) => result.label === LABELS.rejudge)) return;
     const scanResults = results.filter((result) => sourceOf(result.label));
     const refreshed = scanResults.filter((result) => result.trigger === 'refresh');
     if (refreshed.length > 0) {

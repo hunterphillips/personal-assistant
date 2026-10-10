@@ -12,7 +12,7 @@ import { createJobRunner } from '../lib/jobs-runner.mjs';
 
 function candidate(source, id = 'one') { return { title: `${source} ${id}`, source, external_id: id }; }
 
-async function setup({ paused = false, now = '2026-10-10T12:00:00.000Z', scan = null, curate = null } = {}) {
+async function setup({ paused = false, now = '2026-10-10T12:00:00.000Z', scan = null, curate = null, board: givenBoard = null } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-jobs-'));
   const settings = createFocusSettings({ file: path.join(dir, 'settings.json'), limits: LIMITS });
   await settings.load();
@@ -25,7 +25,7 @@ async function setup({ paused = false, now = '2026-10-10T12:00:00.000Z', scan = 
   };
   const scans = Object.fromEntries(['calendar', 'gmail', 'git', 'notes'].map((source) => [source, scan ?? (async () => [candidate(source)])]));
   const curator = { calls: [], async run(input) { curator.calls.push(input); return curate ? curate(input) : { run: 'curator-run', outcome: 'wrote', counts: { added: 1 }, pruned: 0 }; } };
-  const board = { async read() { return { board: { updated: now, items: [] }, problem: null }; } };
+  const board = givenBoard ?? { async read() { return { board: { updated: now, items: [] }, problem: null }; } };
   const jobs = createFocusJobs({
     runner, board, settings, scans, curator, candidatesDir: dir, zone: 'America/Chicago', limits: LIMITS, timeouts: TIMEOUTS,
     now: () => new Date(now),
@@ -71,6 +71,27 @@ test('a successful curate advances the covered signature and the next scan is un
   value.enqueues.length = 0;
   const next = await value.byLabel['focus.scan-calendar'].run('schedule', null, value.controls);
   assert.equal(next.outcome, 'no change');
+  assert.equal(value.enqueues.length, 0);
+});
+
+test('a curate that moves an item stores signatures against the board it left, so the same scan is unchanged', async () => {
+  let items = [{ id: 'a', status: 'open', tier: 'today', now: false, rank: 1, note: null }];
+  const board = { async read() { return { board: { updated: '2026-10-10T12:00:00.000Z', items }, problem: null }; } };
+  const value = await setup({
+    board,
+    curate: async () => {
+      items = [{ ...items[0], tier: 'tomorrow' }];
+      return { run: 'curator-run', outcome: 'wrote' };
+    },
+  });
+  await value.byLabel['focus.scan-gmail'].run('schedule', null, value.controls);
+  value.enqueues.length = 0;
+  assert.equal((await value.byLabel['focus.scan-calendar'].run('schedule', null, value.controls)).outcome, 'wrote');
+  const { signature } = value.enqueues[0][2];
+  assert.equal((await value.byLabel['focus.curate'].run('scan', { source: 'calendar', signature }, value.controls)).outcome, 'wrote');
+  value.enqueues.length = 0;
+  assert.equal((await value.byLabel['focus.scan-calendar'].run('schedule', null, value.controls)).outcome, 'no change');
+  assert.equal((await value.byLabel['focus.scan-gmail'].run('schedule', null, value.controls)).outcome, 'no change', 'the others the curator saw advance too');
   assert.equal(value.enqueues.length, 0);
 });
 
@@ -152,11 +173,11 @@ test('candidate file JSON carries null before curation', async () => {
 
 // A real runner on a fixed clock. The scans' logs carry a future occurrence so
 // only the curate is due.
-async function withRunner(t, { now }) {
+async function withRunner(t, { now, seed = true }) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-jobs-runner-'));
   const runsDir = path.join(dir, 'runs');
   await mkdir(runsDir, { recursive: true });
-  for (const source of ['calendar', 'gmail', 'git', 'notes']) {
+  for (const source of seed ? ['calendar', 'gmail', 'git', 'notes'] : []) {
     await writeFile(path.join(runsDir, `focus.scan-${source}.jsonl`), `${JSON.stringify({ run: `seed-${source}`, occurrence: '2099-01-01T00:00:00.000Z', trigger: 'schedule', startedAt: now, endedAt: now, outcome: 'no change' })}\n`);
   }
   const settings = createFocusSettings({ file: path.join(dir, 'settings.json'), limits: LIMITS });
@@ -233,4 +254,16 @@ test('refresh and catch-up scans queue nothing and carry changed and signature',
     assert.equal(typeof result.signature, 'string');
     assert.equal(Object.hasOwn(result, 'burst'), false);
   }
+});
+
+test('a catch-up burst that includes the curate\'s own occurrence calls the curator once', async (t) => {
+  const { runner, curator } = await withRunner(t, { now: '2026-10-10T10:30:10.000Z', seed: false }); // 05:30:10 Chicago
+  await runner.start();
+  await runner.tick();
+  assert.deepEqual(['calendar', 'gmail', 'git', 'notes'].map((source) => [runner.lastRun(`focus.scan-${source}`).trigger, runner.lastRun(`focus.scan-${source}`).changed]),
+    [['catchup', true], ['catchup', true], ['catchup', true], ['catchup', true]]);
+  assert.equal(curator.calls.length, 1);
+  assert.equal(curator.calls[0].trigger, 'rejudge');
+  assert.equal(curator.calls[0].others.length, 4);
+  assert.equal(runner.runs('focus.curate').length, 1);
 });
