@@ -293,3 +293,20 @@ test('a job\'s triggerFor answer is the trigger its start line and run see', asy
   assert.deepEqual(events.map((event) => event.slice(0, 3)), [['start', 'mapped', 'rejudge'], ['end', 'mapped']]);
   assert.equal(runner.lastRun('mapped').trigger, 'rejudge');
 });
+
+test('start runs a missed occurrence once as a catch-up', async (t) => {
+  const { runner, dir } = await setup(t, { clock: '2026-10-07T15:00:00.000Z' });
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, 'daily.jsonl'), `${JSON.stringify({
+    run: 'old', occurrence: '2026-10-05T12:00:00.000Z', trigger: 'schedule', startedAt: START, endedAt: START, outcome: 'wrote',
+  })}\n`);
+  const events = [];
+  runner.register(scriptedJob('daily', events));
+  await runner.start();
+  assert.deepEqual(events.map((event) => event.slice(0, 3)), [['start', 'daily', 'catchup'], ['end', 'daily']]);
+  assert.equal(runner.lastRun('daily').trigger, 'catchup');
+  assert.equal(runner.lastRun('daily').occurrence, '2026-10-07T12:00:00.000Z');
+  assert.equal(runner.runs('daily').length, 2);
+  await runner.tick();
+  assert.equal(events.length, 2);
+});

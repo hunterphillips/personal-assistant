@@ -109,7 +109,12 @@ function defaultAdapters({ config, store, log, bindings, turnTools = null }) {
 // `createAdapters({ config, store, log, bindings, turnTools })` returns the adapters by provider;
 // tests pass fakes. It is not called when an API key is in `env`. `timeouts`
 // overrides entries of the configured timeouts; tests shorten polls with it.
-export async function startDashboard({ env = process.env, log, createAdapters = defaultAdapters, focusRunner: injectedFocusRunner = null, timeouts = null } = {}) {
+// `createScheduler` builds the routine scheduler; tests wrap it to observe
+// shutdown order.
+export async function startDashboard({
+  env = process.env, log, createAdapters = defaultAdapters, focusRunner: injectedFocusRunner = null, timeouts = null,
+  createScheduler: makeScheduler = createScheduler,
+} = {}) {
   const loaded = loadConfig(env);
   const config = timeouts ? Object.freeze({ ...loaded, timeouts: Object.freeze({ ...loaded.timeouts, ...timeouts }) }) : loaded;
   const logEntry = log ?? defaultLog;
@@ -121,7 +126,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
     throw error;
   }
   try {
-    const dashboard = await startOnRoot({ env, config, logEntry, createAdapters, injectedFocusRunner });
+    const dashboard = await startOnRoot({ env, config, logEntry, createAdapters, injectedFocusRunner, makeScheduler });
     let closing;
     const close = () => (closing ??= dashboard.close().finally(() => lock.release()));
     return { server: dashboard.server, config, close };
@@ -132,7 +137,7 @@ export async function startDashboard({ env = process.env, log, createAdapters = 
 }
 
 // Everything after the lock: the root, then the stores and the server.
-async function startOnRoot({ env, config, logEntry, createAdapters, injectedFocusRunner }) {
+async function startOnRoot({ env, config, logEntry, createAdapters, injectedFocusRunner, makeScheduler }) {
   let prepared;
   try {
     prepared = await prepareRoot(config.home, {
@@ -257,7 +262,7 @@ async function startOnRoot({ env, config, logEntry, createAdapters, injectedFocu
     log: logEntry,
   });
   delegation = createDelegation({ hub, registry, notifications, limits: config.limits, timeouts: config.timeouts, log: logEntry });
-  const scheduler = createScheduler({ routines, hub, zone: config.timeZone, timeouts: config.timeouts, limits: config.limits, log: logEntry });
+  const scheduler = makeScheduler({ routines, hub, zone: config.timeZone, timeouts: config.timeouts, limits: config.limits, log: logEntry });
   const goals = createGoals({ registry, limits: config.limits, log: logEntry });
   // The sources store asks the feeds which list a source before deleting it.
   let feeds = null;

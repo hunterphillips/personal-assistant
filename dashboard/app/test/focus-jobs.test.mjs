@@ -219,3 +219,15 @@ test('a refresh through the runner queues its curate from the results\' trigger,
   assert.equal(typeof scan.signature, 'string');
   assert.equal(Object.hasOwn(scan, 'burst'), false);
 });
+
+test('refresh and catch-up scans queue nothing and carry changed and signature', async () => {
+  for (const trigger of ['refresh', 'catchup']) {
+    const value = await setup();
+    const result = await value.byLabel['focus.scan-calendar'].run(trigger, null, value.controls);
+    assert.equal(value.enqueues.length, 0);
+    assert.equal(result.outcome, 'wrote');
+    assert.equal(result.changed, true);
+    assert.equal(typeof result.signature, 'string');
+    assert.equal(Object.hasOwn(result, 'burst'), false);
+  }
+});

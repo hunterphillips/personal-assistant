@@ -584,11 +584,17 @@ test('runner rows follow inspected jobs and are attributed to Focus', async () =
     { label: 'focus.curate', name: 'Curate', source: 'dashboard', available: true },
   ] };
   const jobs = createJobs({
-    registry: fakeRegistry([agent('a', [])]), runner, launchAgentsDir: LAUNCH_AGENTS,
+    registry: fakeRegistry([agent('a', ['com.x.one', 'com.x.two'])]), runner, launchAgentsDir: LAUNCH_AGENTS,
     timeouts: TIMEOUTS, readPlist: async () => null, launchctlList: async () => null,
   });
   const result = await jobs.refresh();
-  assert.deepEqual(result.jobs, [
+  assert.deepEqual(result.jobs.map((job) => [job.label, job.source, job.agentId, job.agentName]), [
+    ['com.x.one', 'launchctl', 'a', 'A'],
+    ['com.x.two', 'launchctl', 'a', 'A'],
+    ['focus.scan-calendar', 'dashboard', null, 'Focus'],
+    ['focus.curate', 'dashboard', null, 'Focus'],
+  ]);
+  assert.deepEqual(result.jobs.slice(2), [
     { label: 'focus.scan-calendar', name: 'Calendar scan', source: 'dashboard', available: true, agentId: null, agentName: 'Focus' },
     { label: 'focus.curate', name: 'Curate', source: 'dashboard', available: true, agentId: null, agentName: 'Focus' },
   ]);

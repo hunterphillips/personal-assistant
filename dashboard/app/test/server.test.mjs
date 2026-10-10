@@ -9,6 +9,7 @@ import { lstat, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promis
 import path from 'node:path';
 
 import { TIMEOUTS } from '../lib/config.mjs';
+import { createScheduler } from '../lib/scheduler.mjs';
 import { forcedExitMs, startDashboard } from '../server.mjs';
 import { freePort, tempDir } from './support/harness.mjs';
 import { openEvents } from './support/sse.mjs';
@@ -149,6 +150,34 @@ test('Focus jobs are registered and started only when the board exists', async (
   assert.equal(presentState.jobs.items.filter((row) => row.source === 'dashboard').length, 5);
   await present.close();
   assert.equal(presentRunner.stopped, 1);
+});
+
+test('shutdown settles the Focus runner before it stops the scheduler and closes the hub', async (t) => {
+  const env = await testEnv(t);
+  const boardFile = path.join(env.PERSONAL_ASSISTANT_HOME, 'focus', 'board.json');
+  await mkdir(path.dirname(boardFile), { recursive: true });
+  await writeFile(boardFile, await readFile(path.join(APP_DIR, 'test/fixtures/focus/board.json')));
+  const order = [];
+  const runner = scriptedFocusRunner();
+  const onChange = runner.onChange;
+  runner.onChange = (fn) => {
+    const unsubscribe = onChange(fn);
+    return () => { order.push('hub.close'); return unsubscribe(); };
+  };
+  runner.stop = async () => {
+    order.push('runner.stop');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    order.push('runner.stopped');
+  };
+  const dashboard = await startDashboard({
+    env, log: () => {}, focusRunner: runner,
+    createScheduler: (options) => {
+      const scheduler = createScheduler(options);
+      return { ...scheduler, stop() { order.push('scheduler.stop'); return scheduler.stop(); } };
+    },
+  });
+  await dashboard.close();
+  assert.deepEqual(order, ['runner.stop', 'runner.stopped', 'scheduler.stop', 'hub.close']);
 });
 
 test('startDashboard reports a missing registry and ends event streams on close', async (t) => {
