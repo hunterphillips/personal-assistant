@@ -1,13 +1,14 @@
 // Focus settings: pause state, fixed scan schedules, and the curator's model
 // override. current() answers the defaults until load() has resolved; the
-// server calls load() at start, and there is no polling, since the daemon is
-// the file's only writer. A missing file reads as the defaults with
+// server calls load() at start, and Focus's jobs call reload() at each runner
+// tick, which re-reads the file only when its size or mtime changed, so a
+// hand edit takes effect within a tick. A missing file reads as the defaults with
 // `problem: null`. A file that exists but cannot be read, does not parse,
 // fails validation, or is oversize reads as the defaults with `paused: true`
 // and one plain-word `problem`, so a broken hand edit never silently turns
 // the scans back on; the file is kept intact and update() refuses until it
 // is fixed. update() atomically writes only paused/model changes and
-// notifies listeners. It never schedules work or calls a model.
+// notifies listeners, as does a reload() that changes what current() answers. It never schedules work or calls a model.
 
 import { lstat, readFile } from 'node:fs/promises';
 
@@ -44,14 +45,28 @@ export function createFocusSettings({ file, limits, log: rawLog = () => {} }) {
   let writing = null;
   let loaded = false;
   let loading = null;
+  // The stat signature the current state was read at.
+  let seen = null;
 
   function current() { return state; }
 
+  async function statSignature() {
+    try {
+      const stats = await lstat(file);
+      return { stats, signature: JSON.stringify({ kind: stats.isFile() ? 'file' : 'other', size: stats.size, mtimeMs: stats.mtimeMs }) };
+    } catch (error) {
+      const missing = error?.code === 'ENOENT' || error?.code === 'ENOTDIR';
+      return { error, missing, signature: JSON.stringify({ kind: missing ? 'missing' : 'error', code: error?.code ?? null }) };
+    }
+  }
+
   async function loadOnce() {
-    let stats;
-    try { stats = await lstat(file); } catch (error) {
-      if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') { state = DEFAULTS; return state; }
-      return fail('The Focus settings file could not be read.', error);
+    const read = await statSignature();
+    seen = read.signature;
+    const { stats } = read;
+    if (!stats) {
+      if (read.missing) { state = DEFAULTS; return state; }
+      return fail('The Focus settings file could not be read.', read.error);
     }
     if (!stats.isFile()) return fail('The Focus settings path is not a regular file.');
     if (stats.size > limits.focusSettingsBytes) return fail('The Focus settings file is too large.');
@@ -73,6 +88,24 @@ export function createFocusSettings({ file, limits, log: rawLog = () => {} }) {
     if (loaded) return Promise.resolve(state);
     loading ??= loadOnce().finally(() => { loaded = true; loading = null; });
     return loading;
+  }
+
+  // Re-reads the file when its stat signature moved since the last read,
+  // behind any write in flight; a file that became bad reads as load() reads
+  // it, paused with a problem.
+  function reload() {
+    if (!loaded) return load();
+    return serialized(async () => {
+      if ((await statSignature()).signature === seen) return state;
+      const before = state;
+      await loadOnce();
+      if (JSON.stringify(before) !== JSON.stringify(state)) notify();
+      return state;
+    });
+  }
+
+  function notify() {
+    for (const listener of listeners) { try { listener(state); } catch (error) { log({ event: 'focus_settings_listener_error', error: error?.message ?? String(error) }); } }
   }
 
   function fail(problem, error = null) {
@@ -110,7 +143,8 @@ export function createFocusSettings({ file, limits, log: rawLog = () => {} }) {
       };
       await atomicJson(file, value);
       state = shaped(value, null);
-      for (const listener of listeners) { try { listener(state); } catch (error) { log({ event: 'focus_settings_listener_error', error: error?.message ?? String(error) }); } }
+      seen = (await statSignature()).signature;
+      notify();
       return state;
     });
   }
@@ -120,7 +154,7 @@ export function createFocusSettings({ file, limits, log: rawLog = () => {} }) {
     return () => listeners.delete(fn);
   }
 
-  return Object.freeze({ load, current, update, onChange });
+  return Object.freeze({ load, reload, current, update, onChange });
 }
 
 function validateDocument(value) {

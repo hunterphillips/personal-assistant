@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -88,4 +88,66 @@ test('update loads first and never overwrites an invalid hand edit', async (t) =
   await writeFile(file, '{');
   await assert.rejects(settings.update({ paused: true }), { code: 'settings_invalid' });
   assert.equal(await readFile(file, 'utf8'), '{');
+});
+
+function document(overrides = {}) {
+  return JSON.stringify({
+    version: 1, paused: false,
+    schedules: {
+      calendar: '5 * * * *', gmail: '35 * * * *', git: '15 6,10,14,18 * * *',
+      notes: '45 5,7,11,15,19 * * *', rejudge: '30 5 * * *',
+    },
+    model: { id: null, effort: null },
+    ...overrides,
+  });
+}
+
+// Writes the file and moves its mtime, so a same-size edit inside one
+// millisecond still reads as changed.
+async function edit(file, body, seconds) {
+  await writeFile(file, body);
+  const at = new Date(Date.parse('2026-10-10T12:00:00.000Z') + seconds * 1_000);
+  await utimes(file, at, at);
+}
+
+test('reload re-reads a hand edit only when the stat moved, notifies, and pauses on a bad file', async (t) => {
+  const { file, settings } = await setup(t);
+  await edit(file, document(), 1);
+  await settings.load();
+  const notified = [];
+  settings.onChange((state) => notified.push(state.paused));
+  const first = settings.current();
+  assert.equal(await settings.reload(), first, 'an unchanged file is not parsed again');
+  assert.deepEqual(notified, []);
+
+  await edit(file, document({ schedules: {
+    calendar: '10 * * * *', gmail: '35 * * * *', git: '15 6,10,14,18 * * *',
+    notes: '45 5,7,11,15,19 * * *', rejudge: '30 6 * * *',
+  } }), 2);
+  await settings.reload();
+  assert.equal(settings.current().schedules.rejudge, '30 6 * * *');
+  assert.equal(settings.current().schedules.calendar, '10 * * * *');
+  assert.deepEqual(notified, [false]);
+
+  await edit(file, '{', 3);
+  await settings.reload();
+  assert.equal(settings.current().paused, true);
+  assert.equal(settings.current().problem, 'The settings file could not be read, so curation is paused.');
+  assert.deepEqual(notified, [false, true]);
+
+  await edit(file, document(), 4);
+  await settings.reload();
+  assert.deepEqual([settings.current().paused, settings.current().problem], [false, null]);
+});
+
+test('reload before load loads, and an update is not read back as an edit', async (t) => {
+  const { file, settings } = await setup(t);
+  await edit(file, document({ paused: true }), 1);
+  await settings.reload();
+  assert.equal(settings.current().paused, true);
+  const notified = [];
+  settings.onChange(() => notified.push('change'));
+  const updated = await settings.update({ paused: false });
+  assert.equal(await settings.reload(), updated);
+  assert.deepEqual(notified, ['change']);
 });

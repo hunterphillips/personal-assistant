@@ -173,7 +173,8 @@ test('candidate file JSON carries null before curation', async () => {
 
 // A real runner on a fixed clock. The scans' logs carry a future occurrence so
 // only the curate is due.
-async function withRunner(t, { now, seed = true }) {
+async function withRunner(t, { now: start, seed = true }) {
+  let now = start;
   const dir = await mkdtemp(path.join(os.tmpdir(), 'focus-jobs-runner-'));
   const runsDir = path.join(dir, 'runs');
   await mkdir(runsDir, { recursive: true });
@@ -185,6 +186,7 @@ async function withRunner(t, { now, seed = true }) {
   let uuid = 0;
   const runner = createJobRunner({
     runsDir, zone: 'America/Chicago', limits: LIMITS, now: () => new Date(now), randomUUID: () => `run-${++uuid}`,
+    onTick: () => settings.reload(),
     setTimeout: () => ({ unref() {} }), clearTimeout: () => {},
   });
   t.after(() => runner.stop());
@@ -192,7 +194,7 @@ async function withRunner(t, { now, seed = true }) {
   const board = { async read() { return { board: { updated: now, items: [] }, problem: null }; } };
   const scans = Object.fromEntries(['calendar', 'gmail', 'git', 'notes'].map((source) => [source, async () => [candidate(source)]]));
   const jobs = createFocusJobs({ runner, board, settings, scans, curator, candidatesDir: dir, zone: 'America/Chicago', limits: LIMITS, timeouts: TIMEOUTS, now: () => new Date(now) });
-  return { runner, curator, jobs };
+  return { runner, curator, jobs, settingsFile: path.join(dir, 'settings.json'), set: (iso) => { now = iso; } };
 }
 
 async function settle(condition) {
@@ -266,4 +268,21 @@ test('a catch-up burst that includes the curate\'s own occurrence calls the cura
   assert.equal(curator.calls[0].trigger, 'rejudge');
   assert.equal(curator.calls[0].others.length, 4);
   assert.equal(runner.runs('focus.curate').length, 1);
+});
+
+test('a schedule changed on disk is the next tick\'s cron', async (t) => {
+  const { runner, curator, settingsFile, set } = await withRunner(t, { now: '2026-10-10T10:30:10.000Z' });
+  await runner.start();
+  await runner.tick();
+  assert.equal(curator.calls.length, 1);
+  await writeFile(settingsFile, JSON.stringify({
+    version: 1, paused: false,
+    schedules: { calendar: '5 * * * *', gmail: '35 * * * *', git: '15 6,10,14,18 * * *', notes: '45 5,7,11,15,19 * * *', rejudge: '31 5 * * *' },
+    model: { id: null, effort: null },
+  }));
+  set('2026-10-10T10:31:10.000Z');
+  await runner.tick();
+  assert.equal(curator.calls.length, 2);
+  assert.equal(runner.lastRun('focus.curate').occurrence, '2026-10-10T10:31:00.000Z');
+  assert.equal(runner.rows().at(-1).schedule.text, 'Every day at 5:31');
 });
