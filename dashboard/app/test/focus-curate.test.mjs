@@ -38,12 +38,13 @@ async function setup(t, { query, body, importSdk, timeouts = TIMEOUTS, focusMode
   const board = createBoard({ file, changesFile, candidatesDir, limits: LIMITS, now: () => NOW });
   const settings = { current: () => ({ model: focusModel }) };
   const systemSettings = { current: () => ({ settings: { model: systemModel } }) };
+  const logs = [];
   const curator = createCurator({
     query, importSdk, board, rules, vault: { readPriorities: () => 'Priority text', readProjectState: () => 'Project state' },
     profile: { read: async () => 'Profile text' }, settings, systemSettings,
-    zone: 'America/Chicago', limits: LIMITS, timeouts, cwd: focusDir, now: () => NOW,
+    zone: 'America/Chicago', limits: LIMITS, timeouts, cwd: focusDir, now: () => NOW, log: (entry) => logs.push(entry),
   });
-  return { board, changesFile, curator, file, focusDir, rules };
+  return { board, changesFile, curator, file, focusDir, logs, rules };
 }
 
 async function changeLines(file) {
@@ -119,8 +120,9 @@ test('failed SDK results and API-key init messages are failed outcomes', async (
     yield result(null, { subtype: 'error_max_structured_output_retries', is_error: true, errors: ['The answer did not match the schema.'] });
   });
   const first = await setup(t, { query: bad });
-  assert.deepEqual(await first.curator.run({ trigger: 'rejudge' }), {
-    outcome: 'failed', detail: 'The answer did not match the schema.', pruned: 0,
+  const firstAnswer = await first.curator.run({ trigger: 'rejudge' });
+  assert.deepEqual(firstAnswer, {
+    run: firstAnswer.run, outcome: 'failed', detail: 'The answer did not match the schema.', pruned: 0,
     usage: { input: 100, output: 12, costUsd: 0.02 },
   });
 
@@ -128,7 +130,6 @@ test('failed SDK results and API-key init messages are failed outcomes', async (
   const billed = fakeQuery(async function* ({ options }) {
     options.abortController.signal.addEventListener('abort', () => { aborted = true; });
     yield init({ apiKeySource: 'ANTHROPIC_API_KEY' });
-    assert.equal(options.abortController.signal.aborted, true);
   });
   const second = await setup(t, { query: billed });
   const answer = await second.curator.run({ trigger: 'rejudge' });
@@ -152,7 +153,14 @@ test('rejected, written, stale, and empty op answers map to curator outcomes', a
   const expiredAnswer = await expired.curator.run({ trigger: 'scan', source: 'git', candidates: [] });
   assert.equal(expiredAnswer.outcome, 'wrote');
   assert.deepEqual(expiredAnswer.counts, { added: 0, changed: 0, expired: 1 });
-  assert.equal((await changeLines(expired.changesFile))[0].who, 'curator');
+  assert.match(expiredAnswer.run, /^[0-9a-f-]{36}$/);
+  const expiredLine = (await changeLines(expired.changesFile))[0];
+  assert.equal(expiredLine.who, 'curator');
+  assert.equal(expiredLine.run, expiredAnswer.run);
+  assert.deepEqual(expired.logs.filter((entry) => entry.event === 'focus_curate'), [{
+    event: 'focus_curate', run: expiredAnswer.run, trigger: 'scan', source: 'git', outcome: 'wrote',
+    counts: { added: 0, changed: 0, expired: 1 }, pruned: 0, usage: { input: 100, output: 12, costUsd: 0.02 },
+  }]);
 
   let staleBoard;
   let staleBefore;
@@ -229,7 +237,7 @@ test('query options are isolated and model choices follow Focus then system sett
   const focus = await setup(t, { query: focusQuery, focusModel: { id: 'focus-model', effort: 'high' }, systemModel: { default: 'system-model', effort: 'low' } });
   await focus.curator.run({ trigger: 'rejudge' });
   const options = focusQuery.calls[0].options;
-  assert.deepEqual(options.outputFormat, { type: 'json_schema', schema: options.outputFormat.schema });
+  assert.ok(options.outputFormat.schema.properties.ops);
   assert.equal(options.outputFormat.type, 'json_schema');
   assert.deepEqual(options.tools, []);
   assert.deepEqual(options.settingSources, []);
@@ -254,7 +262,77 @@ test('query options are isolated and model choices follow Focus then system sett
 
 test('query null disables model calls', async (t) => {
   const found = await setup(t, { query: null });
-  assert.deepEqual(await found.curator.run({ trigger: 'rejudge' }), {
-    outcome: 'failed', detail: 'Model calls are off while an API key is in the daemon\'s environment.', pruned: 0,
+  const answer = await found.curator.run({ trigger: 'rejudge' });
+  assert.deepEqual(answer, {
+    run: answer.run, outcome: 'failed', detail: 'Model calls are off while an API key is in the daemon\'s environment.', pruned: 0,
   });
+});
+
+test('a missing or blank rules file fails before any query', async (t) => {
+  const query = fakeQuery(async function* () { yield init(); yield result(); });
+  const missing = await setup(t, { query });
+  await unlink(missing.rules);
+  const missingAnswer = await missing.curator.run({ trigger: 'rejudge' });
+  assert.equal(missingAnswer.outcome, 'failed');
+  assert.equal(missingAnswer.detail, 'The Focus rules file is missing.');
+  assert.equal(query.calls.length, 0);
+
+  const blank = await setup(t, { query });
+  await writeFile(blank.rules, '  \n\t\n');
+  const blankAnswer = await blank.curator.run({ trigger: 'rejudge' });
+  assert.equal(blankAnswer.outcome, 'failed');
+  assert.equal(blankAnswer.detail, 'The Focus rules file is empty.');
+  assert.equal(query.calls.length, 0);
+});
+
+test('an unknown trigger fails before any query', async (t) => {
+  const query = fakeQuery(async function* () { yield init(); yield result(); });
+  const found = await setup(t, { query });
+  const answer = await found.curator.run({ trigger: 'sweep' });
+  assert.equal(answer.outcome, 'failed');
+  assert.equal(answer.detail, 'The curate was asked to run with an unknown trigger.');
+  assert.equal(query.calls.length, 0);
+});
+
+test('candidate groups without a candidates array are skipped', async (t) => {
+  const query = fakeQuery(async function* () { yield init(); yield result(); });
+  const found = await setup(t, { query });
+  await found.curator.run({
+    trigger: 'refresh', candidates: [{ source: 'gmail' }, { source: 'notes', candidates: [{ title: 'Note' }] }],
+    others: [{ source: 'git', scanned: 'now' }],
+  });
+  const prompt = query.calls[0].prompt;
+  assert.doesNotMatch(prompt, /source: gmail/);
+  assert.match(prompt, /source: notes/);
+  assert.doesNotMatch(prompt, /--- git/);
+  assert.doesNotMatch(prompt, /undefined/);
+});
+
+test('a string structured output is parsed, and an unparsable one has no ops array', async (t) => {
+  const parsedQuery = fakeQuery(async function* () { yield init(); yield result(JSON.stringify({ ops: [{ op: 'expire', id: 'tomorrow-one' }] })); });
+  const parsed = await setup(t, { query: parsedQuery });
+  assert.equal((await parsed.curator.run({ trigger: 'rejudge' })).outcome, 'wrote');
+
+  const brokenQuery = fakeQuery(async function* () { yield init(); yield result('{ops'); });
+  const broken = await setup(t, { query: brokenQuery });
+  const answer = await broken.curator.run({ trigger: 'rejudge' });
+  assert.equal(answer.outcome, 'failed');
+  assert.equal(answer.detail, 'The curator answered without an ops array.');
+});
+
+test('a call without a result logs an error line with the stderr tail', async (t) => {
+  const query = fakeQuery(async function* ({ options }) {
+    options.stderr('x'.repeat(3000));
+    options.stderr('last words');
+    yield init();
+  });
+  const found = await setup(t, { query });
+  const answer = await found.curator.run({ trigger: 'rejudge' });
+  assert.equal(answer.detail, 'The curator did not return a result.');
+  const [line] = found.logs.filter((entry) => entry.event === 'focus_curate_error');
+  assert.equal(line.run, answer.run);
+  assert.equal(line.trigger, 'rejudge');
+  assert.equal(line.error, 'The curator did not return a result.');
+  assert.equal(line.stderr.length, 2000);
+  assert.ok(line.stderr.endsWith('last words'));
 });

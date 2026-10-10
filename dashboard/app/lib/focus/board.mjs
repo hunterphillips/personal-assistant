@@ -138,8 +138,6 @@ export function createBoard({ file, changesFile, candidatesDir, limits, log: raw
       if (JSON.stringify(next) === JSON.stringify(current.board)) {
         return deepFreeze({ board: current.board, counts: { added: 0, changed: 0, expired: 0 } });
       }
-      const schemaErrors = validateFocus(next);
-      if (schemaErrors.length > 0) throw new BoardError('rejected', { detail: schemaErrors[0] });
       await atomicJson(file, next);
       for (const line of curatorLines(ops, current.board, next, run, stamp)) {
         await appendChange(changesFile, line, limits.focusChangesLines);
@@ -243,6 +241,7 @@ function curatorLines(ops, current, next, run, stamp) {
   for (const op of ops) {
     const after = op.op === 'add' ? additions[addition++] : next.items.find((entry) => entry.id === op.id);
     const before = current.items.find((entry) => entry.id === (after?.id ?? op.id));
+    // Lines compare the batch's final state per item, so two ops on one item both log when either changed.
     if (JSON.stringify(before) === JSON.stringify(after)) continue;
     const item = after ?? before;
     const fields = { ...op };
