@@ -95,12 +95,14 @@ test('a failed default-branch run counts within 2 days', async () => {
   assert.equal(found.has('recipe-box: fix the failed run'), false, '3 days old is out');
 });
 
-test('an idle branch without an open pull request counts; merged issue branches are skipped', async () => {
+test('an idle branch without an open or merged pull request counts; merged issue branches are skipped', async () => {
   const found = await uncapped();
   const idle = found.get('garden-planner/idle-branch: finish or delete');
   assert.equal(idle.meta, 'idle 5d');
   assert.equal(idle.link, 'https://github.com/hunterphillips/garden-planner/tree/idle-branch');
   assert.equal(found.has('garden-planner/with-pr: finish or delete'), false, 'an open pull request covers it');
+  assert.equal(found.has('garden-planner/merged-pr: finish or delete'), false, 'a merged pull request finished it');
+  assert.equal(found.get('garden-planner/closed-pr: finish or delete').meta, 'idle 9d', 'closed unmerged still counts');
   assert.equal(found.has('garden-planner/claude/issue-7: finish or delete'), false, 'issue 7 is closed');
   assert.equal(
     found.get('garden-planner/claude/issue-8: finish or delete').link,
@@ -140,6 +142,10 @@ test('only hunterphillips repos are listed and queried, and only active ones', a
   assert.deepEqual(
     graphql.map((args) => [args.find((a) => a.startsWith('owner=')), args.find((a) => a.startsWith('name='))]),
     [['owner=hunterphillips', 'name=garden-planner'], ['owner=hunterphillips', 'name=recipe-box']],
+  );
+  assert.ok(
+    graphql.every((args) => args.some((a) => a.includes('associatedPullRequests(first: 5) { nodes { state } }'))),
+    'every branch pull request state is asked for, unfiltered',
   );
   const search = rest.find((args) => args[0] === 'search');
   assert.deepEqual(search.slice(0, 7), [

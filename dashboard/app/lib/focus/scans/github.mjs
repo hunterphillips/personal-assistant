@@ -25,8 +25,9 @@ const MAX_TITLE = 200;
 const LABELS = Object.freeze({ 'ready-for-human': 'decide', 'needs-info': 'answer' });
 const ISSUE_BRANCH_RE = /^(?:claude|local)\/issue-(\d+)$/;
 
-// One repository's open pull requests, branches, default branch checks, and
-// recently closed issues (for the claude/ and local/ issue branch skip).
+// One repository's open pull requests, branches with their pull requests'
+// states, default branch checks, and recently closed issues (for the claude/
+// and local/ issue branch skip).
 export const REPO_QUERY = `query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     name
@@ -56,7 +57,7 @@ export const REPO_QUERY = `query($owner: String!, $name: String!) {
       nodes {
         name
         target { ... on Commit { committedDate } }
-        associatedPullRequests(first: 1, states: OPEN) { nodes { state } }
+        associatedPullRequests(first: 5) { nodes { state } }
       }
     }
     closedIssues: issues(states: CLOSED, first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) {
@@ -148,7 +149,9 @@ export function repoCandidates(repository, nowMs) {
     if (!committed) continue;
     const idleMs = nowMs - Date.parse(committed);
     if (!(idleMs >= IDLE_MIN_MS && idleMs <= IDLE_MAX_MS)) continue;
-    if ((ref.associatedPullRequests?.nodes ?? []).some((pr) => pr.state === 'OPEN')) continue;
+    // An open pull request is already on the board; a merged one means the
+    // branch was finished and never deleted. Closed unmerged still counts.
+    if ((ref.associatedPullRequests?.nodes ?? []).some((pr) => pr.state === 'OPEN' || pr.state === 'MERGED')) continue;
     const issue = ref.name.match(ISSUE_BRANCH_RE);
     if (issue && closed.has(Number(issue[1]))) continue;
     out.push(candidate(

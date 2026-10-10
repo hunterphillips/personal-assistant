@@ -130,6 +130,35 @@
             }
           },
           {
+            "name": "merged-pr",
+            "target": {
+              "committedDate": "2026-10-01T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": [
+                {
+                  "state": "CLOSED"
+                },
+                {
+                  "state": "MERGED"
+                }
+              ]
+            }
+          },
+          {
+            "name": "closed-pr",
+            "target": {
+              "committedDate": "2026-10-01T12:00:00Z"
+            },
+            "associatedPullRequests": {
+              "nodes": [
+                {
+                  "state": "CLOSED"
+                }
+              ]
+            }
+          },
+          {
             "name": "claude/issue-7",
             "target": {
               "committedDate": "2026-10-06T12:00:00Z"
